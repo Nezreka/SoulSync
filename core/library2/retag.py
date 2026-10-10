@@ -28,6 +28,127 @@ MAX_TRACKS = 500
 
 # "argument not supplied" — distinct from a supplied NULL image_url.
 _UNSET = object()
+RETAG_SOURCES = ('auto', 'spotify', 'itunes', 'deezer', 'musicbrainz', 'tidal', 'qobuz', 'discogs', 'bandcamp')
+
+
+def retag_options(options=None) -> Dict[str, Any]:
+    """Shared preview/job/write policy; legacy dry_run=False is explicit opt-in."""
+    raw = dict(options or {})
+    result = {
+        'depth': raw.get('depth', raw.get('enrichment_depth', 'light')),
+        'mode': raw.get('mode', 'overwrite'),
+        'cover_art': raw.get('cover_art', 'fill_missing'),
+        'lyrics': raw.get('lyrics', 'skip'),
+        'source': raw.get('source', 'auto') or 'auto',
+        'auto_apply': raw.get('auto_apply', raw.get('dry_run') is False) is True,
+    }
+    if raw.get('dry_run') is True:
+        result['auto_apply'] = False
+    result['dry_run'] = not result['auto_apply']
+    for key, choices in {'depth': ('light', 'full'), 'mode': ('overwrite', 'fill_missing'),
+                         'cover_art': ('replace', 'fill_missing', 'skip'), 'lyrics': ('fetch', 'skip'),
+                         'source': RETAG_SOURCES}.items():
+        if result[key] not in choices:
+            raise ValueError(f'Invalid retag {key}: {result[key]}')
+    if 'fields' in raw:
+        if not isinstance(raw['fields'], (list, tuple, set)):
+            raise ValueError('Retag fields must be a list')
+        result['fields'] = list(raw['fields'])
+    return result
+
+
+_POLICY_DATA_KEYS = {
+    'title': 'title', 'artist': 'track_artist', 'album_artist': 'artist_name',
+    'album': 'album_title', 'year': 'year', 'genre': 'genres',
+    'track_number': 'track_number', 'disc_number': 'disc_number',
+    'total_tracks': 'track_count', 'total_discs': 'total_discs',
+    'bpm': 'bpm', 'style': 'style', 'mood': 'mood', 'copyright': 'copyright',
+    'isrc': 'isrc', 'lyrics': 'lyrics',
+}
+
+
+def _policy_diff(file_tags, db_data, options):
+    from core.tag_writer import build_tag_diff
+    selected = options.get('fields')
+    diff = build_tag_diff(file_tags, db_data)
+    for item in diff:
+        key = item['file_key']
+        if selected is not None and key not in selected and _POLICY_DATA_KEYS.get(key) not in selected:
+            item['changed'] = False
+        elif key == 'cover_art':
+            item['changed'] = (options['cover_art'] != 'skip' and bool(db_data.get('thumb_url'))
+                               and (options['cover_art'] == 'replace' or not file_tags.get('has_cover_art')))
+        elif key == 'lyrics' and options['lyrics'] == 'skip':
+            item['changed'] = False
+        elif options['mode'] == 'fill_missing' and item.get('file_value') not in ('', None, '0'):
+            item['changed'] = False
+    return diff
+
+
+def _lyrics_for_row(row):
+    """Reuse LRClib's lookup/cache, without its unchecked embedding side effect."""
+    from core.lyrics_client import lyrics_client
+    data = row['db_data']
+    # Existing sidecars are user content; reuse them before looking remotely.
+    for file in [{'path': row.get('file_path')}, *(row.get('sibling_files') or [])]:
+        from core.library2.paths import resolve_lib2_path
+        path = resolve_lib2_path(file.get('path')) if file.get('path') else None
+        if path:
+            for suffix in ('.lrc', '.txt'):
+                sidecar = os.path.splitext(path)[0] + suffix
+                if os.path.isfile(sidecar):
+                    with open(sidecar, encoding='utf-8') as handle:
+                        text = handle.read().strip()
+                    if text:
+                        return text
+    lookup = row.get('provider_lookup') or data
+    duration = int(lookup['duration'] / 1000) if lookup.get('duration') else None
+    lyrics = lyrics_client._fetch_remote_lyrics(lookup.get('title') or '',
+                lookup.get('artist_name') or '', lookup.get('album_title'), duration)
+    return (getattr(lyrics, 'synced_lyrics', None) or getattr(lyrics, 'plain_lyrics', None)) if lyrics else data.get('lyrics')
+
+
+def repair_field_protection(database, file_path, fields, *, track_id=None, file_id=None):
+    """Revalidate file ownership and manual fields immediately before a repair."""
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    from core.library2.paths import resolve_lib2_path
+    keys = hand_tagged_path_keys(database)
+    if is_hand_tagged_path(file_path, keys) or is_hand_tagged_path(resolve_lib2_path(file_path), keys):
+        return {}
+    if track_id is None:
+        return dict(fields)
+    from core.library2.track_files import writable_file_rows
+    from core.library2.metadata_overrides import get_field_overrides
+    with closing(database._get_connection()) as conn:
+        files = writable_file_rows(conn, int(track_id))
+        target = resolve_lib2_path(file_path) or file_path
+        if not any((file_id is None or f['id'] == file_id) and
+                   (f['path'] == file_path or resolve_lib2_path(f['path']) == target) for f in files):
+            raise ValueError('Reviewed file no longer belongs to this track/library')
+        rows = _track_rows(conn, [int(track_id)])
+        if not rows:
+            raise ValueError('Track no longer exists')
+        row = rows[0]
+        data = _db_data_for_row(conn, row)
+        protected = set()
+        for entity, entity_id, mapping in (
+            ('track', track_id, {'track_number': 'track_number', 'disc_number': 'disc_number', 'bpm': 'bpm', 'title': 'title'}),
+            ('release_group', row['album_id'], {'title': 'album', 'year': 'year', 'release_date': 'year', 'genres': 'genre'}),
+            ('artist', row['album_artist_id'], {'name': 'albumartist'}),
+            ('release_edition', data.get('edition_id'), {'title': 'album', 'release_date': 'year'}),
+        ):
+            if entity_id:
+                overrides = get_field_overrides(conn, entity_type=entity, entity_id=int(entity_id))
+                protected.update(mapping[k] for k in overrides if k in mapping)
+        # Number/identity repairs cannot replace a pinned edition's reference.
+        album = conn.execute('SELECT canonical_locked FROM lib2_albums WHERE id=?', (row['album_id'],)).fetchone()
+        if album and album[0]:
+            protected.add('musicbrainz_albumid')
+        if 'track_number' in protected:
+            protected.add('total_tracks')
+        if 'disc_number' in protected:
+            protected.add('total_discs')
+        return {k: v for k, v in fields.items() if k not in protected}
 
 
 def _track_rows(conn, track_ids: List[int]) -> List[Any]:
@@ -49,7 +170,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     batch = track_ids[:MAX_TRACKS]
     marks = ",".join("?" for _ in batch)
     return conn.execute(
-        f"""SELECT t.id, t.title, t.track_number, t.disc_number,
+        f"""SELECT t.id, t.title, t.duration, t.track_number, t.disc_number,
                    t.spotify_id, t.musicbrainz_id, t.album_id, t.bpm, t.isrc, t.style, t.mood, t.copyright, t.genius_lyrics, t.external_ids,
                    al.title AS album_title, al.album_type, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
@@ -268,10 +389,14 @@ def track_contexts(conn, track_ids: List[int]) -> List[Dict[str, Any]]:
     """Materialize all DB metadata needed by preview/write before file I/O."""
     contexts: List[Dict[str, Any]] = []
     from core.library2.track_files import writable_file_rows
+    from core.library2.metadata_context import track_metadata_contexts
     for start in range(0, len(track_ids), MAX_TRACKS):
-        for row in _track_rows(conn, track_ids[start:start + MAX_TRACKS]):
+        batch = track_ids[start:start + MAX_TRACKS]
+        lookup = track_metadata_contexts(conn, batch, purpose='provider_lookup')
+        for row in _track_rows(conn, batch):
             context = dict(row)
             context["db_data"] = _db_data_for_row(conn, row)
+            context['provider_lookup'] = lookup.get(row['id'])
             # dd28-38: a track may legitimately own several files (FLAC + MP3).
             # The preview stays primary-centric — one diff per track is what
             # the user reads — but the write has to reach all of them, or
@@ -334,19 +459,33 @@ def _annotate_manual(diff: List[Dict[str, Any]],
     return diff
 
 
-def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[Dict[str, Any]]:
+def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None, options=None,
+                hand_tagged_keys=None) -> List[Dict[str, Any]]:
     """Per-track diff of file tags vs a materialized lib2 snapshot. Never raises."""
     from core.library2.paths import resolve_lib2_path
     from core.tag_writer import build_tag_diff, read_file_tags
+    from core.repair_jobs.base import is_hand_tagged_path
 
     out: List[Dict[str, Any]] = []
     for row in contexts:
+        row = {**row, 'db_data': dict(row['db_data'])}
+        policy = retag_options(options) if options is not None else None
         entry: Dict[str, Any] = {
             "track_id": row["id"],
             **pick(row, "title", "track_number", "album_id", "album_title", "album_type",
                    "file_path"),
         }
         entry.update({key: row['db_data'].get(key) for key in ('title', 'track_number', 'album_title')})
+        if hand_tagged_keys:
+            files = [{'id': row['file_id'], 'path': row['file_path']}, *row.get('sibling_files', [])]
+            files = [f for f in files if not is_hand_tagged_path(f['path'], hand_tagged_keys)
+                     and not is_hand_tagged_path(resolve_lib2_path(f['path']), hand_tagged_keys)]
+            if not files:
+                entry.update(protected=True, has_changes=False, diff=[])
+                out.append(entry)
+                continue
+            row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
+            entry['file_path'] = row['file_path']
         if not row["file_path"]:
             entry.update(error="No file", has_changes=False, diff=[])
             out.append(entry)
@@ -359,6 +498,8 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[
             out.append(entry)
             continue
         try:
+            if policy and policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields']):
+                row['db_data']['lyrics'] = _lyrics_for_row(row)
             file_tags = read_file_tags(abs_path)
             if on_observation:
                 from core.metadata.art_apply import folder_has_cover_sidecar
@@ -370,7 +511,7 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[
                 out.append(entry)
                 continue
             diff = _annotate_manual(
-                build_tag_diff(file_tags, row["db_data"]),
+                _policy_diff(file_tags, row['db_data'], policy) if policy else build_tag_diff(file_tags, row["db_data"]),
                 row["db_data"].get("_manual_fields") or {},
             )
             changed = [d for d in diff if d.get("changed")]
@@ -384,7 +525,7 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[
                 name = os.path.basename(sibling_path)
                 changed += [
                     {**d, "field": f"{d['field']} ({name})", "file_id": sibling["id"]}
-                    for d in _annotate_manual(build_tag_diff(sibling_tags, row["db_data"]),
+                    for d in _annotate_manual(_policy_diff(sibling_tags, row['db_data'], policy) if policy else build_tag_diff(sibling_tags, row["db_data"]),
                                               row["db_data"].get("_manual_fields") or {})
                     if d.get("changed")]
             entry.update(
@@ -394,6 +535,9 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None) -> List[
                 # them hand-set" without the caller walking every diff row.
                 has_manual_conflict=any(d.get("manual") for d in changed),
             )
+            if policy:
+                entry['retag_options'] = policy
+                entry['lyrics_value'] = row['db_data'].get('lyrics') if policy['lyrics'] == 'fetch' else None
         except Exception as e:  # noqa: BLE001
             entry.update(error=str(e), has_changes=False, diff=[])
         out.append(entry)
@@ -462,52 +606,6 @@ def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any], config
         return persisted
 
 
-def _write_sibling_files(database, row: Dict[str, Any], db_data: Dict[str, Any],
-                         *, cover, stats: Dict[str, Any]) -> None:
-    """Apply the same tag write to a track's non-primary files (dd28-38).
-
-    Counted into ``written``/``failed`` like any other file, because from the
-    user's point of view the operation covers the track, not one chosen file.
-    Never raises: a sibling problem must not fail the primary's result.
-    """
-    siblings = row.get("sibling_files") or []
-    if not siblings:
-        return
-    from core.library2.paths import resolve_lib2_path
-    from core.library2.tag_cache import read_tag_snapshot
-    from core.tag_writer import write_tags_to_file
-
-    for sibling in siblings:
-        stored = sibling.get("path")
-        if not stored:
-            continue
-        try:
-            abs_path = resolve_lib2_path(stored)
-            if not abs_path:
-                stats["failed"] += 1
-                stats["errors"].append({
-                    "track_id": row["id"],
-                    "error": f"Secondary file not found on disk: {stored}",
-                })
-                continue
-            result = write_tags_to_file(
-                abs_path, db_data,
-                embed_cover=bool(cover), cover_data=cover,
-            )
-            if result.get("success"):
-                stats["written"] += 1
-                _persist_file_tags(database, sibling["id"], read_tag_snapshot(abs_path))
-            else:
-                stats["failed"] += 1
-                stats["errors"].append({
-                    "track_id": row["id"],
-                    "error": result.get("error") or "secondary write failed",
-                })
-        except Exception as e:  # noqa: BLE001
-            stats["failed"] += 1
-            stats["errors"].append({"track_id": row["id"], "error": str(e)})
-
-
 def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
                            released: Any) -> None:
     """Hand back the catalogue value for the fields the user released.
@@ -531,9 +629,121 @@ def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
         db_data[key] = manual[key]
 
 
+def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
+                       protect_hand_tagged=False, overwrite_manual=None,
+                       progress=None, lyrics_value=None, legacy=False):
+    """Policy adapter around effective metadata, diff and the partial writer."""
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.tag_cache import read_tag_snapshot
+    from core.tag_writer import write_tag_fields, write_tags_to_file, build_tag_diff, _multi_artist_write_enabled
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    stats = {'written': 0, 'skipped': 0, 'failed': 0, 'errors': []}
+    selected = set(file_ids) if file_ids is not None else None
+    covers = {}
+    with closing(database._get_connection()) as conn:
+        rows = track_contexts(conn, track_ids)
+    for i, row in enumerate(rows):
+        if progress:
+            progress('retag', i, len(rows))
+        files = [{'id': row['file_id'], 'path': row['file_path']}, *row['sibling_files']]
+        files = [f for f in files if f['id'] and (selected is None or f['id'] in selected)]
+        if not files:
+            stats['skipped'] += 1
+            continue
+        try:
+            # Reproject overrides for this track rather than trust an old finding.
+            data = row['db_data']
+            if not legacy:
+                with closing(database._get_connection()) as conn:
+                    fresh = _track_rows(conn, [row['id']])
+                    if not fresh:
+                        raise ValueError('Track no longer exists')
+                    data = _db_data_for_row(conn, fresh[0])
+            _release_manual_fields(data, row['id'], overwrite_manual)
+            if policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields']):
+                data['lyrics'] = lyrics_value if lyrics_value is not None else _lyrics_for_row({**row, 'db_data': data})
+            for index, file in enumerate(files):
+                try:
+                    path = resolve_lib2_path(file['path'])
+                    if not path:
+                        raise ValueError(f"File not found on disk: {file['path']}")
+                    if protect_hand_tagged:
+                        keys = hand_tagged_path_keys(database)
+                        if is_hand_tagged_path(file['path'], keys) or is_hand_tagged_path(path, keys):
+                            stats['skipped'] += 1
+                            continue
+                    tags = read_tag_snapshot(path)
+                    if tags.get('error') and not legacy:
+                        raise ValueError(tags['error'])
+                    legacy_diff = build_tag_diff(tags, data) if legacy else []
+                    legacy_changed = bool(tags.get('error')) or any(item.get('changed') for item in legacy_diff)
+                    cover = None
+                    if (policy['cover_art'] != 'skip' and
+                            ('fields' not in policy or 'cover_art' in policy['fields']) and
+                            (policy['cover_art'] == 'replace' or not tags.get('has_cover_art')
+                             or (legacy and (legacy_changed or index > 0)))):
+                        if row['album_id'] not in covers:
+                            covers[row['album_id']] = _album_cover_data(database, row['album_id'])
+                        cover = covers[row['album_id']]
+                    diff_data = {**data, 'thumb_url': 'resolved' if cover else None}
+                    if legacy:
+                        if not legacy_changed and not cover and index == 0:
+                            _persist_file_tags(database, file['id'], tags)
+                            stats['skipped'] += 1
+                            continue
+                        result = write_tags_to_file(path, data, embed_cover=bool(cover), cover_data=cover)
+                        if result.get('success'):
+                            stats['written'] += 1
+                            _persist_file_tags(database, file['id'], read_tag_snapshot(path))
+                        else:
+                            stats['failed'] += 1
+                            stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': result.get('error') or 'Tag write failed'})
+                        continue
+                    diff = _policy_diff(tags, diff_data, policy)
+                    from core.metadata.source import known_source_id_tags
+                    sources = known_source_id_tags(data) if data.get('known_source_ids') else {}
+                    fields = {}
+                    for item in diff:
+                        key = item['file_key']
+                        if not item.get('changed') or key == 'cover_art':
+                            continue
+                        value = sources.get(key) if key in sources else data.get(_POLICY_DATA_KEYS.get(key, key))
+                        if key == 'year':
+                            value = data.get('release_date') or value
+                        if key == 'artist':
+                            value = value or data.get('artist_name')
+                        if value is not None:
+                            fields[key] = value
+                    if 'artist' in fields and data.get('artists_list') and _multi_artist_write_enabled():
+                        fields['artists'] = data['artists_list']
+                    if not fields and not cover:
+                        _persist_file_tags(database, file['id'], tags)
+                        stats['skipped'] += 1
+                        continue
+                    result = write_tag_fields(path, fields, cover_data=cover)
+                    if not result.get('success'):
+                        stats['failed'] += 1
+                        stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': result.get('error')})
+                        continue
+                    stats['written'] += 1
+                    _persist_file_tags(database, file['id'], read_tag_snapshot(path))
+                except Exception as exc:
+                    stats['failed'] += 1
+                    stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': str(exc)})
+        except Exception as exc:
+            stats['failed'] += 1
+            stats['errors'].append({'track_id': row['id'], 'error': str(exc)})
+    if selected is not None and not any(f['id'] in selected for row in rows for f in
+            [{'id': row['file_id']}, *row['sibling_files']]):
+        stats['failed'] += 1
+        stats['errors'].append({'error': 'Reviewed file no longer belongs to this track/library'})
+    return stats
+
+
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                force_cover: bool = False, overwrite_manual: Any = None,
-               progress=None, file_ids=None, protect_hand_tagged: bool = False) -> Dict[str, Any]:
+               progress=None, file_ids=None, protect_hand_tagged: bool = True,
+               options=None, lyrics_value=None) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
     ``overwrite_manual`` releases fields a person set by hand back to the
@@ -553,113 +763,16 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
     only compares text fields (docs §"A1"), so a cover-only change would
     otherwise be silently skipped forever.
     """
-    from core.library2.paths import resolve_lib2_path
-    from core.library2.tag_cache import read_tag_snapshot
-    from core.tag_writer import build_tag_diff, read_file_tags, write_tags_to_file
     from core.metadata.common import get_config_manager
-    embed_cover = embed_cover and bool(get_config_manager().get('metadata_enhancement.embed_album_art', True))
-
-    stats: Dict[str, Any] = {"written": 0, "skipped": 0, "failed": 0, "errors": []}
-    covers: Dict[int, Optional[Tuple[bytes, str]]] = {}
-    with closing(database._get_connection()) as conn:
-        rows = track_contexts(conn, track_ids)
-        if file_ids is not None:
-            selected = set(file_ids)
-            scoped = []
-            for row in rows:
-                files = [{'id': row['file_id'], 'path': row['file_path']}, *row['sibling_files']]
-                files = [f for f in files if f['id'] in selected]
-                if files:
-                    row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
-                    scoped.append(row)
-            rows = scoped
-    if protect_hand_tagged:
-        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
-        keys = hand_tagged_path_keys(database)
-        protected_rows = []
-        for row in rows:
-            files = [{'id': row['file_id'], 'path': row['file_path']}, *row['sibling_files']]
-            files = [f for f in files if not is_hand_tagged_path(f['path'], keys)
-                     and not is_hand_tagged_path(resolve_lib2_path(f['path']), keys)]
-            if files:
-                row.update(file_id=files[0]['id'], file_path=files[0]['path'], sibling_files=files[1:])
-                protected_rows.append(row)
-            else:
-                stats['skipped'] += 1
-        rows = protected_rows
-    for i, row in enumerate(rows):
-        if progress:
-            progress("retag", i, len(rows))
-        if not row["file_path"]:
-            stats["skipped"] += 1
-            continue
-        abs_path = resolve_lib2_path(row["file_path"])
-        if not abs_path:
-            stats["failed"] += 1
-            stats["errors"].append({"track_id": row["id"],
-                                    "error": "File not found on disk"})
-            continue
-        try:
-            file_tags = read_tag_snapshot(abs_path)
-            db_data = row["db_data"]
-            _release_manual_fields(db_data, row["id"], overwrite_manual)
-
-            album_id = row["album_id"]
-
-            def _cover(album_id=album_id) -> Optional[Tuple[bytes, str]]:
-                if album_id not in covers:
-                    covers[album_id] = _album_cover_data(database, album_id)
-                return covers[album_id]
-
-            if not file_tags.get("error"):
-                diff = build_tag_diff(file_tags, db_data)
-                text_changed = any(d.get("changed") for d in diff)
-                # A file with NO embedded art is the case the "N tag gaps" cell
-                # sends here, and build_tag_diff never reports cover art as a
-                # text change — so the old fastpath skipped exactly the gap the
-                # user clicked on and still reported success (T-03). Missing
-                # art is now its own reason to write; ``force_cover`` stays for
-                # *replacing* art that is already there (a newly picked cover).
-                cover_missing = embed_cover and not file_tags.get("has_cover_art")
-                # The cover lookup can materialize a cold cache, so only reach
-                # for it when it could actually change the outcome — a routine
-                # full-library retag over already-arted files pays nothing.
-                if not text_changed and not (
-                    (cover_missing or (force_cover and embed_cover)) and _cover()
-                ):
-                    _persist_file_tags(database, row["file_id"], file_tags)
-                    stats["skipped"] += 1
-                    # dd28-38: an unchanged primary says nothing about the
-                    # siblings — an MP3 copy added later still needs the write.
-                    _write_sibling_files(
-                        database, row, db_data,
-                        cover=_cover() if embed_cover else None,
-                        stats=stats,
-                    )
-                    continue
-            cover = _cover() if embed_cover else None
-            result = write_tags_to_file(
-                abs_path, db_data,
-                embed_cover=bool(cover), cover_data=cover,
-            )
-            if result.get("success"):
-                stats["written"] += 1
-                _persist_file_tags(
-                    database, row["file_id"], read_tag_snapshot(abs_path)
-                )
-            else:
-                stats["failed"] += 1
-                stats["errors"].append({"track_id": row["id"],
-                                        "error": result.get("error") or "write failed"})
-            _write_sibling_files(
-                database, row, db_data, cover=cover, stats=stats,
-            )
-        except Exception as e:  # noqa: BLE001
-            stats["failed"] += 1
-            stats["errors"].append({"track_id": row["id"], "error": str(e)})
-    logger.info("Library v2 retag: %(written)d written, %(skipped)d unchanged, "
-                "%(failed)d failed", stats)
-    return stats
+    policy = retag_options(options)
+    if not embed_cover or not get_config_manager().get('metadata_enhancement.embed_album_art', True):
+        policy['cover_art'] = 'skip'
+    elif force_cover and options is None:
+        policy['cover_art'] = 'replace'
+    return _write_policy_tags(database, track_ids, policy, file_ids=file_ids,
+                              protect_hand_tagged=protect_hand_tagged,
+                              overwrite_manual=overwrite_manual, progress=progress,
+                              lyrics_value=lyrics_value, legacy=options is None)
 
 
 __all__ = [
@@ -672,6 +785,55 @@ __all__ = [
 ]
 
 
-def refresh_metadata(database, track_ids, **kwargs):
-    from core.library2.native_enrich import refresh_native_metadata as refresh
-    return refresh(database, track_ids, **kwargs)
+def refresh_metadata(database, track_ids, *, source='auto', **kwargs):
+    """Reuse native refresh; an explicit provider never borrows another ID."""
+    from core.library2.native_enrich import refresh_native_metadata, refresh_native_entity_metadata
+    if source in (None, '', 'auto'):
+        return refresh_native_metadata(database, track_ids, **kwargs)
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.match_status import configured_services
+    from core.library2.editions import album_release_ids
+    from core.metadata.cache import refresh_cached_entity
+    source = str(source).strip().lower()
+    result = {'refreshed': 0, 'unavailable': 0, 'errors': []}
+    available = configured_services()
+    if available is not None and source not in available:
+        result['unavailable'] += 1
+        return result
+    targets = {}
+    keys = hand_tagged_path_keys(database)
+    with closing(database._get_connection()) as conn:
+        for row in track_contexts(conn, track_ids):
+            if not row.get('file_path') or is_hand_tagged_path(row['file_path'], keys) or is_hand_tagged_path(resolve_lib2_path(row['file_path']), keys):
+                continue
+            data = row['db_data']
+            ids = data.get('known_source_ids') or {}
+            album = conn.execute('SELECT * FROM lib2_albums WHERE id=?', (row['album_id'],)).fetchone()
+            # A pin applies to the whole release context, so an explicit source
+            # cannot refresh the group from a different release namespace.
+            pinned_source = album['canonical_source'] if album['canonical_locked'] else None
+            if pinned_source and pinned_source != source:
+                result['unavailable'] += 1
+                continue
+            album_id = (album_release_ids(album).get(source) if pinned_source else
+                        (ids.get(source) or {}).get('album'))
+            for kind, entity_id, provider_id in (
+                ('track', row['id'], (ids.get(source) or {}).get('track')),
+                ('album', row['album_id'], album_id),
+                ('artist', row['album_artist_id'], (ids.get(source) or {}).get('artist')),
+            ):
+                if entity_id and provider_id:
+                    targets[(kind, entity_id, str(provider_id))] = str(provider_id)
+    for (kind, entity_id, provider_id) in targets:
+        if kwargs.get('check_stop') and kwargs['check_stop']():
+            break
+        try:
+            with closing(database._get_connection()) as conn:
+                with refresh_cached_entity(source, kind, provider_id):
+                    metadata = refresh_native_entity_metadata(conn, kind, entity_id, {source: provider_id})
+                conn.commit()
+            result['refreshed' if metadata is not None else 'unavailable'] += 1
+        except Exception as exc:
+            result['errors'].append({'entity_type': kind, 'entity_id': entity_id, 'source': source, 'error': str(exc)})
+    return result

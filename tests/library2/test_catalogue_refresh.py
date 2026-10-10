@@ -49,12 +49,12 @@ def _seed(conn, *, album_title="Views", year=2016, spotify_id="sp-alb",
 
 
 def _provider(monkeypatch, tracks, album=None):
-    monkeypatch.setattr(
-        "core.metadata.album_tracks.get_album_tracks_for_source",
-        lambda _source, _id: tracks)
-    monkeypatch.setattr(
-        "core.metadata.album_tracks.get_album_for_source",
-        lambda _source, _id, *a, **k: album or {})
+    from types import SimpleNamespace
+    monkeypatch.setattr("core.metadata.registry.get_client_for_source", lambda _source: SimpleNamespace(
+        get_album_tracks=lambda _id, **kwargs: tracks,
+        get_album=lambda _id, **kwargs: album or {},
+    ))
+    monkeypatch.setattr("core.library2.match_status.configured_services", lambda: {"spotify"})
 
 
 def _changes(plan, track_id):

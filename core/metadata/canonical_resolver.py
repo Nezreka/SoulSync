@@ -67,6 +67,7 @@ def resolve_canonical_for_album(
     fetch_alternates: Optional[
         Callable[[str, str], Optional[List[Dict[str, Any]]]]
     ] = None,
+    candidate_editions: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Pick the canonical release for one album, honoring the source-selection mode.
 
@@ -153,6 +154,14 @@ def resolve_canonical_for_album(
     if winner is None and mode != MODE_ACTIVE_ONLY:
         for source in source_priority:
             _score_linked(source)
+        # Already-known concrete editions are candidates too. The native
+        # catalogue may have a Standard edition beside a linked Deluxe that
+        # clears the floor; best_fit must compare both rather than hiding the
+        # better known edition behind the remote-alternates fallback.
+        for edition in candidate_editions or []:
+            source = edition.get('source')
+            if source in source_priority:
+                _score_edition(source, edition.get('album_id'), edition.get('tracks'))
         winner = _best_clearing_floor(scored)
 
     # #767-2 expansion: no LINKED edition cleared the floor — e.g. a 1-track single

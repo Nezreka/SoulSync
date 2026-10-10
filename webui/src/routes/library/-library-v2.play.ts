@@ -6,10 +6,8 @@
  * single row. What this module owns is the SHAPE of a queue row, which the
  * player reads strictly:
  *
- *   - a row without `file_path` is "download this first", and with
- *     auto-download off that fails outright — even for an album sitting
- *     complete on disk (upstream #1213). So a row with no live file never
- *     enters the queue.
+ *   - a known native row without `file_path` reaches the existing queue
+ *     auto-download switch. With it off the player reports and skips Missing.
  *   - `is_library: true` is what skips the download flow entirely.
  *   - `id` must be an id the MEDIA SERVER understands (server or legacy). A v2
  *     id means nothing to it, so the typed ids ride alongside instead — the
@@ -31,6 +29,8 @@ export interface PlayQueueRow {
   /** What the media server understands: a server or legacy id, else null. */
   id: string | number | null;
   lib2_track_id: number | null;
+  lib2_album_id: number | null;
+  quality_profile_id?: number;
   legacy_track_id: string | number | null;
   server_track_id: string | number | null;
   lib2_artist_id: number | null;
@@ -40,7 +40,7 @@ export interface PlayQueueRow {
   artist: string;
   album: string;
   file_path: string;
-  is_library: true;
+  is_library: boolean;
   image_url: string | null;
   format: string | null;
   bitrate: number | null;
@@ -73,21 +73,24 @@ function primaryArtist(track: LibraryV2Track): { id: number; name: string } | nu
   return primary ? { id: primary.id, name: primary.name } : null;
 }
 
-/** Queue rows for one album, in disc/track order, owned tracks only. */
+/** Known tracks on this release, in disc/track order. No provider fetches. */
 export function albumQueueRows(
-  album: Pick<LibraryV2AlbumDetail, 'title' | 'image_url' | 'tracks'>,
+  album: Pick<LibraryV2AlbumDetail, 'id' | 'title' | 'image_url' | 'tracks'>,
   fallbackArtistName: string,
 ): PlayQueueRow[] {
   return (album.tracks ?? [])
-    .filter((track) => isPlayable(track.file))
+    .filter((track) => isPlayable(track.file) || (track.id != null && Boolean(track.title)))
     .slice()
     .sort(byPosition)
     .map((track) => {
       const credit = primaryArtist(track);
       const title = track.title || 'Unknown Track';
+      const file = isPlayable(track.file) ? track.file : null;
       return {
         id: track.server_track_id ?? track.legacy_track_id ?? null,
         lib2_track_id: track.id,
+        lib2_album_id: album.id,
+        quality_profile_id: track.quality_profile_id,
         legacy_track_id: track.legacy_track_id ?? null,
         server_track_id: track.server_track_id ?? null,
         lib2_artist_id: credit?.id ?? null,
@@ -95,11 +98,11 @@ export function albumQueueRows(
         name: title,
         artist: credit?.name || fallbackArtistName,
         album: album.title || 'Unknown Album',
-        file_path: track.file!.path,
-        is_library: true as const,
+        file_path: file?.path ?? '',
+        is_library: Boolean(file),
         image_url: album.image_url ?? null,
-        format: track.file!.format ?? null,
-        bitrate: track.file!.bitrate ?? null,
+        format: file?.format ?? null,
+        bitrate: file?.bitrate ?? null,
         duration: track.duration ?? null,
         track_number: track.track_number ?? null,
         disc_number: track.disc_number ?? null,
@@ -123,9 +126,16 @@ export function artistQueueRows(
   // flagged primary is still played rather than silently dropped.
   const perTrack = new Map<number, LibraryV2ArtistPlaybackFile>();
   for (const file of files) {
-    if (!isPlayable(file)) continue;
+    // The endpoint marks fileless catalogue rows explicitly. Deleted physical
+    // copies from older callers are still ignored.
+    if (!isPlayable(file) && !(file.file_state === 'missing' && !file.path)) continue;
     const held = perTrack.get(file.track_id);
-    if (!held || (!held.is_primary && file.is_primary)) perTrack.set(file.track_id, file);
+    if (
+      !held ||
+      (!isPlayable(held) && isPlayable(file)) ||
+      (isPlayable(file) && !held.is_primary && file.is_primary)
+    )
+      perTrack.set(file.track_id, file);
   }
 
   return [...perTrack.values()]
@@ -138,6 +148,7 @@ export function artistQueueRows(
         // the row. Streaming from the media server falls back to the path.
         id: null,
         lib2_track_id: file.track_id,
+        lib2_album_id: file.album_id,
         legacy_track_id: null,
         server_track_id: null,
         lib2_artist_id: file.artist_id ?? null,
@@ -146,7 +157,7 @@ export function artistQueueRows(
         artist: file.artist_name || artistName,
         album: file.album_title || 'Unknown Album',
         file_path: file.path,
-        is_library: true as const,
+        is_library: isPlayable(file),
         image_url: file.album_image_url ?? null,
         format: file.format ?? null,
         bitrate: file.bitrate ?? null,

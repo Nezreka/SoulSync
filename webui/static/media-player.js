@@ -1477,6 +1477,9 @@ const npQueuePrefetchBatchIds = new Set();
 const NP_QUEUE_PREFETCH_TERMINAL = new Set(['failed', 'not_found', 'cancelled', 'quarantined']);
 
 function npQueueIdentity(track) {
+    if (track?.lib2_track_id != null) {
+        return `lib2:${track.lib2_track_id}:${track.lib2_album_id ?? ''}:${track.release_edition_id ?? ''}:${track.profile_id ?? ''}:${track.library_owner_id ?? 'shared'}:${track.quality_profile_id ?? ''}`;
+    }
     const source = String(track?.source || track?.metadata_source || '').trim().toLowerCase();
     const sourceId = String(track?.source_track_id || track?.spotify_track_id || track?.tidal_track_id ||
         track?.deezer_id || track?.itunes_track_id || track?.musicbrainz_recording_id || track?.track_id || '').trim();
@@ -1557,11 +1560,15 @@ function npQueueStatusLabel(track) {
     }
 }
 
-function npApplyQueuePrefetchState(requestIds, state, finalPath = '', progress = 0, error = '') {
+function npApplyQueuePrefetchState(requestIds, state, finalPath = '', progress = 0, error = '', identity = {}) {
     const ids = new Set((requestIds || []).map(String));
     let changed = false;
     npQueue.forEach(track => {
         if (!ids.has(String(track?._queue_request_id || ''))) return;
+        for (const field of ['lib2_track_id', 'lib2_album_id', 'release_edition_id',
+            'quality_profile_id', 'profile_id', 'library_owner_id']) {
+            if (Object.prototype.hasOwnProperty.call(identity, field)) track[field] = identity[field];
+        }
         if (finalPath) {
             track.file_path = finalPath;
             track.filename = finalPath;
@@ -1600,6 +1607,7 @@ async function npPollQueuePrefetch() {
         const data = await response.json();
         if (!response.ok || !data.success) throw new Error(data.error || 'Queue download status unavailable');
         let changed = false;
+        let refill = false;
         Object.entries(data.batches || {}).forEach(([batchId, batch]) => {
             const tasks = Array.isArray(batch?.tasks) ? batch.tasks : [];
             tasks.forEach(task => {
@@ -1610,12 +1618,15 @@ async function npPollQueuePrefetch() {
                 if (!requestIds.length) return;
                 const state = task.quarantine_entry_id ? 'quarantined' : String(task.status || 'queued');
                 const finalPath = state === 'completed' ? String(task.final_file_path || '') : '';
+                if ((finalPath || NP_QUEUE_PREFETCH_TERMINAL.has(state)) && npQueue.some(track =>
+                    requestIds.includes(track._queue_request_id) && npQueueTrackNeedsDownload(track))) refill = true;
                 changed = npApplyQueuePrefetchState(
                     requestIds,
                     finalPath ? 'ready' : state,
                     finalPath,
                     task.progress,
                     task.error_message,
+                    info,
                 ) || changed;
             });
             const terminal = ['complete', 'error', 'cancelled'].includes(batch?.phase) &&
@@ -1623,6 +1634,7 @@ async function npPollQueuePrefetch() {
             if (terminal) npQueuePrefetchBatchIds.delete(batchId);
         });
         if (changed) renderNpQueue();
+        if (refill) npScheduleQueuePrefetch();
         if (npQueuePrefetchBatchIds.size === 0) npStopQueuePrefetchPolling();
     } catch (error) {
         console.warn('Queue prefetch status failed:', error.message);
@@ -1632,7 +1644,10 @@ async function npPollQueuePrefetch() {
 async function npPrefetchMissingQueueTracks() {
     if (!npAutoDownloadQueue) return;
     if (npQueuePrefetchRequest) return npQueuePrefetchRequest;
-    const missing = npQueue.filter(npQueueTrackNeedsDownload);
+    // Keep a short buffer ahead of the current song. A long native artist
+    // queue must not start acquiring every release at once or overflow the
+    // backend's request limit, leaving later rows stuck in "Preparing".
+    const missing = npQueue.slice(Math.max(0, npQueueIndex)).filter(npQueueTrackNeedsDownload).slice(0, 25);
     if (!missing.length) return;
     missing.forEach(track => { track.playback_status = 'requesting'; });
     renderNpQueue();
@@ -1650,6 +1665,9 @@ async function npPrefetchMissingQueueTracks() {
                     item.request_ids || [],
                     item.state || 'queued',
                     item.final_path || '',
+                    0,
+                    '',
+                    item,
                 );
             });
             (data.batch_ids || []).forEach(id => npQueuePrefetchBatchIds.add(String(id)));

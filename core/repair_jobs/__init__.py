@@ -34,6 +34,9 @@ JOB_DATA_BASIS: dict[str, str] = {
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
     'monitored_discography_refresh': 'lib2',
+    'album_catalogue_backfill': 'lib2',
+    'album_edition_review': 'lib2',
+    'native_duplicate_detector': 'lib2',
     'audio_corruption_detector': 'lib2',
     'monitoring_list_reconcile': 'lib2',
     'quality_info_backfill': 'lib2',
@@ -98,6 +101,9 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
+    'album_catalogue_backfill': frozenset({'metadata', 'artwork', 'discography', 'wanted'}),
+    'album_edition_review': frozenset({'observe', 'metadata', 'wanted'}),
+    'native_duplicate_detector': frozenset({'observe', 'metadata', 'delete', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
     'monitoring_list_reconcile': frozenset({'wanted'}),
     # Only re-probes and fills already-NULL bitrate/sample_rate/bit_depth/
@@ -116,14 +122,13 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # Repoints a stale index row at a file that is already on disk. 'path' is
     # the stored-path change; no file is ever moved, created or deleted.
     'path_drift_reconcile': frozenset({'observe', 'path'}),
-    # Reports tag drift; applying writes the catalogue's values into the file.
-    # No row moves, nothing is created or deleted.
-    'library_retag': frozenset({'observe', 'tags'}),
+    # Full-depth scan refreshes catalogue/artwork; apply writes selected tags.
+    'library_retag': frozenset({'observe', 'metadata', 'artwork', 'tags'}),
     # Findings only; the fix is the Re-identify modal, which re-imports the
     # file through the normal pipeline.
     'suspect_album_tag_detector': frozenset({'observe'}),
-    # Findings only; applying writes lib2_tracks.bpm. No file is touched.
-    'bpm_backfill': frozenset({'observe', 'metadata'}),
+    # Scan reports candidates; apply stores BPM and writes the selected file tag.
+    'bpm_backfill': frozenset({'observe', 'metadata', 'tags'}),
     # Writes a new artist.nfo sidecar next to the music; no audio file or
     # catalogue row changes.
     'artist_nfo_backfill': frozenset({'new_file'}),
@@ -175,6 +180,8 @@ JOB_ID_MIGRATIONS = {
     # projection does continuously. Their saved configs go inert rather than
     # being folded into an unrelated job's enabled/interval.
     'discography_backfill': 'monitored_discography_refresh',
+    'canonical_version_resolve': 'album_edition_review',
+    'duplicate_detector': 'native_duplicate_detector',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
     # The two transitional jobs return as one neutral, complete invariant
@@ -196,6 +203,8 @@ PRESERVED_RETIRED_FINDING_IDS = frozenset({
     # out from under a user who was midway through reviewing them.
     'quality_upgrade_scan',
     'discography_backfill',
+    'canonical_version_resolve',
+    'duplicate_detector',
 })
 
 _imports_done = False
@@ -233,6 +242,8 @@ def get_all_jobs() -> dict[str, type[RepairJob]]:
 
 
 _JOB_MODULES = [
+    'core.repair_jobs.native_duplicate_detector',
+    'core.repair_jobs.album_edition_review',
     'core.repair_jobs.track_number_repair',
     'core.repair_jobs.cache_evictor',
     'core.repair_jobs.orphan_file_detector',
@@ -258,6 +269,7 @@ _JOB_MODULES = [
     'core.repair_jobs.comma_artist_splitter',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
+    'core.repair_jobs.album_catalogue_backfill',
     'core.repair_jobs.monitoring_list_reconcile',
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.library_reorganize',

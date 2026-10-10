@@ -6709,6 +6709,11 @@ def _resolve_playback_prefetch_local_file(track):
         if resolved and os.path.isfile(resolved):
             return resolved
 
+    # Native rows already resolved their exact scoped primary file. A title
+    # match could substitute another edition or another owner's copy.
+    if track.get('lib2_track_id') is not None:
+        return None
+
     title = str(track.get('name') or track.get('title') or '').strip()
     raw_artists = track.get('artists') if isinstance(track.get('artists'), list) else []
     artists = []
@@ -6747,11 +6752,29 @@ def _resolve_playback_prefetch_local_file(track):
 def _start_playback_queue_prefetch(raw_tracks):
     """Add missing player rows to the existing downloader in strict queue order."""
     from core.playback.prefetch import (
+        MAX_PREFETCH_TRACKS,
         PLAYBACK_PREFETCH_MAX_CONCURRENT,
         deduplicate_prefetch_tracks,
     )
+    from core.library2.grab_context import names_lib2_entity
+    from core.playback.library_v2 import resolve_native_queue_track
+    from core.library_scope import acting_profile_id
 
-    tracks, request_ids_by_key = deduplicate_prefetch_tracks(raw_tracks)
+    profile_id = acting_profile_id(get_current_profile_id())
+    library_owner_id = _selected_library_owner()
+    resolved_tracks = []
+    for raw in list(raw_tracks)[:MAX_PREFETCH_TRACKS]:
+        if not isinstance(raw, dict):
+            raise ValueError('Each playback queue track must be an object')
+        if names_lib2_entity(raw):
+            raw = resolve_native_queue_track(
+                get_database(), raw, profile_id=profile_id,
+                library_owner_id=library_owner_id, is_admin=is_admin_request())
+        else:
+            raw = {**raw, 'profile_id': profile_id, 'library_owner_id': library_owner_id}
+        resolved_tracks.append(raw)
+
+    tracks, request_ids_by_key = deduplicate_prefetch_tracks(resolved_tracks)
     if not tracks:
         raise ValueError('No valid missing tracks were provided')
 
@@ -6773,6 +6796,10 @@ def _start_playback_queue_prefetch(raw_tracks):
         for task_id, task in download_tasks.items():
             if not isinstance(task, dict) or task.get('playlist_id') != 'playback_queue':
                 continue
+            task_batch = download_batches.get(task.get('batch_id'), {})
+            if (task_batch.get('profile_id', 1) != profile_id
+                    or task_batch.get('library_owner_id') != library_owner_id):
+                continue
             track_info = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             key = track_info.get('_playback_queue_key')
             if not key:
@@ -6789,6 +6816,8 @@ def _start_playback_queue_prefetch(raw_tracks):
             for batch_id, batch in download_batches.items()
             if isinstance(batch, dict)
             and batch.get('playback_prefetch')
+            and batch.get('profile_id', 1) == profile_id
+            and batch.get('library_owner_id') == library_owner_id
             and str(batch.get('phase') or '') not in {'complete', 'error', 'cancelled'}
         ]
         reusable_batches.sort(key=lambda pair: float(pair[1].get('created_at') or 0))
@@ -6850,10 +6879,10 @@ def _start_playback_queue_prefetch(raw_tracks):
                     'queue_index': 0,
                     'permanently_failed_tracks': [],
                     'cancelled_tracks': set(),
-                    'profile_id': get_current_profile_id(),
+                    'profile_id': profile_id,
                     # the selected directory, resolved while a request still exists;
                     # every later stage reads it back off the batch (#1199)
-                    'library_owner_id': _selected_library_owner(),
+                    'library_owner_id': library_owner_id,
                     'playback_prefetch': True,
                     'created_at': time.time(),
                 }
@@ -6870,6 +6899,8 @@ def _start_playback_queue_prefetch(raw_tracks):
                     'playlist_id': 'playback_queue',
                     'batch_id': new_batch_id,
                     'track_index': track_index,
+                    'profile_id': profile_id,
+                    'library_owner_id': library_owner_id,
                     'download_id': None,
                     'username': None,
                     'filename': None,
@@ -6923,6 +6954,17 @@ def _start_playback_queue_prefetch(raw_tracks):
         )
         existing_batch_ids.add(new_batch_id)
 
+    # Typed identity survives both the immediate ready response and later
+    # polling (which returns the same track_info). Never expose a provider id
+    # as a media-server song id.
+    by_key = {track['_playback_queue_key']: track for track in tracks}
+    for item in items:
+        track = by_key[item['queue_key']]
+        for field in ('lib2_track_id', 'lib2_album_id', 'release_edition_id',
+                      'quality_profile_id', 'profile_id', 'library_owner_id'):
+            if field in track:
+                item[field] = track[field]
+
     return {
         'success': True,
         'items': items,
@@ -6932,7 +6974,19 @@ def _start_playback_queue_prefetch(raw_tracks):
 
 
 def _playback_queue_prefetch_status(batch_ids):
-    data = _downloads_status.build_batched_status(batch_ids, _build_status_deps())
+    from core.library_scope import acting_profile_id
+    profile_id = acting_profile_id(get_current_profile_id())
+    library_owner_id = _selected_library_owner()
+    with tasks_lock:
+        scoped_ids = [bid for bid in batch_ids
+                      if (batch := download_batches.get(bid))
+                      and batch.get('playback_prefetch')
+                      and batch.get('profile_id', 1) == profile_id
+                      and batch.get('library_owner_id') == library_owner_id]
+    # The generic builder interprets [] as "every batch".
+    if not scoped_ids:
+        return {'success': True, 'batches': {}}
+    data = _downloads_status.build_batched_status(scoped_ids, _build_status_deps())
     return {'success': True, **data}
 
 
@@ -6948,6 +7002,8 @@ def playback_queue_prefetch():
         return jsonify({'success': False, 'error': 'tracks list is required'}), 400
     try:
         return jsonify(_start_playback_queue_prefetch(tracks))
+    except PermissionError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 403
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
     except Exception as exc:

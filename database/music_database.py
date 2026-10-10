@@ -18042,162 +18042,27 @@ class MusicDatabase:
             }
 
     def get_library_artists(self, search_query: str = "", letter: str = "", page: int = 1, limit: int = 50, watchlist_filter: str = "all", profile_id: int = 1, source_filter: str = "", quality_filter: str = "", sort: str = "name", skip_server_filter: bool = False) -> Dict[str, Any]:
-        """Artists for the public library API: search, filter, paginate.
-
-        Reads the catalogue. Two things the legacy version had to do fall away
-        with it: the same-name dedup (v2 has `canonical_artist_id`, so an alias
-        member is folded, not guessed at with `MIN(id)`), and the active-server
-        filter (a catalogue row is the library, whoever reported it), so
-        ``skip_server_filter`` is accepted for API compatibility and ignored.
-
-        ``sort`` is 'name' (A-Z, ignoring leading punctuation, so '"Weird Al"
-        Yankovic' files under W) or 'recent' (recently added first).
-        ``quality_filter`` is accepted for API compatibility and ignored: the
-        findings it filtered on come from the quality jobs Library v2 retired;
-        upgrades live in the wanted projection.
-        """
-        from core.library2.provider_ids import parse_external_ids
-        from core.library2.sql_util import scope_visibility_sql
+        """Native catalogue page using shared selection, scope and quality rules."""
+        from core.library2.artist_reader import read_artist_page, artist_pagination
+        from core.library2.queries import _json_list
+        from core.library2.metadata_overrides import project_metadata_many
 
         try:
             with self._get_connection() as conn:
-                cursor = conn.cursor()
-
-                where_conditions = ["a.canonical_artist_id IS NULL"]
-                params: list = []
-                # The library the caller reads (#1199): an artist shows when one
-                # of its alias group is visible there, and its counts are the
-                # releases and tracks visible there. Empty when nothing
-                # separates libraries.
-                artist_visible = scope_visibility_sql("artist", "va")
-                if artist_visible:
-                    where_conditions.append(
-                        "EXISTS (SELECT 1 FROM lib2_artists va"
-                        " WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
-                        f" AND {artist_visible})")
-                album_visible = scope_visibility_sql("album", "al")
-                track_visible = scope_visibility_sql("track", "t")
-                album_scope = f" AND {album_visible}" if album_visible else ""
-                track_scope = f" AND {track_visible}" if track_visible else ""
-
-                if search_query:
-                    where_conditions.append("LOWER(a.name) LIKE LOWER(?)")
-                    params.append(f"%{search_query}%")
-
-                if letter and letter != "all":
-                    stripped_name = _library_stripped_sql('a.name')
-                    if letter == "#":
-                        # Numbers (and names that strip down to nothing)
-                        where_conditions.append(
-                            f"SUBSTR(UPPER({stripped_name}), 1, 1) NOT GLOB '[A-Z]'")
-                    else:
-                        where_conditions.append(
-                            f"UPPER(SUBSTR({stripped_name}, 1, 1)) = UPPER(?)")
-                        params.append(letter)
-
-                # Enrichment-source filter. Spotify and MusicBrainz have their
-                # own columns; every other provider lives in `external_ids`.
-                if source_filter:
-                    negate = source_filter.startswith('!')
-                    key = source_filter.lstrip('!')
-                    if key in ('spotify', 'musicbrainz'):
-                        col = f"a.{key}_id"
-                        present = f"({col} IS NOT NULL AND {col} != '')"
-                    else:
-                        present = (f"(json_extract(a.external_ids, '$.{key}') IS NOT NULL "
-                                   f"AND json_extract(a.external_ids, '$.{key}') != '')")
-                    where_conditions.append(f"NOT {present}" if negate else present)
-
-                cursor.execute(
-                    "SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) as name_lower "
-                    "FROM watchlist_artists WHERE profile_id = ?", (profile_id,))
-                watchlist_rows = cursor.fetchall()
-                wl_spotify = {r['spotify_artist_id'] for r in watchlist_rows if r['spotify_artist_id']}
-                wl_itunes = {r['itunes_artist_id'] for r in watchlist_rows if r['itunes_artist_id']}
-                wl_names = {r['name_lower'] for r in watchlist_rows if r['name_lower']}
-
-                if watchlist_filter in ("watched", "unwatched"):
-                    match_parts, match_params = [], []
-                    if wl_spotify:
-                        match_parts.append(
-                            f"(a.spotify_id IS NOT NULL AND a.spotify_id IN "
-                            f"({','.join('?' * len(wl_spotify))}))")
-                        match_params.extend(wl_spotify)
-                    if wl_itunes:
-                        match_parts.append(
-                            f"(json_extract(a.external_ids, '$.itunes') IN "
-                            f"({','.join('?' * len(wl_itunes))}))")
-                        match_params.extend(wl_itunes)
-                    if wl_names:
-                        match_parts.append(f"LOWER(a.name) IN ({','.join('?' * len(wl_names))})")
-                        match_params.extend(wl_names)
-                    if match_parts:
-                        combined = ' OR '.join(match_parts)
-                        where_conditions.append(
-                            f"({combined})" if watchlist_filter == "watched"
-                            else f"NOT ({combined})")
-                        params.extend(match_params)
-                    elif watchlist_filter == "watched":
-                        where_conditions.append("0")
-
-                where_clause = " AND ".join(where_conditions)
-
-                cursor.execute(
-                    f"SELECT COUNT(*) as total_count FROM lib2_artists a WHERE {where_clause}",
-                    params)
-                total_count = cursor.fetchone()['total_count']
-
-                offset = (page - 1) * limit
-                # Whitelisted — never interpolated from the raw request value.
-                order_by = {
-                    'recent': "a.added_at DESC, a.id DESC",
-                }.get(sort, f"{_library_sort_key_sql('a.name')}, a.name COLLATE NOCASE")
-                cursor.execute(f"""
-                    SELECT a.id, a.name, a.image_url, a.genres, a.spotify_id,
-                           a.musicbrainz_id, a.external_ids, a.soul_id,
-                           a.server_source,
-                           (SELECT COUNT(*) FROM lib2_albums al
-                             WHERE al.primary_artist_id = a.id{album_scope}) AS album_count,
-                           (SELECT COUNT(*) FROM lib2_tracks t
-                             JOIN lib2_albums al2 ON al2.id = t.album_id
-                            WHERE al2.primary_artist_id = a.id{track_scope}) AS track_count
-                      FROM lib2_artists a
-                     WHERE {where_clause}
-                     ORDER BY {order_by}
-                     LIMIT ? OFFSET ?
-                """, params + [limit, offset])
-                artist_rows = self._api_project_lib2(conn, 'artist', cursor.fetchall())
-
-                artists = []
-                for row in artist_rows:
-                    try:
-                        genres = json.loads(row['genres'] or '[]')
-                        if not isinstance(genres, list):
-                            genres = []
-                    except (TypeError, ValueError):
-                        genres = []
-                    ids = parse_external_ids(row['external_ids'])
-                    is_watched = (
-                        (row['spotify_id'] and row['spotify_id'] in wl_spotify)
-                        or (ids.get('itunes') and ids['itunes'] in wl_itunes)
-                        or (row['name'] and row['name'].lower() in wl_names)
-                    )
-                    row['genres'] = genres
-                    row['is_watched'] = bool(is_watched)
-                    artists.append(row)
-
-                total_pages = (total_count + limit - 1) // limit
-                return {
-                    'artists': artists,
-                    'pagination': {
-                        'page': page,
-                        'limit': limit,
-                        'total_count': total_count,
-                        'total_pages': total_pages,
-                        'has_prev': page > 1,
-                        'has_next': page < total_pages,
-                    }
-                }
+                rows, total = read_artist_page(
+                    conn, search=search_query, letter=letter, page=page, limit=limit,
+                    watchlist_filter=watchlist_filter, profile_id=profile_id,
+                    source_filter=source_filter, quality_filter=quality_filter,
+                    sort=sort, include_size=False)
+                projected = project_metadata_many(
+                    conn, entity_type='artist',
+                    provider_fields={int(row['id']): row for row in rows})
+                artists = self._api_project_lib2(
+                    conn, 'artist', [projected[int(row['id'])][0] for row in rows])
+                for row in artists:
+                    row['genres'] = _json_list(row.get('genres'))
+                    row['album_count'] = int(row.get('album_count') or 0) + int(row.get('single_count') or 0)
+                return {'artists': artists, 'pagination': artist_pagination(page, limit, total)}
 
         except Exception as e:
             logger.error(f"Error getting library artists: {e}")

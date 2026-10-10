@@ -20,13 +20,14 @@ things it does differently from the version it replaces:
   carries BOTH — the fix takes the hand-set value unless the user explicitly
   releases the field (``fix_action='overwrite_manual'``).
 
-Dry run by design: the scan only ever creates findings. Nothing touches a file
-until one is applied.
+The default scan creates findings. Automatic writing requires an explicit
+auto_apply setting (or the legacy dry_run=False opt-in).
 """
 
 from __future__ import annotations
 
 from core.repair_jobs import register_job
+from core.library2.retag import RETAG_SOURCES
 from core.repair_jobs.base import (
     JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
 )
@@ -60,20 +61,27 @@ class LibraryRetagJob(RepairJob):
     help_text = (
         "Compares the tags written in each audio file against what Library v2 "
         "holds for that track, and reports every field that differs.\n\n"
-        "The scan never writes. Applying a finding writes the library's values "
+        "By default the scan creates findings. Auto apply must be explicitly enabled. "
+        "Applying a finding writes the library's values "
         "into the file — the same engine the Re-tag dialog uses, so the preview "
         "and the finding agree.\n\n"
         "Full depth refreshes the provider metadata in the catalogue first. "
         "Hand-tagged files are excluded. "
         "A field you edited by hand wins by default. Where the catalogue wanted "
         "something else, the finding shows both values, and you can release that "
-        "field deliberately."
+        "field deliberately. Fill missing keeps existing file values. Cover art "
+        "can be replaced, filled only when absent, or skipped; lyrics fetch uses "
+        "LRClib and existing sidecars. Full depth updates catalogue provider metadata "
+        "even when the run only creates findings. Source selects that provider's own IDs."
     )
     icon = "repair-icon-retag"
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'depth': 'light'}
-    setting_options = {'depth': ['light', 'full']}
+    default_settings = {'depth': 'light', 'mode': 'overwrite', 'cover_art': 'fill_missing',
+                        'lyrics': 'skip', 'source': 'auto', 'auto_apply': False}
+    setting_options = {'depth': ['light', 'full'], 'mode': ['overwrite', 'fill_missing'],
+                       'cover_art': ['replace', 'fill_missing', 'skip'], 'lyrics': ['fetch', 'skip'],
+                       'source': list(RETAG_SOURCES)}
     auto_fix = False
     supports_file_scope = True
     # Moves/rewrites real library files, so a LIVE run is refused when the
@@ -106,18 +114,32 @@ class LibraryRetagJob(RepairJob):
             result.errors += 1
             return result
 
-        by_track = {int(s["track_id"]): s for s in subjects if s.get("track_id")}
+        by_track = {}
+        for subject in subjects:
+            if subject.get('track_id'):
+                by_track.setdefault(int(subject['track_id']), []).append(subject)
         track_ids = list(by_track)
         total = len(track_ids)
         settings = context.config_manager.get('repair.jobs.library_retag.settings', {}) or {}
-        depth = settings.get('depth', settings.get('enrichment_depth', 'light'))
+        try:
+            options = retag.retag_options(settings)
+        except ValueError as exc:
+            logger.warning('Invalid Library Re-tag settings: %s', exc)
+            result.errors += 1
+            return result
+        depth = options['depth']
         if depth == 'full':
             if context.report_progress:
                 context.report_progress(phase='Refreshing provider metadata before preview...', total=total)
             refreshed = retag.refresh_metadata(context.db, track_ids,
                                                config_manager=context.config_manager,
-                                               check_stop=context.check_stop)
+                                               check_stop=context.check_stop, source=options['source'])
             result.errors += len(refreshed['errors'])
+            if refreshed.get('refreshed') and context.report_change:
+                for track_id in track_ids:
+                    context.report_change(finding_type='library_retag', action='refreshed_catalogue',
+                        entity_type='track', entity_id=f'lib2:{track_id}',
+                        details={'enrichment_depth': 'full'})
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
@@ -137,12 +159,14 @@ class LibraryRetagJob(RepairJob):
             finally:
                 conn.close()
             for row in contexts:
-                subject = by_track[row['id']]
-                row.update(file_id=subject.get('file_id'), file_path=subject['path'])
-            for entry in retag.tag_preview(contexts, on_observation=lambda fid, tags: retag._persist_file_tags(context.db, fid, tags, context.config_manager, self.job_id)):
+                files = by_track[row['id']]
+                row.update(file_id=files[0].get('file_id'), file_path=files[0]['path'],
+                           sibling_files=[{'id': f.get('file_id'), 'path': f['path']} for f in files[1:]])
+            for entry in retag.tag_preview(contexts, options=options, on_observation=lambda fid, tags: retag._persist_file_tags(context.db, fid, tags, context.config_manager, self.job_id)):
                 done += 1
                 result.scanned += 1
-                subject = by_track.get(int(entry.get("track_id") or 0)) or {}
+                files = by_track.get(int(entry.get('track_id') or 0)) or [{}]
+                subject = files[0]
                 if entry.get("error"):
                     # A finding promises a fix. Nothing can be written to a file
                     # that cannot be read, so raising one would create a row
@@ -157,6 +181,18 @@ class LibraryRetagJob(RepairJob):
                 manual_fields = [d.get("field") for d in diff if d.get("manual")]
                 artist = subject.get("artist_name") or "Unknown"
                 title = entry.get("title") or subject.get("title") or "Unknown"
+                if options['auto_apply']:
+                    stats = retag.write_tags(context.db, [entry['track_id']], options=options,
+                        protect_hand_tagged=True, file_ids=[f['file_id'] for f in files if f.get('file_id')],
+                        lyrics_value=entry.get('lyrics_value'))
+                    result.errors += stats.get('failed', 0)
+                    if not stats.get('failed'):
+                        result.auto_fixed += stats.get('written', 0)
+                        if stats.get('written') and context.report_change:
+                            context.report_change(finding_type='library_retag', action='applied_tags',
+                                entity_type='track', entity_id=f"lib2:{entry['track_id']}",
+                                file_path=entry.get('file_path'), details={'file_ids': [f.get('file_id') for f in files]})
+                        continue
                 if not context.create_finding:
                     continue
                 try:
@@ -172,6 +208,9 @@ class LibraryRetagJob(RepairJob):
                         details={
                             "track_id": entry["track_id"],
                             "enrichment_depth": depth,
+                            "retag_options": options,
+                            "file_ids": [f['file_id'] for f in files if f.get('file_id')],
+                            "lyrics_value": entry.get('lyrics_value'),
                             "title": title,
                             "artist": artist,
                             "album": entry.get("album_title"),

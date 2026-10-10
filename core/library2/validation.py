@@ -16,9 +16,23 @@ def notify_changes(file_ids=()):
             logging.getLogger(__name__).debug('Library change notification failed', exc_info=True)
 
 
-def edition_reference(conn, track_id, data):
+def edition_reference_rows(conn, track_ids):
+    """Batch the edition bindings shared by read-only metadata lookups."""
+    marks = ','.join('?' for _ in track_ids)
+    rows = {}
+    for row in conn.execute(
+        "SELECT rt.*, e.track_count, e.disc_count, e.title AS edition_title FROM lib2_release_tracks rt "
+        f"JOIN lib2_release_editions e ON e.id=rt.release_edition_id WHERE rt.track_id IN ({marks})", track_ids):
+        rows.setdefault(int(row['track_id']), []).append(row)
+    bound = {int(row[0]) for row in conn.execute(
+        f"SELECT t.id FROM lib2_tracks t WHERE t.id IN ({marks}) AND EXISTS "
+        "(SELECT 1 FROM lib2_release_editions e WHERE e.release_group_id=t.album_id)", track_ids)}
+    return rows, bound
+
+
+def edition_reference(conn, track_id, data, *, rows=None, has_edition=None, lookup_only=False):
     """Use a concrete owning edition; an ambiguous release is never guessed."""
-    rows = conn.execute(
+    rows = rows if rows is not None else conn.execute(
         "SELECT rt.*, e.track_count, e.disc_count, e.title AS edition_title FROM lib2_release_tracks rt "
         "JOIN lib2_release_editions e ON e.id=rt.release_edition_id WHERE rt.track_id=?", (track_id,),
     ).fetchall()
@@ -34,18 +48,21 @@ def edition_reference(conn, track_id, data):
         row = rows[0]
         data.update(track_number=row['track_number'], disc_number=row['disc_number'],
                     total_discs=row['disc_count'], edition_status='correct', edition_id=row['release_edition_id'])
-        counts = conn.execute(
-            "SELECT COUNT(*), SUM(CASE WHEN disc_number=? THEN 1 ELSE 0 END) "
-            "FROM lib2_release_tracks WHERE release_edition_id=?", (row['disc_number'], row['release_edition_id']),
-        ).fetchone()
-        data['track_count'] = counts[1] if row['track_count'] and counts[0] == row['track_count'] else None
+        if not lookup_only:
+            counts = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN disc_number=? THEN 1 ELSE 0 END) "
+                "FROM lib2_release_tracks WHERE release_edition_id=?", (row['disc_number'], row['release_edition_id']),
+            ).fetchone()
+            data['track_count'] = counts[1] if row['track_count'] and counts[0] == row['track_count'] else None
         if row['title_override']:
             data['title'] = row['title_override']
         if row['edition_title']:
             data['album_title'] = row['edition_title']
     else:
-        album = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()
-        ambiguous = album and conn.execute('SELECT 1 FROM lib2_release_editions WHERE release_group_id=?', (album[0],)).fetchone()
+        ambiguous = has_edition
+        if ambiguous is None:
+            album = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()
+            ambiguous = album and conn.execute('SELECT 1 FROM lib2_release_editions WHERE release_group_id=?', (album[0],)).fetchone()
         data['edition_status'] = 'unknown' if ambiguous else 'not_checked'
         if ambiguous:
             data.update(track_number=None, disc_number=None, track_count=None)

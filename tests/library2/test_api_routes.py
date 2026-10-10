@@ -2675,6 +2675,8 @@ def test_fill_tag_gaps_enriches_the_album_before_writing_tags(api, monkeypatch):
 
 def test_fill_tag_gaps_falls_back_through_providers_until_one_succeeds(api, monkeypatch):
     from core.library2 import native_enrich
+    monkeypatch.setattr('core.metadata.registry.get_primary_source', lambda: 'deezer')
+    monkeypatch.setattr('core.library2.match_status.configured_services', lambda: {'deezer', 'spotify'})
 
     attempted = []
 

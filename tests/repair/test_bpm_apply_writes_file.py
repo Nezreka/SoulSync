@@ -124,6 +124,30 @@ def test_only_the_bpm_tag_changes(worker, tmp_path):
     assert audio["bpm"] == ["128"]
 
 
+def test_aborted_bpm_save_leaves_apply_failed(worker, tmp_path, monkeypatch):
+    w, _, add_track = worker
+    path = tmp_path / 'song.flac'
+    _flac(path)
+    add_track(path)
+    before = path.read_bytes()
+    monkeypatch.setattr('core.metadata.common.save_audio_file', lambda *_a: False)
+    out = _apply(w, path)
+    assert out['success'] is False
+    assert path.read_bytes() == before
+
+
+def test_applied_bpm_supports_opus(worker, tmp_path):
+    w, _, add_track = worker
+    if not shutil.which('ffmpeg'):
+        pytest.skip('ffmpeg needed for Opus fixture')
+    path = tmp_path / 'song.opus'
+    subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i',
+                    'sine=frequency=440:duration=0.15', str(path)], check=True)
+    add_track(path)
+    assert _apply(w, path)['success']
+    assert MutagenFile(path)['bpm'] == ['128']
+
+
 def test_bpm_tags_turned_off_leaves_the_file_alone(worker, tmp_path):
     w, _, add_track = worker
     w._config_manager = _Cfg(**{"deezer.tags.bpm": False})

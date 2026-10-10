@@ -176,6 +176,7 @@ def _album_tracklist_context(
     """Return album row, edition reference and provider IDs for cache binding."""
     row = conn.execute(
         """SELECT al.title, al.primary_artist_id, al.tracklist_json,
+                  al.canonical_source, al.canonical_album_id, al.canonical_locked,
                   al.year AS album_year,
                   al.release_date AS album_release_date,
                   al.track_count AS album_track_count,
@@ -233,6 +234,11 @@ def _album_tracklist_context(
         "release_date": release_date,
         "track_count": track_count,
     }
+    if row['canonical_source'] and row['canonical_album_id']:
+        reference['canonical_release'] = {
+            'source': str(row['canonical_source']).lower(),
+            'id': str(row['canonical_album_id']),
+        }
     return row, reference, source_ids
 
 
@@ -673,7 +679,7 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
         # Upgrade path: preserve an existing cache once, but bind it to the
         # current edition reference so a later edition switch invalidates it.
         from core.library2.provider_adapters import TRACKLIST_PARSER_VERSION
-        record_provider_snapshot(
+        snapshot = record_provider_snapshot(
             conn,
             provider="legacy-cache",
             entity_type="album",
@@ -682,7 +688,7 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
             parser_version=TRACKLIST_PARSER_VERSION,
             payload={"reference": reference, "tracks": cached},
             is_complete=True,
-        )
+        ).snapshot
         durable_tracks = cached
     elif snapshot is not None and durable_tracks is None and cached:
         logger.info(
@@ -715,6 +721,22 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
             conn, album_id, reusable, complete=reusable_complete,
             inherit_monitoring=inherit_monitoring,
         )
+        # Materialization may establish/correct the release's track count.
+        # Rebind the same snapshot after those corrections, just as on the
+        # cold-provider path, otherwise the next consumer discards this cache.
+        _, corrected_reference, _ = _album_tracklist_context(conn, album_id)
+        if snapshot is not None and corrected_reference != reference:
+            payload = dict(snapshot.payload)
+            payload['reference'] = corrected_reference
+            record_provider_snapshot(
+                conn, provider=snapshot.provider, entity_type='album',
+                entity_id=album_id, scope='tracklist',
+                provider_entity_id=snapshot.provider_entity_id,
+                parser_version=snapshot.parser_version, payload=payload,
+                is_complete=snapshot.is_complete, etag=snapshot.etag,
+                provider_version=snapshot.provider_version,
+                cursor=snapshot.cursor, page_count=snapshot.page_count,
+            )
         conn.execute(
             """UPDATE lib2_albums
                   SET tracklist_json=?, tracklist_status='ready',
@@ -735,14 +757,25 @@ def resolve_tracklist(config_manager, conn, album_id: int, *,
     # blocking HTTP calls — holding SQLite's single write lock across them
     # stalled every other request until the 30s busy timeout fired.
     conn.commit()
-    from core.library2.provider_adapters import fetch_album_tracklist
-    provider_result = provider_result or fetch_album_tracklist(
-        al["title"],
-        artist_name,
-        source_album_ids=source_ids,
-        release_date=reference["release_date"],
-        expected_track_count=reference["track_count"],
-    )
+    from core.library2.provider_adapters import fetch_album_tracklist, fetch_matched_album_tracklists
+    if al['canonical_locked'] and al['canonical_source'] and al['canonical_album_id']:
+        pinned_source = str(al['canonical_source']).lower()
+        pinned_id = str(al['canonical_album_id'])
+        if (provider_result is None or provider_result.provider != pinned_source
+                or str(provider_result.provider_entity_id) != pinned_id):
+            # A manual edition decision is exact. Searching by title or falling
+            # back to a higher-priority provider could reintroduce the Deluxe
+            # that the user just replaced with Standard.
+            exact = fetch_matched_album_tracklists({pinned_source: pinned_id}, source_order=(pinned_source,))
+            provider_result = next((result for result in exact
+                                    if result.provider == pinned_source
+                                    and str(result.provider_entity_id) == pinned_id), None)
+    else:
+        provider_result = provider_result or fetch_album_tracklist(
+            al["title"], artist_name, source_album_ids=source_ids,
+            release_date=reference["release_date"],
+            expected_track_count=reference["track_count"],
+        )
     if provider_result:
         tracks = provider_result.track_payloads()
         try:
@@ -789,7 +822,23 @@ def load_album_catalogue(database, config_manager, conn, album_id, *, services=N
     Existing complete, edition-bound snapshots skip the provider walk. A
     prefetched result enters the same persistence boundary; it is never saved
     by a parallel download-specific catalogue writer.
+
+    Commits the caller's connection, including before waiting for a concurrent
+    catalogue load. The same transaction contract as ``resolve_tracklist``
+    applies: callers must pass a connection whose work may be committed here.
     """
+    from core.library2.catalogue_flight import album_catalogue_flight
+    conn.commit()
+    with album_catalogue_flight(conn, album_id):
+        return _load_album_catalogue(
+            database, config_manager, conn, album_id, services=services,
+            inherit_monitoring=inherit_monitoring, provider_result=provider_result,
+            enrich=enrich,
+        )
+
+
+def _load_album_catalogue(database, config_manager, conn, album_id, *, services,
+                          inherit_monitoring, provider_result, enrich):
     from core.library2.provider_snapshots import get_latest_provider_snapshot
     context = _album_tracklist_context(conn, album_id)
     snapshot = get_latest_provider_snapshot(conn, entity_type='album', entity_id=album_id, scope='tracklist')
@@ -812,7 +861,8 @@ def load_album_catalogue(database, config_manager, conn, album_id, *, services=N
         schedule_album_track_reconcile(database, album_id, config_manager)
     return tracks
 
-def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
+def _partial_album_rows(conn, *, cached: Optional[bool] = None,
+                        interested_only: bool = False) -> List[Any]:
     """Albums whose expected provider track count is larger than known track rows,
     plus the ones whose size nothing has ever established.
 
@@ -834,6 +884,23 @@ def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
         " AND al.expected_track_count IS NULL)"
     )
     clauses = []
+    if interested_only:
+        # Scheduled verification is driven by actual ownership/monitoring,
+        # not by an artist's whole browsable discography. A one-track import
+        # with a server-derived count still needs its provider catalogue.
+        unverified_sql = (
+            "(al.expected_track_count IS NULL "
+            " OR COALESCE(al.tracklist_status, 'idle') <> 'ready' "
+            " OR COALESCE(al.tracklist_json, '') = '')"
+        )
+        clauses.append(
+            "EXISTS (SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id AND ("
+            " t.id IN (SELECT w.track_id FROM lib2_wanted_tracks w WHERE w.wanted=1) OR"
+            " EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id"
+            "         AND COALESCE(f.file_state, 'active')='active'"
+            "         AND TRIM(COALESCE(f.path, ''))<>''"
+            "         AND COALESCE(f.import_status, 'imported')='imported')))"
+        )
     if cached is True:
         clauses.append(f"al.expected_track_count IS NOT NULL AND al.expected_track_count <> {count_sql}")
         clauses.append("al.tracklist_json IS NOT NULL AND al.tracklist_json <> ''")
@@ -844,6 +911,16 @@ def _partial_album_rows(conn, *, cached: Optional[bool] = None) -> List[Any]:
     return conn.execute(
         "SELECT al.id FROM lib2_albums al WHERE " + " AND ".join(clauses) + " ORDER BY al.id"
     ).fetchall()
+
+
+def pending_album_catalogues(conn) -> List[int]:
+    """Unverified/partial releases with an owned or effectively monitored track.
+
+    Uses the precache's completeness selection. Monitoring is checked across
+    all library profiles through the authoritative wanted projection; a stale
+    compatibility flag cannot opt another artist's discography into the job.
+    """
+    return [int(row[0]) for row in _partial_album_rows(conn, interested_only=True)]
 
 
 def _precache_max_workers(config_manager, default: int = 8) -> int:
@@ -960,4 +1037,4 @@ def precache_tracklists(database, config_manager, *, progress=None) -> int:
     return resolved
 
 
-__all__ = ["resolve_tracklist", "precache_tracklists"]
+__all__ = ["load_album_catalogue", "pending_album_catalogues", "resolve_tracklist", "precache_tracklists"]

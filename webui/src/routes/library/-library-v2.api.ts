@@ -1234,13 +1234,22 @@ export interface LibraryV2TagPreviewTrack {
   has_changes: boolean;
   /** Whether any changing field on this track is hand-set. */
   has_manual_conflict?: boolean;
+  protected?: boolean;
   error?: string;
+}
+
+export interface LibraryV2RetagPolicy {
+  mode: 'overwrite' | 'fill_missing';
+  cover_art: 'replace' | 'fill_missing' | 'skip';
+  lyrics: 'fetch' | 'skip';
+  source: string;
 }
 
 export async function fetchLibraryV2TagPreview(
   entity: 'artists' | 'albums',
   id: number,
   depth: 'light' | 'full' = 'light',
+  policy?: LibraryV2RetagPolicy,
 ): Promise<{
   tracks: LibraryV2TagPreviewTrack[];
   changed_count: number;
@@ -1256,7 +1265,7 @@ export async function fetchLibraryV2TagPreview(
     }
   >(
     apiClient.get(
-      `library/v2/${entity}/${id}/tag-preview${depth === 'full' ? '?depth=full' : ''}`,
+      `library/v2/${entity}/${id}/tag-preview?${new URLSearchParams({ depth, ...policy })}`,
       { timeout: 120_000 },
     ),
     'Tag preview failed',
@@ -1276,12 +1285,14 @@ export async function writeLibraryV2Tags(
    *  [track_id, field] pairs. Omitted, every hand-set value is kept — which is
    *  the rule everywhere else in Library v2. */
   overwriteManual: [number, string][] = [],
+  policy?: LibraryV2RetagPolicy,
 ): Promise<string> {
   const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/tags/write', {
       json: {
         track_ids: trackIds,
         embed_cover: embedCover,
+        ...policy,
         ...(overwriteManual.length ? { overwrite_manual: overwriteManual } : {}),
       },
     }),

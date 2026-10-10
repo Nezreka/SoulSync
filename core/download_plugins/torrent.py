@@ -48,7 +48,7 @@ Limitations:
 
 from __future__ import annotations
 
-import asyncio
+from core.async_utils import run_blocking
 import re
 import threading
 import time
@@ -1270,7 +1270,7 @@ async def prowlarr_track_search(
     title = str(hint.get('title') or '').strip()
     if hint.get('catalogue_context') and not hint.get('_catalogue_hydrated'):
         from core.library2.download_catalogue import hydrate_download_album
-        await asyncio.to_thread(hydrate_download_album, hint['catalogue_context'])
+        await run_blocking(hydrate_download_album, hint['catalogue_context'])
         hint['_catalogue_hydrated'] = True
     additional = []
     if artist and album and album.casefold() not in ('unknown album', title.casefold()):

@@ -74,6 +74,7 @@ export const FINDING_TYPE_BLURBS: Record<string, string> = {
   metadata_gap: 'Missing genres, years or IDs that enrichment can fill in.',
   bpm_backfill: 'Tracks missing BPM that Deezer or local analysis can fill in.',
   duplicate_tracks: 'The same track stored more than once.',
+  native_duplicate_tracks: 'Review copies. Keep Best preserves protected files.',
   single_album_redundant: 'Singles you also own inside the full album.',
   mbid_mismatch: 'Track MusicBrainz IDs disagree with the tags on disk.',
   album_mbid_mismatch: 'Album MusicBrainz IDs disagree with the tags on disk.',

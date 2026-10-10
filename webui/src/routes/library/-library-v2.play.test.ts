@@ -113,7 +113,7 @@ describe('albumQueueRows', () => {
     });
   });
 
-  it('leaves out a track with no file rather than queueing a dead row', () => {
+  it('keeps known missing tracks for the existing queue auto-download switch', () => {
     // A "missing" placeholder is an expected track we do not have. Queueing it
     // is what made upstream's button fail on an album owned in part.
     const rows = albumQueueRows(
@@ -125,17 +125,24 @@ describe('albumQueueRows', () => {
       }),
       'Aphex Twin',
     );
-    expect(rows.map((r) => r.title)).toEqual(['Xtal']);
+    expect(rows.map((r) => r.title)).toEqual(['Xtal', 'Tha']);
+    expect(rows[1]).toMatchObject({
+      lib2_track_id: 2,
+      lib2_album_id: 5,
+      quality_profile_id: 1,
+      file_path: '',
+      is_library: false,
+    });
   });
 
-  it('skips a file that is on the row but not active', () => {
+  it('keeps native identity but never plays a deleted file path', () => {
     const rows = albumQueueRows(
       album({
         tracks: [track({ file: { ...track().file!, file_state: 'deleted' } })],
       }),
       'Aphex Twin',
     );
-    expect(rows).toEqual([]);
+    expect(rows[0]).toMatchObject({ lib2_track_id: 1, file_path: '', is_library: false });
   });
 
   it('plays in disc then track order, whatever order the payload arrived in', () => {
@@ -230,6 +237,23 @@ describe('artistQueueRows', () => {
     // shorten the queue rather than play what is there.
     const rows = artistQueueRows([file({ is_primary: false })], 'Aphex Twin');
     expect(rows).toHaveLength(1);
+  });
+
+  it('keeps native missing siblings alongside one owned file per track', () => {
+    const rows = artistQueueRows(
+      [
+        file(),
+        file({ track_id: 2, track_title: 'Tha', track_number: 2, path: '', file_state: 'missing' }),
+      ],
+      'Aphex Twin',
+    );
+    expect(rows.map((row) => row.title)).toEqual(['Xtal', 'Tha']);
+    expect(rows[1]).toMatchObject({
+      lib2_track_id: 2,
+      lib2_album_id: 5,
+      file_path: '',
+      is_library: false,
+    });
   });
 
   it('leaves out a file the catalogue no longer counts as present', () => {

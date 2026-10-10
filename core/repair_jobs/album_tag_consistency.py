@@ -8,65 +8,25 @@ normalizing all tracks to the canonical (majority) value.
 
 import json
 import os
+import re
+from contextlib import closing
 from typing import Dict
 from core.library2.maintenance_subjects import active_file_subjects
 from collections import Counter
 
 from mutagen import File as MutagenFile
-from mutagen.id3 import ID3
-from mutagen.flac import FLAC
-from mutagen.oggvorbis import OggVorbis
-from mutagen.mp4 import MP4
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects, drop_hand_tagged
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_tag_consistency")
 
 
 def _read_tag(audio, tag_name):
-    """Read a tag value from a Mutagen file object, handling format differences."""
-    if audio is None:
-        return None
-    try:
-        if isinstance(audio.tags, ID3):
-            # MP3
-            if tag_name == 'album':
-                frame = audio.tags.get('TALB')
-                return str(frame) if frame else None
-            elif tag_name == 'artist':
-                frame = audio.tags.get('TPE1')
-                return str(frame) if frame else None
-            elif tag_name == 'albumartist':
-                frame = audio.tags.get('TPE2')
-                return str(frame) if frame else None
-            elif tag_name == 'musicbrainz_albumid':
-                for key in audio.tags:
-                    if key.startswith('TXXX:') and 'MusicBrainz Album Id' in key:
-                        return str(audio.tags[key])
-                return None
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            vals = audio.get(tag_name.upper(), [])
-            return vals[0] if vals else None
-        elif isinstance(audio, MP4):
-            tag_map = {
-                'album': '\xa9alb',
-                'artist': '\xa9ART',
-                'albumartist': 'aART',
-            }
-            key = tag_map.get(tag_name)
-            if key:
-                vals = audio.get(key, [])
-                return vals[0] if vals else None
-            if tag_name == 'musicbrainz_albumid':
-                vals = audio.get('----:com.apple.iTunes:MusicBrainz Album Id', [])
-                if vals:
-                    return vals[0].decode('utf-8') if isinstance(vals[0], bytes) else str(vals[0])
-                return None
-    except Exception as e:
-        logger.debug("read tag value failed: %s", e)
-    return None
+    """Compatibility adapter onto the shared partial-field codec."""
+    from core.tag_writer import read_tag_field
+    return read_tag_field(audio, tag_name)
 
 
 MISSING = '(missing)'
@@ -116,50 +76,83 @@ def _detect_inconsistencies(tag_data, check_album, check_artist, check_mbid):
 
 
 def _write_tag(audio, tag_name, value):
-    """Write a tag value to a Mutagen file object, handling format differences."""
+    """Set one field; callers must confirm the atomic save before reporting it."""
+    from core.tag_writer import set_tag_fields
     if audio is None or value is None:
         return False
     try:
-        if isinstance(audio.tags, ID3):
-            from mutagen.id3 import TALB, TPE1, TPE2, TXXX
-            if tag_name == 'album':
-                audio.tags.delall('TALB')
-                audio.tags.add(TALB(encoding=3, text=[value]))
-            elif tag_name == 'artist':
-                audio.tags.delall('TPE1')
-                audio.tags.add(TPE1(encoding=3, text=[value]))
-            elif tag_name == 'albumartist':
-                audio.tags.delall('TPE2')
-                audio.tags.add(TPE2(encoding=3, text=[value]))
-            elif tag_name == 'musicbrainz_albumid':
-                # Remove existing
-                to_remove = [k for k in audio.tags if k.startswith('TXXX:') and 'MusicBrainz Album Id' in k]
-                for k in to_remove:
-                    del audio.tags[k]
-                audio.tags.add(TXXX(encoding=3, desc='MusicBrainz Album Id', text=[value]))
-            return True
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            audio[tag_name.upper()] = [value]
-            return True
-        elif isinstance(audio, MP4):
-            tag_map = {
-                'album': '\xa9alb',
-                'artist': '\xa9ART',
-                'albumartist': 'aART',
-            }
-            key = tag_map.get(tag_name)
-            if key:
-                audio[key] = [value]
-                return True
-            if tag_name == 'musicbrainz_albumid':
-                from mutagen.mp4 import MP4FreeForm
-                audio['----:com.apple.iTunes:MusicBrainz Album Id'] = [
-                    MP4FreeForm(value.encode('utf-8'))
-                ]
-                return True
-    except Exception as e:
-        logger.debug(f"Failed to write tag {tag_name}: {e}")
-    return False
+        return bool(set_tag_fields(audio, {tag_name: value}))
+    except Exception as exc:
+        logger.debug("Failed to set tag %s: %s", tag_name, exc)
+        return False
+
+
+def split_group_key(artist_name, album_title):
+    """Upstream split detection folds punctuation but retains edition qualifiers."""
+    return tuple(' '.join(re.sub(r'[^\w\s]', ' ', str(v or '').casefold()).split())
+                 for v in (artist_name, album_title))
+
+
+def split_catalogue_state(conn, album_ids):
+    """Snapshot the native release identities a reviewed split was based on."""
+    state = []
+    for album_id in sorted(set(album_ids)):
+        row = conn.execute('SELECT id,primary_artist_id,title,year,release_date,canonical_locked,canonical_source,canonical_album_id '
+                           'FROM lib2_albums WHERE id=?', (int(album_id),)).fetchone()
+        if row is None:
+            raise ValueError('Reviewed album no longer exists')
+        editions = conn.execute('SELECT id,title,spotify_id,musicbrainz_id,external_ids,is_default '
+                                'FROM lib2_release_editions WHERE release_group_id=? ORDER BY id', (int(album_id),)).fetchall()
+        state.append({**dict(row), 'editions': [dict(e) for e in editions]})
+    return state
+
+
+def _compatible_split(state, tags):
+    """Reject positive evidence of distinct releases; unknown facts may coexist."""
+    years = {str(r.get('year') or r.get('release_date') or '')[:4] for r in state}
+    years.discard('')
+    years.update(str(t['date_tag'])[:4] for t in tags if t.get('date_tag') and str(t['date_tag'])[:4].isdigit())
+    if len(years) > 1 or len({t['rg_tag'] for t in tags if t.get('rg_tag')}) > 1:
+        return False
+    signatures = []
+    from core.library2.native_enrich import _stored_source_ids
+    for row in state:
+        ids = {}
+        for edition in row['editions']:
+            if edition['is_default']:
+                ids = _stored_source_ids(edition)
+        if row['canonical_locked'] and row['canonical_source'] and row['canonical_album_id']:
+            ids = {row['canonical_source']: str(row['canonical_album_id'])}
+        if ids:
+            signatures.append(ids)
+    for index, first in enumerate(signatures):
+        for second in signatures[index + 1:]:
+            common = set(first) & set(second)
+            if not common or any(first[source] != second[source] for source in common):
+                return False
+    return True
+
+
+def _read_subject_tags(subjects, context):
+    from core.library2.paths import resolve_lib2_path
+    tags = []
+    for subject in subjects:
+        raw = str(subject.get('path') or '')
+        path = raw if os.path.isfile(raw) else resolve_lib2_path(raw, config_manager=context.config_manager)
+        if not path:
+            continue
+        try:
+            audio = MutagenFile(path, easy=False)
+            if audio is not None:
+                tags.append({'track_id': f"lib2:{subject['track_id']}", 'file_id': subject['file_id'],
+                    'album_id': subject['album_id'], 'owner_profile_id': subject.get('owner_profile_id'),
+                    'track_title': subject.get('title'), 'file_path': raw, 'resolved_path': path,
+                    'album_tag': _read_tag(audio, 'album'), 'albumartist_tag': _read_tag(audio, 'albumartist'),
+                    'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
+                    'rg_tag': _read_tag(audio, 'musicbrainz_releasegroupid'), 'date_tag': _read_tag(audio, 'date')})
+        except Exception as exc:
+            logger.debug('Unable to read consistency file %s: %s', raw, exc)
+    return tags
 
 
 @register_job
@@ -176,6 +169,10 @@ class AlbumTagConsistencyJob(RepairJob):
         'into multiple entries (e.g. "Simulation Theory" and "Simulation Theory (Super Deluxe)").\n\n'
         'The fix normalizes all tracks in the album to the most common (majority) value, '
         'then writes the corrected tags to the actual audio files.\n\n'
+        'Also reviews native album rows with the same artist and title that may '
+        'have split on your server. Conflicting years, release identities, editions '
+        'and library owners are kept separate. Apply only changes the listed files; '
+        'catalogue rows are never merged, and manual fields, hand tags and pins are protected.\n\n'
         'Settings:\n'
         '- Check album name: Detect inconsistent album title tags\n'
         '- Check album artist: Detect inconsistent album artist tags\n'
@@ -219,7 +216,62 @@ class AlbumTagConsistencyJob(RepairJob):
             self._scan_native_albums(
                 context, result, check_album, check_artist, check_mbid,
             )
+            if not context.check_stop():
+                self._scan_split_groups(context, result, check_album, check_artist, check_mbid)
         return result
+
+    def _subjects(self, context):
+        subjects = drop_hand_tagged(context, scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)))
+        artist = get_scope_artist(context)
+        return [s for s in subjects if not artist or (s.get('artist_name') or '').casefold() == artist.casefold()]
+
+    def _scan_split_groups(self, context, result, check_album, check_artist, check_mbid):
+        """Review same-name native rows as a group, without merging the catalogue."""
+        try:
+            groups = {}
+            for subject in self._subjects(context):
+                key = (*split_group_key(subject.get('artist_name'), subject.get('album_title')), subject.get('owner_profile_id'))
+                if key[0] and key[1]:
+                    groups.setdefault(key, []).append(subject)
+            for subjects in groups.values():
+                if context.check_stop() or context.wait_if_paused():
+                    return
+                album_ids = sorted({s['album_id'] for s in subjects})
+                if len(album_ids) < 2:
+                    continue
+                tags = _read_subject_tags(subjects, context)
+                if len({t['album_id'] for t in tags}) < 2:
+                    continue
+                with closing(context.db._get_connection()) as conn:
+                    state = split_catalogue_state(conn, album_ids)
+                if not _compatible_split(state, tags):
+                    continue
+                result.scanned += 1
+                inconsistencies = _detect_inconsistencies(tags, check_album, check_artist, check_mbid)
+                if not inconsistencies or not context.create_finding:
+                    continue
+                album_title, artist_name = subjects[0].get('album_title'), subjects[0].get('artist_name')
+                files = sorted({t['file_id'] for t in tags})
+                inserted = context.create_finding(job_id=self.job_id, finding_type='album_tag_inconsistency',
+                    severity='warning', entity_type='album', entity_id=f'lib2:{album_ids[0]}', file_path=None,
+                    title=f'Split on your server: {album_title} by {artist_name}',
+                    description=f'{len(album_ids)} catalogue rows with matching artist/title have inconsistent file tags. Review the listed files.',
+                    details={'album_id': f'lib2:{album_ids[0]}', 'album_ids': album_ids, 'server_split': True,
+                        'split_catalogue_state': state, 'library_v2_native': True,
+                        'library_owner_id': subjects[0].get('owner_profile_id') or 1,
+                        'album_title': album_title, 'artist_name': artist_name, 'inconsistencies': inconsistencies,
+                        'track_count': len(tags), 'tracks': [{'id': t['track_id'], 'track_id': t['track_id'],
+                            'file_id': t['file_id'], 'album_id': t['album_id'], 'owner_profile_id': t['owner_profile_id'],
+                            'title': t['track_title'], 'file_path': t['file_path']} for t in tags],
+                        'library_v2': {'album_id': album_ids[0], 'album_ids': album_ids, 'artist_id': subjects[0].get('artist_id'),
+                            'track_ids': sorted({s['track_id'] for s in subjects}), 'file_ids': files}})
+                if inserted:
+                    result.findings_created += 1
+                else:
+                    result.findings_skipped_dedup += 1
+        except Exception as exc:
+            logger.warning('Native split album scan failed: %s', exc)
+            result.errors += 1
 
     def _scan_native_albums(self, context: JobContext, result: JobResult,
                             check_album: bool, check_artist: bool, check_mbid: bool):
@@ -229,10 +281,8 @@ class AlbumTagConsistencyJob(RepairJob):
             from core.library2.paths import resolve_lib2_path
 
             albums = {}
-            for subject in scoped_file_subjects(context, active_file_subjects(
-                context.db, context.config_manager,
-            )):
-                albums.setdefault(subject['album_id'], []).append(subject)
+            for subject in self._subjects(context):
+                albums.setdefault((subject['album_id'], subject.get('owner_profile_id')), []).append(subject)
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
@@ -268,33 +318,12 @@ class AlbumTagConsistencyJob(RepairJob):
             context.update_progress(0, len(eligible))
 
         unreadable = 0
-        for album_id, subjects in eligible:
+        for (album_id, owner_id), subjects in eligible:
             if context.check_stop() or context.wait_if_paused():
                 return
             result.scanned += 1
 
-            tag_data = []
-            for subject in subjects:
-                raw = str(subject['path'])
-                resolved = raw if os.path.exists(raw) else resolve_lib2_path(
-                    raw, config_manager=context.config_manager)
-                if not resolved or not os.path.exists(resolved):
-                    continue
-                try:
-                    audio = MutagenFile(resolved, easy=False)
-                    if audio is None:
-                        continue
-                    tag_data.append({
-                        'track_id': f"lib2:{subject['track_id']}",
-                        'track_title': subject['title'],
-                        'file_path': raw,
-                        'resolved_path': resolved,
-                        'album_tag': _read_tag(audio, 'album'),
-                        'albumartist_tag': _read_tag(audio, 'albumartist'),
-                        'mbid_tag': _read_tag(audio, 'musicbrainz_albumid'),
-                    })
-                except Exception:
-                    continue
+            tag_data = _read_subject_tags(subjects, context)
 
             if len(tag_data) < 2:
                 # Eligible on paper, but the files are not there to read. Counted and
@@ -332,7 +361,9 @@ class AlbumTagConsistencyJob(RepairJob):
                     'artist_name': artist_name,
                     'inconsistencies': inconsistencies,
                     'track_count': len(tag_data),
-                    'tracks': [{'id': t['track_id'], 'title': t['track_title'],
+                    'library_owner_id': owner_id or 1,
+                    'tracks': [{'id': t['track_id'], 'track_id': t['track_id'], 'file_id': t['file_id'],
+                                'album_id': album_id, 'owner_profile_id': owner_id, 'title': t['track_title'],
                                 'file_path': t['file_path']} for t in tag_data],
                     'library_v2_native': True,
                     'library_v2': {

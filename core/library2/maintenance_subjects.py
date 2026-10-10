@@ -13,6 +13,9 @@ from contextlib import closing
 from typing import Any, Dict, List, Mapping, Optional
 
 from core.library2.provider_ids import source_ids_from_values
+from core.library2.metadata_context import (
+    album_metadata_context, track_metadata_contexts, validate_metadata_purpose,
+)
 
 
 def _table_exists(conn: Any, table: str) -> bool:
@@ -49,13 +52,45 @@ def _compat_provider_fields(subject: Dict[str, Any]) -> None:
     subject["file_path"] = subject.get("path")
 
 
+def _display_subject_fields(subject: Dict[str, Any], context: Mapping[str, Any], *, album_subject: bool) -> None:
+    """Map the shared effective fields onto the maintenance response aliases."""
+    album = context if album_subject else context.get("album_metadata") or {}
+    artist = context.get("artist_metadata") or {}
+    for source, target in {
+        "year": "album_year", "genres": "album_genres", "image_url": "album_image",
+        "label": "album_label", "style": "album_style", "mood": "album_mood",
+        "explicit": "album_explicit", "album_type": "album_type", "release_date": "release_date",
+    }.items():
+        if source in album:
+            subject[target] = album[source]
+    for source, target in {
+        "sort_name": "artist_sort_name", "image_url": "artist_image", "genres": "artist_genres",
+        "summary": "artist_summary", "style": "artist_style", "mood": "artist_mood",
+        "label": "artist_label",
+    }.items():
+        if source in artist:
+            subject[target] = artist[source]
+    if not album_subject:
+        for source, target in {"style": "track_style", "mood": "track_mood"}.items():
+            if source in context:
+                subject[target] = context[source]
+
+
 def active_file_subjects(
     database: Any,
     config_manager: Any,
     *,
     include_missing: bool = False,
+    purpose: str = "provider_lookup",
 ) -> List[Dict[str, Any]]:
-    """Return every indexed Library-v2 file with full entity/provider context."""
+    """Native file facts with explicit lookup, display and protected write values.
+
+    Existing detection jobs use provider identity by default. Callers request
+    display or Retag write values explicitly; those subjects also retain their
+    lookup context. Read-only scans need not build an unused write projection.
+    """
+
+    validate_metadata_purpose(purpose)
 
     with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_track_files"):
@@ -127,6 +162,9 @@ def active_file_subjects(
               ORDER BY al.id, COALESCE(t.disc_number,1),
                        COALESCE(t.track_number,2147483647), f.id"""
         ).fetchall()
+        ids = {int(row["track_id"]) for row in rows}
+        contexts = {key: track_metadata_contexts(conn, ids, purpose=key)
+                    for key in dict.fromkeys(("provider_lookup", purpose))}
         subjects: List[Dict[str, Any]] = []
         for row in rows:
             subject = dict(row)
@@ -147,6 +185,21 @@ def active_file_subjects(
                 musicbrainz_id=subject.pop("artist_musicbrainz_id", None),
                 external_ids=subject.pop("artist_external_ids", None),
             )
+            for key, values in contexts.items():
+                subject[f"{key}_metadata"] = values.get(int(subject["track_id"]), {})
+            selected = subject[f"{purpose}_metadata"]
+            # Keep physical file facts on the subject; metadata contexts carry
+            # the selected edition and artist identity alongside those facts.
+            for field in ("title", "duration", "track_number", "disc_number", "bpm",
+                          "album_title", "artist_name", "artist_id", "album_artist_id",
+                          "album_artist_name", "track_source_ids", "album_source_ids",
+                          "artist_source_ids", "album_artist_source_ids", "edition_id",
+                          "edition_status", "canonical_locked", "_manual_fields"):
+                if field in selected:
+                    subject[field] = selected[field]
+            subject["metadata_purpose"] = purpose
+            if purpose != "provider_lookup":
+                _display_subject_fields(subject, selected, album_subject=False)
             _compat_provider_fields(subject)
             subjects.append(subject)
         return subjects
@@ -157,8 +210,11 @@ def active_album_subjects(
     config_manager: Any,
     *,
     require_active_files: bool = True,
+    purpose: str = "provider_lookup",
 ) -> List[Dict[str, Any]]:
     """Return native releases with provider IDs and an optional file anchor."""
+
+    validate_metadata_purpose(purpose)
 
     with closing(database._get_connection()) as conn:
         if not _table_exists(conn, "lib2_albums"):
@@ -229,6 +285,18 @@ def active_album_subjects(
                 external_ids=subject.pop("artist_external_ids", None),
             )
             subject["track_source_ids"] = {}
+            for key in dict.fromkeys(("provider_lookup", purpose)):
+                subject[f"{key}_metadata"] = album_metadata_context(
+                    conn, subject["album_id"], purpose=key) or {}
+            selected = subject[f"{purpose}_metadata"]
+            for field in ("title", "album_title", "artist_name", "artist_id",
+                          "album_source_ids", "artist_source_ids", "edition_id",
+                          "canonical_locked", "_manual_fields"):
+                if field in selected:
+                    subject[field] = selected[field]
+            subject["metadata_purpose"] = purpose
+            if purpose != "provider_lookup":
+                _display_subject_fields(subject, selected, album_subject=True)
             _compat_provider_fields(subject)
             subjects.append(subject)
         return subjects

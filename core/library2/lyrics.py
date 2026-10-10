@@ -18,27 +18,18 @@ logger = get_logger("library2.lyrics")
 ResolveFn = Callable[[str], Optional[str]]
 
 
-def _track_lyrics_context(conn, track_id: int) -> Optional[Dict[str, Any]]:
-    """Title/artist/album/duration LRClib needs for its lookup."""
-    row = conn.execute(
-        """SELECT t.title, t.duration, al.title AS album_title
-             FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-            WHERE t.id = ?""",
-        (track_id,),
-    ).fetchone()
-    if not row:
+def _track_lyrics_context(conn, track_id: int, *, purpose: str = "provider_lookup") -> Optional[Dict[str, Any]]:
+    """LRClib identity by default; callers explicitly request display values."""
+    from .metadata_context import track_metadata_context
+
+    context = track_metadata_context(conn, track_id, purpose=purpose)
+    if context is None:
         return None
-    artist = conn.execute(
-        """SELECT ar.name FROM lib2_track_artists ta
-           JOIN lib2_artists ar ON ar.id = ta.artist_id
-          WHERE ta.track_id = ? ORDER BY ta.position LIMIT 1""",
-        (track_id,),
-    ).fetchone()
-    duration_seconds = int(row["duration"] / 1000) if row["duration"] else None
+    duration_seconds = int(context["duration"] / 1000) if context.get("duration") else None
     return {
-        "title": row["title"] or "",
-        "album_title": row["album_title"],
-        "artist": artist["name"] if artist else "",
+        "title": context["title"] or "",
+        "album_title": context["album_title"],
+        "artist": context["artist_name"],
         "duration_seconds": duration_seconds,
     }
 
@@ -79,7 +70,7 @@ def fetch_track_lyrics(
     if not stored_path:
         return {"fetched": False, "error": "Track has no file"}
 
-    context = _track_lyrics_context(conn, track_id)
+    context = _track_lyrics_context(conn, track_id, purpose="provider_lookup")
     if context is None:
         return {"fetched": False, "error": "Track not found"}
 

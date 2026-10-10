@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HttpResponse, http, server } from '@/test/msw';
@@ -7,7 +7,83 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import { RetagModal } from './retag-modal';
 
+it('uses the selected policy for both preview and writing', async () => {
+  const previews: URLSearchParams[] = [];
+  let written: Record<string, unknown> | undefined;
+  server.use(
+    http.get('/api/library/v2/albums/5/tag-preview', ({ request }) => {
+      previews.push(new URL(request.url).searchParams);
+      return HttpResponse.json({
+        success: true,
+        tracks: [
+          {
+            track_id: 1,
+            album_id: 5,
+            title: 'Song',
+            file_path: '/music/song.opus',
+            has_changes: true,
+            diff: [{ field: 'Title', file_value: '', db_value: 'Song', changed: true }],
+          },
+        ],
+      });
+    }),
+    http.post('/api/library/v2/tags/write', async ({ request }) => {
+      written = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({ success: true, job_id: 'policy-write' });
+    }),
+    http.get('/api/library/v2/jobs/status', () =>
+      HttpResponse.json({ running: false, result: { written: 1 } }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  await screen.findAllByText('Song');
+  fireEvent.change(screen.getByLabelText('Tag values'), { target: { value: 'fill_missing' } });
+  fireEvent.change(screen.getByLabelText('Cover art'), { target: { value: 'skip' } });
+  fireEvent.change(screen.getByLabelText('Lyrics'), { target: { value: 'fetch' } });
+  fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'deezer' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Write tags (1)' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Write tags (1)' }));
+  await screen.findByText(/Done: 1 written/);
+  const policy = { mode: 'fill_missing', cover_art: 'skip', lyrics: 'fetch', source: 'deezer' };
+  expect(written).toMatchObject(policy);
+  expect(Object.fromEntries(previews.at(-1)!)).toMatchObject(policy);
+});
+
 describe('Library v2 retag preview', () => {
+  it('shows hand-tag protection without offering a write', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/5/tag-preview', () =>
+        HttpResponse.json({
+          success: true,
+          changed_count: 0,
+          tracks: [
+            {
+              track_id: 1,
+              title: 'Handwritten',
+              album_id: 5,
+              file_path: '/music/manual.opus',
+              protected: true,
+              has_changes: false,
+              diff: [],
+            },
+          ],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Hand-tagged file protected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Write tags (0)' })).toBeDisabled();
+    expect(screen.queryByText('tags match')).not.toBeInTheDocument();
+  });
+
   it('groups by stable album id and labels release types even when rows are interleaved', async () => {
     const previewTrack = (trackId: number, albumId: number, albumType: string, title: string) => ({
       track_id: trackId,

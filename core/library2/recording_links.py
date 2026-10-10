@@ -34,9 +34,9 @@ from typing import Any, Dict, Iterable, List, Optional
 _ACTIVE_FILE_BASE = "COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted')"
 
 
-def _active_file() -> str:
+def _active_file(alias="f") -> str:
     from core.library2.sql_util import owner_clause
-    return _ACTIVE_FILE_BASE + owner_clause(column="f.owner_profile_id")
+    return _ACTIVE_FILE_BASE.replace('f.', alias + '.') + owner_clause(column=f"{alias}.owner_profile_id")
 
 _IN_CHUNK = 400
 
@@ -109,9 +109,8 @@ def _chunks(values: List[int]) -> Iterable[List[int]]:
 def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
     """Map each fileless track id to the sibling position that owns its file.
 
-    A sibling qualifies when it shares the recording AND the normalized title,
-    and holds an active file. Tracks that own a file themselves, and tracks
-    with no qualifying sibling, are absent from the result.
+    A sibling qualifies through an approved canonical link, or the same
+    recording AND normalized title, and holds a scoped active file.
     """
     wanted = [int(t) for t in track_ids if t is not None]
     if not wanted:
@@ -125,6 +124,20 @@ def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str,
         marks = ",".join("?" for _ in chunk)
         rows = conn.execute(
             f"""
+            WITH subjects AS MATERIALIZED (
+                SELECT * FROM lib2_tracks WHERE id IN ({marks})
+            ), partners AS (
+                SELECT me.id AS track_id, COALESCE(me.canonical_track_id,me.id) AS owner_id FROM subjects me
+                UNION
+                SELECT me.id, other.id FROM subjects me JOIN lib2_tracks other
+                    ON other.canonical_track_id=COALESCE(me.canonical_track_id,me.id)
+                UNION
+                SELECT me.id, other.id FROM subjects me
+                JOIN lib2_release_tracks mine ON mine.track_id=me.id
+                JOIN lib2_release_tracks theirs ON theirs.recording_id=mine.recording_id
+                JOIN lib2_tracks other ON other.id=theirs.track_id
+                WHERE {title_match}
+            )
             SELECT me.id            AS track_id,
                    me.title         AS title,
                    other.id         AS owner_track_id,
@@ -135,23 +148,16 @@ def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str,
                    f.id             AS file_id,
                    f.path           AS path,
                    f.is_primary     AS is_primary
-              FROM lib2_tracks me
-              JOIN lib2_release_tracks mine ON mine.track_id = me.id
-              JOIN lib2_release_tracks theirs
-                    ON theirs.recording_id = mine.recording_id
-                   AND theirs.track_id IS NOT NULL
-                   AND theirs.track_id <> me.id
-              JOIN lib2_tracks other ON other.id = theirs.track_id
+              FROM partners p JOIN subjects me ON me.id=p.track_id
+              JOIN lib2_tracks other ON other.id=p.owner_id
               JOIN lib2_albums al ON al.id = other.album_id
               JOIN lib2_track_files f ON f.track_id = other.id
-             WHERE me.id IN ({marks})
-               AND {title_match}
+             WHERE other.id<>me.id
                AND {_active_file()}
                AND NOT EXISTS (
                    SELECT 1 FROM lib2_track_files own
                     WHERE own.track_id = me.id
-                      AND COALESCE(own.file_state,'active')
-                          NOT IN ('missing_confirmed','deleted'))
+                      AND TRIM(COALESCE(own.path,''))<>'' AND {_active_file('own')})
              ORDER BY me.id, f.is_primary DESC, f.id
             """,
             tuple(chunk),

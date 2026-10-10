@@ -7,6 +7,7 @@ import {
   LIBRARY_V2_QUERY_KEY,
   writeLibraryV2Tags,
   type LibraryV2TagPreviewTrack,
+  type LibraryV2RetagPolicy,
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
 import { LibraryToolDialog } from './tool-dialog';
@@ -134,9 +135,15 @@ export function RetagModal({
 }) {
   const queryClient = useQueryClient();
   const [depth, setDepth] = useState<'light' | 'full'>('light');
+  const [policy, setPolicy] = useState<LibraryV2RetagPolicy>({
+    mode: 'overwrite',
+    cover_art: 'fill_missing',
+    lyrics: 'skip',
+    source: 'auto',
+  });
   const previewQuery = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'tag-preview', entity, id, depth],
-    queryFn: () => fetchLibraryV2TagPreview(entity, id, depth),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'tag-preview', entity, id, depth, policy],
+    queryFn: () => fetchLibraryV2TagPreview(entity, id, depth, policy),
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
@@ -154,7 +161,7 @@ export function RetagModal({
 
   const [showUnchanged, setShowUnchanged] = useState(false);
   const visibleTracks = useMemo(
-    () => tracks.filter((t) => showUnchanged || t.has_changes || t.error),
+    () => tracks.filter((t) => showUnchanged || t.has_changes || t.error || t.protected),
     [tracks, showUnchanged],
   );
   const grouped = useMemo(() => {
@@ -229,7 +236,7 @@ export function RetagModal({
         // track the user then deselected is not a request to write it.
         if (field && chosen.has(trackId)) overwrite.push([trackId, field]);
       }
-      const jobId = await writeLibraryV2Tags(ids, true, overwrite);
+      const jobId = await writeLibraryV2Tags(ids, true, overwrite, policy);
       // Poll this write only; other background jobs have independent ids.
       for (let i = 0; i < 600; i += 1) {
         const state = await fetchLibraryV2JobStatus(jobId);
@@ -269,7 +276,12 @@ export function RetagModal({
           <button
             type="button"
             className={styles.btnPrimary}
-            disabled={selected.size === 0 || phase === 'writing' || phase === 'done'}
+            disabled={
+              previewQuery.isFetching ||
+              selected.size === 0 ||
+              phase === 'writing' ||
+              phase === 'done'
+            }
             onClick={() => void write()}
           >
             {phase === 'writing' ? 'Writing…' : `Write tags (${selected.size})`}
@@ -278,6 +290,69 @@ export function RetagModal({
       }
     >
       <div className={styles.previewToolbar}>
+        {(
+          [
+            [
+              'mode',
+              'Tag values',
+              [
+                ['overwrite', 'Use library values'],
+                ['fill_missing', 'Fill empty tags only'],
+              ],
+            ],
+            [
+              'cover_art',
+              'Cover art',
+              [
+                ['replace', 'Replace'],
+                ['fill_missing', 'Fill missing'],
+                ['skip', 'Skip'],
+              ],
+            ],
+            [
+              'lyrics',
+              'Lyrics',
+              [
+                ['skip', 'Skip'],
+                ['fetch', 'Fetch missing lyrics'],
+              ],
+            ],
+            [
+              'source',
+              'Provider',
+              [
+                'auto',
+                'spotify',
+                'itunes',
+                'deezer',
+                'musicbrainz',
+                'tidal',
+                'qobuz',
+                'discogs',
+                'bandcamp',
+              ].map((source) => [source, source === 'auto' ? 'Configured providers' : source]),
+            ],
+          ] as const
+        ).map(([key, label, choices]) => (
+          <label key={key} className={styles.checkOption}>
+            {label}
+            <select
+              value={policy[key]}
+              disabled={phase === 'writing' || phase === 'done'}
+              onChange={(event) => {
+                setPolicy((current) => ({ ...current, [key]: event.target.value }));
+                setDepth('light');
+                setReleased(new Set());
+              }}
+            >
+              {choices.map(([value, text]) => (
+                <option key={value} value={value}>
+                  {text}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
         <button
           type="button"
           className={styles.btnGhost}
@@ -413,6 +488,8 @@ export function RetagModal({
                       <td className={styles.diffCell}>
                         {t.error ? (
                           <span className={styles.statusWarn}>{t.error}</span>
+                        ) : t.protected ? (
+                          <span className={styles.statusWarn}>Hand-tagged file protected</span>
                         ) : t.has_changes ? (
                           <>
                             <TagChanges track={t} />

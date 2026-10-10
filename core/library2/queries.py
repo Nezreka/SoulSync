@@ -29,16 +29,6 @@ def _alpha_key(column: str) -> str:
     return _library_sort_key_sql(column)
 
 
-_SORTS = {
-    # An empty or NULL sort_name sorts by the name rather than ahead of A.
-    "name": (_alpha_key("COALESCE(NULLIF(a.sort_name, ''), a.name)")
-             + ", a.name COLLATE NOCASE"),
-    "added": "a.added_at DESC",
-    "albums": "album_count DESC, a.name COLLATE NOCASE",
-    "tracks": "track_count DESC, a.name COLLATE NOCASE",
-}
-
-
 def _media_server_sources_many(conn, entity_type: str, entity_ids: List[int]
                                ) -> Dict[int, List[str]]:
     """Positive Plex/Jellyfin/Navidrome recognitions for API projections."""
@@ -72,39 +62,6 @@ def _media_server_sources_many(conn, entity_type: str, entity_ids: List[int]
     for row in rows:
         result.setdefault(int(row[0]), []).append(str(row[1]))
     return result
-
-
-# The two count-based artist sorts read their ordering key from
-# `lib2_artist_rollup` (see core/library2/artist_rollup.py for the measurements
-# that forced that design). Both used to be a correlated scalar subquery
-# injected straight into ORDER BY, so SQLite re-ran them per artist row:
-# `sort=albums` was measured at 11.5 s and (on the audit's bigger fixture)
-# 46.6 s, with no timeout guard, for one click on a column header
-# (perf-audit PERF-01/PERF-04).
-_ORDER_ROLLUP_COLUMNS = {"albums": "album_count", "tracks": "track_count"}
-
-
-def _artist_page_order(sort: str) -> Tuple[str, str, str, str]:
-    """How to order the artist page, and what it costs to compute.
-
-    Returns ``(page_join, page_order, outer_order, needs_rollup)``:
-
-    - ``page_join``    -- join added to the page-id selection.
-    - ``page_order``   -- ORDER BY used while choosing the page's artists.
-    - ``outer_order``  -- ORDER BY on the final projection, which can only
-      reference columns carried through ``page_artists``.
-    - ``needs_rollup`` -- the roll-up column, or "" for the cheap sorts.
-    """
-    column = _ORDER_ROLLUP_COLUMNS.get(sort)
-    if column:
-        return (
-            "LEFT JOIN lib2_artist_rollup ar ON ar.artist_id=a.id",
-            f"COALESCE(ar.{column}, 0) DESC, a.name COLLATE NOCASE, a.id",
-            "a._order_count DESC, a.name COLLATE NOCASE, a.id",
-            column,
-        )
-    plain = _SORTS.get(sort, _SORTS["name"]) + ", a.id"
-    return "", plain, plain, ""
 
 
 def _json_dict(raw: Any) -> Dict[str, Any]:
@@ -178,187 +135,26 @@ def _artist_provider_ids(row: Any) -> Dict[str, str]:
     return ids
 
 
-_LEGACY_API_SOURCE_COLUMNS = {
-    "spotify": "spotify", "musicbrainz": "musicbrainz", "deezer": "deezer",
-    "discogs": "discogs", "audiodb": "audiodb", "itunes": "itunes",
-    "lastfm": "lastfm", "genius": "genius", "tidal": "tidal", "qobuz": "qobuz",
-    "amazon": "amazon", "jiosaavn": "jiosaavn",
-}
-
-
-class _ProfileWatchlist:
-    """The calling profile's legacy watchlist, as one rule used twice.
-
-    Guide §2.6: the global lib2 ``monitored`` flag is the *admin's* intent, and
-    other household profiles keep their own watchlist. So membership is decided
-    by ``watchlist_artists`` rows for one ``profile_id``, matched exactly the way
-    ``MusicDatabase.get_library_artists`` matches them: Spotify id, iTunes id, or
-    lowercased name.
-
-    The page filter has to run in SQL or pagination would count the wrong rows,
-    while ``is_watched`` is decided per returned row. Both come from this one
-    object so the two answers cannot drift apart.
-    """
-
-    def __init__(self, conn, profile_id: int) -> None:
-        self.spotify: set = set()
-        self.itunes: set = set()
-        self.names: set = set()
-        exists = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist_artists'"
-        ).fetchone()
-        if not exists:
-            # A fresh install can read the catalogue before the legacy watchlist
-            # table exists. Falling back to `monitored` here is exactly the
-            # substitution that lost profile scoping in the first place, so the
-            # honest reading of "no rows" is "nothing is watched".
-            return
-        for row in conn.execute(
-            "SELECT spotify_artist_id, itunes_artist_id, LOWER(artist_name) AS name_lower "
-            "FROM watchlist_artists WHERE profile_id = ?", (int(profile_id),)
-        ):
-            if row["spotify_artist_id"]:
-                self.spotify.add(str(row["spotify_artist_id"]))
-            if row["itunes_artist_id"]:
-                self.itunes.add(str(row["itunes_artist_id"]))
-            if row["name_lower"]:
-                self.names.add(str(row["name_lower"]))
-
-    def __bool__(self) -> bool:
-        return bool(self.spotify or self.itunes or self.names)
-
-    def sql(self, params: Dict[str, Any]) -> str:
-        """A predicate over ``lib2_artists a``, binding into ``params``.
-
-        Returns ``"0"`` for an empty watchlist: nothing can match, and the
-        legacy reader says the same.
-        """
-        parts = []
-        for prefix, values, columns in (
-            ("wlsp", self.spotify, ("a.spotify_id", "json_extract(a.external_ids,'$.spotify')")),
-            ("wlit", self.itunes, ("json_extract(a.external_ids,'$.itunes')",)),
-        ):
-            if not values:
-                continue
-            keys = []
-            for index, value in enumerate(sorted(values)):
-                key = f"{prefix}_{index}"
-                params[key] = value
-                keys.append(f":{key}")
-            joined = ", ".join(keys)
-            parts.append("(" + " OR ".join(
-                f"({column} IS NOT NULL AND {column} IN ({joined}))"
-                for column in columns) + ")")
-        if self.names:
-            keys = []
-            for index, value in enumerate(sorted(self.names)):
-                key = f"wlnm_{index}"
-                params[key] = value
-                keys.append(f":{key}")
-            parts.append(f"LOWER(a.name) IN ({', '.join(keys)})")
-        return "(" + " OR ".join(parts) + ")" if parts else "0"
-
-    def contains(self, *, name: Any, provider_ids: Mapping[str, str]) -> bool:
-        if str(provider_ids.get("spotify") or "") in self.spotify and self.spotify:
-            return True
-        if str(provider_ids.get("itunes") or "") in self.itunes and self.itunes:
-            return True
-        return str(name or "").strip().casefold() in self.names
-
-
 def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all",
                             page: int = 1, limit: int = 75,
-                            watchlist_filter: str = "all",
-                            source_filter: str = "",
-                            profile_id: int = 1) -> Dict[str, Any]:
-    """``/api/library/artists`` served from lib2 instead of the legacy tables.
+                            watchlist_filter: str = "all", source_filter: str = "",
+                            profile_id: int = 1, quality_filter: str = "",
+                            sort: str = "name") -> Dict[str, Any]:
+    """Historical response adapter; only this shape uses legacy back-references."""
+    from .artist_reader import read_artist_page, artist_pagination
+    from .provider_ids import parse_external_ids
 
-    iss32-E03. The endpoint read ``database.get_library_artists`` — the legacy
-    table — so metadata edits and enrichment performed in the Library-v2 UI
-    were invisible to it. The response shape is reproduced field for field,
-    because the shape is the contract: ``findExactArtist`` in the tools page
-    and the finding→artist link both consume it.
-
-    **The ``id`` stays the legacy artist id.** Consumers hand it straight to
-    ``navigateToArtistDetail``, and the artist-detail page resolves a bare
-    numeric id against the legacy table by contract (see the tool-integration
-    audit). Returning a lib2 id here would look correct and navigate to
-    nothing. ``lib2_artist_id`` is added alongside for callers that want the
-    native identity.
-
-    **Artists with no legacy row are omitted.** They are invisible to this
-    endpoint today too, and giving them an id that navigation cannot resolve
-    would be a regression dressed as a feature. They stop being a special case
-    in Stufe 2, when the producers write lib2 directly and the artist-detail
-    page can take a native id (docs §32.3.1).
-    """
-    from core.library2.provider_ids import parse_external_ids
-
-    page = max(1, int(page))
-    limit = max(1, min(int(limit), 500))
-    offset = (page - 1) * limit
-
-    from core.library2.sql_util import library_artist_sql
-    clauses = ["a.canonical_artist_id IS NULL", "a.legacy_artist_id IS NOT NULL", library_artist_sql('a')]
-    # Same rule as list_artists: a client on the legacy surface must not be
-    # handed the whole house's catalogue either (E-03).
-    _visible = scope_visibility_sql("artist", "va")
-    if _visible:
-        clauses.append(
-            "EXISTS (SELECT 1 FROM lib2_artists va"
-            "  WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
-            f"   AND {_visible})")
-    params: Dict[str, Any] = {}
-    if search_query:
-        clauses.append("a.name LIKE :like ESCAPE '\\'")
-        params["like"] = f"%{str(search_query).replace(chr(92), chr(92) * 2).replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
-    if letter and letter != "all":
-        if letter == "#":
-            clauses.append("UPPER(SUBSTR(a.name, 1, 1)) NOT GLOB '[A-Z]'")
-        else:
-            clauses.append("UPPER(SUBSTR(a.name, 1, 1)) = UPPER(:letter)")
-            params["letter"] = letter
-    watchlist = _ProfileWatchlist(conn, profile_id)
-    if watchlist_filter == "watched":
-        clauses.append(watchlist.sql(params))
-    elif watchlist_filter == "unwatched":
-        clauses.append(f"NOT {watchlist.sql(params)}")
-
-    # Provider match filter. lib2 keeps provider identity in external_ids (plus
-    # the promoted spotify_id/musicbrainz_id columns), so the legacy
-    # column-per-provider test becomes a JSON containment test.
-    negate = str(source_filter or "").startswith("!")
-    source_key = str(source_filter or "").lstrip("!").strip().lower()
-    if source_key in _LEGACY_API_SOURCE_COLUMNS:
-        namespace = _LEGACY_API_SOURCE_COLUMNS[source_key]
-        promoted = {"spotify": "a.spotify_id", "musicbrainz": "a.musicbrainz_id"}.get(namespace)
-        has_it = f"json_extract(a.external_ids, '$.{namespace}') IS NOT NULL"
-        if promoted:
-            has_it = f"({has_it} OR ({promoted} IS NOT NULL AND {promoted} <> ''))"
-        clauses.append(f"NOT ({has_it})" if negate else has_it)
-
-    where = " AND ".join(clauses)
-    total_count = int(conn.execute(
-        f"SELECT COUNT(*) FROM lib2_artists a WHERE {where}", params).fetchone()[0])
-
-    rows = conn.execute(
-        f"""SELECT a.id, a.legacy_artist_id, a.name, a.image_url, a.genres,
-                   a.external_ids, a.spotify_id, a.musicbrainz_id, a.soul_id,
-                   a.monitored,
-                   (SELECT COUNT(*) FROM lib2_albums al
-                     WHERE al.primary_artist_id = a.id
-                       AND al.origin = 'library') AS album_count,
-                   (SELECT COUNT(*) FROM lib2_tracks t
-                      JOIN lib2_albums al2 ON al2.id = t.album_id
-                     WHERE al2.primary_artist_id = a.id) AS track_count
-              FROM lib2_artists a
-             WHERE {where}
-             ORDER BY a.name COLLATE NOCASE
-             LIMIT :limit OFFSET :offset""",
-        {**params, "limit": limit, "offset": offset}).fetchall()
-
+    rows, total_count = read_artist_page(
+        conn, search=search_query, letter=letter, page=page, limit=limit,
+        watchlist_filter=watchlist_filter, source_filter=source_filter,
+        profile_id=profile_id, quality_filter=quality_filter, sort=sort,
+        include_size=False, require_legacy_id=True)
+    projected = project_metadata_many(
+        conn, entity_type="artist",
+        provider_fields={int(row["id"]): dict(row) for row in rows})
     artists: List[Dict[str, Any]] = []
     for row in rows:
+        effective, _ = projected[int(row["id"])]
         ids = parse_external_ids(row["external_ids"])
         if row["spotify_id"]:
             ids.setdefault("spotify", str(row["spotify_id"]))
@@ -367,9 +163,9 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
         artists.append({
             "id": row["legacy_artist_id"],
             "lib2_artist_id": row["id"],
-            "name": row["name"],
-            "image_url": row["image_url"],
-            "genres": _json_list(row["genres"]),
+            "name": effective["name"],
+            "image_url": effective["image_url"],
+            "genres": _json_list(effective["genres"]),
             "musicbrainz_id": ids.get("musicbrainz"),
             "spotify_artist_id": ids.get("spotify"),
             "itunes_artist_id": ids.get("itunes"),
@@ -386,26 +182,15 @@ def legacy_api_artists_page(conn, *, search_query: str = "", letter: str = "all"
             # row that only ever passed through it has nothing in the column.
             "soul_id": row["soul_id"] or ids.get("soulid") or ids.get("soul"),
             "amazon_id": ids.get("amazon"),
-            "album_count": int(row["album_count"] or 0),
+            "album_count": int((row["album_count"] or 0) + (row["single_count"] or 0)),
             "track_count": int(row["track_count"] or 0),
             # Not `row["monitored"]`: that is the admin's global lib2 intent,
             # and telling a guest profile it owns the admin's monitoring is the
             # regression this reproduces the legacy meaning to avoid.
-            "is_watched": watchlist.contains(name=row["name"], provider_ids=ids),
+            "is_watched": row["is_watched"],
         })
 
-    total_pages = (total_count + limit - 1) // limit
-    return {
-        "artists": artists,
-        "pagination": {
-            "page": page,
-            "limit": limit,
-            "total_count": total_count,
-            "total_pages": total_pages,
-            "has_prev": page > 1,
-            "has_next": page < total_pages,
-        },
-    }
+    return {"artists": artists, "pagination": artist_pagination(page, limit, total_count)}
 
 
 def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, Any]]:
@@ -467,249 +252,18 @@ def _scoped_flag(conn, entity: str, row) -> bool:
 
 
 def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str = "all",
-                 page: int = 1, limit: int = 75,
-                 include_size: bool = True) -> Tuple[List[Dict[str, Any]], int]:
-    """Paginated artist overview with per-artist roll-up stats.
+                 page: int = 1, limit: int = 75, include_size: bool = True,
+                 letter: str = "all", watchlist_filter: str = "all",
+                 source_filter: str = "", quality_filter: str = "",
+                 profile_id: int = 1) -> Tuple[List[Dict[str, Any]], int]:
+    """Library-v2 display adapter over the shared artist page reader."""
+    from .artist_reader import read_artist_page
 
-    ``monitored`` filters the list: ``'all'`` (default), ``'monitored'``, or
-    ``'unmonitored'``.
-
-    ``include_size`` (perf25-03) controls the disk-space roll-up, which needs a
-    window function over every file of the page's artists plus a SUM on top of
-    it — by far the heaviest part of this query.  The size column is opt-in in
-    the artist table (default off), so the caller may switch it off and get
-    ``total_size_bytes = 0`` for a value nothing renders.
-    """
-    # whose library this page is (#1199). Built per call: the scope belongs
-    # to whoever is asking, and while SCOPE_PARKED is true it is empty, so
-    # every query here is byte for byte the one that ran before.
-    tf_owner = owner_clause(column="tf.owner_profile_id")
-    album_visible = scope_visibility_sql("album", "al") or "1=1"
-    album_monitored = monitored_sql("album", "al")
-    track_monitored = monitored_sql("track", "t")
-    page_join, page_order, outer_order, rollup_column = _artist_page_order(sort)
-    if rollup_column:
-        # Rebuilt only when missing or stale; a few minutes of drift moves an
-        # artist by a row, which is the whole reason a cache is acceptable for
-        # an ordering key but not for a rendered number.
-        from core.library2.artist_rollup import ensure_fresh_artist_rollup
-        ensure_fresh_artist_rollup(conn)
-    page = max(1, int(page))
-    limit = max(1, min(int(limit), 500))
-    offset = (page - 1) * limit
-    # §40: alias-member rows are folded into their canonical artist's entry
-    # (get_artist merges their albums in) and never listed on their own.
-    from core.library2.sql_util import library_artist_sql
-    clauses, params = ["a.canonical_artist_id IS NULL", library_artist_sql('a')], {}
-    # ...and, once directories exist, only the ones this library may see: a
-    # file of ours hangs off it, or we have monitoring intent on it. Empty
-    # while the scope is every library, so an install without own directories
-    # -- and every install while SCOPE_PARKED is true -- lists what it listed
-    # before (E-03).
-    visible = scope_visibility_sql("artist", "va")
-    if visible:
-        # Across the ALIAS GROUP, not just the canonical row. §40 folds member
-        # rows into their canonical entry and get_artist merges their albums in
-        # afterwards, so a canonical artist whose owned files all hang off an
-        # alias would otherwise be judged fileless and dropped from its owner's
-        # own list.
-        clauses.append(
-            "EXISTS (SELECT 1 FROM lib2_artists va"
-            "  WHERE COALESCE(va.canonical_artist_id, va.id) = a.id"
-            f"   AND {visible})")
-    if search:
-        # iss29-D04: spell the alias-membership test so an index can serve it.
-        #
-        # `COALESCE(member.canonical_artist_id, member.id) = a.id` is not
-        # sargable — no index can answer it, and the only artist indexes are
-        # `idx_lib2_artists_canonical(canonical_artist_id)` and
-        # `idx_lib2_artists_name`. Combined with a leading-wildcard LIKE that
-        # made `GET /artists?search=a` a full cross product: ~10^8 row
-        # comparisons on a 10k-artist library, evaluated TWICE (the same WHERE
-        # is reused by the count and by the page_artists CTE), on the request
-        # thread, on every keystroke.
-        #
-        # The two branches below are exactly equivalent to the COALESCE — the
-        # outer query already restricts `a` to canonical rows — and each one is
-        # an index lookup.
-        # ...and the two branches are kept APART. Written as one EXISTS with an
-        # `OR` inside, SQLite could use neither index and fell back to scanning
-        # lib2_artists once per candidate artist: 21.7 s on a 12k-artist
-        # catalogue for a search matching ten of them (the PERF-08 shape).
-        #
-        # The second branch is not a subquery at all. `member.canonical_artist_id
-        # IS NULL AND member.id = a.id` can only be satisfied by `a` itself,
-        # because the outer query already restricts `a` to canonical rows -- so
-        # it is a plain column test on the row being examined.
-        # The alias branch is an `IN (...)` over a subquery that has no
-        # correlation, so SQLite evaluates it ONCE. Written as a correlated
-        # `EXISTS (... WHERE member.canonical_artist_id = a.id ...)` it is
-        # re-run per candidate artist, and whether that is a seek or a scan
-        # depends entirely on how selective ANALYZE believes
-        # `idx_lib2_artists_canonical` to be -- on a library with few aliases
-        # SQLite sees one distinct value, picks the scan, and the search
-        # becomes 12,000 x 12,000: measured at 7.5 s for the count alone,
-        # doubled because the same WHERE also drives the page query.
-        clauses.append(
-            "(a.name LIKE :like ESCAPE '\\' "
-            " OR a.id IN (SELECT member.canonical_artist_id FROM lib2_artists member "
-            "              WHERE member.canonical_artist_id IS NOT NULL "
-            "                AND member.name LIKE :like ESCAPE '\\'))"
-        )
-        # ...and escape the wildcards. Without ESCAPE, a user typing `%` or `_`
-        # was writing pattern syntax rather than searching for the character.
-        escaped = (
-            str(search)
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
-        params["like"] = f"%{escaped}%"
-    # the monitored flag THIS library sees: the shared library's global
-    # column, or an own library's rules (#1199)
-    artist_monitored = monitored_sql("artist", "a")
-    if monitored == "monitored":
-        clauses.append(f"{artist_monitored} = 1")
-    elif monitored == "unmonitored":
-        clauses.append(f"{artist_monitored} = 0")
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    total = conn.execute(
-        f"SELECT COUNT(*) AS c FROM lib2_artists a {where}", params
-    ).fetchone()["c"]
-
-    # I8: disk-space roll-up, kept separate from track_stats below — that CTE's
-    # plain (unranked) tf join fans out per historical file row, which would
-    # inflate a SUM(size) sharing the same join. This one joins each track's
-    # single ADR-03 primary file exactly once.  perf25-03: the window function
-    # over every file of the page plus the SUM on top of it is the heaviest
-    # part of the statement, so it is only assembled when the caller wants it.
-    # The scoping used to be an `EXISTS (...)` on a bare `FROM lib2_track_files`,
-    # which the planner served by SCANNING the whole file table and evaluating
-    # the EXISTS per row -- 21.7 s on a 288k-track library for a search that
-    # matched ten artists (perf-audit PERF-03's shape, here in list_artists).
-    # Resolving the page's track ids first and CROSS JOINing from them forces
-    # the small side to lead. DISTINCT matters: a track credited to two artists
-    # on the page would otherwise enter twice and split its own ROW_NUMBER
-    # partition, double-counting the file in the SUM below.
-    size_cte = f""",
-        page_tracks AS (
-            SELECT DISTINCT ta.track_id
-              FROM canonical_members cm
-              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
-        ),
-        track_primary_files AS (
-            SELECT tf.track_id, tf.size,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY tf.track_id ORDER BY {primary_order('tf')}
-                   ) AS rank
-              FROM page_tracks pt
-              CROSS JOIN lib2_track_files tf ON tf.track_id=pt.track_id
-             WHERE COALESCE(tf.file_state, 'active') <> 'deleted'{tf_owner}
-        ),
-        artist_size AS (
-            SELECT cm.canonical_id AS artist_id,
-                   COALESCE(SUM(pf.size), 0) AS total_size_bytes
-              FROM canonical_members cm
-              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
-              JOIN track_primary_files pf ON pf.track_id=ta.track_id AND pf.rank=1
-             GROUP BY cm.canonical_id
-        )""" if include_size else ""
-    size_select = "COALESCE(asz.total_size_bytes, 0)" if include_size else "0"
-    size_join = "LEFT JOIN artist_size asz ON asz.artist_id=a.id" if include_size else ""
-    order_count_col = f"COALESCE(ar.{rollup_column}, 0)" if rollup_column else "0"
-
-    rows = conn.execute(
-        f"""
-        WITH page_artists AS MATERIALIZED (
-            SELECT a.*, {order_count_col} AS _order_count
-              FROM lib2_artists a
-              {page_join}
-              {where}
-             ORDER BY {page_order}
-             LIMIT :limit OFFSET :offset
-        ),
-        -- perf25-03: only alias members that fold into an artist ON THIS PAGE
-        -- matter; materializing the whole artist table here made every list
-        -- request scale with library size instead of page size.
-        canonical_members AS MATERIALIZED (
-            SELECT member.id AS member_id,
-                   COALESCE(member.canonical_artist_id, member.id) AS canonical_id
-              FROM lib2_artists member
-             WHERE COALESCE(member.canonical_artist_id, member.id)
-                   IN (SELECT id FROM page_artists)
-        ),
-        -- perf25-03 scoped these to `page_artists`, but the PLANNER IGNORED
-        -- it: `canonical_members` is a MATERIALIZED CTE with no index, so
-        -- SQLite estimated its cardinality high and drove the join from
-        -- lib2_track_artists instead -- a full scan of the largest junction
-        -- table, twice, plus one of lib2_track_files, on every artist page.
-        -- CROSS JOIN is an explicit join-order constraint in SQLite, so the
-        -- ~78-row page CTE leads and the junction is SEEKed through
-        -- idx_lib2_track_artists_artist. `page_artists` is dropped from these
-        -- joins because `canonical_members` is already page-scoped.
-        artist_albums AS (
-            SELECT cm.canonical_id AS artist_id, aa.album_id
-              FROM canonical_members cm
-              CROSS JOIN lib2_album_artists aa ON aa.artist_id=cm.member_id
-            UNION
-            SELECT cm.canonical_id AS artist_id, t.album_id
-              FROM canonical_members cm
-              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
-              JOIN lib2_tracks t ON t.id=ta.track_id
-        ),
-        album_stats AS (
-            SELECT aa.artist_id,
-                   COUNT(DISTINCT CASE
-                       WHEN al.album_type <> 'single'
-                        AND (al.origin='library' OR {album_monitored}=1)
-                       THEN al.id END) AS album_count,
-                   COUNT(DISTINCT CASE
-                       WHEN al.album_type = 'single'
-                        AND (al.origin='library' OR {album_monitored}=1)
-                       THEN al.id END) AS single_count
-              FROM artist_albums aa
-              JOIN lib2_albums al ON al.id=aa.album_id
-             -- the same library as the track counters beside them, or the row
-             -- reads "41 albums, 1 track present" from two different scopes
-             WHERE {album_visible}
-             GROUP BY aa.artist_id
-        ),
-        track_stats AS (
-            SELECT cm.canonical_id AS artist_id,
-                   COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
-                       THEN t.id END) AS track_count,
-                   COUNT(DISTINCT CASE
-                       WHEN tf.id IS NOT NULL
-                        AND COALESCE(tf.file_state, 'active')
-                            NOT IN ('missing_confirmed','deleted')
-                       THEN t.id END) AS track_files_present
-              FROM canonical_members cm
-              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
-              JOIN lib2_tracks t ON t.id=ta.track_id
-              LEFT JOIN lib2_wanted_tracks w
-                     ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
-              LEFT JOIN lib2_track_files tf ON tf.track_id=t.id{tf_owner}
-             GROUP BY cm.canonical_id
-        ){size_cte}
-        SELECT a.id, a.name, a.sort_name, a.image_url, a.genres,
-               {artist_monitored} AS monitored, a.monitor_new_items, a.quality_profile_id,
-               a.quality_profile_explicit, a.added_at,
-               COALESCE(als.album_count, 0) AS album_count,
-               COALESCE(als.single_count, 0) AS single_count,
-               COALESCE(ts.track_count, 0) AS track_count,
-               COALESCE(ts.track_files_present, 0) AS track_files_present,
-               {size_select} AS total_size_bytes
-        FROM page_artists a
-        LEFT JOIN album_stats als ON als.artist_id=a.id
-        LEFT JOIN track_stats ts ON ts.artist_id=a.id
-        {size_join}
-        ORDER BY {outer_order}
-        """,
-        {**params, "limit": limit, "offset": offset},
-    ).fetchall()
-
+    rows, total = read_artist_page(
+        conn, search=search, sort=sort, monitored=monitored, page=page,
+        limit=limit, include_size=include_size, letter=letter,
+        watchlist_filter=watchlist_filter, source_filter=source_filter,
+        quality_filter=quality_filter, profile_id=profile_id)
     projected = project_metadata_many(
         conn,
         entity_type="artist",

@@ -390,6 +390,55 @@ def _configured_source_order() -> Tuple[str, ...]:
         return tuple(METADATA_SOURCE_PRIORITY)
 
 
+def configured_source_order() -> Tuple[str, ...]:
+    """The shared metadata priority, including the configured primary source."""
+    return _configured_source_order()
+
+
+def configured_entity_source_order(
+    entity_type: str, source_ids: Optional[Mapping[str, str]] = None,
+) -> Tuple[str, ...]:
+    """Usable native services in metadata priority order (None means unknown)."""
+    from core.library2.match_status import SERVICES, configured_services
+
+    supported = {source for source, _label, kinds in SERVICES if entity_type in kinds}
+    available = configured_services()
+    return tuple(
+        source for source in _provider_query_order(configured_source_order(), source_ids or {})
+        if source in supported and (available is None or source in available)
+    )
+
+
+def album_refresh_source_ids(conn: Any, album_id: int) -> Dict[str, str]:
+    """Exact release IDs from the loader's selected edition, honoring its pin.
+
+    A release-group MBID can resolve a tracklist, but is not an exact release
+    metadata key. A locked selection cannot fall back to an older sibling
+    edition simply because its preferred provider returned incomplete data.
+    """
+    from core.library2.completeness import _album_tracklist_context
+    from core.library2.editions import _canonical_pin
+    from core.library2.provider_ids import parse_external_ids, provider_only
+
+    context = _album_tracklist_context(conn, int(album_id))
+    if context is None:
+        return {}
+    row, _reference, ids = context
+    ids = provider_only(ids)
+    release_mbid = (row["edition_musicbrainz_id"] or row["album_musicbrainz_id"]
+                    or parse_external_ids(row["edition_external_ids"]).get("musicbrainz")
+                    or parse_external_ids(row["album_external_ids"]).get("musicbrainz"))
+    if not release_mbid:
+        ids.pop("musicbrainz", None)
+    album = conn.execute("SELECT * FROM lib2_albums WHERE id=?", (int(album_id),)).fetchone()
+    pin = _canonical_pin(album)
+    if pin:
+        if album["canonical_locked"]:
+            return {pin[0]: pin[1]}
+        ids[pin[0]] = pin[1]
+    return ids
+
+
 def _provider_query_order(
     source_order: Tuple[str, ...], source_ids: Mapping[str, str],
 ) -> list[str]:
@@ -487,6 +536,14 @@ def _first(payload: Mapping[str, Any], *keys: str) -> Any:
         if payload.get(key) not in (None, ""):
             return payload[key]
     return None
+
+
+def _exact_identity_matches(payload: Mapping[str, Any], provider: str, provider_id: str) -> bool:
+    """Reject an explicitly declared provider/edition fallback at the boundary."""
+    actual_source = _optional_text(_first(payload, "provider", "source"))
+    actual_id = _optional_text(_first(payload, "provider_entity_id", "id"))
+    return ((actual_source is None or actual_source.lower() == provider)
+            and (actual_id is None or actual_id == str(provider_id)))
 
 
 def _image_url(payload: Mapping[str, Any]) -> Optional[str]:
@@ -603,6 +660,8 @@ def fetch_descriptive_metadata(
                 _call_descriptive_getter(getter, canonical, provider_id)
             )
             if payload is None:
+                continue
+            if not _exact_identity_matches(payload, provider, provider_id):
                 continue
             release_date = _optional_text(_first(
                 payload, "release_date", "releaseDate", "date", "released",
@@ -830,14 +889,31 @@ def _fetch_direct_album_tracklist(
             payload = getter(provider_id, allow_fallback=False)
         else:
             payload = getter(provider_id)
+        if isinstance(payload, Mapping) and not _exact_identity_matches(payload, provider, provider_id):
+            return None
+        if any(str(item.get("provider") or item.get("source") or provider).strip().lower() != provider
+               for item in _track_items(payload)):
+            return None
         tracks = _normalize_tracklist(payload, provider)
         if tracks:
-            return TracklistProviderResult(provider, provider_id, tracks)
+            complete = payload.get("is_complete", True) if isinstance(payload, Mapping) else True
+            return TracklistProviderResult(provider, provider_id, tracks, is_complete=bool(complete))
     except Exception as exc:  # noqa: BLE001
         logger.debug(
             "%s tracklist lookup failed (%s): %s", provider, provider_id, exc,
         )
     return None
+
+
+def fetch_album_release_tracklist(
+    provider: str, provider_id: str,
+) -> Optional[TracklistProviderResult]:
+    """Fetch one exact release; never search or enable provider fallback."""
+    source = str(provider or "").strip().lower()
+    identity = str(provider_id or "").strip()
+    if not source or not identity or source in {"upc", "barcode", "isrc"}:
+        return None
+    return _fetch_direct_album_tracklist(source, identity)
 
 
 def fetch_matched_album_tracklists(
@@ -996,6 +1072,7 @@ def fetch_artwork_url(
     source_order: Optional[Tuple[str, ...]] = None,
     deadline: Optional[float] = None,
     release_group_id: Optional[str] = None,
+    allow_search: bool = True,
 ) -> Optional[ArtworkProviderResult]:
     """Resolve artwork through existing engines and return one typed result.
 
@@ -1017,6 +1094,9 @@ def fetch_artwork_url(
     caller — and, through it, the per-entity artwork build lock — for minutes.
     The check sits between attempts, so the bound is the deadline plus at most
     one in-flight provider call.
+
+    ``allow_search=False`` stops after exact release IDs, so a selected edition
+    refresh cannot use artwork from an unrelated result or release group.
     """
     kind = str(kind or "").strip().lower()
     if kind not in {"artist", "album"}:
@@ -1091,14 +1171,10 @@ def fetch_artwork_url(
                 getter = getattr(client, "get_album_metadata", None)
             if not callable(getter):
                 continue
-            try:
-                payload = getter(provider_id, include_tracks=False)
-            except TypeError:
-                try:
-                    payload = getter(provider_id, allow_fallback=False)
-                except TypeError:
-                    payload = getter(provider_id)
+            payload = _call_descriptive_getter(getter, "album", provider_id)
             if not isinstance(payload, Mapping):
+                continue
+            if not _exact_identity_matches(payload, source, provider_id):
                 continue
             images = payload.get("images")
             url = None
@@ -1125,6 +1201,8 @@ def fetch_artwork_url(
                 )
         except Exception as exc:  # noqa: BLE001
             logger.debug("%s direct artwork lookup failed: %s", source, exc)
+    if not allow_search:
+        return None
     # No exact release id answered. A MusicBrainz release GROUP is still an
     # exact statement about THIS record — and its Cover Art Archive entry
     # covers every edition, so it hits more often than a per-release one —
@@ -1184,6 +1262,10 @@ __all__ = [
     "TracklistTrack",
     "TrackMetadataProviderResult",
     "fetch_album_tracklist",
+    "fetch_album_release_tracklist",
+    "configured_source_order",
+    "configured_entity_source_order",
+    "album_refresh_source_ids",
     "fetch_matched_album_tracklists",
     "fetch_artwork_url",
     "fetch_artist_discography",

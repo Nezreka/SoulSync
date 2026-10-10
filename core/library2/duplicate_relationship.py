@@ -99,13 +99,16 @@ def validate_duplicate_pair(
     to_track_id: int,
     *,
     allow_reverse_existing: bool = False,
+    confirmed_recording: bool = False,
 ) -> Dict[str, Any]:
     """Return source/target rows when a duplicate relationship is credible.
 
     Validation is intentionally conservative: the rows must share an artist,
     normalized title and compatible duration; hard recording identifiers may
     be absent, but when both sides have one in the same namespace they must
-    agree. A canonical root cannot itself become a duplicate because that
+    agree. Explicit recording confirmation can resolve inconsistent artist
+    or title tags in a reviewed candidate; it never bypasses duration, hard
+    recording IDs or relationship topology. A canonical root cannot itself become a duplicate because that
     would create a chain and make file ownership ambiguous.
     """
     if int(from_track_id) == int(to_track_id):
@@ -153,17 +156,19 @@ def validate_duplicate_pair(
     target_artists = _artist_ids(
         conn, int(target["id"]), int(target["primary_artist_id"])
     )
-    if source_artists.isdisjoint(target_artists):
+    if source_artists.isdisjoint(target_artists) and not confirmed_recording:
         raise DuplicateRelationshipError("Tracks do not share an artist")
 
-    if _normalized_title(source["title"]) != _normalized_title(target["title"]):
+    if _normalized_title(source["title"]) != _normalized_title(target["title"]) and not confirmed_recording:
         raise DuplicateRelationshipError("Track titles do not match")
 
     if not durations_compatible(source["duration"], target["duration"]):
         raise DuplicateRelationshipError("Track durations differ too much")
 
-    conflict = conflicting_recording_id(
-        source, target, (*RECORDING_IDS, ("spotify_id", "Spotify track ID")))
+    # Provider release IDs may differ between a single and its album cut.
+    # Manual review and the importer's automatic links must use the same
+    # release-independent hard recording namespaces.
+    conflict = conflicting_recording_id(source, target)
     if conflict:
         raise DuplicateRelationshipError(f"Tracks have conflicting {conflict}s")
 

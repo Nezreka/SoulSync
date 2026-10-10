@@ -163,7 +163,8 @@ def test_fix_disc_number_tag_writes_flac_tags(tmp_path):
     _make_flac(f, {'title': 'X'})
     _fix_disc_number_tag(str(f), 2, 3)
     audio = FLAC(str(f))
-    assert audio['discnumber'] == ['2/3']
+    assert audio['discnumber'] == ['2']
+    assert audio['disctotal'] == ['3']
     assert audio['disctotal'] == ['3']
 
 

@@ -4380,14 +4380,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
     @_route("/api/library/v2/artists/<int:artist_id>/play-queue")
     def lib2_artist_play_queue(artist_id):
-        """What the artist Play button queues: one playable file per track,
+        """What the artist Play button queues: owned and known missing tracks,
         scoped by CREDIT rather than by album artist.
 
         The Files tab's endpoint above answers a different question — its
         ``primary_artist_id`` scope exists so a selection matches what the
         delete preview will see — and reusing it here dropped every release
         the artist only guests on, which the artist page itself shows."""
-        from core.library2 import queries as Q
+        from core.playback.library_v2 import artist_queue_rows
         try:
             page = int(request.args.get("page", 1))
             limit = int(request.args.get("limit", 100))
@@ -4400,7 +4400,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 "SELECT 1 FROM lib2_artists WHERE id=?", (artist_id,)
             ).fetchone():
                 return _fail("Artist not found", 404)
-            files, total = Q.list_artist_playback_files(
+            files, total = artist_queue_rows(
                 conn, artist_id, page=page, limit=limit)
         total_pages = (total + limit - 1) // limit if limit else 0
         return jsonify({
@@ -4779,6 +4779,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if entity not in ("artists", "albums"):
             return _fail("Unsupported entity")
         from core.library2 import retag
+        try:
+            options = retag.retag_options(request.args)
+        except ValueError as exc:
+            return _fail(str(exc))
         db = get_database()
         with closing(db._get_connection()) as conn:
             exists = conn.execute(
@@ -4789,14 +4793,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          else retag.artist_track_ids(conn, eid))
             truncated = len(track_ids) > retag.MAX_TRACKS
         refresh_result = None
-        depth = request.args.get('depth', 'light')
-        if depth not in ('light', 'full'):
-            return _fail('depth must be light or full')
-        if depth == 'full':
-            refresh_result = retag.refresh_metadata(db, track_ids[:retag.MAX_TRACKS], config_manager=config_manager)
+        if options['depth'] == 'full':
+            refresh_result = retag.refresh_metadata(db, track_ids[:retag.MAX_TRACKS], config_manager=config_manager,
+                                                   source=options['source'])
         with closing(db._get_connection()) as conn:
             contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS])
-        preview = retag.tag_preview(contexts)
+        from core.repair_jobs.base import hand_tagged_path_keys
+        preview = retag.tag_preview(contexts, options=options, hand_tagged_keys=hand_tagged_path_keys(db))
         return jsonify({
             "success": True,
             "tracks": preview,
@@ -4826,6 +4829,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2 import retag
         if not raw_track_ids or len(raw_track_ids) > retag.MAX_TRACKS:
             return _fail(f"track_ids must contain between 1 and {retag.MAX_TRACKS} IDs")
+        try:
+            options = retag.retag_options(body) if any(key in body for key in
+                ('depth', 'mode', 'cover_art', 'lyrics', 'source', 'fields')) else None
+        except ValueError as exc:
+            return _fail(str(exc))
         track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
         # Fields a person set by hand win by default. `overwrite_manual` is how
@@ -4884,6 +4892,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 stats = retag.write_tags(db, track_ids,
                                          embed_cover=embed_cover,
                                          overwrite_manual=overwrite_manual,
+                                         protect_hand_tagged=True,
+                                         options=options,
                                          progress=_progress)
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
@@ -4938,33 +4948,30 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return [f for f in findings.values() if f['finding_type'] in safe_types], missing
 
         def _enrich_album():
-            enriched_from = None
-            if album_id:
-                from core.library2.match_status import SERVICES
-                from core.library2.native_enrich import enrich_native_entity_for_service
-                from core.metadata.registry import METADATA_SOURCE_PRIORITY
-                valid_album_services = {s for s, _label, cols in SERVICES if "album" in cols}
-                providers = [s for s in METADATA_SOURCE_PRIORITY if s in valid_album_services]
-                for source in providers:
-                    enrich_conn = _conn()
-                    try:
-                        result = enrich_native_entity_for_service(
-                            enrich_conn, "album", album_id, source,
-                        )
-                        if result.get("success"):
-                            enrich_conn.commit()
-                            enriched_from = source
-                            break
-                        enrich_conn.rollback()
-                    except Exception as exc:  # noqa: BLE001
-                        enrich_conn.rollback()
-                        logger.debug(
-                            "fill-tag-gaps: %s enrich failed for album %s: %s",
-                            source, album_id, exc,
-                        )
-                    finally:
-                        enrich_conn.close()
-            return enriched_from
+            if not album_id:
+                return None
+            from core.library2.catalogue_refresh import fill_album_metadata_gaps
+            from core.library2.paths import resolve_lib2_path
+            from core.library2.track_files import writable_file_rows
+            from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+
+            keys = hand_tagged_path_keys(get_database())
+            with closing(_conn()) as enrich_conn:
+                # A hand-tagged file is the native metadata lock, including
+                # when its stored path needs mapping to this host's path.
+                files = writable_file_rows(enrich_conn, eid)
+                if any(is_hand_tagged_path(file["path"], keys)
+                       or is_hand_tagged_path(resolve_lib2_path(file["path"], config_manager), keys)
+                       for file in files):
+                    return None
+                try:
+                    enriched_from = fill_album_metadata_gaps(enrich_conn, album_id)
+                    enrich_conn.commit()
+                    return enriched_from
+                except Exception as exc:  # noqa: BLE001
+                    enrich_conn.rollback()
+                    logger.debug("fill-tag-gaps: album %s refresh failed: %s", album_id, exc)
+                    return None
 
         def _run():
             try:

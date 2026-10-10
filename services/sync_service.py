@@ -1,4 +1,5 @@
 import asyncio
+from core.async_utils import run_blocking
 import contextvars
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -763,7 +764,7 @@ class PlaylistSyncService:
                         logger.info(
                             "No library matches for %r and no server playlist "
                             "exists; creating an empty one", playlist.name)
-                        _created = await asyncio.to_thread(
+                        _created = await run_blocking(
                             media_client.create_playlist, playlist.name, [])
                         if _created:
                             # Link it so the next sync follows the server ID.
@@ -801,15 +802,15 @@ class PlaylistSyncService:
                         if server_type == 'navidrome' else {}
                     )
                     if sync_mode == 'append':
-                        sync_success = await asyncio.to_thread(
+                        sync_success = await run_blocking(
                             media_client.append_to_playlist, playlist.name, plex_tracks,
                             **_navidrome_id_kw)
                     elif sync_mode == 'reconcile':
-                        sync_success = await asyncio.to_thread(
+                        sync_success = await run_blocking(
                             self._reconcile_or_replace, media_client, playlist.name,
                             plex_tracks, **_navidrome_id_kw)
                     else:
-                        sync_success = await asyncio.to_thread(
+                        sync_success = await run_blocking(
                             media_client.update_playlist, playlist.name, plex_tracks,
                             **_navidrome_id_kw)
 
@@ -848,7 +849,7 @@ class PlaylistSyncService:
                 )
                 unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
-                wishlist_added_count = await asyncio.to_thread(
+                wishlist_added_count = await run_blocking(
                     self._wishlist_unmatched, playlist, unmatched_tracks)
 
             # Build per-track match details for sync history
@@ -1055,10 +1056,10 @@ class PlaylistSyncService:
         the matcher is all blocking work (sqlite, fuzzy scoring, plex
         fetchItem) and never awaits, so run inline it held that loop for the
         whole matching pass and the app froze until the sync finished. the
-        thread keeps the loop free; to_thread copies the context, so the sync's
+        shared pool keeps the loop free and copies the context, so the sync's
         profile id comes along.
         """
-        return await asyncio.to_thread(self._find_track_blocking, spotify_track, candidate_pool)
+        return await run_blocking(self._find_track_blocking, spotify_track, candidate_pool)
 
     def _find_track_blocking(self, spotify_track: SpotifyTrack, candidate_pool: Optional[Dict[str, list]] = None) -> Tuple[Optional[TrackInfo], float]:
         """Find a track using the same improved database matching as Download Missing Tracks modal"""

@@ -418,7 +418,11 @@ def pin_album_release(cursor: Any, album_id: int, source: str,
     match it came from. The default edition follows either way. Does not
     commit.
     """
+    if hasattr(cursor, 'cursor') and not hasattr(cursor, 'lastrowid'):
+        cursor = cursor.cursor()
     source = str(source or "").strip().lower()
+    before = cursor.execute('SELECT * FROM lib2_albums WHERE id=?',
+                            (int(album_id),)).fetchone()
     if provider_id:
         cursor.execute(
             "UPDATE lib2_albums SET canonical_source=?, canonical_album_id=?,"
@@ -437,6 +441,26 @@ def pin_album_release(cursor: Any, album_id: int, source: str,
             " WHERE id=? AND LOWER(COALESCE(canonical_source,''))=?",
             (int(album_id), source))
     sync_default_edition(cursor, int(album_id))
+    after = cursor.execute('SELECT canonical_source,canonical_album_id FROM lib2_albums WHERE id=?',
+                           (int(album_id),)).fetchone()
+    if before is not None and after is not None and _canonical_pin(before) != _canonical_pin(after):
+        from core.library2.provider_ids import provider_only
+        from core.library2.provider_snapshots import get_latest_provider_snapshot
+        current_ids = provider_only(album_release_ids(before))
+        same_only_release = bool(provider_id) and current_ids == {source: str(provider_id)}
+        snapshot = get_latest_provider_snapshot(cursor.connection, entity_type='album',
+                                                entity_id=int(album_id), scope='tracklist')
+        same_snapshot = (snapshot is not None and snapshot.is_complete
+                         and snapshot.provider == source
+                         and snapshot.provider_entity_id == str(provider_id))
+        if same_only_release or same_snapshot:
+            return
+        # The previous ready cache describes the previous selection even when
+        # the new release shares its track count/provider-ID set. Let both the
+        # album page and background catalogue job resolve the chosen edition.
+        cursor.execute("UPDATE lib2_albums SET tracklist_json=NULL,tracklist_status='idle',"
+                       "tracklist_error=NULL,tracklist_retry_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                       (int(album_id),))
 
 
 def reconcile_pinned_editions(cursor: Any) -> int:

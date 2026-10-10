@@ -206,6 +206,13 @@ class TrackNumberRepairJob(RepairJob):
                     continue
 
                 try:
+                    from core.library2.retag import repair_field_protection
+                    protected = repair_field_protection(context.db, raw_path,
+                        {'track_number': details['correct_track_num'], 'disc_number': details.get('disc_number')},
+                        track_id=subject['track_id'], file_id=subject['file_id'])
+                    if 'track_number' not in protected or ('disc_number' in details and 'disc_number' not in protected):
+                        result.skipped += 1
+                        continue
                     if not details.get("tag_ok", False):
                         # iss29-E07: the rename is only correct if the tag write
                         # actually landed. `save_audio_file` returns False when
@@ -224,6 +231,10 @@ class TrackNumberRepairJob(RepairJob):
                                 "filename alone so the finding stays actionable",
                                 resolved,
                             )
+                            result.errors += 1
+                            continue
+                    if not details.get('disc_ok', True) and details.get('disc_number'):
+                        if not _fix_disc_number_tag(resolved, int(details['disc_number']), int(details.get('total_discs') or 0)):
                             result.errors += 1
                             continue
                     new_path = None
@@ -1048,104 +1059,19 @@ def _normalize_title(title: str) -> str:
 
 
 def _fix_track_number_tag(file_path: str, correct_num: int, total: int) -> bool:
-    """Update ONLY the track number tag in the file.
-
-    Returns True only when the tag actually reached the file on disk
-    (iss29-E07) — callers gate the follow-up rename on this.
-    """
-    from mutagen import File as MutagenFile
-    from mutagen.id3 import TRCK, ID3
-    from mutagen.flac import FLAC
-    from mutagen.oggvorbis import OggVorbis
-    from mutagen.mp4 import MP4
-
-    try:
-        audio = MutagenFile(file_path)
-        if audio is None:
-            logger.error("Cannot re-open file for tag fix: %s", file_path)
-            return False
-
-        from core.metadata.track_number_format import format_track_number_tag
-        track_str = format_track_number_tag(correct_num, total)
-
-        if isinstance(audio.tags, ID3):
-            audio.tags.delall('TRCK')
-            audio.tags.add(TRCK(encoding=3, text=[track_str]))
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            audio['tracknumber'] = [track_str]
-            if total:
-                audio['tracktotal'] = audio['totaltracks'] = [str(total)]
-        elif isinstance(audio, MP4):
-            audio['trkn'] = [(correct_num, total)]
-        else:
-            return False
-
-        # Atomic + audio-integrity-verified save (#819/#1000): never rewrite the
-        # user's library file in place; abort if the write would damage the audio.
-        #
-        # iss29-E07: the return value MUST be propagated. `save_audio_file`
-        # returns False for "integrity check failed, original untouched, tags
-        # NOT written" — discarding that reported an unwritten tag as fixed,
-        # and in the native P3 path it let the rename proceed, leaving a file
-        # named `07 - Song.flac` carrying TRCK 3 with the finding resolved so
-        # nothing would ever look at it again.
-        from core.metadata.common import save_audio_file, get_mutagen_symbols
-        if not save_audio_file(audio, get_mutagen_symbols()):
-            logger.error("Track tag NOT written (atomic save aborted): %s", file_path)
-            return False
-
-        logger.info("Fixed track tag: %s → %s", os.path.basename(file_path), track_str)
-        return True
-    except Exception as e:
-        logger.error("Error fixing track tag in %s: %s", file_path, e, exc_info=True)
-        return False
+    """Write only track numbering through the shared atomic field writer."""
+    from core.tag_writer import write_tag_fields
+    return bool(write_tag_fields(file_path, {
+        'track_number': correct_num, 'total_tracks': total or None,
+    }).get('success'))
 
 
 def _fix_disc_number_tag(file_path: str, disc_num: int, total_discs: int) -> bool:
-    """Update ONLY the disc number tag (multi-disc albums — #1075: per-disc
-    track numbering is only enforceable when the disc tag rides along).
-
-    Returns True only when the tag actually reached the file (iss29-E07).
-    """
-    from mutagen import File as MutagenFile
-    from mutagen.id3 import TPOS, ID3
-    from mutagen.flac import FLAC
-    from mutagen.oggvorbis import OggVorbis
-    from mutagen.mp4 import MP4
-
-    try:
-        audio = MutagenFile(file_path)
-        if audio is None:
-            logger.error("Cannot re-open file for disc tag fix: %s", file_path)
-            return False
-
-        disc_str = f"{disc_num}/{total_discs}" if total_discs else str(disc_num)
-
-        if isinstance(audio.tags, ID3):
-            audio.tags.delall('TPOS')
-            audio.tags.add(TPOS(encoding=3, text=[disc_str]))
-        elif isinstance(audio, (FLAC, OggVorbis)):
-            audio['discnumber'] = [disc_str]
-            if total_discs:
-                audio['disctotal'] = [str(total_discs)]
-        elif isinstance(audio, MP4):
-            audio['disk'] = [(disc_num, total_discs or 0)]
-        else:
-            return False
-
-        # Atomic + audio-integrity-verified save (#819/#1000). The result is
-        # propagated for the same reason as in `_fix_track_number_tag`
-        # (iss29-E07).
-        from core.metadata.common import save_audio_file, get_mutagen_symbols
-        if not save_audio_file(audio, get_mutagen_symbols()):
-            logger.error("Disc tag NOT written (atomic save aborted): %s", file_path)
-            return False
-
-        logger.info("Fixed disc tag: %s → %s", os.path.basename(file_path), disc_str)
-        return True
-    except Exception as e:
-        logger.error("Error fixing disc tag in %s: %s", file_path, e, exc_info=True)
-        return False
+    """Write only disc numbering through the shared atomic field writer."""
+    from core.tag_writer import write_tag_fields
+    return bool(write_tag_fields(file_path, {
+        'disc_number': disc_num, 'total_discs': total_discs or None,
+    }).get('success'))
 
 
 def rename_to_basename_result(
@@ -1437,10 +1363,16 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     if not plan:
         return False
 
+    from core.library2.retag import repair_field_protection
+    if not repair_field_protection(context.db, file_path, {'track_number': plan['correct_num']}):
+        return False
+
     if not plan['tag_ok']:
-        _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total'])
+        if not _fix_track_number_tag(file_path, plan['correct_num'], plan['disc_total']):
+            return False
     if not plan['disc_ok']:
-        _fix_disc_number_tag(file_path, plan['correct_disc'], plan['total_discs'])
+        if not _fix_disc_number_tag(file_path, plan['correct_disc'], plan['total_discs']):
+            return False
 
     final_path = file_path
     if plan['new_basename']:

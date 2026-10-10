@@ -72,6 +72,7 @@ DESTRUCTIVE_FINDING_TYPES = frozenset({
     'expired_download',       # deletes the aged download
     'empty_folder',           # removes the folder
     'duplicate_tracks',       # keeps one copy, deletes the others
+    'native_duplicate_tracks', # approved, journalled quarantine of redundant copies
     'single_album_redundant', # deletes the redundant single
     'quality_upgrade',        # 'delete' variant removes the below-profile file
     'acoustid_mismatch',      # 'delete'/'relocate' both touch files
@@ -97,6 +98,8 @@ FINDING_TYPE_META = {
     'metadata_gap':             {'label': 'Metadata Gaps', 'verb': 'Auto-Fill'},
     'bpm_backfill':             {'label': 'Missing BPM', 'verb': 'Apply BPM'},
     'duplicate_tracks':         {'label': 'Duplicate Tracks', 'verb': 'Keep Best'},
+    'native_duplicate_tracks':  {'label': 'Duplicate Tracks', 'verb': 'Keep Best',
+                                'confirm': 'Redundant files move to recoverable quarantine; protected copies stay. Weak matches need individual recording confirmation.'},
     'single_album_redundant':   {'label': 'Redundant Singles', 'verb': 'Remove Single'},
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
@@ -192,6 +195,9 @@ JOB_CATEGORIES = {
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
     'monitored_discography_refresh': 'Collection gaps',
+    'album_catalogue_backfill': 'Collection gaps',
+    'album_edition_review': 'Tags & metadata',
+    'native_duplicate_detector': 'Files & storage',
     'cache_evictor': 'System',
     'skip_audit_cleanup': 'System',
     'monitoring_list_reconcile': 'System',
@@ -671,6 +677,13 @@ class RepairWorker:
                 defaults['interval_hours'] = cfg.get('interval_hours', defaults['interval_hours'])
                 if 'settings' in cfg and isinstance(cfg['settings'], dict):
                     defaults['settings'].update(cfg['settings'])
+                    if job_id == 'library_retag':
+                        from core.library2.retag import retag_options
+                        try:
+                            policy = retag_options(cfg['settings'])
+                            defaults['settings'].update({key: policy[key] for key in job.default_settings})
+                        except ValueError:
+                            pass  # Keep invalid settings visible; the scan reports the error.
 
         return defaults
 
@@ -909,6 +922,8 @@ class RepairWorker:
                 return
             conn = self.db._get_connection()
             try:
+                from core.library2.review_migration import preserve_legacy_reviews
+                preserve_legacy_reviews(conn)
                 marks = ','.join('?' for _ in prune_ids)
                 cursor = conn.execute(
                     f"DELETE FROM repair_findings WHERE status = 'pending' "
@@ -2599,6 +2614,7 @@ class RepairWorker:
             'corrupt_audio': self._fix_corrupt_audio,
             'fake_lossless': self._fix_fake_lossless,
             'library_retag': self._fix_library_retag,
+            'native_duplicate_tracks': self._fix_native_duplicate_review,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
             'genre_enrichment': self._fix_genre_enrichment,
@@ -2617,6 +2633,34 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_native_duplicate_review(self, entity_type, entity_id, file_path, details):
+        """Approved native Keep Best; never interpret legacy IDs as file IDs."""
+        from core.library2.duplicate_review import REVIEW_SCHEMA, apply_keep_best
+
+        if (details.get('schema') != REVIEW_SCHEMA or entity_type != 'track'
+                or not str(entity_id or '').startswith('lib2:')):
+            return {'success': False, 'error': 'Native duplicate review required; legacy IDs cannot be applied'}
+        try:
+            native_id = int(str(entity_id).split(':', 1)[1])
+            members = details.get('tracks') or []
+            if native_id not in {int(row['track_id']) for row in members}:
+                raise ValueError('Finding subject is not in this native duplicate review')
+            action = str(details.get('_fix_action') or '')
+            confirm_recording = action.endswith(':confirmed') or action == 'keep_best_confirmed'
+            action = action.removesuffix(':confirmed')
+            keeper = None
+            if action.startswith('file-'):
+                keeper = int(action.removeprefix('file-'))
+            elif action not in {'keep_best', 'keep_best_confirmed'}:
+                raise ValueError('Choose Keep Best or an exact native file from this review')
+        except (KeyError, TypeError, ValueError) as exc:
+            return {'success': False, 'error': str(exc)}
+        return apply_keep_best(
+            self.db, details, config_manager=self._config_manager,
+            transfer_folder=self.transfer_folder, approved=True, keep_file_id=keeper,
+            confirm_recording=confirm_recording,
+        )
 
     def _fix_suspect_album_tag(self, entity_type, entity_id, file_path, details):
         """A suspect album tag is fixed by picking the right release, which
@@ -2998,42 +3042,9 @@ class RepairWorker:
                 conn.close()
 
     def _fix_canonical_version(self, entity_type, entity_id, file_path, details):
-        """Apply a canonical-version finding — pin the release the resolver chose
-        (source, release id and score, straight from the finding) onto the album
-        so the Reorganizer and Track Number Repair resolve the same edition (#765).
-
-        Writes an AUTO pin (``locked=False``), like the resolve job's dry-run-OFF
-        path and the Reorganizer — a later resolve can still self-heal it. A
-        LOCKED manual pin is a deliberate album-view edition choice (#758), so
-        accepting the resolver's suggestion here stays unlocked.
-        """
-        source = details.get('source')
-        canonical_album_id = details.get('album_id')
-        if not source or not canonical_album_id:
-            return {'success': False,
-                    'error': 'Finding is missing the canonical source/release id'}
-        try:
-            score = float(details.get('score') or 0.0)
-        except (TypeError, ValueError):
-            score = 0.0
-        try:
-            updated = self.db.set_album_canonical(
-                entity_id, source, str(canonical_album_id), score,
-            )
-        except Exception as e:
-            return {'success': False, 'error': f'Failed to store canonical pin: {e}'}
-        if not updated:
-            return {
-                'success': False,
-                'error': ('Album not updated — it may be manually locked to a '
-                          'different edition, or the album row is missing'),
-            }
-        label = details.get('album_title') or details.get('artist_name') or entity_id
-        return {
-            'success': True,
-            'action': 'pinned_canonical',
-            'message': f'Pinned {source} release {canonical_album_id} as canonical for "{label}"',
-        }
+        """Apply an approved native edition review through the manual pin contract."""
+        from core.library2.edition_review import apply_edition_proposal
+        return apply_edition_proposal(self.db, entity_id, details)
 
     def _fix_expired_download(self, entity_type, entity_id, file_path, details):
         """Apply an expired-origin finding through the cleaner's safe helper."""
@@ -3611,13 +3622,24 @@ class RepairWorker:
             return {'success': False,
                     'error': 'No Library v2 track associated with this finding'}
         validation = details.get('validation') or {}
-        if validation.get('checks', {}).get('edition') == 'unknown':
+        from core.library2 import retag
+        options = retag.retag_options(details['retag_options']) if details.get('retag_options') is not None else None
+        selected = options.get('fields') if options else None
+        writes_numbers = selected is None or bool(set(selected) & {'track_number', 'disc_number', 'total_tracks', 'total_discs', 'track_count'})
+        if writes_numbers and validation.get('checks', {}).get('edition') == 'unknown':
             return {'success': False, 'error': 'Select the release edition in Re-identify before writing track numbers'}
         release = details.get('_fix_action') == 'overwrite_manual'
-        from core.library2 import retag
+        cover_enabled = (options is None or options['cover_art'] != 'skip') and (selected is None or 'cover_art' in selected)
 
         try:
-            if validation.get('checks', {}).get('artwork_database') == 'missing':
+            # A finding's path and hand-tag status may have changed since scan.
+            # Validate before fetching artwork or performing any file-side effect.
+            if file_path:
+                allowed = retag.repair_field_protection(self.db, file_path, {'_retag': True}, track_id=native_track_id,
+                    file_id=validation.get('file_id'))
+                if not allowed:
+                    return {'success': True, 'action': 'preserved_hand_tags', 'message': 'Hand-tagged file preserved'}
+            if cover_enabled and validation.get('checks', {}).get('artwork_database') == 'missing':
                 from core.library2.provider_adapters import fetch_artwork_url
                 reference = validation.get('reference') or {}
                 art = fetch_artwork_url('album', artist_name=reference.get('artist_name') or '', album_title=reference.get('album_title') or '')
@@ -3631,11 +3653,15 @@ class RepairWorker:
                         conn.close()
             stats = retag.write_tags(
                 self.db, [native_track_id],
-                embed_cover=bool(validation), overwrite_manual=release,
+                embed_cover=cover_enabled and bool(validation or options), overwrite_manual=release,
                 protect_hand_tagged=True,
-                file_ids=[validation['file_id']] if validation.get('file_id') else None,
+                file_ids=(details.get('file_ids') or ([validation['file_id']] if validation.get('file_id') else None)),
+                options=options, lyrics_value=details.get('lyrics_value'),
             )
-            if validation.get('checks', {}).get('artwork_sidecar') == 'missing':
+            if stats.get('failed'):
+                failure = (stats.get('errors') or [{}])[0]
+                return {'success': False, 'error': failure.get('error') or 'Some tags could not be written', 'retryable': True}
+            if cover_enabled and validation.get('checks', {}).get('artwork_sidecar') == 'missing':
                 from core.metadata.art_apply import apply_art_to_album_files
                 resolved, _ = self._resolve_finding_path(entity_id, file_path)
                 reference = validation.get('reference') or {}
@@ -3647,7 +3673,7 @@ class RepairWorker:
             logger.error("Library re-tag apply failed for %s: %s",
                          entity_id, exc, exc_info=True)
             return {'success': False, 'error': str(exc)}
-        if not stats.get('written') and not (validation and stats.get('skipped') and not stats.get('failed')):
+        if not stats.get('written') and not ((validation or options) and stats.get('skipped') and not stats.get('failed')):
             failure = (stats.get('errors') or [{}])[0]
             return {
                 'success': False,
@@ -4089,6 +4115,15 @@ class RepairWorker:
         # about files the catalogue does not know, and their fix is the tag
         # write below.
         native_track_id = _lib2_id(entity_id)
+        from core.library2.retag import repair_field_protection
+        try:
+            allowed = repair_field_protection(self.db, file_path, {'track_number': int(correct_num),
+                'disc_number': details.get('disc_number')}, track_id=native_track_id,
+                file_id=((details.get('library_v2') or {}).get('file_id') or details.get('file_id')))
+            if 'track_number' not in allowed or ('disc_number' in details and 'disc_number' not in allowed):
+                return {'success': True, 'action': 'preserved_manual_number', 'message': 'Manual numbering or hand tags preserved'}
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
         if native_track_id is not None:
             conn = self.db._get_connection()
             try:
@@ -4114,14 +4149,6 @@ class RepairWorker:
                     return {'success': False, 'retryable': True,
                             'error': 'Release numbering changed; rerun Track Number Repair before applying this finding.'}
                 details = {**details, 'total_tracks': total}
-                cursor = conn.execute(
-                    "UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP "
-                    "WHERE id=?",
-                    (int(correct_num), native_track_id),
-                )
-                if cursor.rowcount == 0:
-                    return {'success': False, 'error': 'Library-v2 track no longer exists'}
-                conn.commit()
             finally:
                 conn.close()
 
@@ -4240,6 +4267,16 @@ class RepairWorker:
                         'retryable': True,
                     }
 
+            if native_track_id is not None:
+                conn = self.db._get_connection()
+                try:
+                    cursor = conn.execute('UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                                          (int(correct_num), native_track_id))
+                    if not cursor.rowcount:
+                        return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                    conn.commit()
+                finally:
+                    conn.close()
             return {'success': True, 'action': 'fixed_track_number',
                     'message': f'Updated track number to {correct_num}'}
         except Exception as e:
@@ -4843,14 +4880,14 @@ class RepairWorker:
         if is_hand_tagged_path(file_path, keys) or is_hand_tagged_path(resolved, keys):
             return ' (hand-tagged file preserved, saved in SoulSync only)'
         try:
-            from core.tag_writer import write_tags_to_file
-            result = write_tags_to_file(resolved, {'bpm': int(round(bpm))}, embed_cover=False)
+            from core.tag_writer import write_tag_fields
+            result = write_tag_fields(resolved, {'bpm': int(round(bpm))})
         except Exception as e:  # noqa: BLE001 - the db value already landed
             logger.warning("Could not write BPM to %s: %s", resolved, e)
-            return ' (could not write the file tag)'
+            raise ValueError(f'BPM tag could not be written: {e}') from e
         if not result.get('success') or 'bpm' not in (result.get('written_fields') or []):
             logger.warning("BPM tag not written to %s: %s", resolved, result.get('error'))
-            return ' (could not write the file tag)'
+            raise ValueError(result.get('error') or 'BPM tag could not be written')
         return ', written to the file'
 
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
@@ -4922,7 +4959,10 @@ class RepairWorker:
                 conn.close()
         message = f'Applied metadata: {", ".join(native_updates)}'
         if 'bpm' in native_updates:
-            message += self._write_bpm_tag(file_path, effective_bpm)
+            try:
+                message += self._write_bpm_tag(file_path, effective_bpm)
+            except ValueError as exc:
+                return {'success': False, 'error': str(exc), 'retryable': True}
         return {'success': True, 'action': 'applied_metadata', 'message': message}
 
     def _fix_unwanted_content(self, entity_type, entity_id, file_path, details):
@@ -5198,10 +5238,20 @@ class RepairWorker:
             return {'success': False, 'error': 'No inconsistency data in finding'}
 
         from mutagen import File as MutagenFile
-        from core.repair_jobs.album_tag_consistency import _read_tag, _write_tag
+        from core.tag_writer import read_tag_field, write_tag_fields
+        from core.library2.retag import repair_field_protection
 
         # Build field → canonical value map
         canonical_map = {inc['field']: inc['canonical'] for inc in inconsistencies}
+
+        if details.get('server_split'):
+            from core.repair_jobs.album_tag_consistency import split_catalogue_state
+            conn = self.db._get_connection()
+            try:
+                if split_catalogue_state(conn, details.get('album_ids') or []) != details.get('split_catalogue_state'):
+                    return {'success': False, 'retryable': True, 'error': 'Reviewed releases changed; rerun Album Tag Consistency'}
+            finally:
+                conn.close()
 
         fixed_files = 0
         errors = 0
@@ -5222,44 +5272,61 @@ class RepairWorker:
             if not resolved and os.path.isfile(track_file):
                 resolved = track_file
             if not resolved or not os.path.exists(resolved):
+                errors += 1
                 continue
 
             try:
                 audio = MutagenFile(resolved, easy=False)
                 if audio is None:
+                    errors += 1
                     continue
-
-                # Apply all field fixes in one open/save cycle
-                file_changed = False
-                for field, canonical in canonical_map.items():
-                    current = _read_tag(audio, field)
+                track_id = _lib2_id(track_info.get('track_id') or track_info.get('id'))
+                if details.get('library_v2_native') and track_id is None:
+                    raise ValueError('Native track identity missing; rerun the consistency scan')
+                allowed = repair_field_protection(self.db, track_file, canonical_map,
+                    track_id=track_id, file_id=track_info.get('file_id'))
+                if track_id is not None and _lib2_id(entity_id) is not None:
+                    conn = self.db._get_connection()
+                    try:
+                        member = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()
+                        expected_album = track_info.get('album_id') if details.get('server_split') else _lib2_id(entity_id)
+                        if member is None or member[0] != expected_album:
+                            raise ValueError('Track no longer belongs to the reviewed album')
+                        if 'owner_profile_id' in track_info and track_info.get('file_id'):
+                            owner = conn.execute('SELECT owner_profile_id FROM lib2_track_files WHERE id=?', (track_info['file_id'],)).fetchone()
+                            if owner is None or owner[0] != track_info['owner_profile_id']:
+                                raise ValueError('Reviewed file library owner changed')
+                    finally:
+                        conn.close()
+                selected = {}
+                file_changes = []
+                for field, canonical in allowed.items():
+                    current = read_tag_field(audio, field)
                     # an empty tag is a mismatch too: navidrome keys on the
                     # release id, so a file without one splits off exactly
                     # like a file with the wrong one
                     if (current or '') != canonical:
-                        if _write_tag(audio, field, canonical):
-                            file_changed = True
-                            changes.append(f'{field}: "{current or "(missing)"}" → "{canonical}" in {os.path.basename(resolved)}')
-
-                if file_changed:
-                    # Atomic + audio-integrity-verified save (#819/#1000): never
-                    # rewrite the library file in place; abort if the write would
-                    # damage the audio rather than corrupt it.
-                    from core.metadata.common import save_audio_file, get_mutagen_symbols
-                    save_audio_file(audio, get_mutagen_symbols())
+                        selected[field] = canonical
+                        file_changes.append(f'{field}: "{current or "(missing)"}" → "{canonical}" in {os.path.basename(resolved)}')
+                if selected:
+                    saved = write_tag_fields(resolved, selected)
+                    if not saved.get('success'):
+                        raise ValueError(saved.get('error') or 'Tag save failed')
                     fixed_files += 1
+                    changes.extend(file_changes)
             except Exception as e:
                 logger.error(f"Error fixing tag consistency for {resolved}: {e}")
                 errors += 1
 
+        if errors:
+            return {'success': False, 'error': f'Failed to fix {errors} file(s); {fixed_files} written',
+                    'written': fixed_files, 'retryable': True}
         if fixed_files > 0:
             return {
                 'success': True,
                 'action': 'normalized_tags',
                 'message': f'Fixed {fixed_files} file(s): {"; ".join(changes[:3])}{"..." if len(changes) > 3 else ""}',
             }
-        elif errors > 0:
-            return {'success': False, 'error': f'Failed to fix {errors} file(s)'}
         else:
             return {'success': True, 'action': 'already_consistent', 'message': 'All tags already consistent'}
 

@@ -127,7 +127,13 @@ def _retag_worker(monkeypatch, tmp_path: Path, calls: list) -> RepairWorker:
         return {"written": len(track_ids), "skipped": 0, "failed": 0, "errors": []}
 
     monkeypatch.setattr("core.library2.retag.write_tags", _write_tags)
-    return _worker(tmp_path)
+    worker = _worker(tmp_path)
+    from core.library2.schema import ensure_library_v2_schema
+    from tests.lib2_seed import track
+    with worker.db._get_connection() as conn:
+        ensure_library_v2_schema(conn)
+        track(conn, 'Artist', 'Album', 'Song', id=42, path='/music/a.flac')
+    return worker
 
 
 def test_applying_a_retag_finding_writes_that_one_track(monkeypatch, tmp_path: Path):

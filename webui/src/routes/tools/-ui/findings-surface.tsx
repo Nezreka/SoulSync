@@ -590,6 +590,20 @@ export function FindingsSurface({
         return;
       }
 
+      if (type === 'native_duplicate_tracks') {
+        const weak = Boolean(finding.details?.requires_recording_confirmation);
+        const confirmed = await window.showConfirmDialog?.({
+          title: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
+          message: weak
+            ? 'After comparing these files, confirm they contain the same recording. Keep the recommended file and move redundant copies to recoverable quarantine? Protected copies stay.'
+            : 'Keep the recommended file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.',
+          confirmText: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
+          destructive: true,
+        });
+        if (!confirmed) return;
+        fixAction = weak ? 'keep_best:confirmed' : 'keep_best';
+      }
+
       // A finding with no catalogue subject cannot be re-downloaded — the fix
       // is a plain delete, and unlike every prompt above it has no dialog of
       // its own to stop at. Confirm it here rather than let one click remove a
@@ -640,9 +654,12 @@ export function FindingsSurface({
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
     async (findingId: number, trackId: string) => {
+      const native = trackId.startsWith('file-') || trackId.startsWith('keep_best');
       const confirmed = await window.showConfirmDialog?.({
         title: 'Keep This Version',
-        message: 'Keep this version and remove the other duplicate(s)?',
+        message: native
+          ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
+          : 'Keep this version and remove the other duplicate(s)?',
         confirmText: 'Keep',
         destructive: true,
       });
@@ -744,6 +761,24 @@ export function FindingsSurface({
       if (!qualityAction) return;
     }
 
+    const nativeDuplicateIds = withType('native_duplicate_tracks');
+    let nativeDuplicateAction: string | null = null;
+    if (nativeDuplicateIds.length) {
+      const weak = nativeDuplicateIds.some((id) =>
+        Boolean(byId.get(id)?.details?.requires_recording_confirmation),
+      );
+      const confirmed = await window.showConfirmDialog?.({
+        title: weak ? 'Confirm Recordings & Keep Best' : 'Keep Best',
+        message: weak
+          ? 'Confirm that each selected duplicate group contains the same recording after reviewing its files. Keep the recommended copies and quarantine redundant files? Protected copies stay.'
+          : 'Keep the recommended copies and move redundant files to recoverable quarantine? Protected copies stay.',
+        confirmText: weak ? 'Confirm Recordings & Keep Best' : 'Keep Best',
+        destructive: true,
+      });
+      if (!confirmed) return;
+      nativeDuplicateAction = weak ? 'keep_best:confirmed' : 'keep_best';
+    }
+
     let fixed = 0;
     let failed = 0;
     let lastError = '';
@@ -775,6 +810,7 @@ export function FindingsSurface({
         else if (findingType === TYPE_DEAD && deadAction) fixAction = deadAction;
         else if (findingType === TYPE_ACOUSTID && acoustidAction) fixAction = acoustidAction;
         else if (findingType === TYPE_QUALITY && qualityAction) fixAction = qualityAction;
+        else if (findingType === 'native_duplicate_tracks') fixAction = nativeDuplicateAction;
         // Backfill "Add to Wishlist" falls through with no action — the fix
         // handler already adds to the wishlist by default.
 
@@ -898,6 +934,15 @@ export function FindingsSurface({
           });
           if (!confirmed) return;
         }
+      } else if (group.finding_type === 'native_duplicate_tracks') {
+        const confirmed = await window.showConfirmDialog?.({
+          title: 'Keep Best',
+          message: `Keep recommended copies for ${count.toLocaleString()} duplicate findings and move redundant files to recoverable quarantine? Protected copies stay. Weak matches remain pending for individual recording confirmation.`,
+          confirmText: 'Keep Best',
+          destructive: true,
+        });
+        if (!confirmed) return;
+        fixAction = 'keep_best';
       } else {
         // Everything else takes its default action. Destructive types still
         // spell out what happens to files; safe ones just confirm the scale.

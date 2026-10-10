@@ -269,6 +269,33 @@ def test_number_approval_rechecks_catalogue_before_any_write(library, stale_tota
         assert conn.execute('SELECT track_number FROM lib2_tracks WHERE id=7').fetchone()[0] == 3
 
 
+def test_number_save_failure_does_not_update_native_catalogue(library, monkeypatch):
+    from core.repair_worker import RepairWorker
+    db, path, cfg = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_tracks SET track_number=3 WHERE id=7')
+    monkeypatch.setattr('core.metadata.common.save_audio_file', lambda *_a: False)
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = db, cfg, str(path.parent)
+    out = worker._fix_track_number('track', 'lib2:7', str(path), {'correct_track_num': 7, 'total_tracks': 13, 'tag_ok': False})
+    assert out['success'] is False
+    with closing(db._get_connection()) as conn:
+        assert conn.execute('SELECT track_number FROM lib2_tracks WHERE id=7').fetchone()[0] == 3
+
+
+def test_number_apply_rechecks_manual_override(library):
+    from core.repair_worker import RepairWorker
+    from core.library2.metadata_overrides import set_field_override
+    db, path, cfg = library
+    before = path.read_bytes()
+    with closing(db._get_connection()) as conn, conn:
+        set_field_override(conn, entity_type='track', entity_id=7, field_name='track_number', value=9)
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = db, cfg, str(path.parent)
+    worker._fix_track_number('track', 'lib2:7', str(path), {'correct_track_num': 7, 'total_tracks': 13, 'tag_ok': False})
+    assert path.read_bytes() == before
+
+
 def test_number_scan_retries_after_catalogue_becomes_complete(library, monkeypatch):
     from core.repair_jobs.base import JobContext
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
