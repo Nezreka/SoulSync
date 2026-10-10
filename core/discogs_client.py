@@ -14,6 +14,7 @@ import threading
 import requests
 from core.metadata.artist_album_cache import get_cached_artist_album_payload, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
+from core.metadata.release_dates import discogs_release_date
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from functools import wraps
@@ -220,7 +221,7 @@ class Track:
             popularity=release.get('community', {}).get('have', 0),
             external_urls=external_urls if external_urls else None,
             image_url=image_url,
-            release_date=str(release.get('year', '')) if release.get('year') else None,
+            release_date=discogs_release_date(release) or None,
             track_number=track_number,
             disc_number=disc_number,
             album_type='album',
@@ -350,9 +351,7 @@ class Album:
         else:
             album_type = 'album'
 
-        # Year
-        year = release_data.get('year', '')
-        release_date = str(year) if year and year != 0 else ''
+        release_date = discogs_release_date(release_data)
 
         external_urls = {}
         if release_data.get('uri'):
@@ -986,7 +985,7 @@ class DiscogsClient:
             'id': str(release_id),
             'name': data.get('title', ''),
             'images': [{'url': image_url, 'height': 600, 'width': 600}] if image_url else [],
-            'release_date': str(data.get('year', '')) if data.get('year') else '',
+            'release_date': discogs_release_date(data),
         }
 
         # Get artists

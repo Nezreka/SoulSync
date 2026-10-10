@@ -14,6 +14,8 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Optional, Dict, List, Tuple
 
+from core.metadata.release_dates import discogs_release_date
+
 logger = logging.getLogger(__name__)
 
 _refresh_entities = ContextVar('metadata_refresh_entities', default=frozenset())
@@ -1287,7 +1289,7 @@ class MetadataCache:
             else:
                 fields['name'] = raw_title
 
-            fields['release_date'] = str(data.get('year', '')) if data.get('year') else ''
+            fields['release_date'] = discogs_release_date(data)
             tracklist = data.get('tracklist', [])
             fields['total_tracks'] = len(tracklist) if tracklist else 0
             fields['genres'] = json.dumps(data.get('genres', []))

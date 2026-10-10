@@ -6,6 +6,7 @@ Reuses the same Mutagen patterns as _enhance_file_metadata in web_server.py.
 
 import os
 import logging
+import re
 from typing import Dict, Any, Optional, List, Tuple
 
 from mutagen import File as MutagenFile
@@ -476,15 +477,16 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             db_str = ', '.join(db_val) if db_val else ''
             db_val = db_str if db_str else None
 
-        # Special: year / release date (#824). Prefer the full release_date when
-        # the DB has one — it's authoritative, compare it directly. Otherwise use
-        # the year int, for which a MORE-specific file date with the same year is
-        # preserved (not flagged as a change). DB year is int, file is string.
+        # Compare at the available catalogue precision, using the writer's
+        # preservation rule so the preview agrees with the actual retag (#824).
+        # More-specific catalogue dates still detect real month/day corrections.
         if db_key == 'year':
             release_date = db_data.get('release_date')
             if release_date:
                 db_val = str(release_date)
                 db_str = str(release_date).strip()
+                if _date_to_write(file_str, db_str) == file_str:
+                    file_str = db_str
             elif db_val is not None:
                 db_str = str(db_val)
                 db_val = str(db_val)
@@ -808,25 +810,21 @@ def _multi_artist_write_enabled() -> bool:
 
 
 def _date_to_write(existing: Optional[str], year) -> str:
-    """Value to write for the date/year tag. Writes the DB year, BUT keeps an
-    existing, MORE-specific file date (e.g. ``2023-11-03``) when its year already
-    matches — so enrichment/retag never downgrades a real full release date to
-    just the year (#824). When the years differ (a genuine correction) or the
-    file has no date, the year is written as before."""
+    """Keep a more-specific file date when it agrees with the catalogue's
+    known year or month (#824). A conflicting year, month, or day is still
+    corrected, and an empty file date receives the catalogue value."""
     year_str = str(year)
     if existing:
         existing = str(existing).strip()
         if len(existing) > 4 and len(year_str) >= 4 and existing[:4] == year_str[:4]:
             if _normalize_date_str(existing) == _normalize_date_str(year_str):
                 return existing
-            # Only keep the (longer) existing value when the new value is
-            # itself just a bare year — genuinely less specific, so it
-            # can't express a real month/day correction. Any longer new
-            # value (e.g. a full date) is a genuine correction and must
-            # win even if `existing` happens to be an even longer string
-            # (a stale full timestamp is not "more specific" than a
-            # shorter but correct date).
+            # A partial date cannot correct a day it does not specify.
+            # Full dates still win over conflicting (even longer) timestamps.
             if len(year_str) <= 4:
+                return existing
+            if (re.fullmatch(r'\d{4}-(?:0[1-9]|1[0-2])', year_str)
+                    and existing.startswith(year_str + '-')):
                 return existing
     return year_str
 

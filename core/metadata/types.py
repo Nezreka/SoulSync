@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from core.metadata.release_dates import discogs_release_date
+
 
 # ---------------------------------------------------------------------------
 # Helpers shared by converters
@@ -353,8 +355,7 @@ class Album:
         if raw.get('uri'):
             external_urls['discogs'] = _str(raw['uri'])
 
-        year = raw.get('year')
-        release_date = str(year) if year and _int(year) > 0 else ''
+        release_date = discogs_release_date(raw)
 
         return cls(
             id=_str(raw.get('id')),

@@ -521,3 +521,44 @@ def test_download_uses_the_album_page_catalogue_loader(album_environment, monkey
     monkeypatch.setattr('core.library2.provider_adapters.fetch_album_tracklist', lambda *a, **kw: pytest.fail('the common album cache must prevent a second fetch'))
     assert hydrate_download_album(fresh_context)['album']['id'] == 'spotify-album'
     assert fresh_context['_album_catalogue_id'] == first
+
+
+@pytest.mark.parametrize("old_date,new_date,expected", [
+    ("2008", "2008-02-08", "2008-02-08"),
+    ("2008-02", "2008-02-08", "2008-02-08"),
+    ("2008-02-08", "2008", "2008-02-08"),
+    ("2008-02-11", "2008-02-08", "2008-02-11"),
+    ("2007", "2008-02-08", "2007"),
+    ("2008", "2008-02-31", "2008"),
+    ("2008-03", "2008-02-08", "2008-03"),
+    (None, "2008-02-08", "2008-02-08"),
+])
+def test_download_catalogue_refines_only_compatible_release_dates(album_environment, old_date, new_date, expected):
+    from core.library2.download_catalogue import _ensure_album
+    env = album_environment
+    album = {**env.album, "release_date": old_date}
+    context = {"artist": {"name": ARTIST}, "album": album, "source": "deezer"}
+    album_id = _ensure_album(env.db, context, album, "deezer")
+    _ensure_album(env.db, context, {**album, "release_date": new_date}, "deezer")
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT release_date FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == expected
+
+
+@pytest.mark.parametrize("pin_source,pin_id,expected", [
+    ("musicbrainz", "other-release", "2008"),
+    ("deezer", "other-release", "2008"),
+    ("deezer", "album-dz", "2008-02-08"),
+])
+def test_download_catalogue_date_refinement_respects_manual_edition_pin(album_environment, pin_source, pin_id, expected):
+    from core.library2.download_catalogue import _ensure_album
+    env = album_environment
+    album = {**env.album, "id": "album-dz", "release_date": "2008"}
+    context = {"artist": {"name": ARTIST}, "album": album, "source": "deezer"}
+    album_id = _ensure_album(env.db, context, album, "deezer")
+    with env.db._get_connection() as conn:
+        conn.execute("UPDATE lib2_albums SET canonical_locked=1, canonical_source=?, canonical_album_id=? WHERE id=?",
+                     (pin_source, pin_id, album_id))
+        conn.commit()
+    _ensure_album(env.db, context, {**album, "release_date": "2008-02-08"}, "deezer")
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT release_date FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == expected

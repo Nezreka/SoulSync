@@ -19,6 +19,7 @@ release dated today counts as released — release-day tracks should flow.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -77,3 +78,27 @@ def split_released_unreleased(
         else:
             released.append(t)
     return released, unreleased
+
+
+def discogs_release_date(data: Dict[str, Any]) -> str:
+    """Keep Discogs' known date components; zero month/day mean unknown."""
+    try:
+        fallback_year = int(data.get('year') or 0)
+    except (TypeError, ValueError):
+        fallback_year = 0
+    fallback = f'{fallback_year:04d}' if 1 <= fallback_year <= 9999 else ''
+    released = str(data.get('released') or '').strip()
+    match = re.fullmatch(r'(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?', released)
+    if match:
+        year, month, day = (int(part) if part is not None else 0 for part in match.groups())
+        if 1 <= year <= 9999:
+            if month == 0 and day == 0:
+                return f'{year:04d}'
+            if 1 <= month <= 12:
+                if day == 0:
+                    return f'{year:04d}-{month:02d}'
+                try:
+                    return date(year, month, day).isoformat()
+                except ValueError:
+                    return fallback
+    return fallback

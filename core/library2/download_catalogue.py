@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from datetime import date
 
 from core.library2.autolink import find_or_create_album, find_or_create_artist
 from core.library2.release_kind import confirm_release_kind
@@ -23,9 +24,28 @@ def _ensure_album(database, context, album, source):
                                        spotify_album_id=album.get('id'), source=source, monitored=0)
         if album_id > old_max:
             conn.execute("UPDATE lib2_albums SET origin='discography' WHERE id=?", (album_id,))
-        conn.execute('UPDATE lib2_albums SET release_date=COALESCE(release_date, ?), '
+        row = conn.execute('SELECT release_date, canonical_locked, canonical_source, canonical_album_id '
+                           'FROM lib2_albums WHERE id=?', (album_id,)).fetchone()
+        existing = row['release_date']
+        incoming = album.get('release_date')
+        pinned_elsewhere = row['canonical_locked'] and (
+            str(row['canonical_source'] or '').lower() != str(source).lower()
+            or str(row['canonical_album_id'] or '') != str(album.get('id') or ''))
+        # Fill known components of the same date, never correct an existing
+        # day or borrow another edition's date across an explicit pin.
+        release_date = existing or incoming
+        if existing and incoming and not pinned_elsewhere:
+            old_date, new_date = str(existing).strip(), str(incoming).strip()
+            if len(old_date) in (4, 7) and new_date.startswith(old_date + '-'):
+                try:
+                    date.fromisoformat(new_date + '-01' if len(new_date) == 7 else new_date)
+                except ValueError:
+                    release_date = existing  # malformed provider dates cannot refine the catalogue
+                else:
+                    release_date = new_date
+        conn.execute('UPDATE lib2_albums SET release_date=?, '
                      'expected_track_count=COALESCE(expected_track_count, ?) WHERE id=?',
-                     (album.get('release_date'), album.get('total_tracks'), album_id))
+                     (release_date, album.get('total_tracks'), album_id))
         confirm_release_kind(conn, album_id, album.get('album_type'), known=album.get('_album_type_known') is not False)
         conn.commit()
     context['_album_catalogue_id'] = album_id
