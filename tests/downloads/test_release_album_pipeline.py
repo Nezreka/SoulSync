@@ -66,7 +66,10 @@ def album_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "music.db"))
     monkeypatch.setenv("SOULSYNC_CONFIG_PATH", str(tmp_path / "config.json"))
     db = database.MusicDatabase(str(tmp_path / "music.db"))
-    monkeypatch.setattr(database, "_database_instances", {threading.get_ident(): db})
+    # _database_instances is keyed by (thread id, resolved path) — seed the
+    # entry get_database() will actually look up (no-arg call resolves the
+    # DATABASE_PATH set above).
+    monkeypatch.setattr(database, "_database_instances", {(threading.get_ident(), str(tmp_path / "music.db")): db})
     monkeypatch.setattr(wishlist_service, "_wishlist_service", None)
     monkeypatch.setattr(release_import, "_recent_imports", type(release_import._recent_imports)())
     profile_id = db.create_profile("Album requester")

@@ -26563,8 +26563,14 @@ class MusicDatabase:
             conn.commit()
             logger.info(f"Seeded {len(default_urls)} default HiFi instances")
 
-# Thread-safe singleton pattern for database access
-_database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
+# Thread-safe singleton pattern for database access.
+# Keyed by (thread ID, resolved database path): the same thread may legitimately
+# need different database files over its lifetime (tests set DATABASE_PATH per
+# module; workers pass explicit paths). Keying by thread alone silently returned
+# the WRONG database when a second path was requested after the first — e.g. a
+# test module's DATABASE_PATH was ignored because an earlier module had already
+# cached an instance for this thread, so queries ran against the wrong file.
+_database_instances: Dict[Tuple[int, str], MusicDatabase] = {}
 _database_lock = threading.Lock()
 
 def get_database(database_path: str = None) -> MusicDatabase:
@@ -26579,12 +26585,16 @@ def get_database(database_path: str = None) -> MusicDatabase:
     if database_path is None or database_path == "database/music_library.db":
         database_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
 
-    thread_id = threading.get_ident()
+    # The cache key includes the resolved path: two different paths requested
+    # from the same thread must yield two different instances. (Previously the
+    # key was the thread ID alone, so the second path silently got the first
+    # path's database.)
+    key = (threading.get_ident(), database_path)
 
     with _database_lock:
-        if thread_id not in _database_instances:
-            _database_instances[thread_id] = MusicDatabase(database_path)
-        return _database_instances[thread_id]
+        if key not in _database_instances:
+            _database_instances[key] = MusicDatabase(database_path)
+        return _database_instances[key]
 
 def close_database():
     """Close database instances (safe to call from any thread)"""
