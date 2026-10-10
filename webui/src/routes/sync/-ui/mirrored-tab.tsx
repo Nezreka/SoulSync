@@ -152,7 +152,7 @@ export interface MirroredTabProps {
 }
 
 /** the scope's slice of the list. */
-export function rowsForScope<T extends { source?: string | null }>(
+function rowsForScope<T extends { source?: string | null }>(
   rows: readonly T[],
   scope: 'all' | 'user',
 ): T[] {
