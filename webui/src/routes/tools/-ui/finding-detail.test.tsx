@@ -176,3 +176,63 @@ describe('Native duplicate review', () => {
     expect(select).toHaveBeenLastCalledWith(1, 'keep_best:confirmed');
   });
 });
+
+const catalogueFinding = (eligible = true): RepairFinding =>
+  duplicateFinding({
+    finding_type: 'native_duplicate_releases',
+    entity_type: 'album',
+    entity_id: 'lib2:995',
+    details: {
+      schema: 'native_duplicate_releases/v1',
+      merge_eligible: eligible,
+      blocked_reasons: eligible ? [] : ['An acquisition is still active.'],
+      albums: [995, 1125].map((album_id, index) => ({
+        album_id,
+        title: 'Ark',
+        artist_name: 'Star Party',
+        release_date: '2016-02-04',
+        file_count: 0,
+        provider_ids: { spotify: 'release-' + index },
+        tracks: [
+          {
+            id: index + 1,
+            title: 'Ark',
+            duration: 180800,
+            isrc: 'GB2LD2010147',
+            evidence_source: 'cache:spotify:track-' + index,
+          },
+        ],
+      })),
+    },
+  });
+
+describe('Catalogue duplicate review', () => {
+  it('compares fileless releases and selects the exact surviving album', () => {
+    const choose = vi.fn();
+    const { container } = render(
+      <FindingDetail
+        finding={catalogueFinding()}
+        onKeepDuplicate={choose}
+        onApplyCoverArt={vi.fn()}
+      />,
+    );
+    expect(container.textContent).toContain('GB2LD2010147');
+    expect(container.textContent).toContain('3:01');
+    expect(container.textContent).toContain('release-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Merge into release #1125' }));
+    expect(choose).toHaveBeenCalledWith(1, 'merge-1125');
+    expect(container.textContent).not.toContain('quarantine');
+  });
+
+  it('explains an active-download blocker and disables merging', () => {
+    render(
+      <FindingDetail
+        finding={catalogueFinding(false)}
+        onKeepDuplicate={vi.fn()}
+        onApplyCoverArt={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('An acquisition is still active.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Merge into release #995' })).toBeDisabled();
+  });
+});

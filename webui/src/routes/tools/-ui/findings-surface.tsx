@@ -541,6 +541,10 @@ export function FindingsSurface({
     async (finding: RepairFinding) => {
       const type = finding.finding_type;
       let fixAction: string | null = null;
+      if (type === 'native_duplicate_releases') {
+        setExpanded((current) => new Set([...current, finding.id]));
+        return;
+      }
 
       if (type === TYPE_ORPHAN) {
         fixAction = await prompts.promptOrphan();
@@ -654,13 +658,16 @@ export function FindingsSurface({
   /** `selectDuplicateToKeep`. */
   const keepDuplicate = useCallback(
     async (findingId: number, trackId: string) => {
+      const catalogue = trackId.startsWith('merge-');
       const native = trackId.startsWith('file-') || trackId.startsWith('keep_best');
       const confirmed = await window.showConfirmDialog?.({
-        title: 'Keep This Version',
-        message: native
-          ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
-          : 'Keep this version and remove the other duplicate(s)?',
-        confirmText: 'Keep',
+        title: catalogue ? 'Merge Releases' : 'Keep This Version',
+        message: catalogue
+          ? 'Merge these catalogue entries into the selected release? Both provider editions and all physical audio files are preserved.'
+          : native
+            ? 'Keep this file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.'
+            : 'Keep this version and remove the other duplicate(s)?',
+        confirmText: catalogue ? 'Merge' : 'Keep',
         destructive: true,
       });
       if (!confirmed) return;
@@ -716,8 +723,14 @@ export function FindingsSurface({
   /** `bulkFixFindings` — ask once per finding KIND, then fix one id at a time. */
   const bulkFix = useCallback(async () => {
     if (selected.size === 0) return;
-    const ids = [...selected];
     const byId = new Map((items || []).map((finding) => [finding.id, finding]));
+    const ids = [...selected].filter(
+      (id) => byId.get(id)?.finding_type !== 'native_duplicate_releases',
+    );
+    if (ids.length !== selected.size) {
+      toast('Review each duplicate release and select the release group to keep.', 'info');
+      if (!ids.length) return;
+    }
     const typeOf = (id: number) => byId.get(id)?.finding_type;
     const withType = (findingType: string) => ids.filter((id) => typeOf(id) === findingType);
 
@@ -839,6 +852,10 @@ export function FindingsSurface({
    */
   const fixGroup = useCallback(
     async (group: FindingGroup, info: FindingTypeInfo | undefined) => {
+      if (group.finding_type === 'native_duplicate_releases') {
+        toast('Review each duplicate release and select the release group to keep.', 'info');
+        return;
+      }
       const label = info?.label || group.finding_type.replace(/_/g, ' ');
       const count = group.pending;
       let fixAction: string | null = null;

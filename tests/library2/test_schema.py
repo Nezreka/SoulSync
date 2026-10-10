@@ -23,6 +23,7 @@ _EXPECTED_TABLES = {
     "lib2_artist_rollup",
     # Provider credit snapshots, linked when a guest artist joins (A04).
     "lib2_provider_credits",
+    "lib2_catalogue_redirects", "lib2_catalogue_provider_aliases",
 }
 
 

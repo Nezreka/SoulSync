@@ -13495,6 +13495,21 @@ class MusicDatabase:
                 except Exception as _quota_exc:  # noqa: BLE001 - a broken quota check never blocks an add
                     logger.debug("request quota check skipped: %s", _quota_exc)
 
+                from core.library2.catalogue_identity import canonicalize_wishlist_identity
+                spotify_track_data, source_info = canonicalize_wishlist_identity(
+                    conn, spotify_track_data, source_info)
+                canonical_track_id = spotify_track_data.get('id') or track_id
+                if canonical_track_id != track_id:
+                    if self.blocklist_reason_for_track(profile_id, spotify_track_data):
+                        return self._wishlist_outcome("skipped", canonical_track_id, reason="blocklisted")
+                    if source_type == 'manual' or user_initiated:
+                        self.remove_from_wishlist_ignore(canonical_track_id, profile_id=profile_id)
+                    elif self.is_track_ignored(canonical_track_id, profile_id=profile_id):
+                        return self._wishlist_outcome("skipped", canonical_track_id, reason="ignore-list")
+                    if _mlm.get_match_for_track(self, profile_id, spotify_track_data):
+                        return self._wishlist_outcome("satisfied", canonical_track_id, reason="manual library match")
+                track_id = canonical_track_id
+
                 track_name = spotify_track_data.get('name', 'Unknown Track')
                 artists = spotify_track_data.get('artists', [])
                 if artists:
@@ -13651,6 +13666,15 @@ class MusicDatabase:
                             insert_track_id = track_id
 
                 if existing is not None:
+                    previous_context = cursor.execute("SELECT source_info FROM wishlist_tracks WHERE id=?", (existing['id'],)).fetchone()
+                    try:
+                        previous_info = json.loads(previous_context[0] or '{}')
+                    except (ValueError, TypeError):
+                        previous_info = {}
+                    if isinstance(previous_info, dict) and previous_info.get('merged_wishlist_sources'):
+                        source_info = {**(source_info if isinstance(source_info, dict) else {}),
+                                       'merged_wishlist_sources': previous_info['merged_wishlist_sources']}
+                        source_json = json.dumps(source_info)
                     updates = ["spotify_data = ?"]
                     params: List[Any] = [spotify_json]
                     if quality_profile_id is not None and resolved_qp_id is not None:
@@ -24584,6 +24608,8 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
                 self._ensure_music_request_schema(cursor)
+                from core.library2.catalogue_identity import merged_wishlist_key
+                ids = [merged_wishlist_key(conn, tid, int(profile_id)) or tid for tid in ids]
                 ph = ','.join('?' * len(ids))
                 cursor.execute(
                     f"UPDATE wishlist_tracks SET request_status = 'approved', "
@@ -24602,7 +24628,10 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute("SELECT 1 FROM wishlist_tracks WHERE profile_id = ? AND spotify_track_id = ? LIMIT 1",
                                (int(profile_id), str(track_id)))
-                return cursor.fetchone() is not None
+                if cursor.fetchone() is not None:
+                    return True
+                from core.library2.catalogue_identity import merged_wishlist_key
+                return merged_wishlist_key(conn, track_id, int(profile_id)) is not None
         except Exception as e:
             logger.debug("wishlist_has_track failed: %s", e)
             return True   # unknown reads as still on its way, never a false "arrived"

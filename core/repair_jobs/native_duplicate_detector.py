@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_catalogue_duplicate, dismissed_catalogue_review
 from core.library2.duplicate_review import DEFAULT_SETTINGS, find_duplicate_candidates
 from core.library2.maintenance_subjects import active_file_subjects
 from core.repair_jobs import register_job
@@ -15,11 +16,17 @@ logger = get_logger("repair_jobs.native_duplicate_detector")
 class NativeDuplicateDetectorJob(RepairJob):
     job_id = "native_duplicate_detector"
     display_name = "Duplicate Detector"
-    description = "Reviews native duplicate files, including unlinked and cross-format copies"
+    description = "Reviews duplicate catalogue releases and native files, including fileless wishes"
     help_text = (
         "Finds duplicate candidates independently of confirmed recording links. "
         "Title/artist similarity and download filenames are review evidence only. "
-        "The scan writes Findings; it never links tracks or removes files.\n\n"
+        "Catalogue duplicates are also checked before any files exist. Select a surviving "
+        "release group in the Finding; both provider editions and all audio files stay. "
+        "Incomplete tracklists, conflicting identities, active downloads and manual "
+        "choices require resolution before a merge.\n\n"
+        "auto_merge_catalogue (off by default) merges only complete, identical recordings "
+        "with at least two agreeing trusted release IDs and no conflicting trusted ID. "
+        "Conflicting provider release IDs require manual review.\n\n"
         "After approval, Keep Best recommends a playlist copy first, then a manual "
         "file pick, then the native quality ranking. You may pick an exact file. "
         "Weak matches require explicit confirmation of the same recording.\n\n"
@@ -34,14 +41,15 @@ class NativeDuplicateDetectorJob(RepairJob):
     library_v2_effects = frozenset({"observe", "metadata", "delete", "wanted"})
     default_enabled = False
     default_interval_hours = 168
-    default_settings = DEFAULT_SETTINGS.copy()
+    default_settings = {**DEFAULT_SETTINGS, "auto_merge_catalogue": False}
     auto_fix = False
     supports_file_scope = True
     supports_artist_scope = True
     writes_library_files = True
 
     def estimate_scope(self, context: JobContext) -> int:
-        return len(artist_scoped_subjects(context, active_file_subjects(context.db, context.config_manager)))
+        return (len(artist_scoped_subjects(context, active_file_subjects(context.db, context.config_manager)))
+                + len(find_catalogue_duplicates(context.db, scope=context.scope, check_stop=context.check_stop)))
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -71,7 +79,54 @@ class NativeDuplicateDetectorJob(RepairJob):
             )
             if context.check_stop():
                 return result
-            result.scanned = total
+            release_candidates = find_catalogue_duplicates(
+                context.db, scope=context.scope,
+                check_stop=lambda: context.check_stop() or context.wait_if_paused())
+            reviewed_catalogue = len(release_candidates)
+            merged_catalogue = False
+            if settings.get("auto_merge_catalogue") is True:
+                while release_candidates:
+                    applied_one = False
+                    for candidate in release_candidates:
+                        if context.check_stop() or context.wait_if_paused():
+                            return result
+                        if (not candidate["auto_merge_eligible"]
+                                or dismissed_catalogue_review(context.db, candidate)):
+                            continue
+                        applied = merge_catalogue_duplicate(
+                            context.db, candidate, candidate["recommended_album_id"], automatic=True)
+                        if applied["success"]:
+                            result.auto_fixed += 1
+                            merged_catalogue = applied_one = True
+                            break
+                    if not applied_one:
+                        break
+                    # Each merge changes both snapshots and native IDs in a
+                    # larger group. Rebuild before applying or publishing again.
+                    release_candidates = find_catalogue_duplicates(
+                        context.db, scope=context.scope,
+                        check_stop=lambda: context.check_stop() or context.wait_if_paused())
+            for candidate in release_candidates:
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                keeper = next(a for a in candidate["albums"] if a["id"] == candidate["recommended_album_id"])
+                if context.create_finding:
+                    created = context.create_finding(
+                        job_id=self.job_id, finding_type="native_duplicate_releases", severity="info",
+                        entity_type="album", entity_id=f"lib2:{keeper['id']}", file_path=None,
+                        title=f"Release duplicate: {keeper['title']} by {keeper['artist_name']}",
+                        description="Compare these catalogue entries and select the release group to keep. "
+                                    "Provider editions and physical files are preserved.", details=candidate)
+                    if created:
+                        result.findings_created += 1
+                    else:
+                        result.findings_skipped_dedup += 1
+            result.scanned = total + reviewed_catalogue
+            if merged_catalogue:
+                candidates = find_duplicate_candidates(
+                    context.db, context.config_manager, settings=settings, scope=scope,
+                    playlist_membership=membership, server_source=server,
+                    check_stop=lambda: context.check_stop() or context.wait_if_paused())
             for candidate in candidates:
                 if context.check_stop() or context.wait_if_paused():
                     return result

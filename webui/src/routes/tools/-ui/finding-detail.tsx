@@ -428,12 +428,82 @@ function NativeDuplicateReview({
   );
 }
 
+function CatalogueDuplicateReview({
+  finding,
+  onKeepDuplicate,
+}: Pick<FindingDetailProps, 'finding' | 'onKeepDuplicate'>) {
+  const details = finding.details || {};
+  const albums = list<{
+    album_id: number;
+    title: string;
+    artist_name: string;
+    release_date?: string;
+    file_count: number;
+    provider_ids?: Record<string, string>;
+    tracks?: {
+      id: number;
+      title: string;
+      duration?: number;
+      isrc?: string;
+      evidence_source?: string;
+    }[];
+  }>(details.albums);
+  if (details.schema !== 'native_duplicate_releases/v1' || albums.length !== 2) {
+    return <p>This release review needs a fresh scan before it can be applied.</p>;
+  }
+  return (
+    <>
+      <p>
+        Select the release group to keep. Both provider editions, all audio files and monitoring are
+        retained under that release.
+      </p>
+      {list<string>(details.blocked_reasons).map((reason) => (
+        <p key={reason}>{reason}</p>
+      ))}
+      {albums.map((album) => (
+        <section className="repair-detail-subitem" key={album.album_id}>
+          <strong>
+            {album.title} · {album.artist_name} · #{album.album_id}
+          </strong>
+          <p>
+            {album.release_date || 'Date unknown'} · {album.file_count} files
+          </p>
+          {Object.entries(album.provider_ids || {}).map(([provider, id]) => (
+            <p key={provider}>
+              {provider}: {id}
+            </p>
+          ))}
+          {list<NonNullable<typeof album.tracks>[number]>(album.tracks).map((track) => (
+            <p key={track.id}>
+              {track.title}
+              {track.duration ? ' · ' + formatDurationMs(track.duration) : ''}
+              {track.isrc ? ' · ISRC ' + track.isrc : ' · Recording identity unavailable'}
+              {track.evidence_source?.startsWith('cache:') ? ' · Confirmed provider cache' : ''}
+            </p>
+          ))}
+          <button
+            type="button"
+            className="repair-btn"
+            aria-label={'Merge into release #' + album.album_id}
+            disabled={details.merge_eligible !== true}
+            onClick={() => onKeepDuplicate(finding.id, 'merge-' + album.album_id)}
+          >
+            Merge into release #{album.album_id}
+          </button>
+        </section>
+      ))}
+    </>
+  );
+}
+
 export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
   const media = <FindingMedia details={d} />;
 
   switch (finding.finding_type) {
+    case 'native_duplicate_releases':
+      return <CatalogueDuplicateReview finding={finding} onKeepDuplicate={onKeepDuplicate} />;
     case 'native_duplicate_tracks':
       return (
         <NativeDuplicateReview

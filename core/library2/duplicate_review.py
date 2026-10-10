@@ -37,7 +37,7 @@ DEFAULT_SETTINGS = {
 # Ported from the current upstream review detector: numbered performances
 # differ, while years that merely describe a remaster/edition do not.
 _ROMAN_SEQUENCE = re.compile(r"\b(?:pt|pts|part|parts|movement|movements|segue|interlude|chapter|act)\s*([ivx]+)\b")
-_ROMAN_VALUES = dict(zip("i ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx".split(), range(1, 21)))
+_ROMAN_VALUES = dict(zip("i ii iii iv v vi vii viii ix x xi xii xiii xiv xv xvi xvii xviii xix xx".split(), range(1, 21), strict=True))
 _EDITION_YEAR = re.compile(
     r"\b(?:remaster(?:ed)?|mix|edition|version)\s*(?P<after>(?:19|20)\d{2})\b"
     r"|\b(?P<before>(?:19|20)\d{2})(?=\s*(?:remaster(?:ed)?|mix|edition|version)\b)"
@@ -389,7 +389,7 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         files = [by_id[fid] for fid in ids]
         if not playlist_membership:
             # An empty answer may be a failed read: keep the scan's playlists.
-            for f, seen in zip(files, original):
+            for f, seen in zip(files, original, strict=False):
                 if seen.get("playlists") and "playlist_reference" not in f["protected_reasons"]:
                     f["protected_reasons"].append("playlist_reference")
         snapshots = [f["snapshot"] for f in files]

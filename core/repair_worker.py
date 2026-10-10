@@ -73,6 +73,7 @@ DESTRUCTIVE_FINDING_TYPES = frozenset({
     'empty_folder',           # removes the folder
     'duplicate_tracks',       # keeps one copy, deletes the others
     'native_duplicate_tracks', # approved, journalled quarantine of redundant copies
+    'native_duplicate_releases', # catalogue merge requires a survivor choice
     'single_album_redundant', # deletes the redundant single
     'quality_upgrade',        # 'delete' variant removes the below-profile file
     'acoustid_mismatch',      # 'delete'/'relocate' both touch files
@@ -100,6 +101,8 @@ FINDING_TYPE_META = {
     'duplicate_tracks':         {'label': 'Duplicate Tracks', 'verb': 'Keep Best'},
     'native_duplicate_tracks':  {'label': 'Duplicate Tracks', 'verb': 'Keep Best',
                                 'confirm': 'Redundant files move to recoverable quarantine; protected copies stay. Weak matches need individual recording confirmation.'},
+    'native_duplicate_releases': {'label': 'Duplicate Releases', 'verb': 'Review Merge',
+                                  'confirm': 'Select the release group to keep; provider editions and physical files are preserved.'},
     'single_album_redundant':   {'label': 'Redundant Singles', 'verb': 'Remove Single'},
     'mbid_mismatch':            {'label': 'MBID Mismatch', 'verb': 'Apply Tags'},
     'album_mbid_mismatch':      {'label': 'Album MBID Mismatch', 'verb': 'Apply Tags'},
@@ -1619,16 +1622,22 @@ class RepairWorker:
                              id DESC
                 """, (job_id, finding_type, file_path))
             else:
-                cursor.execute("""
+                subject_clause, subject_params = " AND entity_type=? AND entity_id=?", (entity_type, entity_id)
+                if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
+                    # The same release pair remains one review even when a new
+                    # file changes which member is recommended as the survivor.
+                    subject_clause = " AND entity_type=? AND CASE WHEN json_valid(details_json) THEN json_extract(details_json,'$.pair_key') END=?"
+                    subject_params = (entity_type, enriched_details['pair_key'])
+                cursor.execute(f"""
                     SELECT id, status, resolved_at, details_json
                     FROM repair_findings
                     WHERE job_id=? AND finding_type=?
                       AND status IN ('pending','resolved','dismissed')
-                      AND entity_type=? AND entity_id=? AND file_path IS NULL
+                      AND file_path IS NULL{subject_clause}
                     ORDER BY CASE status WHEN 'pending' THEN 0
                                          WHEN 'dismissed' THEN 1 ELSE 2 END,
                              id DESC
-                """, (job_id, finding_type, entity_type, entity_id))
+                """, (job_id, finding_type, *subject_params))
             for previous in cursor.fetchall():
                 # Some lightweight tests deliberately use sqlite's default
                 # tuple rows; production connections use sqlite.Row. Keep the
@@ -1647,6 +1656,8 @@ class RepairWorker:
                         json.dumps(enriched_details) if enriched_details else '{}',
                         existing_id,
                     ))
+                    if finding_type == 'native_duplicate_releases':
+                        cursor.execute("UPDATE repair_findings SET entity_id=? WHERE id=?", (entity_id, existing_id))
                     conn.commit()
                     from core.library2.validation import notify_changes
                     notify_changes()
@@ -2617,6 +2628,7 @@ class RepairWorker:
             'fake_lossless': self._fix_fake_lossless,
             'library_retag': self._fix_library_retag,
             'native_duplicate_tracks': self._fix_native_duplicate_review,
+            'native_duplicate_releases': self._fix_native_catalogue_duplicate,
             'canonical_version': self._fix_canonical_version,
             'genre_cleanup': self._fix_genre_cleanup,
             'genre_enrichment': self._fix_genre_enrichment,
@@ -2635,6 +2647,23 @@ class RepairWorker:
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
         return handler(entity_type, entity_id, file_path, details)
+
+    def _fix_native_catalogue_duplicate(self, entity_type, entity_id, file_path, details):
+        from core.library2.catalogue_duplicates import SCHEMA, merge_catalogue_duplicate
+        try:
+            if (entity_type != 'album' or not str(entity_id or '').startswith('lib2:')
+                    or details.get('schema') != SCHEMA):
+                raise ValueError('A native release-duplicate review is required')
+            native_id = int(str(entity_id).split(':', 1)[1])
+            if native_id not in {int(a['album_id']) for a in details['albums']}:
+                raise ValueError('Finding subject is outside this review')
+            action = str(details.get('_fix_action') or '')
+            if not action.startswith('merge-'):
+                raise ValueError('Select the release group to keep in the individual review')
+            keeper = int(action.removeprefix('merge-'))
+        except (KeyError, TypeError, ValueError) as exc:
+            return {'success': False, 'error': str(exc)}
+        return merge_catalogue_duplicate(self.db, details, keeper)
 
     def _fix_native_duplicate_review(self, entity_type, entity_id, file_path, details):
         """Approved native Keep Best; never interpret legacy IDs as file IDs."""

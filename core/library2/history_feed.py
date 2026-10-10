@@ -194,7 +194,8 @@ def _track_ids_for_albums(conn, album_ids: Sequence[int]) -> List[int]:
     rows = _rows(
         conn, f"SELECT id FROM lib2_tracks WHERE album_id IN ({_in_clause(album_ids)})", album_ids
     )
-    return [int(r[0]) for r in rows]
+    from core.library2.catalogue_identity import merged_entity_ids
+    return merged_entity_ids(conn, "track", [int(r[0]) for r in rows])
 
 
 def _acquisition_request_ids(
@@ -778,12 +779,15 @@ def scoped_history(
     if not 1 <= limit <= 500:
         raise ValueError("limit must be between 1 and 500")
 
+    from core.library2.catalogue_identity import merged_entity_ids, resolve_native_id
+    if scope in {"album", "track"}:
+        entity_id = resolve_native_id(conn, scope, entity_id)
     events: List[Dict[str, Any]] = []
     if scope == "artist":
         from core.library2.artist_aliases import resolve_alias_group
 
         artist_ids = resolve_alias_group(conn, entity_id)
-        album_ids = _album_ids_for_artists(conn, artist_ids)
+        album_ids = merged_entity_ids(conn, "album", _album_ids_for_artists(conn, artist_ids))
         edition_ids = _edition_ids_for_albums(conn, album_ids)
         recording_ids = _recording_ids_for_editions(conn, edition_ids)
         track_ids = _track_ids_for_albums(conn, album_ids)
@@ -805,31 +809,33 @@ def scoped_history(
         events += download_events
         events += _artist_name_fallback_events(conn, artist_name or "", matched_ids, limit)
     elif scope == "album":
-        edition_ids = _edition_ids_for_albums(conn, [entity_id])
+        album_ids = merged_entity_ids(conn, "album", [entity_id])
+        edition_ids = _edition_ids_for_albums(conn, album_ids)
         recording_ids = _recording_ids_for_editions(conn, edition_ids)
-        track_ids = _track_ids_for_albums(conn, [entity_id])
+        track_ids = _track_ids_for_albums(conn, album_ids)
         request_ids = _acquisition_request_ids(
-            conn, album_ids=[entity_id], edition_ids=edition_ids, recording_ids=recording_ids,
+            conn, album_ids=album_ids, edition_ids=edition_ids, recording_ids=recording_ids,
         )
         download_events, _matched_ids = _track_download_events(conn, track_ids, limit)
         events += _acquisition_events(conn, request_ids, limit)
         events += _entity_history_events(conn, track_ids, limit)
-        events += _file_delete_events(conn, album_ids=[entity_id], limit=limit)
+        events += _file_delete_events(conn, album_ids=album_ids, limit=limit)
         events += _manual_skip_events(conn, track_ids, limit)
         events += _maintenance_events(
-            conn, album_ids=[entity_id], track_ids=track_ids, limit=limit,
+            conn, album_ids=album_ids, track_ids=track_ids, limit=limit,
         )
         events += download_events
     else:  # track
+        track_ids = merged_entity_ids(conn, "track", [entity_id])
         recording_ids = _recording_ids_for_track(conn, entity_id)
         request_ids = _acquisition_request_ids(conn, recording_ids=recording_ids)
-        download_events, _matched_ids = _track_download_events(conn, [entity_id], limit)
+        download_events, _matched_ids = _track_download_events(conn, track_ids, limit)
         acquisition_events = _acquisition_events(conn, request_ids, limit)
         events += acquisition_events
-        events += _entity_history_events(conn, [entity_id], limit)
-        events += _track_file_delete_events(conn, [entity_id], limit)
-        events += _manual_skip_events(conn, [entity_id], limit)
-        events += _maintenance_events(conn, track_ids=[entity_id], limit=limit)
+        events += _entity_history_events(conn, track_ids, limit)
+        events += _track_file_delete_events(conn, track_ids, limit)
+        events += _manual_skip_events(conn, track_ids, limit)
+        events += _maintenance_events(conn, track_ids=track_ids, limit=limit)
         # The legacy track_downloads feed and the richer acquisition pipeline
         # both journal "a download finished" independently — for a track the
         # acquisition system tracked, that is the SAME real event twice under

@@ -132,6 +132,9 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     data.setdefault('id', str(row['spotify_track_id']).split('::', 1)[0])
     data['source'] = _wishlist_provider(data, info)
     native_id = _int_or_none(info.get('lib2_track_id'))
+    if native_id:
+        from core.library2.catalogue_identity import resolve_native_id
+        native_id = resolve_native_id(conn, "track", native_id)
     track = conn.execute('SELECT * FROM lib2_tracks WHERE id=?', (native_id,)).fetchone() if native_id else None
     if track is None and str(data.get('id') or '').startswith('lib2-track:'):
         track = conn.execute('SELECT * FROM lib2_tracks WHERE stable_id=?', (data['id'].removeprefix('lib2-track:'),)).fetchone()

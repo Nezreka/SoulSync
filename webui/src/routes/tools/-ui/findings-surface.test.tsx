@@ -586,25 +586,28 @@ describe('the findings inbox', () => {
     });
   });
 
-  it('dismisses a whole group by type rather than by shipping ids', async () => {
-    routes({
-      [GROUPS]: { groups: [group({ pending: 900 })] },
-      [TYPES]: { types: [typeInfo()] },
-      '/api/repair/findings/bulk': { success: true, updated: 900 },
-    });
-    renderSurface();
-    await flush();
+  it.each(['orphan_file', 'native_duplicate_releases'])(
+    'dismisses a whole %s group by type rather than by shipping ids',
+    async (findingType) => {
+      routes({
+        [GROUPS]: { groups: [group({ finding_type: findingType, pending: 900 })] },
+        [TYPES]: { types: [typeInfo({ type: findingType })] },
+        '/api/repair/findings/bulk': { success: true, updated: 900 },
+      });
+      renderSurface();
+      await flush();
 
-    fireEvent.click(screen.getByText('Dismiss all'));
-    await flush();
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringContaining('never raised again') }),
-    );
-    expect(bodyOf('/api/repair/findings/bulk')).toEqual({
-      finding_type: 'orphan_file',
-      action: 'dismiss',
-    });
-  });
+      fireEvent.click(screen.getByText('Dismiss all'));
+      await flush();
+      expect(confirmSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ message: expect.stringContaining('never raised again') }),
+      );
+      expect(bodyOf('/api/repair/findings/bulk')).toEqual({
+        finding_type: findingType,
+        action: 'dismiss',
+      });
+    },
+  );
 
   it('says All Clear when no group survives the filters', async () => {
     routes({ [GROUPS]: { groups: [] } });

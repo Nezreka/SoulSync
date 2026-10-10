@@ -288,6 +288,10 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
     # exactly what the alias feature (§24/§40) exists for.
     from core.library2.artist_aliases import resolve_alias_group
     scope_ids = resolve_alias_group(conn, artist_id) or [artist_id]
+    from core.library2.catalogue_identity import provider_alias
+    merged = provider_alias(conn, "album", namespace, provider_id, artist_ids=set(scope_ids))
+    if merged is not None:
+        return merged
     placeholders = ",".join("?" for _ in scope_ids)
     rows = conn.execute(
         f"""SELECT DISTINCT al.id, al.title, al.spotify_id, al.external_ids
@@ -346,6 +350,10 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                           monitored: Optional[int] = None) -> int:
     provider_id = _clean_provider_id(spotify_track_id)
     namespace = _provider_namespace(provider_id, source)
+    from core.library2.catalogue_identity import provider_alias
+    merged = provider_alias(conn, "track", namespace, provider_id, album_id=album_id)
+    if merged is not None:
+        return merged
     key = dedup_title_key(title)
     rows = conn.execute(
         "SELECT id, title, track_number, disc_number, spotify_id, external_ids "
