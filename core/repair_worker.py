@@ -4857,7 +4857,11 @@ class RepairWorker:
 
         res = apply_album_year_fix(
             db=self.db,
-            album_id=int(album_id),
+            # album_id stays as-is: on Navidrome-backed libraries album ids
+            # are TEXT soul ids (e.g. '2G0CgWoRXSwDbwnkmPpg6e'), and int()
+            # raises on those. apply_album_year_fix only uses the id in SQL
+            # parameter bindings, which are type-agnostic. (#1633)
+            album_id=album_id,
             canonical_year=str(canonical_year),
             canonical_date=canonical_date,
             tracks=tracks,
