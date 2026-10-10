@@ -27,11 +27,17 @@ VARIOUS_ARTISTS = "Various Artists"
 
 # The spellings a source actually ships. Same vocabulary as
 # ``is_multi_artist_compilation`` so the two agree about what "various" means.
+# (R4 M2: "ONE shared" overclaims — is_multi_artist_compilation keeps its own
+# tuple and this set uses casefold while some call sites use lower(). They
+# agree on the spellings that matter; this comment no longer claims more.)
+# Used by the #1567 poisoned-batch guards in core/metadata/source.py,
+# core/wishlist/album_grouping.py and core/repair_jobs/suspect_album_tag.py.
 VARIOUS_ARTIST_NAMES = frozenset({
     "various artists",
     "various",
     "va",
     "v.a.",
+    "v.a",
     "various artist",
     "diverse interpreten",
 })
@@ -49,7 +55,7 @@ _SOUNDTRACK_TYPES = frozenset({"soundtrack", "soundtracks"})
 
 def is_various_artists_name(name: Any) -> bool:
     """True for the spellings sources use for a various-artists credit."""
-    return str(name or "").strip().lower() in VARIOUS_ARTIST_NAMES
+    return str(name or "").strip().casefold() in VARIOUS_ARTIST_NAMES
 
 
 def _album_credit_names(album_ctx: Dict[str, Any]) -> list:
