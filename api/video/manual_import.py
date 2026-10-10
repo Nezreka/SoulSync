@@ -148,13 +148,26 @@ def register_routes(bp):
             _reclaim_source(patch.get("_cleanup_source"))
         ok = patch.get("status") == "completed"
         if ok:
+            # The row now carries the USER's chosen identity, not the grab's:
+            # the subtitle hook (and the worker's residue check) resolve
+            # per-show overrides by re-reading the download row from the DB —
+            # without this the worker would see the stale grab identity,
+            # degrade to the global list, and delete the hook's rows as
+            # residue. Best-effort; the hook falls back to global without it.
+            if override.get("media_id") is not None:
+                try:
+                    db.update_video_download(dl_id, media_source="tmdb",
+                                             media_id=override.get("media_id"))
+                except Exception:   # noqa: BLE001, S110 - best-effort
+                    pass
             # Write NFO + artwork sidecars for the chosen identity (best-effort), then
             # refresh the server + DB the same way the auto-download path does
             # (batch-complete → scan chain), so the manually-placed title shows up
             # without waiting for a scheduled scan.
             # "id" threads the real download id through: write_subtitles_for keys its
-            # subtitle_wanted rows on it (the dict is otherwise synthetic — the
-            # override identity, not the row's).
+            # subtitle_wanted rows on it. The row itself now carries the user's
+            # chosen identity (persisted above), so the hook's DB re-read and
+            # the worker's residue check resolve the same per-show override.
             sidecar_dl = {"id": dl_id, "kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
                           "media_id": override.get("media_id"),
                           "poster_url": row.get("poster_url"),

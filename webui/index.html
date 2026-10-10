@@ -2470,6 +2470,11 @@
                                 <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
                             </div>
+                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
+                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitles</h2>
+                                <div class="vd-subcfg" data-vd-subcfg></div>
+                            </div>
                             <div class="vd-ep-toolbar">
                                 <h2 class="vd-ep-heading">Episodes</h2>
                                 <div class="vd-toolbar-right">
@@ -2588,6 +2593,11 @@
                             <div class="vd-acq-section" data-vd-acq-section hidden>
                                 <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
+                            </div>
+                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
+                            <div class="vd-subcfg-section" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitles</h2>
+                                <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-cast-section" data-vd-cast-section hidden>
                                 <div class="vd-section-head">
@@ -12527,6 +12537,8 @@
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
+    <!-- Subtitle overrides + manual search (Phase 3; hooks into video-detail.js) -->
+    <script src="{{ url_for('static', filename='video/video-subtitles.js', v=static_v) }}"></script>
     <!-- Shared YouTube-channel helpers (paste-a-link follow, channel/video cards);
          load before search/watchlist/wishlist which use window.VideoYoutube -->
     <script src="{{ url_for('static', filename='video/video-youtube.js', v=static_v) }}"></script>

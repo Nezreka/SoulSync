@@ -17,8 +17,22 @@ Isolated: stdlib only; no music imports.
 
 from __future__ import annotations
 
-from .helpers import parse_langs, parse_provider_order, srt_name, write_subtitles
+from .helpers import (
+    MAX_LANG_CODES,
+    SubtitleLookupError,
+    effective_subtitle_languages,
+    parse_langs,
+    parse_provider_order,
+    show_override_for_download,
+    srt_name,
+    valid_lang_code,
+    validate_lang_codes,
+    write_subtitles,
+)
 from .providers.opensubtitles import opensubtitles_fetcher, pick_best_file, search_params
 
 __all__ = ["parse_langs", "parse_provider_order", "pick_best_file", "srt_name",
-           "search_params", "opensubtitles_fetcher", "write_subtitles"]
+           "search_params", "opensubtitles_fetcher", "write_subtitles",
+           "validate_lang_codes", "valid_lang_code", "MAX_LANG_CODES",
+           "effective_subtitle_languages",
+           "show_override_for_download", "SubtitleLookupError"]
