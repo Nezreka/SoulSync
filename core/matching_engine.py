@@ -1254,6 +1254,55 @@ class MusicMatchingEngine:
         # Detect version type in Soulseek result
         version_type, penalty = self.detect_version_type(slskd_track.filename)
 
+        # --- Base-title veto (#1626) ---
+        # A shared version qualifier inflates whole-path similarity enough to
+        # pass the title gate: wanted "Crystalline (Orchestral Version)" vs a
+        # DIFFERENT song's "Damnation Flame (Orchestral Version)" in the right
+        # artist folder scored 0.69 and cleared the accept threshold — the
+        # "(Orchestral Version)" overlap pushed the title score past the 0.30
+        # gate while the artist folder contributed 0.40. Compare the BARE song
+        # titles instead: if both reduce to non-empty base titles that are
+        # nowhere near each other, this is the wrong song no matter what the
+        # folders say. Fail open — all three must hold or nothing happens:
+        #   (a) the artist component matched cleanly (word-boundary hit: the
+        #       similarity fallback is capped at 0.70, so >= 0.99 is exact);
+        #   (b) both base titles are non-empty;
+        #   (c) base-title similarity under a FLOOR, not exact inequality, so
+        #       a typo'd filename never gets vetoed.
+        # Same song, different version ("X" vs "X (Remastered)") reduces to
+        # equal base titles and never vetoes — that call stays with the strict
+        # version matching below. Skipped when the base scorer already
+        # rejected (0.0), so its early-return paths are untouched.
+        if base_confidence > 0.0:
+            _artist_evidence = getattr(slskd_track, 'artist_score', None) or 0.0
+            if _artist_evidence >= 0.99:
+                # Pass the wanted artist on both sides (MAJOR-1, #1626): for
+                # flat "Artist - Title" filenames — an explicitly supported
+                # shape — the last segment is the whole "Artist - Title"
+                # string, and without the artist the name dilutes the
+                # candidate base title ("up" vs "pink floyd up"), vetoing
+                # correct short-titled tracks by long-named artists.
+                # strip_artist_prefix only strips on exact folded equality
+                # and never returns empty, so this is fail-safe.
+                _wanted_artist = (getattr(spotify_track, 'artists', None)
+                                  or [''])[0]
+                _wanted_base = self.base_title_of(spotify_track.name,
+                                                  _wanted_artist)
+                _cand_base = self.base_title_of(slskd_track.filename,
+                                                _wanted_artist,
+                                                from_filename=True)
+                if _wanted_base and _cand_base:
+                    _base_sim = SequenceMatcher(
+                        None, _wanted_base, _cand_base).ratio()
+                    if _base_sim < 0.30:
+                        logger.debug(
+                            f"Base-title veto: '{spotify_track.name}' vs "
+                            f"'{slskd_track.filename[:60]}' (base "
+                            f"'{_wanted_base}' vs '{_cand_base}', "
+                            f"sim={_base_sim:.2f})"
+                        )
+                        return 0.0, 'rejected_base_title_mismatch'
+
         # Check if Spotify track title contains version indicators
         spotify_title_lower = spotify_track.name.lower()
 
