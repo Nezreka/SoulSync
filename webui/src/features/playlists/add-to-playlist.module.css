@@ -7,9 +7,9 @@
   flex-shrink: 0;
   padding: 0;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   cursor: pointer;
   transition:
     color 0.15s ease,
@@ -19,7 +19,7 @@
 .button:hover,
 .button:focus-visible {
   color: #fff;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
 }
 
 .picker {
@@ -29,7 +29,7 @@
   flex-direction: column;
   max-height: min(440px, calc(100vh - 16px));
   padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 14px;
   background: #18181c;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
@@ -55,7 +55,7 @@
 
 .subject {
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -67,9 +67,9 @@
   height: 34px;
   margin-bottom: 6px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: #fff;
   font: inherit;
 }
@@ -119,7 +119,7 @@
   width: 100%;
   padding: 6px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   color: inherit;
   font: inherit;
@@ -129,7 +129,7 @@
 
 .row:hover:not(:disabled),
 .row:focus-visible {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
   outline: none;
 }
 
@@ -148,15 +148,15 @@
   width: 36px;
   height: 36px;
   flex-shrink: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   object-fit: cover;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.3), #24242a);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   font-weight: 700;
 }
 
 .newCover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
 }
 
 .rowText {
@@ -173,13 +173,13 @@
 }
 
 .count {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 11.5px;
 }
 
 .note {
   padding: 14px 8px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-align: center;
 }
 

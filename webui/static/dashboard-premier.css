@@ -40,16 +40,16 @@
     letter-spacing: 0.14em;
     text-transform: uppercase;
     color: rgba(244, 245, 247, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--white-a10);
     background: rgba(0, 0, 0, 0.3);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 6px 14px 6px 11px;
 }
 #dashboard-page .dash-hero-eyebrow::before {
     content: '';
     width: 7px;
     height: 7px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     flex: none;
 }
@@ -108,9 +108,9 @@
     padding: 12px 20px 11px;
     min-width: 118px;
     border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid var(--white-a07);
     background: rgba(0, 0, 0, 0.32);
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset;
+    box-shadow: 0 1px 0 var(--white-a05) inset;
 }
 #dashboard-page .dash-hero-number + .dash-hero-number::before {
     content: none;
@@ -148,8 +148,8 @@
     flex-wrap: nowrap;
     gap: 12px;
     padding: 10px 10px 10px 18px;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--white-a09);
     background: rgba(0, 0, 0, 0.42);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) inset;
     max-width: 640px;
@@ -199,7 +199,7 @@
     text-transform: uppercase;
     white-space: nowrap;
     border: 1px solid rgba(var(--accent-rgb), 0.5);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     color: rgb(var(--accent-light-rgb));
     background: rgba(var(--accent-rgb), 0.1);
     transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
@@ -220,15 +220,15 @@
 #dashboard-page .library-status-more {
     width: 40px;
     min-height: 40px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--white-a10);
+    background: var(--white-a04);
     color: rgba(244, 245, 247, 0.7);
     transition: background 0.18s ease, border-color 0.18s ease;
 }
 #dashboard-page .library-status-more:hover {
-    background: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.2);
+    background: var(--white-a09);
+    border-color: var(--white-a20);
     color: #fff;
 }
 
@@ -255,9 +255,9 @@
     margin: 16px auto 0;
     padding: 0 26px;
     min-height: 40px;
-    border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--white-a12);
+    background: var(--white-a04);
     justify-content: center;
     font-size: 13px;
     font-weight: 650;
@@ -291,7 +291,7 @@
 #dashboard-page .weekly-digest {
     padding: 20px 24px 18px;
     border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid var(--white-a08);
     background:
         radial-gradient(120% 160% at 8% 0%, rgba(var(--accent-rgb), 0.1) 0%, rgba(0, 0, 0, 0) 55%),
         rgba(0, 0, 0, 0.42);
@@ -321,7 +321,7 @@
     font: inherit;
     font-size: 12.5px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
     cursor: pointer;
 }
 #dashboard-page .wd-link:hover {
@@ -364,7 +364,7 @@
     align-items: stretch;
     gap: 10px;
     padding-left: 28px;
-    border-left: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 1px solid var(--white-a08);
 }
 #dashboard-page .wd-bar-col {
     display: flex;
@@ -377,14 +377,14 @@
 #dashboard-page .wd-bar {
     width: 100%;
     min-height: 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: linear-gradient(to top, rgba(var(--accent-rgb), 0.45), rgb(var(--accent-light-rgb)));
 }
 #dashboard-page .wd-day {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--white-a35);
 }
 @media (max-width: 760px) {
     #dashboard-page .wd-body {
@@ -394,7 +394,7 @@
         padding-left: 0;
         border-left: none;
         padding-top: 16px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-top: 1px solid var(--white-a08);
     }
 }
 
@@ -417,7 +417,7 @@
     gap: 22px;
     padding: 22px 26px;
     border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid var(--white-a09);
     background:
         linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.01)),
         linear-gradient(180deg, #0e1512, #090c0a);
@@ -437,13 +437,13 @@
     flex: none;
     width: 78px;
     height: 78px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background:
         radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb)) 0 15%, #0a0c0a 15.5% 21%, transparent 21.5%),
         repeating-radial-gradient(circle at 50% 50%, #16191b 0 2px, #0b0d0e 2px 4px);
     box-shadow:
         0 10px 26px rgba(0, 0, 0, 0.5),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+        inset 0 0 0 1px var(--white-a07);
     animation: dash-vinyl-spin 26s linear infinite;
 }
 #dashboard-page .listen-vinyl::after {
@@ -454,7 +454,7 @@
     width: 8px;
     height: 8px;
     transform: translate(-50%, -50%);
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: #05070a;
     box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.55);
 }
@@ -529,7 +529,7 @@
     justify-content: center;
     font-size: 22px;
     padding-left: 4px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     color: #06130b;
     box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35);
@@ -543,7 +543,7 @@
     content: '';
     position: absolute;
     inset: -6px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: 2px solid rgba(var(--accent-rgb), 0.5);
     animation: dash-play-ping 2.2s ease-out infinite;
     pointer-events: none;
@@ -562,9 +562,9 @@
     gap: 4px;
     padding: 22px 66px 22px 24px;
     border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid var(--white-a09);
     background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.008)),
+        linear-gradient(180deg, var(--white-a04), rgba(255, 255, 255, 0.008)),
         linear-gradient(180deg, #101312, #0a0c0b);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
     text-align: left;
@@ -573,7 +573,7 @@
     transition: border-color 0.2s ease, transform 0.2s ease;
 }
 #dashboard-page .listen-tile:hover {
-    border-color: rgba(255, 255, 255, 0.18);
+    border-color: var(--white-a18);
     transform: translateY(-2px);
 }
 #dashboard-page .listen-tile-title {
@@ -596,13 +596,13 @@
     font-size: 13px;
     font-weight: 600;
     color: rgba(244, 245, 247, 0.72);
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--white-a06);
 }
 #dashboard-page .listen-mixrow i {
     width: 7px;
     height: 7px;
     flex: none;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
 }
@@ -613,8 +613,8 @@
     transform: translateY(-50%);
     width: 36px;
     height: 36px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: var(--radius-circle);
+    border: 1px solid var(--white-a14);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -657,7 +657,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     gap: 16px;
     margin-bottom: 16px;
     padding: 0 4px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--white-a08);
 }
 #dashboard-page .dash-rail-titleblock {
     display: flex;
@@ -683,7 +683,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     text-transform: uppercase;
     color: #06130b;
     background: rgb(var(--accent-rgb));
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 4px 11px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -707,7 +707,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 #dashboard-page .dash-rail-titlelink:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.7);
     outline-offset: 4px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
 }
 #dashboard-page .dash-rail-subtitle {
     font-size: 12.5px;
@@ -788,11 +788,11 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     position: relative;
     inset: auto;
     aspect-ratio: 1 / 1;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     overflow: hidden;
     margin-bottom: 14px;
     flex: none;
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--white-a05);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 #dashboard-page .dash-rail-card .ya-card-img::after {
@@ -829,7 +829,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
 }
 #dashboard-page .dash-rail-card .ya-card-sub--link:hover {
     color: #fff;
@@ -842,7 +842,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--white-a35);
     margin-top: 6px;
     padding-top: 0;
     border-top: 0;
@@ -859,7 +859,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--white-a35);
     background: none;
     border: none;
 }
@@ -889,14 +889,14 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 }
 #dashboard-page .dash-side-card {
     padding: 22px 22px 20px;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--white-a08);
     background: rgba(0, 0, 0, 0.32);
 }
 #dashboard-page .dash-side-head {
     margin-bottom: 16px;
     padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--white-a08);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -947,13 +947,13 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     height: 10px;
     border-radius: 5px;
     background:
-        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0 1px, transparent 1px 10%),
-        rgba(255, 255, 255, 0.06);
+        repeating-linear-gradient(90deg, var(--white-a16) 0 1px, transparent 1px 10%),
+        var(--white-a06);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4) inset;
     overflow: hidden;
 }
 #dashboard-page .dash-sync-bar > span {
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     background: rgb(var(--accent-rgb));
 }
 #dashboard-page .dash-sync-sortbar {
@@ -971,7 +971,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     min-height: 58px;
     padding: 9px 4px;
     border-radius: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--white-a06);
     transition: background 0.15s ease;
     align-items: center;
 }
@@ -985,7 +985,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     width: 44px;
     height: 44px;
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    border: 1px solid var(--white-a10);
 }
 #dashboard-page .dash-sync-name {
     font-size: 13.5px;
@@ -1000,7 +1000,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     color: #fbbf24;
     background: rgba(245, 158, 11, 0.12);
     border: 1px solid rgba(245, 158, 11, 0.32);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 4px 11px;
     white-space: nowrap;
 }
@@ -1016,7 +1016,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     font-weight: 750;
     color: #06130b;
     background: rgb(var(--accent-rgb));
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 4px 11px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
@@ -1035,13 +1035,13 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row {
     padding: 11px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--white-a07);
     background: rgba(255, 255, 255, 0.025);
     align-items: center;
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover {
-    border-color: rgba(255, 255, 255, 0.14);
+    border-color: var(--white-a14);
     background: rgba(255, 255, 255, 0.045);
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-name {
@@ -1060,9 +1060,9 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     text-transform: uppercase;
     font-variant-numeric: tabular-nums;
     color: rgba(244, 245, 247, 0.6);
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 999px;
+    background: var(--white-a06);
+    border: 1px solid var(--white-a09);
+    border-radius: var(--radius-pill);
     padding: 5px 11px;
     white-space: nowrap;
 }
@@ -1079,8 +1079,8 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 #dashboard-page .dash-tiles .dash-tile.header-button {
     min-height: 104px;
     padding: 20px;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--white-a08);
     background: rgba(0, 0, 0, 0.32);
     gap: 8px;
     align-items: flex-start;

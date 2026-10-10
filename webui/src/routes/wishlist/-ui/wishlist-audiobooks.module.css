@@ -35,12 +35,12 @@
     rgba(255, 255, 255, 0.045) 0%,
     rgba(255, 255, 255, 0.015) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   box-shadow:
     0 10px 30px rgba(0, 0, 0, 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    inset 0 1px 0 var(--white-a06);
   overflow: hidden;
   flex-wrap: wrap;
 }
@@ -52,7 +52,7 @@
   left: -40px;
   width: 140px;
   height: 140px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: radial-gradient(circle, rgba(var(--accent-rgb), 0.18) 0%, transparent 70%);
   pointer-events: none;
   filter: blur(20px);
@@ -79,7 +79,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -92,7 +92,7 @@
 .heroPulseDot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #34d399;
   box-shadow: 0 0 8px #34d399;
   animation: heroPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -147,7 +147,7 @@
 
 .heroStatLabel {
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .heroActions {
@@ -167,7 +167,7 @@
   height: 42px;
   padding: 0 22px;
   border: 1px solid rgba(var(--accent-rgb), 0.5);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: linear-gradient(
     135deg,
     rgba(var(--accent-rgb), 0.95) 0%,
@@ -181,7 +181,7 @@
   white-space: nowrap;
   box-shadow:
     0 6px 20px rgba(var(--accent-rgb), 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    inset 0 1px 0 var(--white-a25);
   transition:
     transform 0.18s ease,
     box-shadow 0.18s ease,
@@ -192,7 +192,7 @@
   transform: translateY(-2px);
   box-shadow:
     0 10px 26px rgba(var(--accent-rgb), 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    inset 0 1px 0 var(--white-a35);
 }
 
 .searchNow:active:not(:disabled) {
@@ -208,9 +208,9 @@
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid var(--white-a30);
   border-top-color: #fff;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.8s linear infinite;
 }
 
@@ -223,7 +223,7 @@
 .notice {
   margin: 0;
   padding: 12px 18px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   font-size: 13px;
   font-weight: 500;
   color: #ffffff;
@@ -257,7 +257,7 @@
   top: 50%;
   transform: translateY(-50%);
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   pointer-events: none;
 }
 
@@ -265,9 +265,9 @@
   width: 100%;
   height: 42px;
   padding: 0 38px 0 38px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a04);
   backdrop-filter: blur(12px);
   color: #ffffff;
   font-size: 13.5px;
@@ -282,12 +282,12 @@
 
 .searchInput:focus {
   border-color: rgba(var(--accent-rgb), 0.7);
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18);
 }
 
 .searchInput::placeholder {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .searchClear {
@@ -295,9 +295,9 @@
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   border: none;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   cursor: pointer;
   padding: 4px 6px;
   font-size: 11px;
@@ -305,7 +305,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   width: 22px;
   height: 22px;
   transition:
@@ -314,7 +314,7 @@
 }
 
 .searchClear:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--white-a18);
   color: #ffffff;
 }
 
@@ -338,10 +338,10 @@
   align-items: center;
   gap: 8px;
   padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(255, 255, 255, 0.65);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--white-a08);
+  background: var(--white-a03);
+  color: var(--white-a65);
   font-size: 12.5px;
   font-weight: 580;
   font-family: inherit;
@@ -354,7 +354,7 @@
 }
 
 .filter:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   color: #ffffff;
   transform: translateY(-1px);
 }
@@ -362,8 +362,8 @@
 .filterDot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.4);
+  border-radius: var(--radius-circle);
+  background: var(--white-a40);
 }
 
 .dotLooking {
@@ -407,7 +407,7 @@
   opacity: 0.75;
   background: rgba(0, 0, 0, 0.22);
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .viewSwitch {
@@ -416,8 +416,8 @@
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a08);
 }
 
 .viewBtn {
@@ -425,10 +425,10 @@
   align-items: center;
   gap: 6px;
   padding: 5px 11px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
@@ -443,7 +443,7 @@
 }
 
 .viewBtnActive {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-a12);
   color: #ffffff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
@@ -453,15 +453,10 @@
 .skeleton {
   height: 320px;
   border-radius: 18px;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.03),
-    rgba(255, 255, 255, 0.08),
-    rgba(255, 255, 255, 0.03)
-  );
+  background: linear-gradient(90deg, var(--white-a03), var(--white-a08), var(--white-a03));
   background-size: 800px 100%;
   animation: abShimmer 1.4s linear infinite;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
 }
 
 @keyframes abShimmer {
@@ -477,8 +472,8 @@
   padding: 64px 24px;
   text-align: center;
   border-radius: 20px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(135deg, var(--white-a03) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid var(--white-a07);
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
 }
 
@@ -508,7 +503,7 @@
   align-items: center;
   height: 40px;
   padding: 0 22px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(var(--accent-rgb), 0.9);
   border: 1px solid rgba(var(--accent-rgb), 0.4);
   color: #ffffff;
@@ -543,9 +538,9 @@
   flex-direction: column;
   min-width: 0;
   padding: 10px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-xl);
+  background: var(--white-a02);
+  border: 1px solid var(--white-a05);
   transition:
     border-color 0.2s ease,
     background 0.2s ease,
@@ -554,8 +549,8 @@
 }
 
 .card:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--white-a04);
+  border-color: var(--white-a12);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
 }
 
@@ -566,7 +561,7 @@
 
 .coverLink {
   display: block;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
 .coverLink:focus-visible {
@@ -580,10 +575,10 @@
   right: 8px;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-circle);
+  border: 1px solid var(--white-a20);
   background: rgba(15, 17, 23, 0.85);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   cursor: pointer;
@@ -622,10 +617,10 @@
 .art {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: #15161e;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
   transition:
     border-color 0.2s ease,
@@ -644,12 +639,7 @@
 .spineSheen {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.15) 0%,
-    rgba(0, 0, 0, 0.4) 3.5%,
-    transparent 9%
-  );
+  background: linear-gradient(90deg, var(--white-a15) 0%, rgba(0, 0, 0, 0.4) 3.5%, transparent 9%);
   pointer-events: none;
   z-index: 2;
 }
@@ -694,7 +684,7 @@
   align-items: center;
   gap: 5px;
   padding: 4px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -702,14 +692,14 @@
   background: rgba(12, 14, 20, 0.78);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--white-a14);
   white-space: nowrap;
 }
 
 .badgePulse {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: inline-block;
 }
 
@@ -738,8 +728,8 @@
 }
 
 .badgeLooking {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--white-a10);
+  border-color: var(--white-a20);
   color: #e2e8f0;
 }
 
@@ -792,7 +782,7 @@
   display: block;
   font-size: 12px;
   font-weight: 550;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -804,7 +794,7 @@
   gap: 5px;
   padding: 2px 7px;
   margin-top: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 550;
   max-width: fit-content;
@@ -828,13 +818,13 @@
 }
 
 .narratorAny {
-  color: rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.09);
+  color: var(--white-a45);
+  background: var(--white-a05);
+  border-color: var(--white-a09);
 }
 
 .narratorAny:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
   color: #ffffff;
 }
 
@@ -855,7 +845,7 @@
 .trail {
   display: block;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -891,13 +881,13 @@
   font-family: inherit;
   appearance: none;
   -webkit-appearance: none;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a05);
   color: rgba(255, 255, 255, 0.72);
   font-size: 11px;
   font-weight: 600;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   white-space: nowrap;
   transition:
@@ -908,7 +898,7 @@
 }
 
 .action:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-a12);
   color: #ffffff;
   transform: translateY(-1px);
 }
@@ -956,8 +946,8 @@
   gap: 16px;
   padding: 10px 16px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a02);
+  border: 1px solid var(--white-a06);
   transition:
     background 0.18s ease,
     border-color 0.18s ease,
@@ -966,7 +956,7 @@
 
 .shelfRow:hover {
   background: rgba(255, 255, 255, 0.045);
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--white-a12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
@@ -978,7 +968,7 @@
   overflow: hidden;
   flex-shrink: 0;
   background: #15161e;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
 }
 
 .shelfCover {
@@ -1014,7 +1004,7 @@
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   flex-wrap: wrap;
 }
 

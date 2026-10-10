@@ -65,7 +65,7 @@
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--mm-raised);
   color: var(--text-secondary) !important;
   font-size: 18px;
@@ -155,7 +155,7 @@
 .kinds button {
   padding: 5px 11px;
   border: 1px solid var(--white-a07);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--mm-raised);
   font-size: 12.5px;
   color: var(--text-secondary);
@@ -231,7 +231,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--white-a07);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -321,7 +321,7 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(var(--accent-rgb), 0.1);
   font-size: 13px;
 }
@@ -370,7 +370,7 @@
   flex-shrink: 0;
   padding: 9px 18px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--mm-raised);
   font-size: 13.5px;
   font-weight: 600;

@@ -40,7 +40,7 @@
   overflow-x: hidden;
   padding: 30px 36px 60px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: var(--white-a14) transparent;
 }
 
 /* A soft crossfade each time the view or collection changes. The page keys
@@ -83,7 +83,7 @@
   width: 100%;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   color: var(--text-1);
   font-size: 13.5px;
   font-family: inherit;
@@ -102,8 +102,8 @@
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-circle);
+  background: var(--white-a08);
   color: var(--white-a65);
   font-size: 15px;
   line-height: 1;
@@ -112,7 +112,7 @@
   align-items: center;
   justify-content: center;
 }
-.automx-search-clear:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
+.automx-search-clear:hover { background: var(--white-a16); color: #fff; }
 
 .automx-nav {
   flex: 1;
@@ -121,7 +121,7 @@
   flex-direction: column;
   gap: 2px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: var(--white-a12) transparent;
 }
 .automx-nav-heading {
   font-size: 10.5px;
@@ -152,14 +152,14 @@
     box-shadow 0.16s ease;
 }
 .automx-nav-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: var(--text-1);
 }
 .automx-nav-item.active {
   background: rgba(var(--accent-rgb), 0.13);
   border-color: rgba(var(--accent-rgb), 0.28);
   color: #fff;
-  box-shadow: 0 2px 14px rgba(var(--accent-rgb), 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 14px rgba(var(--accent-rgb), 0.12), inset 0 1px 0 var(--white-a06);
 }
 .automx-nav-icon {
   width: 20px;
@@ -181,10 +181,10 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-pill);
+  background: var(--white-a07);
   color: var(--white-a40);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
 }
 .automx-nav-item.active .automx-nav-count {
   background: rgba(var(--accent-rgb), 0.2);
@@ -203,7 +203,7 @@
 .automx-health-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   flex-shrink: 0;
 }
 .automx-health-dot.ok { background: rgb(var(--automx-ok)); box-shadow: 0 0 6px rgba(var(--automx-ok), 0.8); }
@@ -240,7 +240,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--line);
   background: var(--white-a04);
   color: var(--white-a40);
@@ -250,13 +250,13 @@
   cursor: pointer;
   transition: all 0.22s ease;
 }
-.automx-master:hover { border-color: rgba(255, 255, 255, 0.18); }
+.automx-master:hover { border-color: var(--white-a18); }
 .automx-master .automx-master-sw {
   width: 32px;
   height: 18px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   position: relative;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--white-a14);
   transition: background 0.22s ease;
   flex-shrink: 0;
 }
@@ -267,7 +267,7 @@
   left: 2px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #fff;
   transition: transform 0.22s var(--ease-emphasized);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
@@ -315,7 +315,7 @@
   padding: 30px 34px;
   border-radius: 22px;
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.018));
+  background: linear-gradient(180deg, var(--white-a05), rgba(255, 255, 255, 0.018));
   backdrop-filter: blur(14px);
 }
 .automx-hero-glow {
@@ -323,7 +323,7 @@
   inset: auto -80px -120px auto;
   width: 380px;
   height: 380px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   filter: blur(90px);
   pointer-events: none;
   transition: background 0.5s ease;
@@ -348,24 +348,24 @@
   width: 60px;
   height: 60px;
   flex-shrink: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 26px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  background: var(--white-a06);
+  border: 1px solid var(--white-a14);
+  box-shadow: inset 0 1px 0 var(--white-a12);
 }
 .automx-hero.ok .automx-hero-mark {
   color: rgb(134, 239, 172);
   border-color: rgba(var(--automx-ok), 0.45);
-  box-shadow: 0 0 26px rgba(var(--automx-ok), 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 26px rgba(var(--automx-ok), 0.28), inset 0 1px 0 var(--white-a12);
 }
 .automx-hero.warn .automx-hero-mark {
   color: rgb(253, 224, 171);
   border-color: rgba(var(--automx-warn), 0.5);
-  box-shadow: 0 0 26px rgba(var(--automx-warn), 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 26px rgba(var(--automx-warn), 0.3), inset 0 1px 0 var(--white-a12);
 }
 .automx-hero-text { position: relative; flex: 1; min-width: 0; }
 .automx-hero-title {
@@ -479,7 +479,7 @@
   width: 10px;
   height: 10px;
   margin-top: -5px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: rgb(var(--accent-rgb));
   box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.7);
   border: 2px solid rgba(0, 0, 0, 0.55);
@@ -492,7 +492,7 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: rgb(var(--accent-light-rgb));
   background: rgba(var(--accent-rgb), 0.12);
   border: 1px solid rgba(var(--accent-rgb), 0.3);
@@ -510,13 +510,13 @@
   border: none;
   padding: 4px 6px;
   margin: 0 -6px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-family: inherit;
   text-align: left;
   cursor: pointer;
   transition: background 0.15s ease;
 }
-.automx-row-main:hover { background: rgba(255, 255, 255, 0.05); }
+.automx-row-main:hover { background: var(--white-a05); }
 .automx-row-icon { font-size: 14px; flex-shrink: 0; }
 .automx-row-name {
   font-size: 13.5px;
@@ -555,14 +555,14 @@
   gap: 8px;
   padding: 7px 8px;
   margin: 0 -8px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid transparent;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .automx-attention-row:hover,
 .automx-recent-row:hover {
   background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(255, 255, 255, 0.06);
+  border-color: var(--white-a06);
 }
 .automx-attention-row.failed {
   background: rgba(var(--automx-danger), 0.07);
@@ -587,9 +587,9 @@
 .automx-mini-btn {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: var(--white-a65);
   font-size: 12px;
   cursor: pointer;
@@ -643,7 +643,7 @@
   font-size: 21px;
   background: rgba(var(--accent-rgb), 0.12);
   border: 1px solid rgba(var(--accent-rgb), 0.3);
-  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.14), inset 0 1px 0 var(--white-a08);
 }
 .automx-library-titles { flex: 1; min-width: 0; }
 .automx-library-title {
@@ -682,7 +682,7 @@
 .automx-chip-btn:hover {
   background: var(--white-a07);
   color: var(--text-1);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--white-a18);
 }
 .automx-chip-danger:hover {
   background: rgba(var(--automx-danger), 0.12);
@@ -760,7 +760,7 @@
   gap: 12px;
   padding: 70px 30px;
   border-radius: 22px;
-  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border: 1px dashed var(--white-a14);
   background: rgba(255, 255, 255, 0.015);
 }
 .automx-empty-small { padding: 46px 24px; }

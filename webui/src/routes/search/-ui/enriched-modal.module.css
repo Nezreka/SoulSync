@@ -96,7 +96,7 @@
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--em-raised);
   color: var(--text-secondary) !important;
   font-size: 18px;
@@ -123,7 +123,7 @@
 .providers button {
   padding: 5px 12px;
   border: 1px solid var(--white-a07);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--em-raised);
   font-size: 12.5px;
   color: var(--text-secondary);
@@ -170,8 +170,8 @@
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-circle);
+  border: 2px solid var(--white-a15);
   border-top-color: rgb(var(--accent-rgb));
   animation: spin 0.8s linear infinite;
 }
@@ -251,7 +251,7 @@
   top: 8px;
   left: 8px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(12, 13, 17, 0.8);
   font-size: 10.5px;
   font-weight: 700;
@@ -328,7 +328,7 @@
   max-width: 320px;
   padding: 6px 8px;
   border: 1px solid var(--line-strong);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--em-raised);
   font-size: 12.5px;
 }
@@ -345,7 +345,7 @@
 .conf i {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--success);
 }
 
@@ -380,7 +380,7 @@
   flex-shrink: 0;
   padding: 9px 18px;
   border: 1px solid var(--line-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--em-raised);
   font-size: 13.5px;
   font-weight: 600;

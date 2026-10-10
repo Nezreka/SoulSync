@@ -18,7 +18,7 @@
 }
 
 .fieldHelper {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -31,9 +31,9 @@
 .textInput,
 .textArea {
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-lg);
+  background: var(--white-a05);
   color: #fff;
   font: inherit;
   font-size: 14px;
@@ -53,15 +53,15 @@
 
 .textInput:hover,
 .textArea:hover {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--white-a16);
+  background: var(--white-a06);
 }
 
 .textInput:focus,
 .textArea:focus {
   outline: none;
   border-color: rgba(var(--accent-light-rgb), 0.55);
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
   box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
 }
 
@@ -74,11 +74,11 @@
   width: auto;
   min-width: 130px;
   box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.035)),
-    rgba(255, 255, 255, 0.05);
+    var(--white-a05);
   background-repeat: no-repeat;
   color: #fff;
   font: inherit;
@@ -96,18 +96,16 @@
   color-scheme: dark;
   cursor: pointer;
   &:hover {
-    border-color: rgba(255, 255, 255, 0.16);
+    border-color: var(--white-a16);
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.045)),
-      rgba(255, 255, 255, 0.06);
+      var(--white-a06);
   }
 
   &:focus {
     outline: none;
     border-color: rgba(var(--accent-light-rgb), 0.55);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.05)),
-      rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, var(--white-a08), var(--white-a05)), var(--white-a07);
     box-shadow: 0 0 0 3px rgba(var(--accent-light-rgb), 0.12);
   }
 
@@ -132,8 +130,8 @@
   flex-shrink: 0;
   box-sizing: border-box;
   margin: 0;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border: 2px solid var(--white-a20);
+  border-radius: var(--radius-xs);
   background: transparent;
   color: #000;
   cursor: pointer;
@@ -186,11 +184,9 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0 3px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)),
-    rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--white-a08), var(--white-a04)), var(--white-a06);
   cursor: pointer;
   transition:
     border-color 0.18s ease,
@@ -224,7 +220,7 @@
   display: block;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   transform: translateX(0);
@@ -251,10 +247,10 @@
   position: relative;
   width: 100%;
   height: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-pill);
+  background: var(--white-a08);
+  box-shadow: inset 0 1px 1px var(--white-a04);
 }
 
 .rangeIndicator {
@@ -271,9 +267,9 @@
   width: 16px;
   height: 16px;
   border: 1px solid rgba(255, 255, 255, 0.24);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background:
-    radial-gradient(circle at 30% 28%, rgba(255, 255, 255, 0.3), transparent 46%),
+    radial-gradient(circle at 30% 28%, var(--white-a30), transparent 46%),
     rgb(var(--accent-light-rgb));
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
   transition:
@@ -305,10 +301,8 @@
   padding: 14px 16px;
   text-align: left;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.03)),
-    rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--white-a08);
+  background: linear-gradient(180deg, var(--white-a05), var(--white-a03)), var(--white-a03);
   color: #fff;
   cursor: pointer;
   transition:
@@ -318,18 +312,16 @@
     background 0.18s ease;
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.14);
+    border-color: var(--white-a14);
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.04)),
-      rgba(255, 255, 255, 0.04);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.075), var(--white-a04)), var(--white-a04);
     box-shadow: 0 12px 28px rgba(0, 0, 0, 0.22);
   }
 
   &[data-selected='true'] {
     border-color: rgba(var(--accent-light-rgb), 0.45);
     background:
-      linear-gradient(180deg, rgba(var(--accent-rgb), 0.18), rgba(255, 255, 255, 0.04)),
-      rgba(255, 255, 255, 0.05);
+      linear-gradient(180deg, rgba(var(--accent-rgb), 0.18), var(--white-a04)), var(--white-a05);
     box-shadow:
       0 0 0 1px rgba(var(--accent-light-rgb), 0.1),
       0 14px 32px rgba(0, 0, 0, 0.26);
@@ -383,9 +375,9 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -400,8 +392,8 @@
     background 0.18s ease;
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--white-a18);
+    background: var(--white-a08);
   }
 
   &[data-variant='ghost'] {
@@ -412,9 +404,9 @@
 
   &[data-variant='ghost']:hover:not(:disabled) {
     transform: none;
-    border-color: rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.85);
+    border-color: var(--white-a12);
+    background: var(--white-a06);
+    color: var(--white-a85);
   }
 
   &[data-selected='true'] {
@@ -438,9 +430,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -457,8 +449,8 @@
     color 0.18s ease;
   &:hover:not(:disabled) {
     transform: translateY(-1px);
-    border-color: rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--white-a18);
+    background: var(--white-a08);
   }
 
   &:focus-visible {
@@ -525,14 +517,14 @@
   }
 
   &[data-variant='secondary'] {
-    border-color: rgba(255, 255, 255, 0.12);
-    background: rgba(255, 255, 255, 0.08);
+    border-color: var(--white-a12);
+    background: var(--white-a08);
     color: #ccc;
   }
 
   &[data-variant='secondary']:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.18);
-    background: rgba(255, 255, 255, 0.14);
+    border-color: var(--white-a18);
+    background: var(--white-a14);
     color: #fff;
   }
 
@@ -543,19 +535,19 @@
 
   &[data-variant='secondary']:disabled {
     opacity: 0.55;
-    background: rgba(255, 255, 255, 0.05);
-    color: rgba(255, 255, 255, 0.45);
+    background: var(--white-a05);
+    color: var(--white-a45);
   }
 
   &[data-variant='ghost'] {
     border-color: transparent;
     background: transparent;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
   }
 
   &[data-variant='ghost']:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.07);
+    border-color: var(--white-a14);
+    background: var(--white-a07);
     color: #fff;
   }
 

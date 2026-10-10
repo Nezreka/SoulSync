@@ -128,7 +128,7 @@
 .watchlist-page-container .wl-chip--cta {
   background: linear-gradient(135deg, rgb(var(--accent-rgb)) 0%, #12833b 100%);
   color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--white-a20);
   box-shadow: 0 4px 14px rgba(var(--accent-rgb), 0.35);
 }
 
@@ -248,8 +248,8 @@
   min-height: 0 !important;
   height: 28px !important;
   padding: 0 10px !important;
-  background: rgba(255, 255, 255, 0.04) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: var(--white-a04) !important;
+  border: 1px solid var(--white-a08) !important;
   border-radius: 9999px !important;
   cursor: pointer !important;
   user-select: none !important;
@@ -260,8 +260,8 @@
 }
 
 .watchlist-page-container .watchlist-attention-card:hover {
-  background: rgba(255, 255, 255, 0.08) !important;
-  border-color: rgba(255, 255, 255, 0.18) !important;
+  background: var(--white-a08) !important;
+  border-color: var(--white-a18) !important;
   transform: translateY(-1px) !important;
 }
 
@@ -296,7 +296,7 @@
   font-size: 11px !important;
   font-weight: 750 !important;
   line-height: 1 !important;
-  background: rgba(255, 255, 255, 0.07) !important;
+  background: var(--white-a07) !important;
   color: var(--wl-text-muted) !important;
 }
 
@@ -568,7 +568,7 @@
 .watchlist-page-container .watchlist-release-fallback {
   width: 44px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
 }
@@ -577,7 +577,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   font-size: 20px;
 }
 
@@ -798,7 +798,7 @@
   width: 72px !important;
   height: 72px !important;
   min-width: 72px !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-lg) !important;
   overflow: hidden !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
   background: rgba(0, 0, 0, 0.3) !important;
@@ -824,7 +824,7 @@
   align-items: center;
   justify-content: center;
   font-size: 26px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
 }
 
 /* Checkbox (Subtle overlay top-left) */
@@ -956,8 +956,8 @@
   font-size: 10px !important;
   font-weight: 700 !important;
   letter-spacing: 0.02em !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: var(--white-a06) !important;
+  border: 1px solid var(--white-a10) !important;
   color: var(--wl-text-secondary) !important;
 }
 
@@ -986,7 +986,7 @@
   border-radius: var(--radius-pill) !important;
   font-size: 10px !important;
   font-weight: 650 !important;
-  background: rgba(255, 255, 255, 0.05) !important;
+  background: var(--white-a05) !important;
   border: 1px solid var(--line) !important;
   color: var(--wl-text-secondary) !important;
 }
@@ -1221,8 +1221,8 @@
   align-items: center !important;
   gap: 8px !important;
   padding: 9px 18px !important;
-  background: rgba(255, 255, 255, 0.08) !important;
-  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  background: var(--white-a08) !important;
+  border: 1px solid var(--white-a15) !important;
   border-radius: var(--radius-pill) !important;
   color: #ffffff !important;
   font-size: 13px !important;
@@ -1234,7 +1234,7 @@
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-back:hover {
-  background: rgba(255, 255, 255, 0.14) !important;
+  background: var(--white-a14) !important;
   transform: translateX(-2px) !important;
 }
 
@@ -1250,7 +1250,7 @@
 .watchlist-artist-detail-overlay .watchlist-detail-hero img {
   width: 120px !important;
   height: 120px !important;
-  border-radius: 50% !important;
+  border-radius: var(--radius-circle) !important;
   border: 3px solid rgba(var(--accent-rgb), 0.5) !important;
   box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35) !important;
   object-fit: cover !important;
@@ -1282,8 +1282,8 @@
 .watchlist-artist-detail-overlay .watchlist-detail-genre-tag {
   display: inline-flex !important;
   padding: 4px 10px !important;
-  background: rgba(255, 255, 255, 0.06) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: var(--white-a06) !important;
+  border: 1px solid var(--white-a10) !important;
   border-radius: var(--radius-pill) !important;
   font-size: 11.5px !important;
   font-weight: 600 !important;
@@ -1305,7 +1305,7 @@
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 12px !important;
+  border-radius: var(--radius-lg) !important;
   font-size: 14px !important;
   font-weight: 700 !important;
   cursor: pointer !important;
@@ -1315,14 +1315,14 @@
 .watchlist-artist-detail-overlay .watchlist-detail-discography-btn {
   background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.7)) !important;
   color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border: 1px solid var(--white-a20) !important;
   box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.35) !important;
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-settings-btn {
-  background: rgba(255, 255, 255, 0.06) !important;
+  background: var(--white-a06) !important;
   color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid var(--white-a12) !important;
 }
 
 .watchlist-artist-detail-overlay .watchlist-detail-remove-btn {
@@ -1334,7 +1334,7 @@
 .watchlist-artist-detail-overlay .watchlist-detail-section {
   background: var(--wl-surface) !important;
   border: 1px solid var(--line) !important;
-  border-radius: 16px !important;
+  border-radius: var(--radius-xl) !important;
   padding: 16px !important;
   margin-bottom: 16px !important;
 }
@@ -1460,7 +1460,7 @@
     background: #141722 !important;
     border-radius: 24px 24px 0 0 !important;
     border-left: none !important;
-    border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-top: 1px solid var(--white-a15) !important;
     box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.85) !important;
     z-index: 10051 !important;
     padding: 16px 18px calc(24px + env(safe-area-inset-bottom, 20px)) !important;
@@ -1478,7 +1478,7 @@
     width: 44px !important;
     height: 4px !important;
     border-radius: 2px !important;
-    background: rgba(255, 255, 255, 0.25) !important;
+    background: var(--white-a25) !important;
     margin: 0 auto 4px !important;
     flex-shrink: 0 !important;
   }

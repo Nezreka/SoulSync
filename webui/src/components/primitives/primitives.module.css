@@ -4,19 +4,19 @@
   width: 100%;
   margin: 0 0 12px;
   padding: 10px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
   color: rgba(255, 255, 255, 0.82);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 var(--white-a04);
 }
 
 .notice[data-tone='neutral'] {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--white-a08);
+  background: var(--white-a04);
   color: rgba(255, 255, 255, 0.82);
 }
 
@@ -51,15 +51,15 @@
   min-width: 2ch;
   padding: 1px 7px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.74rem;
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
   vertical-align: middle;
-  color: rgba(255, 255, 255, 0.45);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--white-a45);
+  background: var(--white-a05);
+  border-color: var(--white-a08);
 }
 
 .badge[data-tone='info'] {

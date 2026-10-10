@@ -28,7 +28,7 @@
 
 .issuesSubtitle {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   margin: 0;
 }
 
@@ -54,8 +54,8 @@
 .issuesStatCard {
   flex: 1;
   min-width: 100px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   border-radius: 10px;
   padding: 14px 16px;
   text-align: center;
@@ -71,7 +71,7 @@
 
 .issuesStatLabel {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-top: 4px;
@@ -107,7 +107,7 @@
 .issuesEmpty {
   text-align: center;
   padding: 60px 20px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .issuesLoading {
@@ -122,9 +122,9 @@
 .issuesSpinner {
   width: 20px;
   height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--white-a10);
   border-top-color: rgba(var(--accent-light-rgb), 0.7);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.8s linear infinite;
 }
 
@@ -143,13 +143,13 @@
 .issuesEmptyTitle {
   font-size: 16px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   margin-bottom: 6px;
 }
 
 .issuesEmptyText {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .issueCard {
@@ -159,9 +159,9 @@
   width: 100%;
   padding: 14px 16px;
   text-align: left;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--white-a06);
+  background: var(--white-a03);
   color: inherit;
   cursor: pointer;
   transition:
@@ -173,8 +173,8 @@
 
 .issueCard:hover {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--white-a06);
+  border-color: var(--white-a12);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
 }
 
@@ -187,15 +187,15 @@
 .issueCardThumb {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   object-fit: cover;
 }
 
 .issueCardThumbPlaceholder {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  background: var(--white-a05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -242,14 +242,14 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   flex-wrap: wrap;
 }
 
 .issueCardEntityType {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -263,7 +263,7 @@
 }
 
 .issueCardMetaLine {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -271,7 +271,7 @@
 
 .issueCardDescription {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -284,13 +284,13 @@
   gap: 8px;
   flex-wrap: wrap;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-a30);
 }
 
 .issueCardProfile {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .issueCardDate {
@@ -342,7 +342,7 @@
 .issuePriorityDot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: inline-block;
 }
 
@@ -379,7 +379,7 @@
   display: flex;
   gap: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   margin-bottom: 14px;
 }
 
@@ -391,7 +391,7 @@
 .issueHeroArtistThumb {
   width: 48px;
   height: 48px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   position: absolute;
   top: -6px;
@@ -413,13 +413,13 @@
   width: 140px;
   height: 140px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 40px;
-  color: rgba(255, 255, 255, 0.15);
+  color: var(--white-a15);
 }
 
 .issueHeroInfo {
@@ -433,7 +433,7 @@
 
 .issueHeroArtist {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
@@ -448,14 +448,14 @@
 
 .issueHeroTrackName {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   font-weight: 500;
   margin-top: 2px;
 }
 
 .issueHeroMeta {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   margin-top: 2px;
 }
 
@@ -470,9 +470,9 @@
   font-size: 10px;
   padding: 2px 8px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a06);
+  color: var(--white-a55);
+  border: 1px solid var(--white-a08);
 }
 
 .issueDetailInfoBar {
@@ -482,7 +482,7 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--white-a05);
   margin-bottom: 14px;
 }
 
@@ -500,18 +500,18 @@
 
 .issueDetailCategory {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
 }
 
 .issueDetailDate {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-size: 12px;
 }
 
 .issueDetailProfile {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
 }
 
@@ -523,14 +523,14 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   margin-bottom: 8px;
   font-weight: 500;
 }
 
 .issueDetailSectionCount {
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-a30);
   font-size: 10px;
   text-transform: none;
   margin-left: 4px;
@@ -545,16 +545,16 @@
 
 .issueDetailDescription {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .issueDetailFilepath {
   padding: 10px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   color: rgba(255, 255, 255, 0.72);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
@@ -563,7 +563,7 @@
 
 .issueDetailNoDesc {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--white-a25);
   font-style: italic;
 }
 
@@ -578,9 +578,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
+  background: var(--white-a03);
+  border: 1px solid var(--white-a05);
+  border-radius: var(--radius-md);
 }
 
 .issueMetaIcon {
@@ -595,13 +595,13 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   flex-shrink: 0;
 }
 
 .issueMetaValue {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   margin-left: auto;
   font-weight: 500;
   white-space: nowrap;
@@ -637,11 +637,11 @@
 
 .issueDetailResponseTextarea {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--white-a05);
+  border: 1px solid var(--white-a10);
   color: #fff;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 13px;
   outline: none;
   resize: vertical;
@@ -679,16 +679,16 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-pill);
+  background: var(--white-a06);
+  border: 1px solid var(--white-a08);
   color: rgba(255, 255, 255, 0.78);
   text-decoration: none;
   font-size: 12px;
 }
 
 .issueExternalLink:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
 }
 
 .issueExternalLinkService {
@@ -749,8 +749,8 @@
 .issueDetailTracklist {
   display: grid;
   gap: 0;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--white-a02);
+  border: 1px solid var(--white-a05);
   border-radius: 10px;
   padding: 6px 0;
   max-height: 240px;
@@ -762,9 +762,9 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   padding: 8px 14px 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--white-a04);
 }
 
 .issueDetailTracklistDisc:first-child {
@@ -781,7 +781,7 @@
 }
 
 .issueDetailTracklistRow:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-a03);
 }
 
 .issueDetailTracklistNum,
@@ -799,7 +799,7 @@
 
 .issueDetailTracklistTitle {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -809,7 +809,7 @@
 
 .issueDetailTracklistDur {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-a30);
   flex-shrink: 0;
   min-width: 36px;
   text-align: right;
@@ -825,10 +825,10 @@
 .issueTrackBadge {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.65);
+  background: var(--white-a08);
+  color: var(--white-a65);
   font-size: 10px;
   margin-left: 0;
 }
@@ -844,8 +844,8 @@
 }
 
 .issueTrackBadgeOther {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.5);
+  background: var(--white-a08);
+  color: var(--white-a50);
 }
 
 .issueTrackBadgeHigh {
@@ -862,9 +862,9 @@
 
 .reportIssueEntityInfo {
   padding: 14px 16px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
 }
 
 .reportIssueEntityName {
@@ -883,9 +883,9 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: #fff;
   cursor: pointer;
   font: inherit;
@@ -905,8 +905,8 @@
 
 .modalLinkButton:hover {
   transform: translateY(-1px);
-  border-color: rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--white-a18);
+  background: var(--white-a08);
 }
 
 .modalLinkButton:focus-visible {
@@ -916,12 +916,12 @@
 }
 
 .modalButtonSecondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--white-a10);
+  color: var(--white-a80);
 }
 
 .modalButtonSecondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--white-a15);
 }
 
 .modalButtonPrimary {
@@ -1081,14 +1081,14 @@
 .threadHeroArtPlaceholder {
   width: 64px;
   height: 64px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   object-fit: cover;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
 }
 
 .threadHeroArtRound {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 .threadHeroArtPlaceholder {
@@ -1106,7 +1106,7 @@
 
 .threadEyebrow {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   letter-spacing: 0.01em;
 }
 
@@ -1120,7 +1120,7 @@
 
 .threadItem {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1133,15 +1133,15 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .threadItemName {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
 }
 
 .threadItemContext {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .threadItemLinks {
@@ -1168,7 +1168,7 @@
 
 .threadRemoved {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-style: italic;
 }
 
@@ -1184,16 +1184,16 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   text-transform: capitalize;
 }
 
 .threadFollowers {
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   padding: 8px 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-a03);
 }
 
 .threadOffer {
@@ -1202,7 +1202,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(var(--accent-rgb), 0.08);
   border: 1px solid rgba(var(--accent-rgb), 0.22);
   font-size: 13.5px;
@@ -1234,13 +1234,13 @@
   flex: 0 0 auto;
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: grid;
   place-items: center;
   font-size: 12.5px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--white-a85);
+  background: var(--white-a08);
 }
 
 .threadCommentMain {
@@ -1277,7 +1277,7 @@
 
 .threadBodyEmpty {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-style: italic;
 }
 
@@ -1287,12 +1287,12 @@
   gap: 10px;
   padding-left: 11px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .threadEvent strong {
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
 }
 
 .threadEventDot {
@@ -1300,8 +1300,8 @@
   width: 8px;
   height: 8px;
   margin-right: 11px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-circle);
+  background: var(--white-a20);
 }
 
 .threadReply {
@@ -1309,9 +1309,9 @@
   box-sizing: border-box;
   min-height: 76px;
   padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a03);
   color: #fff;
   font: inherit;
   font-size: 13.5px;
@@ -1342,18 +1342,18 @@
 .quietButton {
   padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   cursor: pointer;
 }
 
 .quietButton:hover:not(:disabled) {
   color: #fff;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
 }
 
 .quietButton:disabled {
@@ -1362,7 +1362,7 @@
 }
 
 .itemDetails {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-a06);
   padding-top: 12px;
 }
 
@@ -1375,14 +1375,14 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .itemDetailsDate {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .itemDetailsBody {
@@ -1400,9 +1400,9 @@
   width: 36px;
   height: 36px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a04);
+  color: var(--white-a80);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -1410,7 +1410,7 @@
 
 .menuTrigger:hover:not(:disabled),
 .menuTrigger[aria-expanded='true'] {
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--white-a09);
   color: #fff;
 }
 
@@ -1421,9 +1421,9 @@
   z-index: 2;
   min-width: 210px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(24, 24, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 
@@ -1433,7 +1433,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .menuItem {
@@ -1444,18 +1444,18 @@
   gap: 10px;
   padding: 8px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
   font-size: 13px;
   text-align: left;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   cursor: pointer;
 }
 
 .menuItem:hover,
 .menuItem:focus-visible {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
   outline: none;
 }
 
@@ -1487,9 +1487,9 @@
   flex-direction: column;
   gap: 12px;
   padding: 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  background: var(--white-a03);
+  border: 1px solid var(--white-a08);
 }
 
 .ownerEditLabel {
@@ -1498,14 +1498,14 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .ownerEditInput {
   padding: 9px 12px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a05);
   color: #fff;
   font: inherit;
   font-size: 14px;
