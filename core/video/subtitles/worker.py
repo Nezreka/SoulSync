@@ -278,6 +278,19 @@ def run_cycle(db, settings, fs=None) -> dict:
             video_id = row.get("video_id", video_id)
 
             filename = os.path.basename(file_path)
+            # Disk check BEFORE any network fetch: if the subtitle landed
+            # between cycles (user drop, another process), mark 'have' without
+            # burning provider quota on a download we don't need.
+            name = srt_name(file_path, lang)
+            folder = os.path.dirname(file_path)
+            try:
+                if name.lower() in {str(n).lower()
+                                    for n in (fs.list_dir(folder) or [])}:
+                    db.subtitle_mark(video_kind, video_id, lang, "have",
+                                     hi=hi, forced=forced, count_attempt=False)
+                    continue
+            except Exception:  # noqa: BLE001 - a failed listing just means "not there"
+                pass
             moviehash = opensubtitles_hash(file_path)
             query = SubtitleQuery(identity=dict(identity), language=lang,
                                   hi=hi, forced=forced,
@@ -298,15 +311,7 @@ def run_cycle(db, settings, fs=None) -> dict:
                 text, pid, candidate, score = None, None, None, 0.0
 
             if text:
-                name = srt_name(file_path, lang)
-                folder = os.path.dirname(file_path)
                 try:
-                    if name.lower() in {str(n).lower()
-                                        for n in (fs.list_dir(folder) or [])}:
-                        # Landed between cycles — truthfully 'have', no quota burn.
-                        db.subtitle_mark(video_kind, video_id, lang, "have",
-                                         hi=hi, forced=forced, count_attempt=False)
-                        continue
                     fs.write_text(os.path.join(folder, name), text)
                 except Exception:  # noqa: BLE001
                     logger.exception("subtitle worker: sidecar write failed for %s", name)

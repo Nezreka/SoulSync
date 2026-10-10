@@ -2933,10 +2933,10 @@ class VideoDatabase:
                 row = conn.execute("SELECT 1 FROM video_downloads WHERE id = ?",
                                    (video_id,)).fetchone()
             elif kind == "movie":
-                row = conn.execute("SELECT 1 FROM video_movies WHERE id = ?",
+                row = conn.execute("SELECT 1 FROM movies WHERE id = ?",
                                    (video_id,)).fetchone()
             elif kind == "episode":
-                row = conn.execute("SELECT 1 FROM video_episodes WHERE id = ?",
+                row = conn.execute("SELECT 1 FROM episodes WHERE id = ?",
                                    (video_id,)).fetchone()
             else:
                 return False

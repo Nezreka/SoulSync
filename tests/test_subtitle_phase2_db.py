@@ -130,6 +130,22 @@ def test_source_exists_download_row(db):
     assert db.subtitle_source_exists("download", 999999) is False
 
 
+def test_source_exists_movie_and_episode_rows(db):
+    conn = db._get_connection()
+    movie_id = conn.execute("INSERT INTO movies (title) VALUES ('M')").lastrowid
+    show_id = conn.execute("INSERT INTO shows (title) VALUES ('S')").lastrowid
+    season_id = conn.execute(
+        "INSERT INTO seasons (show_id, season_number) VALUES (?, 1)", (show_id,)).lastrowid
+    ep_id = conn.execute(
+        "INSERT INTO episodes (show_id, season_id, season_number, episode_number, title)"
+        " VALUES (?, ?, 1, 1, 'E')", (show_id, season_id)).lastrowid
+    conn.commit()
+    assert db.subtitle_source_exists("movie", movie_id) is True
+    assert db.subtitle_source_exists("movie", 999999) is False
+    assert db.subtitle_source_exists("episode", ep_id) is True
+    assert db.subtitle_source_exists("episode", 999999) is False
+
+
 def test_source_exists_unknown_kind_is_false(db):
     assert db.subtitle_source_exists("bogus", 1) is False
     assert db.subtitle_source_exists("download", "garbage") is False
