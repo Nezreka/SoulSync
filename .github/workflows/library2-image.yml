@@ -40,12 +40,14 @@ jobs:
             type=gha,scope=foundation
           cache-to: type=gha,mode=max,scope=library2
       - name: Verify compilation and Library regressions in the image
+        # tests/ is in .dockerignore since upstream 929646829: mount it.
         run: >-
-          docker run --rm --entrypoint /bin/sh "$IMAGE" -c
+          docker run --rm -v "$PWD/tests:/app/tests:ro" -e PYTHONDONTWRITEBYTECODE=1
+          --entrypoint /bin/sh "$IMAGE" -c
           'python -m compileall -q api core database services web_server.py wsgi.py &&
           python -m pip install --no-cache-dir pytest==9.0.3 pytest-timeout==2.4.0 &&
           python -m pytest tests/library2/test_metadata_consistency.py
-          tests/wishlist/test_library_monitoring_consistency.py -q --tb=short'
+          tests/wishlist/test_library_monitoring_consistency.py -q --tb=short -p no:cacheprovider'
       - name: Publish verified image
         run: |
           docker push "$IMAGE"
