@@ -52,8 +52,9 @@ DEFAULTS = {
     "carry_subtitles": True,
     "save_artwork": True,    # nfo + artwork sidecars on by default (cheap, local) — best-in-class
     "write_nfo": True,
-    "download_subtitles": False,   # opt-in: fetches from OpenSubtitles (external, rate-limited)
+    "download_subtitles": True,    # on by default for new imports: fetches from the subtitle providers (external, rate-limited)
     "subtitle_langs": "en",
+    "subtitle_provider_order": '["opensubtitles"]',   # JSON list string: provider fetch chain, most-preferred first
     # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
     # episodes, dismissed imports) move into an ss_recycle folder under the
     # file's library root instead of unlinking; purged after recycle_keep_days.
@@ -124,6 +125,10 @@ def normalize(raw: Any) -> dict:
     if "subtitle_langs" in raw:
         from core.video.subtitles import parse_langs
         d["subtitle_langs"] = ",".join(parse_langs(raw.get("subtitle_langs")))
+    if "subtitle_provider_order" in raw:
+        from core.video.subtitles import parse_provider_order
+        d["subtitle_provider_order"] = json.dumps(
+            parse_provider_order(raw.get("subtitle_provider_order")))
     return d
 
 

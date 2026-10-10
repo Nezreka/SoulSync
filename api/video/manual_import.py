@@ -152,7 +152,10 @@ def register_routes(bp):
             # refresh the server + DB the same way the auto-download path does
             # (batch-complete → scan chain), so the manually-placed title shows up
             # without waiting for a scheduled scan.
-            sidecar_dl = {"kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
+            # "id" threads the real download id through: write_subtitles_for keys its
+            # subtitle_wanted rows on it (the dict is otherwise synthetic — the
+            # override identity, not the row's).
+            sidecar_dl = {"id": dl_id, "kind": _KIND_FOR_SCOPE[scope], "media_source": "tmdb",
                           "media_id": override.get("media_id"),
                           "poster_url": row.get("poster_url"),
                           "search_ctx": json.dumps({"scope": scope, "season": override.get("season"),

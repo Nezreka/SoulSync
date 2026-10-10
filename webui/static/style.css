@@ -4246,6 +4246,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 10px;
 }
 
+/* Subtitles provider chain: read-only ordered list of subtitle sources */
+.vo-provider-order {
+    margin: 6px 0 4px;
+    padding-left: 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+}
+
 .post-processing-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

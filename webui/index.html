@@ -8204,26 +8204,6 @@
 
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-subs-dl">
-                                                        <span>Download subtitles</span>
-                                                    </label>
-                                                    <small class="settings-hint">Fetch external .srt files from
-                                                        OpenSubtitles next to the video (uses your OpenSubtitles API key
-                                                        on the enrichment settings). Off by default &mdash; the free
-                                                        tier is daily-quota-limited, and most releases already carry
-                                                        embedded subs.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Subtitle Languages:</label>
-                                                    <input type="text" id="vo-sub-langs" placeholder="en">
-                                                    <small class="settings-hint">Comma-separated language codes to
-                                                        fetch, in priority order (e.g. <code>en,es</code>). One .srt per
-                                                        language is written as &lt;video&gt;.&lt;lang&gt;.srt.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
                                                         <input type="checkbox" id="vo-recycle">
                                                         <span>Recycle deleted files instead of erasing them</span>
                                                     </label>
@@ -8292,6 +8272,48 @@
                                                         style="background: #666;">&#128260; Reset to Defaults</button>
                                                     <small class="settings-hint">Restores the Radarr/Sonarr standard
                                                         layout.</small>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+
+                                                <div class="post-processing-section-title">Subtitles</div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-subs-dl">
+                                                        <span>Download subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">Fetch external .srt files from
+                                                        OpenSubtitles next to the video. On by default for new
+                                                        imports &mdash; best effort: the OpenSubtitles free tier is
+                                                        quota-limited (~20 downloads/day), so anything missed is
+                                                        retried later.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Subtitle Languages:</label>
+                                                    <input type="text" id="vo-sub-langs" placeholder="en">
+                                                    <small class="settings-hint">Language codes to fetch, in
+                                                        priority order (e.g. <code>en,es</code>). One .srt per
+                                                        language is written as
+                                                        &lt;video&gt;.&lt;lang&gt;.srt.</small>
+                                                    <small class="settings-hint">Each code is 2&ndash;3 letters;
+                                                        separate codes with commas, spaces, or semicolons.</small>
+                                                    <small class="settings-hint" id="vo-sub-langs-error" hidden
+                                                        style="color: #ff6b6b;"></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Subtitle provider chain:</label>
+                                                    <ol class="vo-provider-order" id="vo-provider-order"></ol>
+                                                    <small class="settings-hint">Each source is tried in order,
+                                                        top first, until subtitles are found. More providers are
+                                                        coming &mdash; reordering arrives in a later phase.</small>
+                                                    <small class="settings-hint">The API key lives under
+                                                        <a href="#opensubtitles-api-key"
+                                                            style="color: #22a079;">Services &rarr;
+                                                            OpenSubtitles</a>.</small>
                                                 </div>
                                             </div>
 

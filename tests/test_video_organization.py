@@ -22,9 +22,22 @@ def test_normalize_fills_and_validates():
     assert organization.default_settings()["save_artwork"] is True          # on by default (cheap, local)
     assert organization.default_settings()["write_nfo"] is True
     assert organization.normalize({"save_artwork": 0})["save_artwork"] is False
-    assert organization.default_settings()["download_subtitles"] is False   # opt-in (external API)
+    assert organization.default_settings()["download_subtitles"] is True   # on by default for new imports (Broque's call)
     assert organization.default_settings()["subtitle_langs"] == "en"
     assert organization.normalize({"subtitle_langs": "EN, es"})["subtitle_langs"] == "en,es"
+    # subtitle_provider_order is a top-level org setting stored as a JSON string;
+    # normalize accepts a list (what the UI posts) or a JSON string, and garbage
+    # falls back to the OpenSubtitles-only default
+    assert organization.default_settings()["subtitle_provider_order"] == '["opensubtitles"]'
+    assert organization.normalize({})["subtitle_provider_order"] == '["opensubtitles"]'
+    assert organization.normalize(
+        {"subtitle_provider_order": ["opensubtitles", "x"]})["subtitle_provider_order"] == \
+        '["opensubtitles", "x"]'
+    assert organization.normalize(
+        {"subtitle_provider_order": '["a"]'})["subtitle_provider_order"] == '["a"]'
+    assert organization.normalize(
+        {"subtitle_provider_order": "garbage {{{"})["subtitle_provider_order"] == \
+        '["opensubtitles"]'
     assert d["movie_template"] == organization.DEFAULTS["movie_template"]   # blank → default
     assert d["episode_template"] == "$series/$episode"
     # an invalid transfer mode falls back to the default
@@ -58,6 +71,11 @@ def test_load_save_roundtrip():
     saved = organization.save(db, {"transfer_mode": "move"})
     assert saved["transfer_mode"] == "move"
     assert organization.load(db)["transfer_mode"] == "move"              # persisted + reloads
+    # subtitle_provider_order round-trips through the same blob GET serves:
+    # POST a list (what the UI sends) → GET serves it back as a JSON string
+    saved = organization.save(db, {"subtitle_provider_order": ["opensubtitles", "x"]})
+    assert saved["subtitle_provider_order"] == '["opensubtitles", "x"]'
+    assert organization.load(db)["subtitle_provider_order"] == '["opensubtitles", "x"]'
 
 
 # ── template rendering ────────────────────────────────────────────────────────
