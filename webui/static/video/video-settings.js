@@ -1379,6 +1379,60 @@
         if (ep && et) ep.textContent = _orgRender(et.value || et.placeholder, _ORG_EP_EG) + '.mkv';
         if (yp && yt) yp.textContent = _orgRender(yt.value || yt.placeholder, _ORG_YT_EG) + '.mp4';
     }
+    // Subtitle provider chain (Phase 1): read-only ordered list. The backend
+    // serves `subtitle_provider_order` as a JSON list of provider ids (parsed
+    // by core.video.subtitles.parse_provider_order); the fallback below covers
+    // only garbage/missing values, defaulting to OpenSubtitles alone.
+    var SUBTITLE_PROVIDER_NAMES = { opensubtitles: 'OpenSubtitles' };
+    var DEFAULT_SUBTITLE_PROVIDER_ORDER = ['opensubtitles'];
+    function subtitleProviderOrder() {
+        var raw = _videoOrg && _videoOrg.subtitle_provider_order;
+        if (typeof raw === 'string') {
+            try { raw = JSON.parse(raw); } catch (e) { raw = null; }
+        }
+        var list = [];
+        if (Array.isArray(raw)) {
+            raw.forEach(function (p) {
+                p = String(p == null ? '' : p);
+                if (p && list.indexOf(p) === -1) list.push(p);
+            });
+        }
+        return list.length ? list : DEFAULT_SUBTITLE_PROVIDER_ORDER.slice();
+    }
+    function renderProviderOrder() {
+        var ol = document.getElementById('vo-provider-order');
+        if (!ol) return;
+        ol.innerHTML = '';
+        subtitleProviderOrder().forEach(function (id) {
+            var li = document.createElement('li');
+            li.textContent = SUBTITLE_PROVIDER_NAMES[id] || id;
+            ol.appendChild(li);
+        });
+    }
+    // Light validation for the languages field: 2-3 letter codes, same
+    // separators the backend's parse_langs accepts. Invalid input shows a
+    // hint and reverts to the last saved value instead of saving.
+    var _voLangsLastGood = 'en';
+    function validateSubLangs() {
+        var el = document.getElementById('vo-sub-langs');
+        var err = document.getElementById('vo-sub-langs-error');
+        if (!el) return true;
+        var toks = String(el.value || '').split(/[,\s;]+/).filter(function (t) { return t; });
+        var bad = null;
+        for (var i = 0; i < toks.length; i++) {
+            if (!/^[A-Za-z]{2,3}$/.test(toks[i])) { bad = toks[i]; break; }
+        }
+        if (bad !== null) {
+            if (err) {
+                err.textContent = 'Not a language code: "' + bad + '". Use 2-3 letters per code (e.g. en, es).';
+                err.hidden = false;
+            }
+            return false;
+        }
+        if (err) { err.hidden = true; err.textContent = ''; }
+        _voLangsLastGood = el.value;
+        return true;
+    }
     function fillOrg() {
         if (!_videoOrg) return;
         var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
@@ -1394,6 +1448,8 @@
         chk('vo-nfo', _videoOrg.write_nfo);
         chk('vo-subs-dl', _videoOrg.download_subtitles);
         set('vo-sub-langs', _videoOrg.subtitle_langs || 'en');
+        _voLangsLastGood = _videoOrg.subtitle_langs || 'en';
+        renderProviderOrder();
         chk('vo-recycle', _videoOrg.recycle_deletes);
         set('vo-recycle-days', _videoOrg.recycle_keep_days || 7);
         set('vo-recycle-path', _videoOrg.recycle_path || '');
@@ -1430,7 +1486,9 @@
             min_free_disk_gb: val('vo-min-free'),
             youtube_follow_count: val('vo-yt-follow-count'),
             youtube_sponsorblock: val('vo-sponsorblock'),
-            youtube_embed_subs: on('vo-yt-subs')
+            youtube_embed_subs: on('vo-yt-subs'),
+            // read-only in Phase 1; echoed back once the backend knows the key
+            subtitle_provider_order: subtitleProviderOrder()
         };
     }
     function saveOrganization(silent) {
@@ -1454,10 +1512,15 @@
             el.addEventListener('change', function () { saveOrganization(false); });
         });
         ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
-            'vo-subs-dl', 'vo-sub-langs', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
+            'vo-subs-dl', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
             'vo-sponsorblock', 'vo-yt-subs', 'vo-min-free', 'vo-yt-follow-count'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveOrganization(false); });
+        });
+        var langsEl = document.getElementById('vo-sub-langs');
+        if (langsEl) langsEl.addEventListener('change', function () {
+            if (validateSubLangs()) { saveOrganization(false); }
+            else { langsEl.value = _voLangsLastGood; }
         });
         var reset = document.getElementById('vo-reset');
         if (reset) reset.addEventListener('click', function () {

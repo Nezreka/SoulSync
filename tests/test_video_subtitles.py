@@ -15,6 +15,20 @@ def test_parse_langs():
     assert subtitles.parse_langs("") == ["en"]               # default
 
 
+def test_parse_provider_order():
+    po = subtitles.parse_provider_order
+    assert po('["opensubtitles", "podnapisi"]') == ["opensubtitles", "podnapisi"]
+    assert po(["a", "b"]) == ["a", "b"]                        # list form (UI posts this)
+    assert po(("a",)) == ["a"]
+    assert po(["ok", 42, "", None]) == ["ok"]                  # non-strings dropped
+    assert po(["a", "a", "b"]) == ["a", "b"]                   # de-duped, order kept
+    assert po(["  a  "]) == ["a"]                              # stripped
+    assert po("garbage {{{") == ["opensubtitles"]             # fallback
+    assert po([]) == ["opensubtitles"]                        # empty → default
+    assert po(None) == ["opensubtitles"]
+    assert po({"not": "a list"}) == ["opensubtitles"]
+
+
 def test_pick_best_file_takes_most_downloaded_for_the_language():
     found = {"data": [
         {"attributes": {"language": "en", "download_count": 10, "files": [{"file_id": 111}]}},

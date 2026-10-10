@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 49   # v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 50   # v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -436,6 +436,11 @@ _COLUMN_MIGRATIONS = [
     ("video_requests", "youtube_id", "TEXT"),
     ("video_requests", "channel_youtube_id", "TEXT"),
     ("video_requests", "channel_title", "TEXT"),
+    # subtitle_wanted user_set ("Replace Bazarr" Phase 1 review round 2): the
+    # table shipped in this unreleased PR without the column, so any tester DB
+    # created before this commit needs the idempotent ALTER. The CREATE TABLE
+    # in video_schema.sql already carries it for fresh DBs.
+    ("subtitle_wanted", "user_set", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -2677,6 +2682,118 @@ class VideoDatabase:
                 "SELECT tmdb_id, imdb_id FROM %s WHERE id = ?" % table, (media_id,)
             ).fetchone()
             return (row["tmdb_id"], row["imdb_id"]) if row else (None, None)
+        finally:
+            conn.close()
+
+    def episode_id_for(self, show_id: int, season, episode):
+        """episodes.id for (show, season, episode) — resolves an owned re-grab's
+        shows.id media_id to the episode row subtitle_wanted keys on. None when
+        the row isn't there (yet)."""
+        try:
+            season, episode = int(season), int(episode)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id FROM episodes WHERE show_id=? AND season_number=? "
+                "AND episode_number=?",
+                (int(show_id), season, episode),
+            ).fetchone()
+            return int(row["id"]) if row else None
+        finally:
+            conn.close()
+
+    # ── subtitle_wanted ("Replace Bazarr" wanted queue) ──────────────────────
+    @staticmethod
+    def _subtitle_wanted_key(video_kind, video_id, language, hi=False, forced=False):
+        return (str(video_kind), int(video_id), str(language or "en").lower(),
+                int(bool(hi)), int(bool(forced)))
+
+    def subtitle_want(self, video_kind, video_id, language, hi=False, forced=False,
+                      user_set=False) -> int:
+        """INSERT OR IGNORE one wanted row (UNIQUE on video × language × flags);
+        returns the row id, existing or new. ``user_set=True`` marks a per-item
+        override (the Phase 4 UI); the import hook always creates user_set=0
+        rows, and only user_set=1 rows count as an override there."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO subtitle_wanted(video_kind, video_id, language, hi, forced, user_set) "
+                "VALUES (?, ?, ?, ?, ?, ?)", key + (int(bool(user_set)),))
+            conn.commit()
+            row = conn.execute(
+                "SELECT id FROM subtitle_wanted WHERE video_kind=? AND video_id=? "
+                "AND language=? AND hi=? AND forced=?", key).fetchone()
+            return int(row["id"])
+        finally:
+            conn.close()
+
+    def subtitle_mark(self, video_kind, video_id, language, status, hi=False, forced=False,
+                      count_attempt: bool = True) -> None:
+        """Update a wanted row's status. Any status other than 'wanted' records a
+        fetch attempt (attempts + 1, last_attempt_at = now); re-queueing to
+        'wanted' leaves the attempt counters alone. Pass count_attempt=False
+        when no fetch ran (e.g. the sidecar was already on disk) so ``attempts``
+        stays an honest measure of FETCH attempts for Phase 2's backoff."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            if str(status) == "wanted" or not count_attempt:
+                conn.execute(
+                    "UPDATE subtitle_wanted SET status=? WHERE video_kind=? "
+                    "AND video_id=? AND language=? AND hi=? AND forced=?",
+                    (str(status),) + key)
+            else:
+                conn.execute(
+                    "UPDATE subtitle_wanted SET status=?, attempts=attempts+1, "
+                    "last_attempt_at=datetime('now') WHERE video_kind=? AND video_id=? "
+                    "AND language=? AND hi=? AND forced=?", (str(status),) + key)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def subtitle_get_wanted(self, limit: int = 100) -> list:
+        """Rows still needing a fetch (status='wanted'), oldest first — Phase 2's
+        retry-loop input."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM subtitle_wanted WHERE status='wanted' "
+                "ORDER BY created_at, id LIMIT ?", (int(limit),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def subtitle_get_for_video(self, video_kind, video_id) -> list:
+        """Every wanted row for one video — the per-item override source: when
+        rows exist, the import hook fetches THEIR languages instead of the global
+        subtitle_langs.
+
+        Insertion order (``ORDER BY id``), NOT alphabetical: rows are created in
+        the user's priority order (``parse_langs`` order, promised "in priority
+        order" by the settings UI), and with the providers' ~20/day quota the
+        order decides which languages actually get fetched."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM subtitle_wanted WHERE video_kind=? AND video_id=? "
+                "ORDER BY id",
+                (str(video_kind), int(video_id))).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def subtitle_have(self, video_kind, video_id, language, hi=False, forced=False) -> bool:
+        """True when a 'have' row exists for this video × language × flags."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM subtitle_wanted WHERE video_kind=? AND video_id=? "
+                "AND language=? AND hi=? AND forced=? AND status='have'", key).fetchone()
+            return row is not None
         finally:
             conn.close()
 
