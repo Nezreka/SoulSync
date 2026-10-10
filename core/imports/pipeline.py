@@ -80,6 +80,7 @@ from core.metadata.common import strip_musicbrainz_identity_tags, wipe_source_ta
 from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.imports.quality_replace import is_profile_upgrade
 from core.metadata.enrichment import enhance_file_metadata
+from core.metadata.source import evaluate_batch_album_distrust
 from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
@@ -1420,6 +1421,41 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 )
                 album_info['album_name'] = _regrouped
             _group_upgraded_from = album_info.pop('_album_group_upgraded_from', None)
+
+        # R4F3: the filing path is built BEFORE metadata enhancement computes
+        # the batch-album distrust verdict — a poisoned batch context would
+        # otherwise stamp the stranger's folder/year/type. Compute the verdict
+        # here (pure function of the per-track inputs) and stash it on the
+        # shared context dict: build_final_path_for_track substitutes the
+        # track's own album year/type/artist when distrusted, and
+        # extract_source_metadata + the library row writer reuse the verdict
+        # instead of recomputing (this also covers enhancement-disabled
+        # imports, where the verdict was never stashed before).
+        try:
+            _f3_track_info = get_import_track_info(context)
+            _f3_verdict = evaluate_batch_album_distrust(
+                get_import_original_search(context),
+                _f3_track_info,
+                get_import_context_album(context),
+                _f3_track_info.get("_explicit_artist_context")
+                if isinstance(_f3_track_info, dict) else None,
+            )
+            if _f3_verdict.get("distrusted"):
+                context["_batch_album_distrust_verdict"] = _f3_verdict
+                context["_batch_album_distrusted"] = True
+                context["_track_own_provider_album"] = dict(
+                    _f3_verdict.get("own_album") or {})
+                context["_track_own_artist_display_names"] = list(
+                    _f3_verdict.get("own_artist_display_names") or [])
+                logger.warning(
+                    "[Import] batch album context distrusted before filing: %s",
+                    _f3_verdict.get("reason") or "",
+                )
+        except Exception:  # noqa: BLE001 — a filing-path verdict must never fail an import
+            logger.warning(
+                "[Import] batch-album distrust pre-check failed; filing without distrust")
+            logger.debug(
+                "[Import] batch-album distrust pre-check traceback", exc_info=True)
 
         final_path, _final_is_replace = build_final_path_for_track(context, artist_context, album_info, file_ext)
         if _group_upgraded_from and not _final_is_replace:

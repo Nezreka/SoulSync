@@ -254,3 +254,72 @@ def test_the_artist_page_section_lock_survives_grouping():
     assert ctx['album_type'] == 'album'
     assert ctx['album_type_locked'] is True
 
+
+def _wt_no_id(track_name, artist, album_name, **extra):
+    """A wishlist row with no album id — the shape that forces the
+    ``_name_`` fallback bucket key (#1567)."""
+    t = _wt(track_name, artist, None, album_name, **extra)
+    del t['spotify_data']['album']['id']
+    return t
+
+
+def test_1567_name_fallback_bucket_with_distinct_artists_demoted_to_residual():
+    """#1567: several unrelated tracks sharing one bare album name ("music")
+    with no album ids bucketed together and the first row's artist would have
+    been stamped on all of them. A bare shared name with several distinct
+    artists is not an album — demote every track to the per-track flow."""
+    tracks = [
+        _wt_no_id('Paralyzer', 'Finger Eleven', 'music'),
+        _wt_no_id('Everlong', 'Foo Fighters', 'music'),
+        _wt_no_id('How You Remind Me', 'Nickelback', 'music'),
+        _wt_no_id('I Stand Alone', 'Godsmack', 'music'),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    assert res.album_groups == []
+    assert len(res.residual_tracks) == 4
+    assert {t['track_name'] for t in res.residual_tracks} == {
+        'Paralyzer', 'Everlong', 'How You Remind Me', 'I Stand Alone'}
+
+
+def test_1567_name_fallback_bucket_with_unanimous_artist_still_bundles():
+    """#1567 companion: a name-fallback bucket whose tracks unanimously name
+    one artist is a real (id-less) album and keeps bundling."""
+    tracks = [
+        _wt_no_id('S1', 'Artist', 'Same Album'),
+        _wt_no_id('S2', 'Artist', 'Same Album'),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    assert len(res.album_groups) == 1
+    assert res.album_groups[0].album_key == '_name_same album'
+    assert res.album_groups[0].artist_context['name'] == 'Artist'
+    assert res.residual_tracks == []
+
+
+def test_1567_genuine_compilation_with_real_id_still_bundles():
+    """#1567 companion: a genuine multi-artist compilation with a REAL shared
+    album id must keep bundling — the distrust only applies to weak
+    ``_name_`` buckets."""
+    tracks = [
+        _wt('Star Fighter', 'Wice', 'comp1', 'Magnatron 2.0', album_type='compilation'),
+        _wt('Omricon', 'Woob', 'comp1', 'Magnatron 2.0', album_type='compilation'),
+        _wt('Third Song', 'Zed', 'comp1', 'Magnatron 2.0', album_type='compilation'),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    assert len(res.album_groups) == 1
+    assert res.album_groups[0].artist_context['name'] == 'Various Artists'
+    assert len(res.album_groups[0].tracks) == 3
+    assert res.residual_tracks == []
+
+
+def test_1567_name_fallback_various_artists_compilation_still_bundles():
+    """#1567 companion: even without album ids, an explicit Various Artists
+    compilation marker means the multi-artist bucket is genuine."""
+    tracks = [
+        _wt_no_id('A', 'Singer A', 'Summer Mix', album_type='compilation'),
+        _wt_no_id('B', 'Singer B', 'Summer Mix', album_type='compilation'),
+    ]
+    res = group_wishlist_tracks_by_album(tracks)
+    assert len(res.album_groups) == 1
+    assert res.album_groups[0].artist_context['name'] == 'Various Artists'
+    assert res.residual_tracks == []
+

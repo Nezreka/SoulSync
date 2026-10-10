@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from core.context_sentinels import CONTEXT_SENTINEL_IDS
 from utils.logging_config import get_logger
 
 logger = get_logger("imports.context")
@@ -48,6 +49,34 @@ def _first_source_aware_id(source: str, *values: Any) -> str:
             continue
         return text
     return ""
+
+
+# Album-id values the pipeline itself invents when it has no real provider id.
+# Built from the canonical sentinel set (core/context_sentinels.py) plus the
+# album-flow-only 'wishlist_album' placeholder — they must never be treated
+# as a genuine shared album identity (e.g. by the #1567 poisoned-batch
+# guards). R3F1: a local copy here drifted from CONTEXT_SENTINEL_IDS, so
+# 'auto_import'/'explicit_artist' counted as REAL ids and silently bypassed
+# every distrust wire.
+_PLACEHOLDER_ALBUM_IDS = frozenset(CONTEXT_SENTINEL_IDS) | {"wishlist_album"}
+_NAME_FALLBACK_ALBUM_ID_PREFIX = "_name_"
+
+
+def is_real_provider_album_id(value: Any) -> bool:
+    """True when ``value`` looks like a real provider album id, not one of the
+    placeholder ids the download/import pipeline invents (the
+    ``CONTEXT_SENTINEL_IDS`` sentinels — ``auto_import``, ``explicit_album``,
+    ``explicit_artist``, ``from_sync_modal`` — plus ``wishlist_album`` and the
+    ``_name_<album>`` fallbacks)."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lowered = text.casefold()
+    if lowered in _PLACEHOLDER_ALBUM_IDS:
+        return False
+    if lowered.startswith(_NAME_FALLBACK_ALBUM_ID_PREFIX):
+        return False
+    return True
 
 
 def extract_artist_name(artist: Any) -> str:

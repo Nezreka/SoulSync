@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
+from core.imports.compilation import VARIOUS_ARTIST_NAMES
+
 logger = get_logger("wishlist.album_grouping")
 
 
@@ -154,6 +156,45 @@ def _verify_group_artist_context(group: "WishlistAlbumGroup") -> None:
             group.artist_context["name"] = actual
 
 
+# A name-fallback bucket key carries no shared album id — it is just a
+# normalized album NAME, so unrelated tracks can collide in it.
+_NAME_FALLBACK_PREFIX = "_name_"
+# The multi-artist compilation markers live in the shared vocabulary
+# (core/imports/compilation.py::VARIOUS_ARTIST_NAMES): a bucket claiming one
+# of these is trusted even without an album id.
+
+
+def _name_bucket_is_coherent(group: "WishlistAlbumGroup") -> bool:
+    """Decide whether a ``_name_`` fallback bucket may become an album bundle.
+
+    #1567: eleven unrelated tracks (no album ids, every row's stored album
+    name "music") bucketed together and the first row's artist (Nickelback)
+    was stamped on all of them as the batch album/artist context. A bare
+    name is not an album identity, so a name bucket is only promoted when
+    the member tracks corroborate a real shared release:
+
+    - the bucket claims an explicit "Various Artists" compilation marker
+      (genuine multi-artist compilations keep bundling), or
+    - every member track names the same artist (unanimous single artist).
+
+    Anything else — several distinct track artists under one bare name with
+    no album id — is demoted to the per-track flow, where each track is
+    tagged from its own data instead of first-row-wins context. Buckets
+    with a REAL shared album id are untouched (that's the whole point of
+    the unanimity rule in ``_verify_group_artist_context``).
+    """
+    claimed = ((group.artist_context or {}).get("name") or "").strip().casefold()
+    if claimed in VARIOUS_ARTIST_NAMES:
+        return True
+    names = set()
+    for track in group.tracks:
+        spotify_data = _extract_track_data(track)
+        name = _artist_name_from_track(spotify_data, track)
+        if name and name.strip():
+            names.add(name.strip().casefold())
+    return len(names) <= 1
+
+
 def group_wishlist_tracks_by_album(
     tracks: List[Dict[str, Any]],
     *,
@@ -235,11 +276,31 @@ def group_wishlist_tracks_by_album(
         group.tracks.append(track)
 
     # Second pass: promote groups meeting the threshold; demote
-    # smaller groups to residual.
+    # smaller groups to residual. #1567: name-fallback buckets additionally
+    # have to prove they are one real release — a bare shared name with
+    # several distinct artists and no album id is a poisoned pile, not an
+    # album, and goes back to the per-track flow.
+    #
+    # Bandwidth trade-off (deliberate, no behavior change): an id-less
+    # multi-artist non-VA bucket used to fire ONE album-bundle search for the
+    # whole pile; demoted, each of its N tracks now runs its own per-track
+    # search instead (N searches instead of 1). Correctness wins over
+    # bandwidth here — the single bundle search was stamping one stranger's
+    # album on every track (#1567).
     for group in buckets.values():
         if len(group.tracks) >= min_tracks_per_album:
             _verify_group_artist_context(group)
-            result.album_groups.append(group)
+            if group.album_key.startswith(_NAME_FALLBACK_PREFIX) and not _name_bucket_is_coherent(group):
+                logger.warning(
+                    "[Wishlist Album Grouping] name-fallback bucket '%s' holds tracks "
+                    "by several distinct artists with no shared album id — demoting "
+                    "%d track(s) to the per-track flow (#1567)",
+                    group.album_key,
+                    len(group.tracks),
+                )
+                result.residual_tracks.extend(group.tracks)
+            else:
+                result.album_groups.append(group)
         else:
             result.residual_tracks.extend(group.tracks)
 
