@@ -109,3 +109,55 @@ def test_split_apply_revalidates_new_protection(split, changed):
     assert s.paths[1].read_bytes() == before
     if changed in ('file_rehomed', 'pin'):
         assert out['success'] is False
+
+
+@pytest.fixture
+def record(imported_conn, legacy_db, tmp_path):
+    """One release opening with a guest-led song (the outlier album tag), two
+    songs by the artist, and a fourth owned by a second library."""
+    conn = imported_conn
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Host')").lastrowid
+    guest = conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest')").lastrowid
+    album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Record')", (artist,)).lastrowid
+    paths = []
+    for index, (lead, owner, tag) in enumerate([(guest, None, 'Record (Deluxe)'), (artist, None, 'Record'),
+                                                (artist, None, 'Record'), (artist, 2, 'Record')]):
+        track = conn.execute('INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,?,?)',
+                             (album, f'Song {index}', index + 1)).lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'primary',0)", (track, lead))
+        if lead == guest:
+            conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)", (track, artist))
+        path = tmp_path / f'r{index}.flac'
+        _make_flac(path, {'album': tag, 'title': f'Song {index}', 'albumartist': 'Host'})
+        conn.execute('INSERT INTO lib2_track_files(track_id,path,owner_profile_id) VALUES(?,?,?)', (track, str(path), owner))
+        paths.append(path)
+    conn.commit()
+    return SimpleNamespace(conn=conn, db=legacy_db, artist=artist, album=album, paths=paths,
+                           cfg=SimpleNamespace(get=lambda _k, default=None: default))
+
+
+def test_artist_scope_keeps_guest_led_outliers_and_owners_share_one_finding(record):
+    from core.repair_jobs.base import build_artist_file_scope
+    for scope in (None, build_artist_file_scope(record.db, record.artist, 'Host')):
+        _result, findings = _scan(record, scope)
+        album_findings = [f for f in findings if not f['details'].get('server_split')]
+        # One finding per release id: per-library findings would overwrite each other.
+        assert len(album_findings) == 1
+        tracks = album_findings[0]['details']['tracks']
+        assert len(tracks) == 4 and {t['owner_profile_id'] for t in tracks} == {None, 2}
+        assert album_findings[0]['details']['inconsistencies'][0]['outlier_count'] == 1
+
+
+def test_subjects_keep_the_release_artist_identity_for_a_guest_led_track(record):
+    from core.library2.maintenance_subjects import active_file_subjects
+    guest_led = next(s for s in active_file_subjects(record.db, None) if s['title'] == 'Song 0')
+    assert guest_led['artist_name'] == 'Guest'
+    assert guest_led['artist_id'] == record.artist
+
+
+def test_a_file_gone_since_the_scan_does_not_fail_the_rest_of_the_album(record):
+    _result, findings = _scan(record)
+    finding = next(f for f in findings if not f['details'].get('server_split'))
+    record.paths[1].unlink()
+    assert _apply(record, finding)['success']
+    assert FLAC(record.paths[0])['album'] == ['Record']

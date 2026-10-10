@@ -102,7 +102,9 @@ def propose_album_edition(database, config_manager, album_id, *, mode='active_pr
         candidate_editions=[dict(edition, source=source)
                             for source, editions in stored_alternatives.items() for edition in editions],
     )
-    if not resolved:
+    # The release already pinned (automatically) is no suggestion to review.
+    if not resolved or (str(resolved['source']).lower(), str(resolved['album_id'])) == (
+            str(previous_pin[0] or '').lower(), str(previous_pin[1] or '')):
         return None
     return {
         **resolved, **subject_details(subject), 'lib2_album_id': int(album_id),

@@ -117,6 +117,18 @@ def scoped_file_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[D
     ]
 
 
+def artist_scoped_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The file allowlist when the run has one, else the name-only scope.
+
+    The allowlist already holds the alias group and every track credit; an
+    exact lead-credit name check on top of it drops guest and alias tracks.
+    """
+    artist = get_scope_artist(context)
+    if get_scope_file_paths(context) is not None or not artist:
+        return scoped_file_subjects(context, subjects)
+    return [s for s in subjects if str(s.get("artist_name") or "").casefold() == artist.casefold()]
+
+
 def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> Dict[str, Any]:
     """Resolve a lib2 artist to exact linked file paths for repair jobs.
 

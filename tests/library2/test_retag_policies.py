@@ -163,6 +163,19 @@ def test_retag_lyrics_reuses_primary_credit_and_duration_lookup(native_audio, mo
     assert calls == [('One Dance', 'Guest Singer', 'Views', 180)]
 
 
+def test_fill_missing_does_not_look_up_lyrics_a_file_already_has(native_audio, monkeypatch):
+    n = native_audio
+    from core.lyrics_client import lyrics_client
+    calls = []
+    monkeypatch.setattr(lyrics_client, '_fetch_remote_lyrics',
+                        lambda *args: calls.append(args) or SimpleNamespace(plain_lyrics='Words', synced_lyrics=None))
+    retag.write_tags(n.db, [n.track], options={'lyrics': 'fetch', 'fields': ['lyrics'], 'cover_art': 'skip'})
+    calls.clear()
+    options = {'lyrics': 'fetch', 'mode': 'fill_missing', 'fields': ['lyrics'], 'cover_art': 'skip'}
+    assert not retag.tag_preview(retag.track_contexts(n.conn, [n.track]), options=options)[0]['has_changes']
+    assert calls == []
+
+
 def test_aborted_retag_is_failure_and_does_not_update_tag_cache(native_audio, monkeypatch):
     n = native_audio
     monkeypatch.setattr('core.metadata.common.save_audio_file', lambda *_a: False)

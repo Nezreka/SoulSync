@@ -7,7 +7,7 @@
  * player reads strictly:
  *
  *   - a known native row without `file_path` reaches the existing queue
- *     auto-download switch. With it off the player reports and skips Missing.
+ *     auto-download switch. With it off `queueableRows` leaves it out.
  *   - `is_library: true` is what skips the download flow entirely.
  *   - `id` must be an id the MEDIA SERVER understands (server or legacy). A v2
  *     id means nothing to it, so the typed ids ride alongside instead — the
@@ -166,6 +166,21 @@ export function artistQueueRows(
         disc_number: file.disc_number ?? null,
       };
     });
+}
+
+/** Missing rows wait for the queue's auto-download switch. With it off each
+ *  would only toast "Skipping track", so they stay out with one note. */
+export function queueableRows(rows: PlayQueueRow[]): PlayQueueRow[] {
+  if (window.isQueueAutoDownloadEnabled?.() !== false) return rows;
+  const onDisk = rows.filter((row) => row.is_library);
+  const left = rows.length - onDisk.length;
+  if (left && onDisk.length) {
+    window.showToast?.(
+      `${left} missing track${left === 1 ? '' : 's'} left out: queue auto-download is off`,
+      'info',
+    );
+  }
+  return onDisk;
 }
 
 /** Upstream 651f6e7e2 ("add any track to a playlist"), on a Library v2 row:

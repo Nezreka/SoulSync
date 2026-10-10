@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from database.music_database import MusicDatabase
 from core.repair_worker import RepairWorker
 
@@ -113,6 +115,24 @@ def test_a_live_writing_job_is_refused_and_a_dry_run_is_not(tmp_path, monkeypatc
     monkeypatch.setattr(w, 'get_job_config', lambda jid: {'settings': {'dry_run': True}})
     w._run_job('library_reorganize', forced=True)
     assert ran == [True], "a dry run must still be allowed"
+
+
+@pytest.mark.parametrize('settings,live', [
+    ({'auto_apply': True}, True),
+    ({'auto_apply': True, 'dry_run': False}, True),
+    ({'auto_apply': False, 'dry_run': False}, False),
+    ({'auto_apply': True, 'dry_run': True}, False),
+    ({'dry_run': False}, True),
+    ({}, False),
+])
+def test_retag_auto_apply_counts_as_a_live_run(tmp_path, monkeypatch, settings, live):
+    # Re-tag writes on auto_apply (or the old dry_run=False opt-in), as
+    # retag_options decides; the preflight must see the same answer.
+    from core.library2.retag import retag_options
+    w = _worker(tmp_path)
+    monkeypatch.setattr(w, 'get_job_config', lambda jid: {'settings': settings})
+    job = type('J', (), {'job_id': 'library_retag'})()
+    assert w._job_runs_live(job) is live is retag_options(settings)['auto_apply']
 
 
 def test_jobs_that_do_not_write_files_are_never_gated(tmp_path, monkeypatch):

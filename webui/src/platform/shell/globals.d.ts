@@ -152,6 +152,8 @@ declare global {
     /** media-player.js — play a resolved library track list (radio-row shape)
      *  as the queue, labeled with a "Playing from" context. */
     cancelPendingPlayback?: () => void;
+    /** media-player.js — the queue's auto-download switch for missing rows. */
+    isQueueAutoDownloadEnabled?: () => boolean;
     playTrackList?: (
       tracks: unknown[],
       contextName?: string,

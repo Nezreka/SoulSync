@@ -5,7 +5,7 @@ from __future__ import annotations
 from core.library2.duplicate_review import DEFAULT_SETTINGS, find_duplicate_candidates
 from core.library2.maintenance_subjects import active_file_subjects
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, artist_scoped_subjects
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.native_duplicate_detector")
@@ -41,10 +41,7 @@ class NativeDuplicateDetectorJob(RepairJob):
     writes_library_files = True
 
     def estimate_scope(self, context: JobContext) -> int:
-        subjects = scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
-        if artist := context.scope_artist_name():
-            subjects = [s for s in subjects if str(s.get("artist_name") or "").casefold() == artist.casefold()]
-        return len(subjects)
+        return len(artist_scoped_subjects(context, active_file_subjects(context.db, context.config_manager)))
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -54,11 +51,10 @@ class NativeDuplicateDetectorJob(RepairJob):
             f"repair.jobs.{self.job_id}.settings", {}) or {})} if context.config_manager else self.default_settings.copy()
         scope = context.scope
         try:
-            if artist := context.scope_artist_name():
-                subjects = scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
-                scope = {**(scope or {}), "file_paths": [s["path"] for s in subjects
-                                                       if str(s.get("artist_name") or "").casefold() == artist.casefold()]}
-            total = self.estimate_scope(context)
+            subjects = artist_scoped_subjects(context, active_file_subjects(context.db, context.config_manager))
+            if context.scope_artist_name():
+                scope = {**(scope or {}), "file_paths": [s["path"] for s in subjects]}
+            total = len(subjects)
             if context.report_progress:
                 context.report_progress(phase=f"Reviewing {total} native files for duplicates...", total=total)
             if context.update_progress:

@@ -150,3 +150,20 @@ def test_bulk_lookup_batches_track_positions_and_credits(catalogue):
         conn.set_trace_callback(None)
     assert len(contexts) == len(ids)
     assert len(statements) <= 12, f'{len(statements)} queries for one album lookup batch'
+
+
+def test_a_moved_tracks_stale_edition_binding_does_not_break_subjects(catalogue):
+    # e.g. a folder merge moved the track; its release slot still names the
+    # old album's edition. Every job enumerates these subjects.
+    conn, db, tid, album_id, aid = catalogue
+    old = conn.execute("INSERT INTO lib2_release_editions(release_group_id,title,is_default) VALUES(?, 'Old', 1)",
+                       (album_id,)).lastrowid
+    recording = conn.execute("INSERT INTO lib2_recordings(title) VALUES('Provider Song')").lastrowid
+    conn.execute("INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id,track_number) "
+                 "VALUES(?,?,?,1)", (old, recording, tid))
+    other = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?, 'Merged')", (aid,)).lastrowid
+    conn.execute("INSERT INTO lib2_release_editions(release_group_id,title,is_default) VALUES(?, 'Merged', 1)", (other,))
+    conn.execute("UPDATE lib2_tracks SET album_id=? WHERE id=?", (other, tid))
+    conn.commit()
+    subject = next(s for s in active_file_subjects(db, None) if s["track_id"] == tid)
+    assert subject["album_id"] == other

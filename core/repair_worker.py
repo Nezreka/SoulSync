@@ -2206,10 +2206,12 @@ class RepairWorker:
         )
 
     def _job_runs_live(self, job) -> bool:
-        """Whether this job's next run will WRITE (its dry_run setting is off)."""
+        """Whether this job's next run will WRITE (dry_run off, or Re-tag's auto_apply on)."""
         try:
-            cfg = self.get_job_config(job.job_id) or {}
-            return not (cfg.get('settings') or {}).get('dry_run', True)
+            settings = (self.get_job_config(job.job_id) or {}).get('settings') or {}
+            if 'auto_apply' in settings:
+                return settings['auto_apply'] is True and settings.get('dry_run') is not True
+            return not settings.get('dry_run', True)
         except Exception:
             return False
 
@@ -5272,13 +5274,13 @@ class RepairWorker:
             if not resolved and os.path.isfile(track_file):
                 resolved = track_file
             if not resolved or not os.path.exists(resolved):
-                errors += 1
+                # Deleted or moved since the scan: the rest of the album still
+                # gets unified, as on dev; a rescan reports the file anew.
                 continue
 
             try:
                 audio = MutagenFile(resolved, easy=False)
                 if audio is None:
-                    errors += 1
                     continue
                 track_id = _lib2_id(track_info.get('track_id') or track_info.get('id'))
                 if details.get('library_v2_native') and track_id is None:

@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { LibraryV2ArtistPlaybackFile } from './-library-v2.api';
 import type { LibraryV2AlbumDetail, LibraryV2Track } from './-library-v2.types';
 
-import { albumQueueRows, artistQueueRows, playlistTrack } from './-library-v2.play';
+import { albumQueueRows, artistQueueRows, playlistTrack, queueableRows } from './-library-v2.play';
 
 /**
  * Why Library v2 does NOT need the ownership round-trip upstream added.
@@ -323,5 +323,31 @@ describe('playlistTrack (upstream 651f6e7e2: add any track to a playlist)', () =
   it('nothing to add without a title or an artist', () => {
     expect(playlistTrack(track({ title: null }), 'Album')).toBeNull();
     expect(playlistTrack(track({ artists: [] }), 'Album')).toBeNull();
+  });
+});
+
+describe('queueableRows', () => {
+  const rows = () =>
+    albumQueueRows(
+      album({ tracks: [track(), track({ id: 2, title: 'Tha', file: null })] }),
+      'Aphex Twin',
+    );
+  afterEach(() => {
+    delete window.isQueueAutoDownloadEnabled;
+    delete window.showToast;
+  });
+
+  it('keeps missing rows for the player when queue auto-download is on', () => {
+    window.isQueueAutoDownloadEnabled = () => true;
+    expect(queueableRows(rows()).map((r) => r.title)).toEqual(['Xtal', 'Tha']);
+  });
+
+  it('leaves missing rows out with one note instead of a skip toast per song', () => {
+    window.isQueueAutoDownloadEnabled = () => false;
+    const toast = vi.fn();
+    window.showToast = toast;
+    expect(queueableRows(rows()).map((r) => r.title)).toEqual(['Xtal']);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(toast.mock.calls[0][0]).toContain('1 missing track left out');
   });
 });

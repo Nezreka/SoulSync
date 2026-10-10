@@ -34,6 +34,7 @@ interface PlayerBridge {
   rows: () => QueueRow[];
   setAuto: (value: boolean) => void;
   setBatch: (id: string) => void;
+  batches: () => number;
 }
 
 function harness(auto = false) {
@@ -99,7 +100,7 @@ function harness(auto = false) {
       poll: npPollQueuePrefetch, identity: npQueueIdentity,
       setQueue: tracks => { npQueue = npPrepareQueueTracks(tracks); },
       rows: () => npQueue, setAuto: value => { npAutoDownloadQueue = value; },
-      setBatch: id => npQueuePrefetchBatchIds.add(id) };
+      setBatch: id => npQueuePrefetchBatchIds.add(id), batches: () => npQueuePrefetchBatchIds.size };
   `,
   )(audio, fetch, toast, {}, document) as PlayerBridge;
   bridge.setAuto(auto);
@@ -227,5 +228,16 @@ describe('real native queue player functions', () => {
       library_owner_id: 7,
       id: null,
     });
+  });
+
+  it('stops polling a batch the server no longer reports, e.g. after a library switch', async () => {
+    const h = harness(true);
+    h.setQueue([missing]);
+    h.setBatch('batch-1');
+    h.fetch.mockImplementation(
+      async () => new Response(JSON.stringify({ success: true, batches: {} })),
+    );
+    await h.poll();
+    expect(h.batches()).toBe(0);
   });
 });

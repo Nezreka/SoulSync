@@ -385,14 +385,18 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     return data
 
 
-def track_contexts(conn, track_ids: List[int]) -> List[Dict[str, Any]]:
-    """Materialize all DB metadata needed by preview/write before file I/O."""
+def track_contexts(conn, track_ids: List[int], *, lyrics: bool = True) -> List[Dict[str, Any]]:
+    """Materialize all DB metadata needed by preview/write before file I/O.
+
+    The provider lookup context only serves the lyrics search; skip it when
+    lyrics are not fetched.
+    """
     contexts: List[Dict[str, Any]] = []
     from core.library2.track_files import writable_file_rows
     from core.library2.metadata_context import track_metadata_contexts
     for start in range(0, len(track_ids), MAX_TRACKS):
         batch = track_ids[start:start + MAX_TRACKS]
-        lookup = track_metadata_contexts(conn, batch, purpose='provider_lookup')
+        lookup = track_metadata_contexts(conn, batch, purpose='provider_lookup') if lyrics else {}
         for row in _track_rows(conn, batch):
             context = dict(row)
             context["db_data"] = _db_data_for_row(conn, row)
@@ -498,8 +502,6 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None, options=
             out.append(entry)
             continue
         try:
-            if policy and policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields']):
-                row['db_data']['lyrics'] = _lyrics_for_row(row)
             file_tags = read_file_tags(abs_path)
             if on_observation:
                 from core.metadata.art_apply import folder_has_cover_sidecar
@@ -510,6 +512,10 @@ def tag_preview(contexts: List[Dict[str, Any]], *, on_observation=None, options=
                 entry.update(error=file_tags["error"], has_changes=False, diff=[])
                 out.append(entry)
                 continue
+            # fill_missing never replaces a file's lyrics: no remote lookup then.
+            if (policy and policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields'])
+                    and (policy['mode'] == 'overwrite' or not file_tags.get('lyrics') or row.get('sibling_files'))):
+                row['db_data']['lyrics'] = _lyrics_for_row(row)
             diff = _annotate_manual(
                 _policy_diff(file_tags, row['db_data'], policy) if policy else build_tag_diff(file_tags, row["db_data"]),
                 row["db_data"].get("_manual_fields") or {},
@@ -641,7 +647,7 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
     selected = set(file_ids) if file_ids is not None else None
     covers = {}
     with closing(database._get_connection()) as conn:
-        rows = track_contexts(conn, track_ids)
+        rows = track_contexts(conn, track_ids, lyrics=policy['lyrics'] == 'fetch')
     for i, row in enumerate(rows):
         if progress:
             progress('retag', i, len(rows))
@@ -804,7 +810,7 @@ def refresh_metadata(database, track_ids, *, source='auto', **kwargs):
     targets = {}
     keys = hand_tagged_path_keys(database)
     with closing(database._get_connection()) as conn:
-        for row in track_contexts(conn, track_ids):
+        for row in track_contexts(conn, track_ids, lyrics=False):
             if not row.get('file_path') or is_hand_tagged_path(row['file_path'], keys) or is_hand_tagged_path(resolve_lib2_path(row['file_path']), keys):
                 continue
             data = row['db_data']

@@ -60,7 +60,7 @@ def _context(scope=None):
 
 def _preview(monkeypatch, entries):
     monkeypatch.setattr("core.library2.retag.track_contexts",
-                        lambda _conn, ids: [{"id": i} for i in ids])
+                        lambda _conn, ids, **_k: [{"id": i} for i in ids])
     monkeypatch.setattr("core.library2.retag.tag_preview",
                         lambda contexts, **kwargs: [entries[c["id"]] for c in contexts
                                           if c["id"] in entries])

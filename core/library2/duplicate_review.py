@@ -15,7 +15,6 @@ import json
 import os
 import re
 from types import SimpleNamespace
-from typing import Any
 
 from core.library.duplicate_rules import is_lossy_companion_file, is_lossy_companion_pair, lossy_companion_exts
 from core.library2.duplicate_relationship import (
@@ -126,10 +125,10 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         derivative_parents = {int(r[0]) for r in conn.execute(
             "SELECT derived_from_file_id FROM lib2_track_files "
             "WHERE derived_from_file_id IS NOT NULL AND COALESCE(file_state,'active')<>'deleted'")}
-        mappings = defaultdict(list)
-        for row in conn.execute("SELECT entity_id,server_source,server_path FROM lib2_media_server_mappings "
+        mappings = defaultdict(set)
+        for row in conn.execute("SELECT entity_id,server_source FROM lib2_media_server_mappings "
                                 "WHERE entity_type='track'"):
-            mappings[int(row[0])].append((row[1], row[2]))
+            mappings[int(row[0])].add(str(row[1] or "").lower())
         playlists = {}
         ids = sorted({int(s["track_id"]) for s in subjects})
         for start in range(0, len(ids), 500):
@@ -158,6 +157,7 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         subject["resolved_path"] = (subject["path"] if os.path.isfile(subject["path"]) else
                                     resolve_lib2_path(subject["path"], config_manager=config_manager) or subject["path"])
         subject["norm_title"] = _normalized_title(subject["title"])
+        subject["title_numbers"] = _title_numbers(subject["norm_title"])
         names = credits.get(tid) or [subject["artist_name"]]
         subject["artist_names"] = [str(n).casefold().strip() for name in names for n in split_artist_credits(name or "") if n]
         subject["quality_order"] = order[fid]
@@ -193,10 +193,10 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
             reasons.append("shared_file_reference")
         if subject["playlists"]:
             reasons.append("playlist_reference")
-        # A mapped server file is protected even when playlist enumeration
-        # fails, is stale, or cannot see another server/account's playlists.
-        # The native mapping is the durable signal; never guess that it is safe.
-        if mappings.get(tid):
+        # The active server's playlists were read above, so its mapping alone
+        # protects nothing (or every server-known copy would stay forever).
+        # Another server's playlists are invisible here: never guess it safe.
+        if mappings.get(tid, set()) - {str(source or "").lower()}:
             reasons.append("media_server_reference")
         if not os.path.isfile(subject["resolved_path"]):
             reasons.append("file_unavailable")
@@ -224,19 +224,22 @@ def _candidate_pair(a: dict, b: dict, settings: dict, companion_exts: set) -> bo
         return False
     if settings["ignore_cross_album"] and a["album_id"] != b["album_id"]:
         return False
-    one, two = _title_numbers(a["norm_title"]), _title_numbers(b["norm_title"])
+    one, two = a["title_numbers"], b["title_numbers"]
     if one and two and one != two:
         return False
+    if not _strong_evidence(a, b) and not _similar_tags(a, b, settings):
+        return False
+    # Filesystem identity last: only plausible pairs pay for realpath/stat.
     if os.path.realpath(a["resolved_path"]) == os.path.realpath(b["resolved_path"]):
         return False
     inode = _physical_key(a["resolved_path"])
     if inode and inode == _physical_key(b["resolved_path"]):
         return False
-    if (a.get("derived_from_file_id") == b["file_id"] or b.get("derived_from_file_id") == a["file_id"]
-            or is_lossy_companion_pair(a["resolved_path"], b["resolved_path"], companion_exts)):
-        return False
-    if _strong_evidence(a, b):
-        return True
+    return not (a.get("derived_from_file_id") == b["file_id"] or b.get("derived_from_file_id") == a["file_id"]
+                or is_lossy_companion_pair(a["resolved_path"], b["resolved_path"], companion_exts))
+
+
+def _similar_tags(a: dict, b: dict, settings: dict) -> bool:
     artist_score = max((SequenceMatcher(None, x, y).ratio() for x in a["artist_names"] for y in b["artist_names"]), default=0)
     if a["norm_title"] and b["norm_title"] and artist_score >= settings["artist_similarity"]:
         if SequenceMatcher(None, a["norm_title"], b["norm_title"]).ratio() >= settings["title_similarity"]:
@@ -277,27 +280,31 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
         for kind, value in keys:
             if value:
                 buckets[(owner, kind, value)].append(f)
-    # Fuzzy title comparison cannot require an exact title prefix. Compare
-    # unique credit names once, then pass their files to the existing checks.
-    names = list(artists)
-    for i, (owner, name) in enumerate(names):
-        if check_stop and check_stop():
-            return []
+    # Fuzzy title comparison cannot require an exact title prefix. Similar
+    # credit names are compared inside blocks of the same leading or trailing
+    # letters, never every name against every other name of the library.
+    blocks = defaultdict(set)
+    for owner, name in artists:
         buckets[(owner, 'artist', name)] = artists[(owner, name)]
-        for other_owner, other in names[i + 1:]:
-            if owner == other_owner and SequenceMatcher(None, name, other).ratio() >= options['artist_similarity']:
-                buckets[(owner, 'artist_pair', (name, other))] = artists[(owner, name)] + artists[(owner, other)]
+        letters = re.sub(r"\W+", "", name)
+        blocks[(owner, letters[:3])].add(name)
+        blocks[(owner, "", letters[-3:])].add(name)
+    for (owner, *_), block in blocks.items():
+        block = sorted(block)
+        for i, name in enumerate(block):
+            if check_stop and check_stop():
+                return []
+            for other in block[i + 1:]:
+                if SequenceMatcher(None, name, other).ratio() >= options['artist_similarity']:
+                    buckets[(owner, 'artist_pair', (name, other))] = artists[(owner, name)] + artists[(owner, other)]
     neighbors = defaultdict(set)
-    seen = set()
     for members in buckets.values():
         for i, a in enumerate(members):
             if check_stop and check_stop():
                 return []
             for b in members[i + 1:]:
-                key = tuple(sorted((a["file_id"], b["file_id"])))
-                if key in seen:
+                if b["file_id"] in neighbors.get(a["file_id"], ()):
                     continue
-                seen.add(key)
                 if _candidate_pair(a, b, options, companion_exts):
                     neighbors[a["file_id"]].add(b["file_id"])
                     neighbors[b["file_id"]].add(a["file_id"])
@@ -326,8 +333,10 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
             "schema": REVIEW_SCHEMA, "review_token": token, "settings": options,
             "scope": scope, "count": len(members), "recommended_file_id": keeper["file_id"],
             "requires_recording_confirmation": weak, "owner_profile_id": keeper.get("owner_profile_id"),
-            "tracks": [{**f, "id": f["file_id"], "artist": f["artist_name"], "album": f["album_title"],
-                        "file_path": f["path"]} for f in members],
+            "tracks": [{**f["snapshot"], "id": f["file_id"], "artist_name": f["artist_name"],
+                        "album": f["album_title"], "file_path": f["path"], "format": f.get("format"),
+                        "bitrate": f.get("bitrate"), "playlists": f["playlists"],
+                        "protected_reasons": f["protected_reasons"]} for f in members],
             "artist_id": keeper["artist_id"], "album_thumb_url": keeper.get("album_image"),
             "artist_thumb_url": keeper.get("artist_image"),
             "library_v2": {
@@ -371,10 +380,18 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         ids = [int(f["file_id"]) for f in original]
         if len(set(ids)) != len(ids) or len(ids) < 2:
             raise ValueError("Invalid duplicate group")
-        current = _load_files(database, config_manager, scope=review.get("scope"),
-                              playlist_membership=playlist_membership, server_source=server_source)
-        by_id = {f["file_id"]: f for f in current}
+        # Read the server's playlists once for this group, not once per move.
+        playlist_membership, server_source = _playlist_context(playlist_membership, server_source)
+        load = lambda: {f["file_id"]: f for f in _load_files(  # noqa: E731
+            database, config_manager, scope=review.get("scope"),
+            playlist_membership=playlist_membership, server_source=server_source)}
+        by_id = load()
         files = [by_id[fid] for fid in ids]
+        if not playlist_membership:
+            # An empty answer may be a failed read: keep the scan's playlists.
+            for f, seen in zip(files, original):
+                if seen.get("playlists") and "playlist_reference" not in f["protected_reasons"]:
+                    f["protected_reasons"].append("playlist_reference")
         snapshots = [f["snapshot"] for f in files]
         token = hashlib.sha256(json.dumps(snapshots, sort_keys=True).encode()).hexdigest()
         if token != review["review_token"]:
@@ -412,13 +429,14 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
     operations = []
     moved = []
     mover = quarantine_mover(transfer_folder, "native_duplicate_detector")
+    fresh = {}
     for f in removable:
-        # Re-read protection facts immediately before each physical move. A
-        # playlist mapping, hand tag or shared reference added after scan wins.
+        # Re-read protection facts once, right before the first physical move.
+        # A playlist mapping, hand tag or shared reference added after scan wins.
         def guarded_move(path, file=f):
-            fresh = _load_files(database, config_manager, scope=review.get("scope"),
-                                 playlist_membership=playlist_membership, server_source=server_source)
-            lookup = {v["file_id"]: v for v in fresh}
+            if "files" not in fresh:
+                fresh["files"] = load()
+            lookup = fresh["files"]
             now = lookup.get(file["file_id"])
             kept = lookup.get(keeper["file_id"])
             if not now or now["snapshot"] != file["snapshot"] or now["protected_reasons"]:

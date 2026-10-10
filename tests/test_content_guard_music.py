@@ -268,11 +268,8 @@ def test_lib2_track_page_refuses_an_explicit_track(kid, member, tracks, monkeypa
     assert _client_as(member).get(f"/api/library/v2/tracks/{tracks['explicit']['id']}").status_code == 200
 
 
-def test_lib2_play_queue_drops_explicit_files(kid, member, tracks, monkeypatch):
-    from core.library2 import queries as Q
-    files = [{'track_id': t['id'], 'path': t['file_path']} for t in tracks.values()]
-    monkeypatch.setattr(Q, 'list_artist_playback_files',
-                        lambda conn, aid, page=1, limit=100: (json.loads(json.dumps(files)), len(files)))
+def test_lib2_play_queue_drops_explicit_files(kid, member, tracks):
+    # the real queue reader: the fixture's rows are owned files of the artist
     artist_id = tracks['explicit']['id'] - 3
     got = _client_as(kid).get(f'/api/library/v2/artists/{artist_id}/play-queue').get_json()['files']
     assert sorted(f['track_id'] for f in got) == sorted([tracks['clean']['id'], tracks['unknown']['id']])

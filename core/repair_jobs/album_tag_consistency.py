@@ -17,7 +17,9 @@ from collections import Counter
 from mutagen import File as MutagenFile
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import get_scope_artist, JobContext, JobResult, RepairJob, scoped_file_subjects, drop_hand_tagged
+from core.repair_jobs.base import (
+    get_scope_artist, JobContext, JobResult, RepairJob, artist_scoped_subjects, drop_hand_tagged,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.album_tag_consistency")
@@ -200,7 +202,7 @@ class AlbumTagConsistencyJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             counts: Dict[int, int] = {}
-            for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
+            for subject in artist_scoped_subjects(context, active_file_subjects(context.db, context.config_manager)):
                 counts[int(subject["album_id"])] = counts.get(int(subject["album_id"]), 0) + 1
             return sum(1 for count in counts.values() if count >= 2)
         except Exception:
@@ -213,23 +215,25 @@ class AlbumTagConsistencyJob(RepairJob):
         check_artist = settings.get("check_album_artist", True)
         check_mbid = settings.get("check_mb_release_id", True)
         if any((check_album, check_artist, check_mbid)):
+            try:
+                subjects = drop_hand_tagged(context, artist_scoped_subjects(
+                    context, active_file_subjects(context.db, context.config_manager)))
+            except Exception as e:
+                logger.warning("V2 subject enumeration failed: %s", e)
+                result.errors += 1
+                return result
             self._scan_native_albums(
-                context, result, check_album, check_artist, check_mbid,
+                context, result, subjects, check_album, check_artist, check_mbid,
             )
             if not context.check_stop():
-                self._scan_split_groups(context, result, check_album, check_artist, check_mbid)
+                self._scan_split_groups(context, result, subjects, check_album, check_artist, check_mbid)
         return result
 
-    def _subjects(self, context):
-        subjects = drop_hand_tagged(context, scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)))
-        artist = get_scope_artist(context)
-        return [s for s in subjects if not artist or (s.get('artist_name') or '').casefold() == artist.casefold()]
-
-    def _scan_split_groups(self, context, result, check_album, check_artist, check_mbid):
+    def _scan_split_groups(self, context, result, subjects, check_album, check_artist, check_mbid):
         """Review same-name native rows as a group, without merging the catalogue."""
         try:
             groups = {}
-            for subject in self._subjects(context):
+            for subject in subjects:
                 key = (*split_group_key(subject.get('artist_name'), subject.get('album_title')), subject.get('owner_profile_id'))
                 if key[0] and key[1]:
                     groups.setdefault(key, []).append(subject)
@@ -273,30 +277,27 @@ class AlbumTagConsistencyJob(RepairJob):
             logger.warning('Native split album scan failed: %s', exc)
             result.errors += 1
 
-    def _scan_native_albums(self, context: JobContext, result: JobResult,
+    def _scan_native_albums(self, context: JobContext, result: JobResult, file_subjects,
                             check_album: bool, check_artist: bool, check_mbid: bool):
         """Library-v2 releases grouped by their native file subjects."""
-        try:
-            from core.library2.maintenance_subjects import active_file_subjects
-            from core.library2.paths import resolve_lib2_path
-
-            albums = {}
-            for subject in self._subjects(context):
-                albums.setdefault((subject['album_id'], subject.get('owner_profile_id')), []).append(subject)
-        except Exception as e:
-            logger.warning("V2 subject enumeration failed: %s", e)
-            result.errors += 1
-            return
+        # One finding per release: its id is the dedup key, so a per-library
+        # split would let one library's finding overwrite the other's. The
+        # fix still checks each listed file's owner.
+        albums = {}
+        for subject in file_subjects:
+            albums.setdefault(subject['album_id'], []).append(subject)
 
         # The skip breakdown, ported from the legacy projection this replaced.
         # It is not decoration: an album with two tracks and no stored file paths is
         # the Navidrome-shaped gap, and without the breakdown "Scanned: 1" against a
         # three-album library reads as a broken scan rather than as two deliberate
         # exclusions.
+        # The scoped artist's releases, as upstream's album-artist filter: a
+        # guest-led first track does not hide one, a guest spot is not one.
         scope_artist = get_scope_artist(context)
         eligible, single_track, no_paths = [], 0, 0
         for album_id, subjects in albums.items():
-            if scope_artist and (subjects[0].get('artist_name') or '').lower() != scope_artist.lower():
+            if scope_artist and (subjects[0].get('album_artist_name') or '').casefold() != scope_artist.casefold():
                 continue
             if len(subjects) < 2:
                 single_track += 1
@@ -318,7 +319,7 @@ class AlbumTagConsistencyJob(RepairJob):
             context.update_progress(0, len(eligible))
 
         unreadable = 0
-        for (album_id, owner_id), subjects in eligible:
+        for album_id, subjects in eligible:
             if context.check_stop() or context.wait_if_paused():
                 return
             result.scanned += 1
@@ -361,10 +362,9 @@ class AlbumTagConsistencyJob(RepairJob):
                     'artist_name': artist_name,
                     'inconsistencies': inconsistencies,
                     'track_count': len(tag_data),
-                    'library_owner_id': owner_id or 1,
                     'tracks': [{'id': t['track_id'], 'track_id': t['track_id'], 'file_id': t['file_id'],
-                                'album_id': album_id, 'owner_profile_id': owner_id, 'title': t['track_title'],
-                                'file_path': t['file_path']} for t in tag_data],
+                                'album_id': album_id, 'owner_profile_id': t['owner_profile_id'],
+                                'title': t['track_title'], 'file_path': t['file_path']} for t in tag_data],
                     'library_v2_native': True,
                     'library_v2': {
                         'artist_id': subjects[0].get('artist_id'),

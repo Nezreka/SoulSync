@@ -64,6 +64,40 @@ def test_pinned_album_is_not_proposed_again(imported_conn, legacy_db):
     assert propose_album_edition(legacy_db, Config(), album, fetch_tracklist=catalogue) is None
 
 
+def test_the_automatic_pin_already_in_place_is_no_suggestion(imported_conn, legacy_db):
+    from core.library2.edition_review import propose_album_edition
+
+    album = album_and_files(imported_conn)
+    imported_conn.execute("UPDATE lib2_albums SET canonical_source='deezer',canonical_album_id='standard',"
+                          "canonical_locked=0 WHERE id=?", (album,))
+    imported_conn.commit()
+    assert propose_album_edition(legacy_db, Config(), album, mode='best_fit', source_order=('spotify', 'deezer'),
+                                 fetch_tracklist=catalogue, fetch_alternates=lambda *a, **kw: []) is None
+
+
+def test_artist_scoped_review_weighs_every_owned_track_of_the_release(imported_conn, legacy_db, monkeypatch):
+    from core.repair_jobs import get_all_jobs
+    from core.repair_jobs.base import build_artist_file_scope
+
+    album = album_and_files(imported_conn)
+    guest = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest')").lastrowid
+    hotline = imported_conn.execute("SELECT id FROM lib2_tracks WHERE album_id=? AND title='Hotline Bling'",
+                                    (album,)).fetchone()[0]
+    imported_conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (hotline,))
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'primary',0)",
+                          (hotline, guest))
+    imported_conn.commit()
+    artist = imported_conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?', (album,)).fetchone()[0]
+    monkeypatch.setattr('core.library2.edition_review.fetch_release_tracklist', catalogue)
+    monkeypatch.setattr('core.library2.edition_review.fetch_alternative_releases', lambda *a, **kw: [])
+    findings = []
+    get_all_jobs()['album_edition_review']().scan(JobContext(
+        legacy_db, '/m', Config(source_selection='best_fit'), scope=build_artist_file_scope(legacy_db, artist),
+        create_finding=lambda **kw: findings.append(kw) or True))
+    proposal = next(f['details'] for f in findings if f['entity_id'] == f'lib2:{album}')
+    assert proposal['file_track_count'] == 2 and len(proposal['owned_track_ids']) == 2
+
+
 def test_editions_job_is_findings_only_even_with_old_auto_apply_settings(
         imported_conn, legacy_db, monkeypatch):
     from core.repair_jobs import get_all_jobs

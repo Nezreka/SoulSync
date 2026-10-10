@@ -107,18 +107,24 @@ class AlbumCatalogueBackfillJob(RepairJob):
             if context.check_stop() or context.wait_if_paused():
                 break
             try:
+                count = 'SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?'
                 with closing(context.db._get_connection()) as conn:
-                    tracks = load_album_catalogue(
+                    before = conn.execute(count, (album_id,)).fetchone()[0]
+                    load_album_catalogue(
                         context.db, context.config_manager, conn, album_id,
                         inherit_monitoring=False,
                     )
-                if tracks:
+                    added = conn.execute(count, (album_id,)).fetchone()[0] - before
+                # A release that stays partial is retried hourly; only one
+                # that actually gained tracks is a change worth recording.
+                if added > 0:
                     result.auto_fixed += 1
                     if context.report_change:
                         context.report_change(
                             entity_type='album', entity_id=f'lib2:{album_id}',
                             action='catalogue_completed',
-                            details={'lib2_album_id': album_id}, result={'success': True},
+                            details={'lib2_album_id': album_id, 'tracks_added': added},
+                            result={'success': True},
                         )
                 else:
                     result.skipped += 1

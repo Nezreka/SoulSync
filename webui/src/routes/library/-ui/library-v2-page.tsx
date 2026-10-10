@@ -109,7 +109,7 @@ import {
   type LibraryV2MatchSearchResult,
 } from '../-library-v2.api';
 import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
-import { albumQueueRows, artistQueueRows, playlistTrack } from '../-library-v2.play';
+import { albumQueueRows, artistQueueRows, playlistTrack, queueableRows } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import {
   LIBRARY_V2_WANTED_KINDS,
@@ -10347,7 +10347,7 @@ export function AlbumPlayButton({
         void (async () => {
           try {
             const album = await queryClient.fetchQuery(libraryV2AlbumQueryOptions(albumId));
-            const rows = albumQueueRows(album, artistName);
+            const rows = queueableRows(albumQueueRows(album, artistName));
             if (!rows.length) {
               window.showToast?.('Nothing on this release is on disk yet', 'info');
               return;
@@ -10403,7 +10403,7 @@ export function ArtistPlayButton({
               collected.push(...batch.files);
               if (page >= (batch.pagination?.total_pages ?? 1)) break;
             }
-            const rows = artistQueueRows(collected, artistName);
+            const rows = queueableRows(artistQueueRows(collected, artistName));
             if (!rows.length) {
               window.showToast?.(`Nothing by ${artistName} is on disk yet`, 'info');
               return;

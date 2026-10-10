@@ -297,3 +297,38 @@ def test_manual_metadata_and_edition_pins_are_preserved(library, protection):
     result = apply(library, review(library)[0], approved=True, keep_file_id=bf)
     assert result["success"] is True
     assert pa.exists() and pb.exists() and states(library)[af] == "active"
+
+
+def test_active_server_mapping_alone_does_not_block_keep_best(library):
+    from core.library2.duplicate_review import apply_keep_best, find_duplicate_candidates
+    db, config, _root, transfer = library
+    a, af, pa = copy(library, fmt="mp3", bitrate=128)
+    b, bf, pb = copy(library, album="Other", fmt="flac")
+    with closing(db._get_connection()) as conn:
+        for tid, server, sid in ((a, "plex", "pa"), (b, "plex", "pb"), (b, "jellyfin", "jb")):
+            conn.execute("INSERT INTO lib2_media_server_mappings(entity_type,entity_id,server_source,server_id) "
+                         "VALUES('track',?,?,?)", (tid, server, sid))
+        conn.commit()
+    candidate = find_duplicate_candidates(db, config, server_source="plex", playlist_membership={"x": ["L"]})[0]
+    reasons = {t["file_id"]: t["protected_reasons"] for t in candidate["tracks"]}
+    # Plex playlists are readable, so its mapping is no protection; Jellyfin's are not.
+    assert reasons[af] == [] and reasons[bf] == ["media_server_reference"]
+    result = apply_keep_best(db, candidate, config_manager=config, transfer_folder=str(transfer), approved=True,
+                             keep_file_id=bf, server_source="plex", playlist_membership={"x": ["L"]})
+    assert result["success"] is True and result["removed_file_ids"] == [af]
+    assert not pa.exists() and pb.exists()
+
+
+def test_unreadable_playlists_at_apply_keep_the_scans_playlist_protection(library):
+    from core.library2.duplicate_review import find_duplicate_candidates
+    db, config, *_ = library
+    a, af, pa = copy(library, fmt="mp3", bitrate=128)
+    _b, bf, _pb = copy(library, album="Other", fmt="flac")
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type,entity_id,server_source,server_id) "
+                     "VALUES('track',?,'plex','pa')", (a,))
+        conn.commit()
+    candidate = find_duplicate_candidates(db, config, server_source="plex", playlist_membership={"pa": ["Road Trip"]})[0]
+    result = apply(library, candidate, approved=True, keep_file_id=bf, server_source="plex")
+    assert result["success"] is True and result["removed_file_ids"] == []
+    assert pa.exists() and states(library)[af] == "active"

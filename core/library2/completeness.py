@@ -234,7 +234,9 @@ def _album_tracklist_context(
         "release_date": release_date,
         "track_count": track_count,
     }
-    if row['canonical_source'] and row['canonical_album_id']:
+    # Only a manual pin decides which release is fetched (see resolve_tracklist);
+    # an automatic one leaves the lookup alone and must not void its snapshots.
+    if row['canonical_locked'] and row['canonical_source'] and row['canonical_album_id']:
         reference['canonical_release'] = {
             'source': str(row['canonical_source']).lower(),
             'id': str(row['canonical_album_id']),
@@ -970,7 +972,8 @@ def _resolve_stage(database, config_manager, album_ids: List[int], *,
         except Exception:  # noqa: BLE001
             return False
         try:
-            return bool(resolve_tracklist(config_manager, thread_conn, album_id))
+            # The shared loader serializes with album pages and downloads (R07).
+            return bool(load_album_catalogue(database, config_manager, thread_conn, album_id, enrich=False))
         except Exception as e:  # noqa: BLE001
             logger.debug("tracklist precache resolve failed (%s): %s", album_id, e)
             return False

@@ -189,11 +189,13 @@ def active_file_subjects(
                 subject[f"{key}_metadata"] = values.get(int(subject["track_id"]), {})
             selected = subject[f"{purpose}_metadata"]
             # Keep physical file facts on the subject; metadata contexts carry
-            # the selected edition and artist identity alongside those facts.
+            # the selected edition alongside those facts. artist_id and its
+            # source ids stay the release's artist every job links and
+            # recomputes; the lead credit's are in the selected context.
             for field in ("title", "duration", "track_number", "disc_number", "bpm",
-                          "album_title", "artist_name", "artist_id", "album_artist_id",
+                          "album_title", "artist_name", "album_artist_id",
                           "album_artist_name", "track_source_ids", "album_source_ids",
-                          "artist_source_ids", "album_artist_source_ids", "edition_id",
+                          "album_artist_source_ids", "edition_id",
                           "edition_status", "canonical_locked", "_manual_fields"):
                 if field in selected:
                     subject[field] = selected[field]

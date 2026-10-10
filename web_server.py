@@ -6763,19 +6763,30 @@ def _start_playback_queue_prefetch(raw_tracks):
     profile_id = acting_profile_id(get_current_profile_id())
     library_owner_id = _selected_library_owner()
     resolved_tracks = []
+    rejected = []
     for raw in list(raw_tracks)[:MAX_PREFETCH_TRACKS]:
         if not isinstance(raw, dict):
             raise ValueError('Each playback queue track must be an object')
         if names_lib2_entity(raw):
-            raw = resolve_native_queue_track(
-                get_database(), raw, profile_id=profile_id,
-                library_owner_id=library_owner_id, is_admin=is_admin_request())
+            try:
+                raw = resolve_native_queue_track(
+                    get_database(), raw, profile_id=profile_id,
+                    library_owner_id=library_owner_id, is_admin=is_admin_request())
+            except (ValueError, PermissionError) as exc:
+                # A deleted or foreign row fails alone; the rest still loads.
+                if not rejected:
+                    first_error = exc
+                rejected.append({'request_ids': [str(raw.get('_queue_request_id') or '')],
+                                 'state': 'failed', 'error': str(exc)})
+                continue
         else:
             raw = {**raw, 'profile_id': profile_id, 'library_owner_id': library_owner_id}
         resolved_tracks.append(raw)
 
     tracks, request_ids_by_key = deduplicate_prefetch_tracks(resolved_tracks)
     if not tracks:
+        if rejected:
+            raise first_error
         raise ValueError('No valid missing tracks were provided')
 
     resolved_paths = {
@@ -6967,7 +6978,7 @@ def _start_playback_queue_prefetch(raw_tracks):
 
     return {
         'success': True,
-        'items': items,
+        'items': items + rejected,
         'batch_ids': sorted(existing_batch_ids),
         'queued': len(new_tracks),
     }

@@ -1633,6 +1633,9 @@ async function npPollQueuePrefetch() {
                 tasks.every(task => ['completed', 'failed', 'not_found', 'cancelled'].includes(task.status));
             if (terminal) npQueuePrefetchBatchIds.delete(batchId);
         });
+        // A batch the server no longer reports (another library is selected
+        // now, or it was cleaned up) can never finish here: stop asking.
+        npQueuePrefetchBatchIds.forEach(id => { if (!data.batches?.[id]) npQueuePrefetchBatchIds.delete(id); });
         if (changed) renderNpQueue();
         if (refill) npScheduleQueuePrefetch();
         if (npQueuePrefetchBatchIds.size === 0) npStopQueuePrefetchPolling();
@@ -1666,7 +1669,7 @@ async function npPrefetchMissingQueueTracks() {
                     item.state || 'queued',
                     item.final_path || '',
                     0,
-                    '',
+                    item.error || '',
                     item,
                 );
             });
@@ -3812,6 +3815,7 @@ async function playTrackList(tracks, contextName, options = {}) {
     return await playQueueItem(0, options);
 }
 window.playTrackList = playTrackList;
+window.isQueueAutoDownloadEnabled = () => npAutoDownloadQueue;
 
 async function npFetchRadioTracks(forceAdvance = false) {
     // forceAdvance: a manual skip at the tail of the fetched batch (next

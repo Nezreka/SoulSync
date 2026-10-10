@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from core.library2 import queries as Q
+from core.playback.library_v2 import artist_queue_rows
 from core.library2.metadata_overrides import clear_field_override, set_field_override
 from core.library2.status import (
     compute_metadata_gaps,
@@ -335,7 +336,7 @@ def test_play_queue_follows_credits_and_names_each_track_artist(imported_conn):
         "VALUES(?, '/music/feature.flac', 'flac', 'active', 1)", (feature,))
     imported_conn.commit()
 
-    files, total = Q.list_artist_playback_files(imported_conn, guest_id, limit=500)
+    files, total = artist_queue_rows(imported_conn, guest_id, limit=500)
     by_path = {f["path"]: f for f in files}
     assert total == 2
     # The Files-tab scope sees only the first of these.
@@ -375,7 +376,7 @@ def test_play_queue_keeps_one_file_per_track(imported_conn):
         "VALUES(?, '/music/gone.flac', 'flac', 'deleted', 0)", (track_id,))
     imported_conn.commit()
 
-    files, total = Q.list_artist_playback_files(imported_conn, artist_id, limit=500)
+    files, total = artist_queue_rows(imported_conn, artist_id, limit=500)
     assert total == 1
     assert [f["path"] for f in files] == ["/music/song.flac"]
 

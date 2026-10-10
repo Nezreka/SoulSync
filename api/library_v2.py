@@ -4797,7 +4797,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             refresh_result = retag.refresh_metadata(db, track_ids[:retag.MAX_TRACKS], config_manager=config_manager,
                                                    source=options['source'])
         with closing(db._get_connection()) as conn:
-            contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS])
+            contexts = retag.track_contexts(conn, track_ids[:retag.MAX_TRACKS],
+                                            lyrics=options['lyrics'] == 'fetch')
         from core.repair_jobs.base import hand_tagged_path_keys
         preview = retag.tag_preview(contexts, options=options, hand_tagged_keys=hand_tagged_path_keys(db))
         return jsonify({

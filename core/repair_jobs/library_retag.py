@@ -136,9 +136,10 @@ class LibraryRetagJob(RepairJob):
                                                check_stop=context.check_stop, source=options['source'])
             result.errors += len(refreshed['errors'])
             if refreshed.get('refreshed') and context.report_change:
-                for track_id in track_ids:
+                # One follow-up per release, not one per track of the scope.
+                for album_id in sorted({int(files[0]['album_id']) for files in by_track.values()}):
                     context.report_change(finding_type='library_retag', action='refreshed_catalogue',
-                        entity_type='track', entity_id=f'lib2:{track_id}',
+                        entity_type='album', entity_id=f'lib2:{album_id}',
                         details={'enrichment_depth': 'full'})
         if context.update_progress:
             context.update_progress(0, total)
@@ -155,7 +156,7 @@ class LibraryRetagJob(RepairJob):
             batch = track_ids[start:start + _BATCH]
             conn = context.db._get_connection()
             try:
-                contexts = retag.track_contexts(conn, batch)
+                contexts = retag.track_contexts(conn, batch, lyrics=options['lyrics'] == 'fetch')
             finally:
                 conn.close()
             for row in contexts:

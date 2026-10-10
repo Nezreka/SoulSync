@@ -19,14 +19,21 @@ def artist_queue_rows(conn, artist_id, *, page=1, limit=100):
     marks = ','.join('?' for _ in ids)
     owner = owner_clause(column='tf.owner_profile_id')
     intent = intent_profile_id()
-    scope = f"""WITH eligible_albums AS (
+    # Only the artist's own releases are checked for owned/wanted tracks,
+    # not every track of the library on each page request.
+    scope = f"""WITH artist_albums AS (
+        SELECT id AS album_id FROM lib2_albums WHERE primary_artist_id IN ({marks})
+        UNION SELECT t.album_id FROM lib2_tracks t JOIN lib2_track_artists ta ON ta.track_id=t.id
+        WHERE ta.artist_id IN ({marks})
+    ), eligible_albums AS (
         SELECT DISTINCT t.album_id FROM lib2_tracks t
-        WHERE EXISTS (SELECT 1 FROM lib2_track_files tf WHERE tf.track_id=t.id
-                      AND COALESCE(tf.file_state,'active')='active'
-                      AND COALESCE(tf.path,'')<>''{owner})
+        WHERE t.album_id IN (SELECT album_id FROM artist_albums)
+          AND (EXISTS (SELECT 1 FROM lib2_track_files tf WHERE tf.track_id=t.id
+                       AND COALESCE(tf.file_state,'active')='active'
+                       AND COALESCE(tf.path,'')<>''{owner})
            OR COALESCE((SELECT w.wanted FROM lib2_wanted_tracks w
                         WHERE w.track_id=t.id AND w.profile_id={intent}),
-                       {monitored_sql('track', 't')})=1
+                       {monitored_sql('track', 't')})=1)
     ), scope_tracks AS (
         SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
         WHERE t.album_id IN (SELECT album_id FROM eligible_albums)
@@ -40,7 +47,7 @@ def artist_queue_rows(conn, artist_id, *, page=1, limit=100):
         WHERE COALESCE(tf.file_state,'active')='active'
           AND COALESCE(tf.path,'')<>''{owner}
     )"""
-    params = [*ids, *ids]
+    params = [*ids, *ids, *ids, *ids]
     total = conn.execute(f'{scope} SELECT COUNT(*) FROM scope_tracks', params).fetchone()[0]
     rows = conn.execute(f"""{scope}
         SELECT r.id AS file_id, t.id AS track_id, t.title AS track_title,

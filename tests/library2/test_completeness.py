@@ -227,6 +227,28 @@ def test_resolve_tracklist_snapshots_spotify_and_reuses_durable_cache(
     assert payload["tracks"][0]["spotify_id"] == "sp-t1"
 
 
+def test_an_automatic_pin_keeps_the_durable_tracklist_snapshot(imported_conn, monkeypatch):
+    # Only a manual pin changes which release is fetched; an automatic one
+    # (import/reorganize) must not void every existing snapshot.
+    views_id = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    imported_conn.execute("UPDATE lib2_release_editions SET spotify_id='sp-1' "
+                          "WHERE release_group_id=? AND is_default=1", (views_id,))
+    imported_conn.execute("UPDATE lib2_albums SET tracklist_json=NULL WHERE id=?", (views_id,))
+    calls = []
+    client = type('Spotify', (), {
+        'is_spotify_authenticated': lambda self: True,
+        'get_album_tracks': lambda self, album_id: calls.append(album_id) or {'items': [
+            {'id': 't1', 'name': 'One Dance', 'track_number': 1, 'duration_ms': 180000}]},
+    })()
+    monkeypatch.setattr("core.metadata.registry.get_client_for_source",
+                        lambda source: client if source == "spotify" else None)
+    first = resolve_tracklist(None, imported_conn, views_id)
+    imported_conn.execute("UPDATE lib2_albums SET canonical_source='deezer', canonical_album_id='dz-1', "
+                          "canonical_locked=0 WHERE id=?", (views_id,))
+    assert resolve_tracklist(None, imported_conn, views_id) == first
+    assert calls == ['sp-1']
+
+
 def test_resolve_tracklist_uses_effective_default_edition_facts(
     imported_conn, monkeypatch
 ):
@@ -684,6 +706,31 @@ def test_precache_tracklists_runs_resolves_concurrently(legacy_db_factory):
         t.join(timeout=5)
     finally:
         completeness.resolve_tracklist = orig
+
+
+def test_precache_shares_the_album_page_singleflight(legacy_db_factory, monkeypatch):
+    # R07: the post-import precache must not fetch past an album page or a
+    # download that is loading the same cold release.
+    from contextlib import contextmanager
+    from core.library2 import catalogue_flight
+    from core.library2.importer import import_legacy_library
+
+    legacy_db = legacy_db_factory(n_albums=2)
+    import_legacy_library(legacy_db)
+    conn = legacy_db._get_connection()
+    _mark_all_albums_partial(conn)
+    conn.close()
+    flown = []
+
+    @contextmanager
+    def flight(_conn, album_id):
+        flown.append(album_id)
+        yield
+
+    monkeypatch.setattr(catalogue_flight, 'album_catalogue_flight', flight)
+    monkeypatch.setattr(completeness, 'resolve_tracklist', lambda *a, **kw: None)
+    precache_tracklists(legacy_db, None)
+    assert len(flown) == 2
 
 
 def test_precache_tracklists_max_workers_caps_concurrency(legacy_db_factory, monkeypatch):

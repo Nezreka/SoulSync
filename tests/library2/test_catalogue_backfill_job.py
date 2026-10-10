@@ -95,6 +95,18 @@ def test_background_job_fills_owned_unmonitored_single_without_album_click(
     assert any(c['entity_id'] == f'lib2:{album_id}' for c in changes)
 
 
+def test_a_release_that_stays_partial_is_reported_only_when_it_gains_tracks(imported_conn, legacy_db):
+    album_id = release(imported_conn, 'Partial', owned=True)
+    imported_conn.execute('UPDATE lib2_albums SET expected_track_count=3 WHERE id=?', (album_id,))
+    imported_conn.commit()
+    changes = []
+    ctx = JobContext(legacy_db, '/music', Config(), report_change=lambda **kw: changes.append(kw))
+    job().scan(ctx)
+    assert [c['details']['tracks_added'] for c in changes] == [1]
+    job().scan(ctx)  # still partial, nothing new: no hourly history entry
+    assert len(changes) == 1
+
+
 def test_background_job_includes_monitored_track_but_not_artist_entire_discography(
         imported_conn, legacy_db):
     wanted = release(imported_conn, 'Requested', monitored=True, origin='discography')

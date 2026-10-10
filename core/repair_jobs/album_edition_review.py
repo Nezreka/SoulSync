@@ -1,7 +1,7 @@
 """Findings-only bulk edition review over native owned file subjects."""
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, artist_scoped_subjects
 
 
 @register_job
@@ -31,8 +31,9 @@ class AlbumEditionReviewJob(RepairJob):
     def _subjects(self, context):
         from core.library2.maintenance_subjects import active_file_subjects
         rows = active_file_subjects(context.db, context.config_manager)
-        name = (context.scope or {}).get('artist_name')
-        return [r for r in rows if not name or str(r.get('artist_name') or '').casefold() == str(name).casefold()]
+        # The scope picks releases; the fit always weighs every owned track.
+        albums = {r['album_id'] for r in artist_scoped_subjects(context, rows)}
+        return [r for r in rows if r['album_id'] in albums]
 
     def estimate_scope(self, context):
         return len({row['album_id'] for row in self._subjects(context)})

@@ -38,14 +38,15 @@ def album_metadata_context(conn, album_id: int, *, purpose: str,
         return None
     album = dict(row)
     artist = conn.execute("SELECT * FROM lib2_artists WHERE id=?", (album["primary_artist_id"],)).fetchone()
-    if edition_id is None:
-        edition = conn.execute("SELECT * FROM lib2_release_editions WHERE release_group_id=? AND is_default=1",
-                               (int(album_id),)).fetchone()
-    else:
+    edition = None
+    if edition_id is not None:
         edition = conn.execute("SELECT * FROM lib2_release_editions WHERE id=? AND release_group_id=?",
                                (int(edition_id), int(album_id))).fetchone()
-        if edition is None:
-            raise ValueError("Edition does not belong to this release group")
+    if edition is None:
+        # Also a moved track's stale binding to its old album's edition: one
+        # such row must not fail every job's subject enumeration.
+        edition = conn.execute("SELECT * FROM lib2_release_editions WHERE release_group_id=? AND is_default=1",
+                               (int(album_id),)).fetchone()
     provider = dict(album)
     # A concrete edition owns its identity; the group pin is only the fallback.
     album_ids = _source_ids(edition) if edition is not None else {}

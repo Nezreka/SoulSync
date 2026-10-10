@@ -339,3 +339,18 @@ def test_native_own_profile_acquires_only_into_its_library(runtime, monkeypatch)
     row = tasks[response.get_json()['items'][0]['task_id']]
     assert row['profile_id'] == row['library_owner_id'] == 7
     assert batches[row['batch_id']]['library_owner_id'] == 7
+
+
+def test_one_unresolvable_native_row_fails_alone(runtime):
+    server, _, ids, tasks, _ = runtime
+    response = _prefetch_client(server).post('/api/playback/queue/prefetch', json={'tracks': [
+        {'lib2_track_id': 999999, 'title': 'Gone', 'artist': 'A', '_queue_request_id': 'gone'},
+        {'lib2_track_id': ids['ep_track'], '_queue_request_id': 'ok'},
+    ]})
+    assert response.status_code == 200
+    items = {item['request_ids'][0]: item for item in response.get_json()['items']}
+    assert items['gone']['state'] == 'failed' and items['gone']['error']
+    assert items['ok']['state'] == 'queued' and len(tasks) == 1
+    alone = _prefetch_client(server).post('/api/playback/queue/prefetch', json={'tracks': [
+        {'lib2_track_id': 999999, '_queue_request_id': 'gone'}]})
+    assert alone.status_code == 400
