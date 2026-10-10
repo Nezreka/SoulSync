@@ -1,0 +1,170 @@
+/* ── Horizontal scrollbars: visible, grabbable, with slide affordance ─────────
+   Broque: horizontal scrollbars were barely visible and nothing signalled that
+   an area slides sideways. This sheet fixes that:
+
+   1. GLOBAL: any horizontal rail with NO custom scrollbar design gets a
+      visible thumb/track (section 1). Non-!important and low specificity,
+      so components with their own designs keep them.
+   2. TARGETED: the main rails' thin dim thumbs are bumped to visible
+      (section 2). Same specificity as the component rules, later in the
+      cascade (this sheet is linked last), so these win without !important.
+      Accent-tinted designs (.dash-rail, .discover-mixes-grid hover) are
+      deliberately untouched.
+   3. `.hscroll-fade` (plus the main card rails) gets an edge fade so it
+      reads that there is more content to the side (section 3).
+
+   What this sheet does NOT do, and why:
+   - No `height` on `::-webkit-scrollbar:horizontal`: the `:horizontal`
+     qualifier does not match the scrollbar pseudo-element itself in
+     Chromium (only thumb/track/button), so such a rule would be dead code.
+   - `scrollbar-width` / `scrollbar-color` are overridden only in section 2,
+     where three rails need `scrollbar-color` to beat their own property
+     rules (two of them `!important`). Chrome resolves those standard
+     properties before the legacy pseudo-elements, and setting
+     `scrollbar-color` triggers full custom-scrollbar rendering — but those
+     rails already set it, so nothing changes there. Every other rule wins
+     by cascade order with no `!important`, so a component can still
+     override intentionally.
+
+   Firefox: `scrollbar-width` / `scrollbar-color` can't target one axis, and
+   the app sets `color-scheme: dark`, so Firefox paints visible native dark
+   scrollbars. No Firefox changes.
+
+   Tokens only (no hardcoded colors) so the token-palettes work keeps applying.
+   `display: none` scrollbar rules elsewhere are unaffected — that is a
+   different property, so intentionally hidden scrollbars (chat guilds, chip
+   bars) stay hidden. Vertical scrollbars are untouched: every rule here is
+   horizontal-scoped. */
+
+/* ── 1. Global: lift unstyled horizontal rails ─────────────────────────────
+   `:horizontal` matches thumb/track/button (verified). Low specificity
+   (0,0,2): any component thumb/track rule (0,1,1) wins, so this only
+   affects rails with no custom design. */
+html ::-webkit-scrollbar-thumb:horizontal,
+html *::-webkit-scrollbar-thumb:horizontal {
+  background: var(--white-a25);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  min-width: 48px;
+}
+
+html ::-webkit-scrollbar-track:horizontal,
+html *::-webkit-scrollbar-track:horizontal {
+  background: var(--white-a05);
+  border-radius: var(--radius-pill);
+}
+
+/* ── 2. Targeted: visible thumbs on the main rails ────────────────────────
+   .discover-carousel / .discover-grid set `scrollbar-width: thin` and
+   `scrollbar-color`, which beat pseudo-element rules in Chrome — so the
+   color is lifted via the property itself (same specificity, later in the
+   cascade, !important beats !important). Size stays thin; the fade
+   (section 3) is the main affordance here.
+   .explorer-picker-scroll also sets scrollbar-*, so it gets the same
+   property treatment (its own rule isn't !important, so none needed here).
+   .vd-rail has no scrollbar-* properties, so plain pseudo-element rules
+   win by cascade order (no !important needed).
+   NOT touched: .dash-rail (accent thumb), .discover-mixes-grid (accent
+   hover) — intentional designs. */
+.discover-carousel,
+.discover-grid {
+  scrollbar-color: var(--white-a25) transparent !important;
+}
+
+.explorer-picker-scroll {
+  scrollbar-color: var(--white-a20) transparent;
+}
+
+.vd-rail::-webkit-scrollbar {
+  height: 10px;
+}
+
+.vd-rail::-webkit-scrollbar-thumb {
+  background: var(--white-a25);
+  border-radius: var(--radius-pill);
+}
+
+/* ── 3. Slide affordance: edge fade ───────────────────────────────────────
+   Applied to the main card rails via the :is() list, and opt-in anywhere
+   else with the .hscroll-fade utility class.
+
+   Two layers UNIONED (not intersected):
+     1. a horizontal fade on both edges, for the content;
+     2. a bottom strip kept fully opaque, so the scrollbar zone never fades.
+   Union (mask-composite: add / -webkit-mask-composite: source-over): a pixel
+   is visible if EITHER layer is opaque there. An intersect here would be
+   wrong — it would punch the scrollbar itself out of the mask.
+
+   Notes:
+   - The fade is static, not scroll-aware: a rail that happens to fit shows
+     the fade anyway. The scrollbar itself only renders when there is overflow,
+     so it remains the truthful signal; the fade is the enhancement.
+   - `.discover-grid` is deliberately NOT in the fade list: in the
+     "Your Albums" section it becomes a non-scrolling multi-row grid, where
+     a static fade would wrongly dim cards. */
+.hscroll-fade,
+:is(
+  .discover-carousel,
+  .discover-mixes-grid,
+  .dsc-video-rail-track,
+  .vd-rail,
+  .dash-rail,
+  .explorer-picker-scroll
+) {
+  --hscroll-fade-size: 32px;
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 var(--hscroll-fade-size),
+      #000 calc(100% - var(--hscroll-fade-size)),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
+  -webkit-mask-composite: source-over;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 var(--hscroll-fade-size),
+      #000 calc(100% - var(--hscroll-fade-size)),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
+  mask-composite: add;
+}
+
+/* When keyboard-navigating a rail, drop the fade so focus rings stay fully
+   visible — focus scrolling parks cards flush at the edge, inside the fade
+   zone. */
+.hscroll-fade:focus-within,
+:is(
+  .discover-carousel,
+  .discover-mixes-grid,
+  .dsc-video-rail-track,
+  .vd-rail,
+  .dash-rail,
+  .explorer-picker-scroll
+):focus-within {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Mobile: .discover-carousel wraps instead of scrolling (mobile.css), so
+   the edge fade would wrongly imply scrollability. */
+@media (max-width: 768px) {
+  .discover-carousel {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+/* The picker becomes a non-scrolling vertical grid on phones
+   (style.css @media max-width: 600px) — same treatment. */
+@media (max-width: 600px) {
+  .explorer-picker-scroll {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
