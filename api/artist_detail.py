@@ -2254,10 +2254,16 @@ def download_discography(artist_id):
         # and an artist the user owns nothing of, was ~15-30s PER TRACK — every
         # title/artist variation fell through to a full-table fuzzy fallback).
         # Same batched path the discography backfill job + completion-stream use.
-        # Crucially we pass an empty list (not None) when nothing is owned, so the
-        # owns-nothing case still takes the fast in-memory path → instant.
+        # Crucially we pass an empty list (not None) when nothing is owned, and
+        # mark it exhaustive, so the owns-nothing case still takes the fast
+        # in-memory path → instant. A bare [] without the flag would now fall
+        # through to the legacy per-track SQL search (#1621).
         owned_candidate_tracks = []
         cand_albums = []
+        # True while the [] below is proven release-level emptiness; a failed
+        # pre-fetch is "no information", not "proven empty", so the except
+        # below clears it and the legacy path runs instead.
+        candidates_exhaustive = True
         try:
             cand_albums = db.get_candidate_albums_for_artist(
                 artist_name, server_source=active_server
@@ -2269,6 +2275,7 @@ def download_discography(artist_id):
         except Exception as _cand_err:
             logger.debug("Discography: candidate pre-fetch failed for %s: %s", artist_name, _cand_err)
             owned_candidate_tracks = []
+            candidates_exhaustive = False
 
         total_added = 0
         total_skipped = 0
@@ -2401,7 +2408,17 @@ def download_discography(artist_id):
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
                         if track_already_owned(db, track_name, hint_artist, album_name, active_server,
-                                               candidate_tracks=ownership_candidates):
+                                               candidate_tracks=ownership_candidates,
+                                               # [] here is release-level emptiness (no owned
+                                               # albums, or this release isn't in the library) —
+                                               # keep the fast in-memory miss instead of the
+                                               # legacy SQL path. This preserves the pre-#1621
+                                               # fast-miss exactly; do not copy this flag to
+                                               # call sites with a weaker emptiness proof.
+                                               # (candidates_exhaustive is False when the
+                                               # pre-fetch itself failed — "no information",
+                                               # not "proven empty".)
+                                               candidate_tracks_exhaustive=candidates_exhaustive):
                             skipped_owned += 1
                             continue
 
