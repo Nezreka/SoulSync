@@ -936,3 +936,29 @@ CREATE TABLE IF NOT EXISTS subtitle_wanted (
     UNIQUE(video_kind, video_id, language, hi, forced)
 );
 CREATE INDEX IF NOT EXISTS idx_subtitle_wanted_status ON subtitle_wanted(status);
+
+-- ── "Replace Bazarr" Phase 2: fetch history + per-provider daily quota ───────
+CREATE TABLE IF NOT EXISTS subtitle_fetch_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_kind TEXT NOT NULL,        -- 'movie' | 'episode' | 'download'
+    video_id INTEGER NOT NULL,
+    language TEXT NOT NULL,
+    hi INTEGER NOT NULL DEFAULT 0,
+    forced INTEGER NOT NULL DEFAULT 0,
+    provider TEXT NOT NULL,          -- provider id, or '' when no provider was tried
+    candidate_title TEXT,            -- best candidate's title, if any
+    score REAL,                      -- best candidate's score, if any
+    outcome TEXT NOT NULL,           -- 'downloaded' | 'miss' | 'below_threshold' | 'error'
+    attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_subtitle_fetch_history_video
+    ON subtitle_fetch_history(video_kind, video_id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_fetch_history_attempted
+    ON subtitle_fetch_history(attempted_at);
+
+CREATE TABLE IF NOT EXISTS subtitle_quota (
+    provider TEXT NOT NULL,
+    day TEXT NOT NULL,               -- YYYY-MM-DD (UTC)
+    used INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (provider, day)
+);

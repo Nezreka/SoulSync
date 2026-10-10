@@ -20,13 +20,16 @@ class SubtitleQuery:
     """What we're looking for.
 
     ``identity`` is ``{imdb_id?, tmdb_id?, season?, episode?}`` — the same shape the
-    old single-fetcher took.
+    old single-fetcher took. ``filename``/``moviehash`` feed Phase 2 scoring
+    (hash-first); providers that can't use them ignore them.
     """
 
     identity: dict = field(default_factory=dict)
     language: str = "en"
     hi: bool = False
     forced: bool = False
+    filename: str | None = None   # video filename, for release-name similarity
+    moviehash: str | None = None  # OpenSubtitles file hash, for hash-match search
 
 
 @dataclass
@@ -35,6 +38,7 @@ class SubtitleCandidate:
 
     ``download_ref`` is opaque and provider-specific (e.g. an OpenSubtitles
     ``file_id``); only the provider that produced it can ``download()`` it.
+    ``hash_match``/``download_count`` feed Phase 2 scoring.
     """
 
     provider_id: str
@@ -43,6 +47,8 @@ class SubtitleCandidate:
     forced: bool
     title: str  # subtitle/release name, for display
     download_ref: Any
+    hash_match: bool = False
+    download_count: int = 0
 
 
 class SubtitleProvider(ABC):

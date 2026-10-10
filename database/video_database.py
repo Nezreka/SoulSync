@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 50   # v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 51   # v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -2796,6 +2796,262 @@ class VideoDatabase:
             return row is not None
         finally:
             conn.close()
+
+    # ── subtitle Phase 2: retryable queue, history, quota, re-key ──────────
+    @staticmethod
+    def _subtitle_backoff_hours(attempts: int) -> int:
+        """Exponential backoff between fetch retries: 1h, 2h, 4h … capped at 7d.
+
+        Pure (also duplicated in the worker for testability — keep in sync)."""
+        try:
+            a = max(0, int(attempts))
+        except (TypeError, ValueError):
+            a = 0
+        return min(2 ** a, 168)
+
+    def subtitle_get_retryable(self, limit: int = 50) -> list:
+        """Rows the Phase 2 worker may attempt now: status='wanted' (never tried,
+        e.g. created while keyless) plus status='failed' whose backoff has
+        expired. 'have'/'fetching' rows are never returned. Oldest first."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM subtitle_wanted WHERE status IN ('wanted', 'failed') "
+                "ORDER BY created_at, id LIMIT ?",
+                (max(1, int(limit)),)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def subtitle_log_fetch(self, video_kind, video_id, language, outcome,
+                           provider="", candidate_title=None, score=None,
+                           hi=False, forced=False) -> None:
+        """Append one row to subtitle_fetch_history. Never raises."""
+        try:
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    "INSERT INTO subtitle_fetch_history(video_kind, video_id, language, "
+                    "hi, forced, provider, candidate_title, score, outcome) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(video_kind), int(video_id), str(language or "en").lower(),
+                     int(bool(hi)), int(bool(forced)), str(provider or ""),
+                     candidate_title if candidate_title is None else str(candidate_title),
+                     None if score is None else float(score), str(outcome)))
+                # Retention: history is observability, not an archive. Prune rows
+                # older than 90 days on each write (single indexed delete).
+                conn.execute(
+                    "DELETE FROM subtitle_fetch_history "
+                    "WHERE attempted_at < datetime('now', '-90 days')")
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:  # noqa: BLE001, S110 - history is observability, never fatal
+            pass
+
+    def subtitle_get_history(self, video_kind, video_id, limit: int = 50) -> list:
+        """Fetch history for one video, newest first — Phase 4's UI input."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM subtitle_fetch_history WHERE video_kind=? AND video_id=? "
+                "ORDER BY id DESC LIMIT ?",
+                (str(video_kind), int(video_id), max(1, int(limit)))).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _today_utc() -> str:
+        import datetime as _dt
+        return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+
+    def subtitle_quota_used(self, provider: str) -> int:
+        """Downloads burned today (UTC) for a provider. 0 when unknown."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT used FROM subtitle_quota WHERE provider=? AND day=?",
+                (str(provider or ""), self._today_utc())).fetchone()
+            return int(row["used"]) if row else 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return 0
+        finally:
+            conn.close()
+
+    def subtitle_quota_bump(self, provider: str) -> int:
+        """Record one download against today's quota. Returns the new total."""
+        day = self._today_utc()
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO subtitle_quota(provider, day, used) VALUES (?, ?, 1) "
+                "ON CONFLICT(provider, day) DO UPDATE SET used = used + 1",
+                (str(provider or ""), day))
+            conn.commit()
+            row = conn.execute(
+                "SELECT used FROM subtitle_quota WHERE provider=? AND day=?",
+                (str(provider or ""), day)).fetchone()
+            return int(row["used"]) if row else 1
+        finally:
+            conn.close()
+
+    def subtitle_delete_for_video(self, video_kind: str, video_id: int) -> int:
+        """Delete all subtitle_wanted rows for a video key. Used for orphaned
+        rows whose source (download/library row) no longer exists. Returns the
+        count deleted."""
+        try:
+            video_id = int(video_id)
+        except (TypeError, ValueError):
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM subtitle_wanted WHERE video_kind = ? AND video_id = ?",
+                (str(video_kind or "").strip().lower(), video_id))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        finally:
+            conn.close()
+
+    def subtitle_source_exists(self, video_kind: str, video_id: int) -> bool | None:
+        """Does the thing a subtitle_wanted row refers to still exist?
+
+        Returns True/False, or None when the check itself failed (transient DB
+        error — callers must NOT treat None as "gone"). Lets the wanted-loop
+        worker clean up orphaned rows (e.g. download rows the user cleared)
+        instead of retrying them forever.
+        """
+        try:
+            video_id = int(video_id)
+        except (TypeError, ValueError):
+            return False
+        kind = str(video_kind or "").strip().lower()
+        conn = self._get_connection()
+        try:
+            if kind == "download":
+                row = conn.execute("SELECT 1 FROM video_downloads WHERE id = ?",
+                                   (video_id,)).fetchone()
+            elif kind == "movie":
+                row = conn.execute("SELECT 1 FROM video_movies WHERE id = ?",
+                                   (video_id,)).fetchone()
+            elif kind == "episode":
+                row = conn.execute("SELECT 1 FROM video_episodes WHERE id = ?",
+                                   (video_id,)).fetchone()
+            else:
+                return False
+            return row is not None
+        except Exception:  # noqa: BLE001 - unknown, not gone
+            return None
+        finally:
+            conn.close()
+
+
+    def subtitle_rekey(self, download_id: int, video_kind: str, video_id: int) -> int:
+        """Move download-keyed wanted rows onto their library row after the scanner
+        ingests: ('download', download_id) → (video_kind, video_id). Returns the
+        number of rows moved. INSERT-OR-IGNORE semantics per row would need the
+        row ids — instead this moves only rows whose target key doesn't already
+        exist (checked per row in Python; the table is small)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, language, hi, forced FROM subtitle_wanted "
+                "WHERE video_kind='download' AND video_id=?",
+                (int(download_id),)).fetchall()
+            moved = 0
+            for r in rows:
+                exists = conn.execute(
+                    "SELECT 1 FROM subtitle_wanted WHERE video_kind=? AND video_id=? "
+                    "AND language=? AND hi=? AND forced=?",
+                    (str(video_kind), int(video_id), r["language"],
+                     int(r["hi"]), int(r["forced"]))).fetchone()
+                if not exists:
+                    conn.execute(
+                        "UPDATE subtitle_wanted SET video_kind=?, video_id=? WHERE id=?",
+                        (str(video_kind), int(video_id), int(r["id"])))
+                    moved += 1
+                else:
+                    # Target already has this language — drop the stale
+                    # download-keyed duplicate rather than orphaning it.
+                    conn.execute("DELETE FROM subtitle_wanted WHERE id=?", (int(r["id"]),))
+                    moved += 1
+            conn.commit()
+            return moved
+        finally:
+            conn.close()
+
+    def subtitle_video_info(self, video_kind, video_id) -> dict:
+        """Identity + stored file path for a wanted row's video. Returns
+        ``{tmdb_id?, imdb_id?, season?, episode?, relative_path?}`` — missing
+        pieces are absent, never raises. ``relative_path`` is the media_files
+        stored path (server-view); resolve it with
+        ``core.video.path_resolver.resolve_video_file_path``."""
+        info: dict = {}
+        conn = self._get_connection()
+        try:
+            kind = str(video_kind or "")
+            vid = int(video_id)
+            if kind == "movie":
+                row = conn.execute(
+                    "SELECT tmdb_id, imdb_id FROM movies WHERE id=?", (vid,)).fetchone()
+                if row:
+                    if row["tmdb_id"]:
+                        info["tmdb_id"] = row["tmdb_id"]
+                    if row["imdb_id"]:
+                        info["imdb_id"] = row["imdb_id"]
+                mf = conn.execute(
+                    "SELECT relative_path FROM media_files WHERE movie_id=? "
+                    "ORDER BY id LIMIT 1", (vid,)).fetchone()
+                if mf and mf["relative_path"]:
+                    info["relative_path"] = mf["relative_path"]
+            elif kind == "episode":
+                row = conn.execute(
+                    "SELECT season_number, episode_number, show_id FROM episodes "
+                    "WHERE id=?", (vid,)).fetchone()
+                if row:
+                    info["season"] = row["season_number"]
+                    info["episode"] = row["episode_number"]
+                    show = conn.execute(
+                        "SELECT tmdb_id, imdb_id FROM shows WHERE id=?",
+                        (row["show_id"],)).fetchone()
+                    if show:
+                        if show["tmdb_id"]:
+                            info["tmdb_id"] = show["tmdb_id"]
+                        if show["imdb_id"]:
+                            info["imdb_id"] = show["imdb_id"]
+                mf = conn.execute(
+                    "SELECT relative_path FROM media_files WHERE episode_id=? "
+                    "ORDER BY id LIMIT 1", (vid,)).fetchone()
+                if mf and mf["relative_path"]:
+                    info["relative_path"] = mf["relative_path"]
+            elif kind == "download":
+                row = conn.execute(
+                    "SELECT dest_path, search_ctx, media_id, media_source, kind "
+                    "FROM video_downloads WHERE id=?", (vid,)).fetchone()
+                if row:
+                    if row["dest_path"]:
+                        info["dest_path"] = row["dest_path"]
+                    mid = row["media_id"]
+                    src = str(row["media_source"] or "").lower()
+                    if mid and src == "tmdb":
+                        try:
+                            info["tmdb_id"] = int(mid)
+                        except (TypeError, ValueError):
+                            pass
+                    try:
+                        ctx = __import__("json").loads(row["search_ctx"] or "{}")
+                    except (ValueError, TypeError):
+                        ctx = {}
+                    if isinstance(ctx, dict):
+                        if ctx.get("season") is not None:
+                            info["season"] = ctx.get("season")
+                            info["episode"] = ctx.get("episode")
+        except Exception:  # noqa: BLE001, S110 - best-effort info lookup
+            pass
+        finally:
+            conn.close()
+        return info
 
     def get_import_failed_video_downloads(self) -> list:
         """Downloads that finished but couldn't be auto-placed (sample / wrong episode /
