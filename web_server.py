@@ -9483,8 +9483,40 @@ def batch_update_library_tracks():
 
 # ── Write Tags to File endpoints ──
 
-def _build_library_tag_db_data(track_data, album_genres=None):
-    """Build the metadata payload consumed by core.tag_writer."""
+def _fetch_tag_credit_maps(cursor, rows):
+    """``({track_id: [names]}, {album_id: [names]})`` for a set of track rows.
+
+    Two queries for the whole batch, not two per track.
+
+    Swallows failure on purpose: ``artist_credits.ensure_schema`` is called
+    best-effort at DB init (database/music_database.py:1812 logs and carries
+    on), so the credit tables genuinely may not exist. Multi-value tags are
+    additive — losing them must not take the whole Write Tags flow down with
+    them.
+    """
+    from core.library.artist_credits import album_credited_names, credited_names
+    track_ids = [str(r['id']) for r in rows if r.get('id')]
+    album_ids = sorted({str(r['album_id']) for r in rows if r.get('album_id')})
+    try:
+        return credited_names(cursor, track_ids), album_credited_names(cursor, album_ids)
+    except Exception as e:
+        logger.warning("artist-credit lookup for tag write failed, "
+                       "falling back to single-artist tags: %s", e)
+        return {}, {}
+
+
+def _build_library_tag_db_data(track_data, album_genres=None,
+                               artists_map=None, album_artists_map=None):
+    """Build the metadata payload consumed by core.tag_writer.
+
+    ``artists_map`` / ``album_artists_map`` are the bulk credit lookups
+    (``{track_id: [names]}`` / ``{album_id: [names]}``) from
+    ``core.library.artist_credits``. The metadata workers already store every
+    credited artist per source; without them the only multi-artist signal here
+    was splitting the ``track_artist`` STRING on ``;``, so a collab album
+    re-tagged from the library came out single-artist even though the DB knew
+    better. Callers fetch the maps once per batch — never per track.
+    """
     album_genres = album_genres or []
     # #1057 — strict genre filtering applies at the tag-write seam too, so
     # 'Write Tags' cleans up genres written before the whitelist was enabled.
@@ -9508,11 +9540,25 @@ def _build_library_tag_db_data(track_data, album_genres=None):
         'thumb_url': track_data.get('album_thumb_url') or track_data.get('artist_thumb_url'),
     }
 
+    separator = config_manager.get('metadata_enhancement.tags.artist_separator', ', ') or ', '
+
+    # Credits win over the `;`-split: they come from the source, the split is a
+    # guess at a string the source never structured. The split stays as the
+    # fallback for tracks no provider ever matched.
+    credited = (artists_map or {}).get(str(track_data.get('id')))
     track_artist = track_data.get('track_artist')
-    if isinstance(track_artist, str) and ';' in track_artist:
+    if credited and len(credited) > 1:
+        db_data['artists_list'] = list(credited)
+        db_data['track_artist'] = separator.join(credited)
+    elif isinstance(track_artist, str) and ';' in track_artist:
         artists_list = [name.strip() for name in track_artist.split(';') if name.strip()]
         if artists_list:
             db_data['artists_list'] = artists_list
+
+    album_credited = (album_artists_map or {}).get(str(track_data.get('album_id')))
+    if album_credited and len(album_credited) > 1:
+        db_data['album_artists_list'] = list(album_credited)
+        db_data['artist_name'] = separator.join(album_credited)
 
     # Carry the known source IDs through so they get embedded too (the writer
     # only acts on the ones present). These come from t.* on the track row.
@@ -9571,7 +9617,10 @@ def get_track_tag_preview(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build DB metadata dict for comparison
-        db_data = _build_library_tag_db_data(track_data, album_genres)
+        _artists, _album_artists = _fetch_tag_credit_maps(cursor, [track_data])
+        db_data = _build_library_tag_db_data(track_data, album_genres,
+                                             artists_map=_artists,
+                                             album_artists_map=_album_artists)
 
         diff = build_tag_diff(file_tags, db_data)
         has_changes = any(d['changed'] for d in diff)
@@ -9620,6 +9669,7 @@ def get_batch_tag_preview():
             WHERE t.id IN ({placeholders})
         """, [str(tid) for tid in track_ids])
         rows = [dict(r) for r in cursor.fetchall()]
+        _artists, _album_artists = _fetch_tag_credit_maps(cursor, rows)
 
         results = []
         for track_data in rows:
@@ -9653,7 +9703,9 @@ def get_batch_tag_preview():
                     except (ValueError, TypeError):
                         album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                db_data = _build_library_tag_db_data(track_data, album_genres)
+                db_data = _build_library_tag_db_data(track_data, album_genres,
+                                                     artists_map=_artists,
+                                                     album_artists_map=_album_artists)
 
                 diff = build_tag_diff(file_tags, db_data)
                 has_changes = any(d['changed'] for d in diff)
@@ -9725,7 +9777,10 @@ def write_track_tags(track_id):
                 album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
         # Build data for writer
-        db_data = _build_library_tag_db_data(track_data, album_genres)
+        _artists, _album_artists = _fetch_tag_credit_maps(cursor, [track_data])
+        db_data = _build_library_tag_db_data(track_data, album_genres,
+                                             artists_map=_artists,
+                                             album_artists_map=_album_artists)
 
         # Resolve cover URL
         cover_url = None
@@ -9801,6 +9856,7 @@ def write_tracks_tags_batch():
         """, [str(tid) for tid in track_ids])
 
         rows = [dict(r) for r in cursor.fetchall()]
+        _artists, _album_artists = _fetch_tag_credit_maps(cursor, rows)
 
         sync_to_server = data.get('sync_to_server', False)
 
@@ -9878,7 +9934,9 @@ def write_tracks_tags_batch():
                         except (ValueError, TypeError):
                             album_genres = [g.strip() for g in track_data['album_genres'].split(',') if g.strip()]
 
-                    db_data = _build_library_tag_db_data(track_data, album_genres)
+                    db_data = _build_library_tag_db_data(track_data, album_genres,
+                                                         artists_map=_artists,
+                                                         album_artists_map=_album_artists)
 
                     # Get pre-downloaded cover art for this track's album
                     art_data = None
