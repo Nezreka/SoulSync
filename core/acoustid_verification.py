@@ -8,6 +8,7 @@ If the audio fingerprint confidently identifies a DIFFERENT song than expected,
 the file is flagged as incorrect.
 """
 
+import os
 import re
 import threading
 from difflib import SequenceMatcher
@@ -368,14 +369,29 @@ class AcoustIDVerification:
             # fingerprinted "Song (Extended Mix)" and quarantines the file the
             # setting just spent a search finding.
             _accept_version = None
+            _file_duration_s = None
             if isinstance(context, dict):
                 _accept_version = str(context.get('_preferred_version_taken') or '') or None
+                if context.get('duration_ms'):
+                    try:
+                        _file_duration_s = float(context['duration_ms']) / 1000.0
+                    except (TypeError, ValueError):
+                        pass
+            if _file_duration_s is None and audio_file_path and os.path.isfile(audio_file_path):
+                try:
+                    from mutagen import File as MutagenFile
+                    mf = MutagenFile(audio_file_path)
+                    if mf and mf.info and hasattr(mf.info, 'length'):
+                        _file_duration_s = float(mf.info.length)
+                except Exception:
+                    pass
 
             outcome = _core_evaluate(
                 expected_track_name, expected_artist_name, recordings,
                 fingerprint_score=best_score,
                 aliases_provider=_aliases_provider,
                 accept_version=_accept_version,
+                expected_duration_s=_file_duration_s,
             )
             logger.info(
                 "Best match: '%s' by '%s' (title_sim=%.2f, artist_sim=%.2f) -> %s",

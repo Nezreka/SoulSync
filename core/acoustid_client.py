@@ -386,26 +386,59 @@ class AcoustIDClient:
             seen_mbids = set()
             best_score = 0.0
 
-            for result in acoustid.match(self.api_key, audio_file, parse=True):
-                # match() with parse=True returns (score, recording_id, title, artist)
-                if not isinstance(result, tuple) or len(result) < 2:
-                    logger.warning(f"Unexpected result format: {result}")
-                    continue
+            # Query AcoustID with parse=False when possible to retain full recording metadata (including duration)
+            try:
+                lookup_res = acoustid.match(self.api_key, audio_file, parse=False)
+            except TypeError:
+                lookup_res = acoustid.match(self.api_key, audio_file)
 
-                score = result[0]
-                recording_id = result[1]
-                title = result[2] if len(result) > 2 else None
-                artist = result[3] if len(result) > 3 else None
+            if isinstance(lookup_res, dict) and lookup_res.get('status') == 'ok':
+                for result in lookup_res.get('results', []):
+                    score = float(result.get('score', 0.0))
+                    if score > best_score:
+                        best_score = score
+                    for recording in result.get('recordings', []):
+                        recording_id = recording.get('id')
+                        title = recording.get('title')
+                        duration = recording.get('duration')
+                        artists = recording.get('artists')
+                        if artists:
+                            artist = "".join([a.get('name', '') + a.get('joinphrase', '') for a in artists])
+                        else:
+                            artist = None
 
-                logger.debug(f"Got result: score={score}, id={recording_id}, title={title}, artist={artist}")
-
-                if score > best_score:
-                    best_score = score
-
-                if recording_id and recording_id not in seen_mbids:
-                    seen_mbids.add(recording_id)
-                    recordings.append({'mbid': recording_id, 'title': title, 'artist': artist, 'score': score})
-                    logger.debug(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score})")
+                        if recording_id and recording_id not in seen_mbids:
+                            seen_mbids.add(recording_id)
+                            recordings.append({
+                                'mbid': recording_id,
+                                'id': recording_id,
+                                'title': title,
+                                'artist': artist,
+                                'score': score,
+                                'duration': duration,
+                            })
+                            logger.debug(f"Found match: {title} by {artist} (MBID: {recording_id}, score: {score}, duration: {duration})")
+            elif isinstance(lookup_res, list) or hasattr(lookup_res, '__iter__'):
+                for result in lookup_res:
+                    if not isinstance(result, tuple) or len(result) < 2:
+                        continue
+                    score = result[0]
+                    recording_id = result[1]
+                    title = result[2] if len(result) > 2 else None
+                    artist = result[3] if len(result) > 3 else None
+                    duration = result[4] if len(result) > 4 else None
+                    if score > best_score:
+                        best_score = score
+                    if recording_id and recording_id not in seen_mbids:
+                        seen_mbids.add(recording_id)
+                        recordings.append({
+                            'mbid': recording_id,
+                            'id': recording_id,
+                            'title': title,
+                            'artist': artist,
+                            'score': score,
+                            'duration': duration,
+                        })
 
             if not recordings:
                 logger.info(f"No AcoustID matches found for: {audio_file}")
