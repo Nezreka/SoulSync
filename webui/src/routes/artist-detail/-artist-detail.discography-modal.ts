@@ -332,6 +332,8 @@ export interface FutureReleases {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  /** Include tracks by artists other than the watched one (tributes, soundtracks). Default off. */
+  include_other_artists: boolean;
   /** null = follow the global auto-download setting */
   auto_download_pref: 'on' | 'off' | null;
 }
@@ -352,6 +354,7 @@ export function defaultFutureReleases(filters: DiscogFilters): FutureReleases {
     include_acoustic: false,
     include_compilations: filters.compilations,
     include_instrumentals: false,
+    include_other_artists: false,
     auto_download_pref: null,
   };
 }
@@ -405,6 +408,7 @@ export async function watchArtistWithSettings(
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,
         include_instrumentals: settings.include_instrumentals,
+        include_other_artists: settings.include_other_artists,
         auto_download_pref: settings.auto_download_pref,
       }),
     },

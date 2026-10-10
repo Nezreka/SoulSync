@@ -163,6 +163,8 @@ export interface WatchlistGlobalConfig {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  /** Include tracks by artists other than the watched one (tributes, soundtracks). Default off. */
+  include_other_artists: boolean;
   exclude_terms: string;
   /**
    * The DEFAULT for artists that have never chosen (`auto_download_pref` null).
@@ -232,6 +234,8 @@ export interface WatchlistArtistConfig {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  /** Include tracks by artists other than the watched one (tributes, soundtracks). Default off. */
+  include_other_artists: boolean;
   last_scan_timestamp?: string | null;
   date_added?: string | null;
   /** null = use the global window. */
