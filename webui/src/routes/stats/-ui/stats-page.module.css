@@ -13,12 +13,12 @@
     radial-gradient(900px 500px at 85% 85%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
     linear-gradient(180deg, rgba(16, 18, 24, 0.85) 0%, rgba(10, 12, 16, 0.95) 100%);
   border-radius: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--white-a08);
+  border-top: 1px solid var(--white-a14);
   box-shadow:
     0 24px 60px -12px rgba(0, 0, 0, 0.65),
     0 8px 24px -4px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    inset 0 1px 0 var(--white-a10);
   backdrop-filter: blur(28px);
 }
 
@@ -40,7 +40,7 @@
   gap: 7px;
   padding: 8px 18px;
   border: 1px solid rgba(var(--accent-light-rgb), 0.45);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: linear-gradient(
     135deg,
     rgba(var(--accent-light-rgb), 0.18) 0%,
@@ -55,7 +55,7 @@
   transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow:
     0 0 20px rgba(var(--accent-light-rgb), 0.2),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--white-a20);
 }
 
 .statsYearButton:hover {
@@ -91,9 +91,9 @@
   display: inline-flex;
   gap: 3px;
   padding: 4px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-lg);
+  background: var(--white-a05);
+  border: 1px solid var(--white-a07);
   backdrop-filter: blur(12px);
 }
 
@@ -102,7 +102,7 @@
   border: 0;
   border-radius: 9px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 650;
@@ -112,15 +112,15 @@
 
 .statsTab:hover {
   color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
 }
 
 .statsTabActive {
-  background: rgba(255, 255, 255, 0.15) !important;
+  background: var(--white-a15) !important;
   color: #fff !important;
   box-shadow:
     0 2px 8px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    inset 0 1px 0 var(--white-a20);
 }
 
 /* Time Range Selector */
@@ -128,9 +128,9 @@
   display: flex;
   gap: 3px;
   padding: 4px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-lg);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   backdrop-filter: blur(12px);
 }
 
@@ -139,7 +139,7 @@
   border: none;
   border-radius: 9px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   font-size: 0.8rem;
   font-weight: 650;
   cursor: pointer;
@@ -148,8 +148,8 @@
 }
 
 .statsRangeButton:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--white-a90);
+  background: var(--white-a05);
 }
 
 .statsRangeButtonActive {
@@ -157,7 +157,7 @@
   color: #fff !important;
   box-shadow:
     0 2px 10px rgba(var(--accent-rgb), 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    inset 0 1px 0 var(--white-a25);
 }
 
 /* =========================================================================
@@ -172,9 +172,9 @@
   flex-wrap: wrap;
   margin: 14px 0 24px;
   padding: 10px 16px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
   backdrop-filter: blur(20px);
 }
 
@@ -195,7 +195,7 @@
 .statsSyncStatusDot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #34d399;
   box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
   flex-shrink: 0;
@@ -203,7 +203,7 @@
 
 .statsLastSynced {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -220,9 +220,9 @@
   width: 32px;
   height: 32px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a05);
+  color: var(--white-a70);
   font-size: 15px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -253,7 +253,7 @@
   height: 14px;
   border: 2px solid rgba(var(--accent-rgb), 0.2);
   border-top-color: rgb(var(--accent-rgb));
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.75s linear infinite;
 }
 
@@ -280,16 +280,16 @@
   width: 270px;
   max-width: 100%;
   padding: 9px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(14px);
   transition: all 0.2s ease;
 }
 
 .historyImportControl:hover {
-  border-color: rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--white-a14);
+  background: var(--white-a05);
 }
 
 .historyImportInfo {
@@ -310,11 +310,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .historyImportStatus {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   font-weight: 550;
 }
 
@@ -326,9 +326,9 @@
   min-height: 32px;
   padding: 0 12px;
   border-radius: 9px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.9);
+  border: 1px solid var(--white-a12);
+  background: var(--white-a06);
+  color: var(--white-a90);
   font: inherit;
   font-size: 0.75rem;
   font-weight: 650;
@@ -355,13 +355,13 @@
   width: 100%;
   height: 4px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   accent-color: rgb(var(--accent-rgb));
 }
 
 .historyImportProgress::-webkit-progress-bar {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
 }
 
 .historyImportProgress::-webkit-progress-value {
@@ -381,7 +381,7 @@
 
 .statsCard {
   background: linear-gradient(145deg, rgba(24, 28, 36, 0.75) 0%, rgba(14, 16, 22, 0.85) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--white-a07);
   border-radius: 18px;
   padding: 18px 20px 16px;
   position: relative;
@@ -431,7 +431,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(var(--accent-rgb), 0.12);
   color: rgb(var(--accent-rgb));
 }
@@ -453,7 +453,7 @@
   align-self: flex-start;
   gap: 4px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: 0.01em;
@@ -473,9 +473,9 @@
 }
 
 .statsCardDelta_flat {
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a05);
+  color: var(--white-a50);
+  border: 1px solid var(--white-a08);
 }
 
 .statsCardDeltaNew {
@@ -497,7 +497,7 @@
 /* Section Card Base */
 .statsSectionCard {
   background: linear-gradient(155deg, rgba(22, 26, 34, 0.65) 0%, rgba(14, 16, 22, 0.75) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--white-a07);
   border-radius: 20px;
   padding: 22px;
   backdrop-filter: blur(20px);
@@ -509,7 +509,7 @@
 }
 
 .statsSectionCard:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: var(--white-a12);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
 }
 
@@ -518,10 +518,10 @@
   font-weight: 750;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   margin-bottom: 18px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -552,12 +552,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.78rem;
 }
 
 .statsClockContextLabel {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-weight: 700;
 }
 
@@ -588,7 +588,7 @@
 .statsClockDay {
   font-size: 0.68rem;
   font-weight: 650;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-align: right;
   padding-right: 4px;
   text-transform: uppercase;
@@ -643,7 +643,7 @@
   padding: 32px 0;
   text-align: center;
   font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 /* Rhythm habit pulse widget */
@@ -652,7 +652,7 @@
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-a06);
 }
 
 .statsRhythmItem {
@@ -660,9 +660,9 @@
   flex-direction: column;
   gap: 3px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
 }
 
 .statsRhythmValue {
@@ -674,7 +674,7 @@
 
 .statsRhythmLabel {
   font-size: 0.7rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
@@ -694,7 +694,7 @@
 .statsTopArtistsVisual {
   margin-bottom: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   overflow-x: auto;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
@@ -738,10 +738,10 @@
 }
 
 .statsBubbleImage {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background-size: cover;
   background-position: center;
-  background-color: rgba(255, 255, 255, 0.08);
+  background-color: var(--white-a08);
   border: 2px solid rgba(var(--accent-rgb), 0.35);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.4),
@@ -763,26 +763,26 @@
 .statsBubbleInitial {
   font-size: 1.25rem;
   font-weight: 800;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
 }
 
 .statsBubbleBarContainer {
   width: 100%;
   height: 3.5px;
-  background: rgba(255, 255, 255, 0.07);
-  border-radius: 999px;
+  background: var(--white-a07);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
 .statsBubbleBar {
   height: 100%;
   background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.5));
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .statsBubbleName {
   font-size: 0.76rem;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
@@ -806,7 +806,7 @@
   max-height: 360px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: var(--white-a12) transparent;
   padding-right: 4px;
 }
 
@@ -816,16 +816,16 @@
   align-items: center;
   gap: 12px;
   padding: 8px 10px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-lg);
+  background: var(--white-a02);
   border: 1px solid transparent;
   transition: all 0.2s ease;
 }
 
 .statsRankedItem:hover,
 .statsRecentItem:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--white-a06);
+  border-color: var(--white-a08);
   transform: translateX(2px);
 }
 
@@ -834,12 +834,12 @@
   font-weight: 800;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 /* Gold, silver, bronze ranks */
@@ -863,9 +863,9 @@
 .statsRankedImageFallback {
   width: 42px;
   height: 42px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   object-fit: cover;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
@@ -889,7 +889,7 @@
 
 .statsRankedMeta {
   font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -902,7 +902,7 @@
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(var(--accent-rgb), 0.08);
 }
 
@@ -931,7 +931,7 @@
 .statsPlayButton {
   width: 30px;
   height: 30px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   border: none;
   background: rgba(var(--accent-rgb), 0.18);
   color: rgb(var(--accent-rgb));
@@ -991,7 +991,7 @@
 .statsOwnPlayGenre {
   font-size: 0.8rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1006,7 +1006,7 @@
 .statsOwnPlayOwned,
 .statsOwnPlayPlayed {
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   min-width: 3px;
   transition: width 0.3s ease;
 }
@@ -1041,7 +1041,7 @@
   gap: 8px;
   margin-top: 6px;
   font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .statsOwnPlayKeyOwned,
@@ -1063,13 +1063,13 @@
 .statsNeglected {
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--white-a06);
 }
 
 .statsNeglectedTitle {
   font-size: 0.74rem;
   font-weight: 750;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 8px;
@@ -1084,7 +1084,7 @@
 }
 
 .statsNeglectedName {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1092,11 +1092,11 @@
 }
 
 .statsNeglectedArtist {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .statsNeglectedCount {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -1127,7 +1127,7 @@
   align-items: center;
   gap: 8px;
   font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
 }
 
 .statsGenreDot,
@@ -1140,7 +1140,7 @@
 
 .statsGenrePct {
   margin-left: auto;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -1150,7 +1150,7 @@
   flex: 1;
   font-size: 0.88rem;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--white-a90);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1158,7 +1158,7 @@
 
 .statsRecentArtist {
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   flex-shrink: 0;
 }
 
@@ -1197,7 +1197,7 @@
   padding: 14px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a05);
 }
 
 .statsHealthItemWide {
@@ -1215,7 +1215,7 @@
 
 .statsHealthLabel {
   font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -1227,7 +1227,7 @@
   border-radius: 9px;
   overflow: hidden;
   margin-top: 10px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
@@ -1247,7 +1247,7 @@
   gap: 16px;
   margin-top: 18px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--white-a05);
   flex-wrap: wrap;
 }
 
@@ -1261,7 +1261,7 @@
 
 .statsEnrichName {
   font-size: 0.76rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   min-width: 75px;
   font-weight: 600;
 }
@@ -1269,19 +1269,19 @@
 .statsEnrichBar {
   flex: 1;
   height: 5px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
+  background: var(--white-a06);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
 .statsEnrichFill {
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .statsEnrichPct {
   font-size: 0.76rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-variant-numeric: tabular-nums;
   min-width: 32px;
   text-align: right;
@@ -1311,7 +1311,7 @@
 
 .statsDiskTotalMeta {
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .statsDiskFormats {
@@ -1330,26 +1330,26 @@
 
 .statsDiskFormatName {
   font-weight: 650;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   text-transform: uppercase;
 }
 
 .statsDiskFormatBar {
   height: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
+  background: var(--white-a06);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
 .statsDiskFormatFill {
   height: 100%;
   background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.6) 100%);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
 }
 
 .statsDiskFormatSize {
   text-align: right;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -1389,7 +1389,7 @@
 
 .statsDbTotalLabel {
   font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -1407,7 +1407,7 @@
   align-items: center;
   gap: 10px;
   font-size: 0.82rem;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
 }
 
 .statsDbLegendName {
@@ -1420,7 +1420,7 @@
 
 .statsDbLegendSize {
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 0.78rem;
   font-weight: 600;
 }
@@ -1430,7 +1430,7 @@
 .statsLoading {
   text-align: center;
   padding: 90px 20px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .statsEmptyIcon {
@@ -1440,7 +1440,7 @@
 
 .statsEmpty h3 {
   font-size: 1.3rem;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   margin-bottom: 10px;
   font-weight: 750;
 }
@@ -1450,7 +1450,7 @@
 .emptyListState {
   font-size: 0.9rem;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .emptyListState {
@@ -1481,7 +1481,7 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   background: rgba(18, 22, 28, 0.96);
   backdrop-filter: blur(28px);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.7);
@@ -1493,7 +1493,7 @@
   justify-content: space-between;
   gap: 18px;
   padding: 24px 26px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid var(--white-a07);
 }
 
 .statsDetailEyebrow {
@@ -1515,17 +1515,17 @@
 
 .statsDetailHeader p {
   margin: 8px 0 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.88rem;
 }
 
 .statsDetailClose {
   width: 36px;
   height: 36px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-circle);
+  background: var(--white-a05);
+  color: var(--white-a80);
   cursor: pointer;
   font-size: 18px;
   display: flex;
@@ -1535,14 +1535,14 @@
 }
 
 .statsDetailClose:hover {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--white-a14);
   color: #fff;
   transform: scale(1.08);
 }
 
 .statsDetailLoading {
   padding: 36px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   text-align: center;
 }
 
@@ -1550,7 +1550,7 @@
   overflow-y: auto;
   padding: 12px 16px 18px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: var(--white-a14) transparent;
 }
 
 .statsDetailRow {
@@ -1560,19 +1560,19 @@
   gap: 14px;
   min-height: 64px;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   transition: background 0.15s ease;
 }
 
 .statsDetailRow:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
 }
 
 .statsDetailArt,
 .statsDetailArtFallback {
   width: 48px;
   height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -1582,8 +1582,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.55);
+  background: var(--white-a08);
+  color: var(--white-a55);
   font-weight: 750;
 }
 
@@ -1603,7 +1603,7 @@
 .statsDetailTrackMeta {
   margin-top: 3px;
   overflow: hidden;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1614,7 +1614,7 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   font-size: 0.76rem;
   white-space: nowrap;
 }
@@ -1625,9 +1625,9 @@
   min-height: 19px;
   padding: 0 8px;
   border: 1px solid rgba(var(--accent-rgb), 0.22);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(var(--accent-rgb), 0.1);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -1637,7 +1637,7 @@
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: rgba(var(--accent-rgb), 0.18);
   color: rgb(var(--accent-rgb));
   cursor: pointer;
@@ -1703,12 +1703,12 @@
   .statsContainer {
     margin: 6px;
     padding: 14px 10px;
-    border-radius: 16px;
+    border-radius: var(--radius-xl);
   }
 
   .statsSectionCard {
     padding: 16px 12px;
-    border-radius: 16px;
+    border-radius: var(--radius-xl);
   }
 
   .headerPrimaryActions {

@@ -49,7 +49,7 @@
   left: 10%;
   width: 650px;
   height: 650px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: radial-gradient(circle, rgba(var(--accent-light-rgb), 0.2) 0%, transparent 70%);
   filter: blur(80px);
   animation: auroraFloat1 18s ease-in-out infinite alternate;
@@ -61,7 +61,7 @@
   right: 5%;
   width: 750px;
   height: 750px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: radial-gradient(circle, rgba(168, 85, 247, 0.18) 0%, transparent 70%);
   filter: blur(100px);
   animation: auroraFloat2 22s ease-in-out infinite alternate;
@@ -73,7 +73,7 @@
   left: 60%;
   width: 500px;
   height: 500px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: radial-gradient(circle, rgba(6, 182, 212, 0.14) 0%, transparent 70%);
   filter: blur(90px);
   animation: auroraFloat3 15s ease-in-out infinite alternate;
@@ -121,8 +121,8 @@
 .pip {
   flex: 1;
   height: 3.5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+  background: var(--white-a12);
   backdrop-filter: blur(4px);
   transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
@@ -141,11 +141,11 @@
   z-index: 10;
   width: 40px;
   height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a12);
+  border-radius: var(--radius-circle);
+  background: var(--white-a06);
   backdrop-filter: blur(20px);
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   font-size: 1rem;
   display: flex;
   align-items: center;
@@ -156,9 +156,9 @@
 }
 
 .close:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--white-a16);
   color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--white-a25);
   transform: scale(1.08);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
@@ -216,9 +216,9 @@
 .storySpinner {
   width: 36px;
   height: 36px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
+  border: 3px solid var(--white-a10);
   border-top-color: var(--accent-light);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.8s linear infinite;
 }
 
@@ -237,7 +237,7 @@
   padding: 4px 14px;
   background: rgba(var(--accent-light-rgb), 0.12);
   border: 1px solid rgba(var(--accent-light-rgb), 0.3);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   color: var(--accent-light);
   font-size: 0.78rem;
   font-weight: 700;
@@ -252,7 +252,7 @@
   line-height: 1.04;
   letter-spacing: -0.04em;
   text-wrap: balance;
-  background: linear-gradient(180deg, #ffffff 30%, rgba(255, 255, 255, 0.75) 100%);
+  background: linear-gradient(180deg, #ffffff 30%, var(--white-a75) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -286,7 +286,7 @@
 }
 
 .quiet {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 1.05rem;
 }
 
@@ -306,8 +306,8 @@
   gap: 8px;
   padding: 20px 28px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a08);
   backdrop-filter: blur(16px);
   min-width: 170px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
@@ -315,8 +315,8 @@
 }
 
 .fact:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--white-a07);
+  border-color: var(--white-a16);
   transform: translateY(-2px);
 }
 
@@ -329,7 +329,7 @@
 }
 
 .factLabel {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -345,8 +345,8 @@
   height: 260px;
   margin: 18px 0 12px;
   padding: 16px 20px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a02);
+  border: 1px solid var(--white-a06);
   border-radius: 20px;
   backdrop-filter: blur(16px);
 }
@@ -367,8 +367,8 @@
   align-items: flex-end;
   width: 100%;
   flex: 1;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  background: var(--white-a04);
+  border-radius: var(--radius-md);
   overflow: hidden;
   position: relative;
 }
@@ -378,7 +378,7 @@
   min-height: 0;
   height: var(--bar-height, 0%);
   background: linear-gradient(180deg, #34d399 0%, var(--accent-light) 50%, #059669 100%);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   transform-origin: bottom;
   animation: barGrow 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
   box-shadow: 0 0 12px rgba(var(--accent-light-rgb), 0.3);
@@ -401,7 +401,7 @@
 }
 
 .monthLabel {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.76rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -459,14 +459,14 @@
   padding: 12px 18px;
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
   backdrop-filter: blur(12px);
   transition: all 0.2s ease;
 }
 
 .countdownRow:hover {
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: var(--white-a07);
+  border-color: var(--white-a14);
   transform: translateX(4px);
 }
 
@@ -475,7 +475,7 @@
   font-size: 1.3rem;
   font-weight: 850;
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   text-align: center;
 }
 
@@ -502,7 +502,7 @@
 }
 
 .countdownPlays {
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   font-size: 0.92rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -513,22 +513,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(
-    140deg,
-    rgba(var(--accent-light-rgb), 0.25),
-    rgba(255, 255, 255, 0.06)
-  );
-  color: rgba(255, 255, 255, 0.8);
+  background: linear-gradient(140deg, rgba(var(--accent-light-rgb), 0.25), var(--white-a06));
+  color: var(--white-a80);
   font-weight: 800;
   text-transform: uppercase;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
 }
 
 .heroPortrait {
   width: 180px;
   height: 180px;
   margin: 0 auto 24px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   font-size: 3.5rem;
   box-shadow:
@@ -563,7 +559,7 @@
   object-fit: cover;
   font-size: 3.5rem;
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px var(--white-a12),
     0 24px 60px rgba(0, 0, 0, 0.7),
     0 0 40px rgba(var(--accent-light-rgb), 0.2);
 }
@@ -597,7 +593,7 @@
   border-radius: 14px;
   object-fit: cover;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -640,9 +636,9 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-a03);
   backdrop-filter: blur(12px);
   color: inherit;
   font: inherit;
@@ -655,8 +651,8 @@
 }
 
 .albumCardPlayable:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--white-a08);
+  border-color: var(--white-a18);
   transform: translateY(-4px);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
 }
@@ -665,7 +661,7 @@
   position: relative;
   display: block;
   margin-bottom: 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -678,7 +674,7 @@
   justify-content: center;
   width: 44px;
   height: 44px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--accent-light);
   color: #04160b;
   font-size: 1.1rem;
@@ -700,7 +696,7 @@
   display: block;
   width: 100%;
   aspect-ratio: 1;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   transition: transform 0.3s ease;
   object-fit: cover;
   font-size: 2.6rem;
@@ -720,7 +716,7 @@
 }
 
 .albumArtist {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   font-size: 0.85rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -747,7 +743,7 @@
   align-items: center;
   gap: 6px;
   padding: 18px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--white-a07);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(12px);
@@ -767,7 +763,7 @@
   width: 88px;
   height: 88px;
   margin-bottom: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   font-size: 2rem;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
@@ -784,7 +780,7 @@
 }
 
 .discoveryPlays {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.8rem;
   font-weight: 550;
 }
@@ -792,7 +788,7 @@
 .countdownArt {
   width: 52px;
   height: 52px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   font-size: 1.3rem;
   flex-shrink: 0;
@@ -829,7 +825,7 @@
   height: 100%;
   padding: 10px;
   border-radius: 24px;
-  background: radial-gradient(circle at center, rgba(255, 255, 255, 0.05) 0%, transparent 75%);
+  background: radial-gradient(circle at center, var(--white-a05) 0%, transparent 75%);
   position: relative;
 }
 
@@ -837,7 +833,7 @@
   max-width: 100%;
   max-height: 100%;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   box-shadow:
     0 24px 70px rgba(0, 0, 0, 0.75),
     0 0 35px rgba(var(--accent-light-rgb), 0.16);
@@ -861,7 +857,7 @@
   padding: 22px 24px;
   border-radius: 22px;
   background: rgba(18, 22, 28, 0.65);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid var(--white-a09);
   backdrop-filter: blur(24px);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
 }
@@ -879,7 +875,7 @@
   width: 100%;
   margin-bottom: 8px;
   padding: 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.72rem;
   font-weight: 750;
   letter-spacing: 0.12em;
@@ -904,10 +900,10 @@
   align-items: baseline;
   gap: 6px;
   padding: 7px 13px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--white-a04);
+  color: var(--white-a80);
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
@@ -916,8 +912,8 @@
 }
 
 .chip:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--white-a30);
+  background: var(--white-a08);
   color: #fff;
 }
 
@@ -934,7 +930,7 @@
 }
 
 .chipHint {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   font-size: 0.7rem;
   font-style: normal;
 }
@@ -947,10 +943,10 @@
   gap: 6px;
   width: 72px;
   padding: 10px 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.035);
-  color: rgba(255, 255, 255, 0.75);
+  color: var(--white-a75);
   font-family: inherit;
   font-size: 0.74rem;
   font-weight: 600;
@@ -959,8 +955,8 @@
 }
 
 .layoutChip:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--white-a30);
+  background: var(--white-a07);
   color: #fff;
   transform: translateY(-2px);
 }
@@ -970,9 +966,9 @@
   width: 32px;
   height: 40px;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
   overflow: hidden;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0 0 1px var(--white-a10);
 }
 
 .glyph_stack::before {
@@ -1041,7 +1037,7 @@
 /* Theme Swatches */
 .swatch {
   padding: 8px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--white-a16);
   border-radius: 10px;
   font-family: inherit;
   font-size: 0.78rem;
@@ -1069,7 +1065,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
@@ -1097,7 +1093,7 @@
   gap: 8px;
   padding: 12px 20px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: linear-gradient(135deg, var(--accent-light) 0%, #15803d 100%);
   color: #04160b;
   font-family: inherit;
@@ -1120,9 +1116,9 @@
 
 .copyButton {
   padding: 12px 20px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a16);
+  border-radius: var(--radius-lg);
+  background: var(--white-a08);
   backdrop-filter: blur(12px);
   color: #fff;
   font-family: inherit;
@@ -1133,8 +1129,8 @@
 }
 
 .copyButton:hover {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--white-a16);
+  border-color: var(--white-a30);
   transform: translateY(-2px);
 }
 
@@ -1191,9 +1187,9 @@
 
 .navButton {
   padding: 10px 24px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a07);
   backdrop-filter: blur(16px);
   color: #fff;
   font-family: inherit;
@@ -1204,8 +1200,8 @@
 }
 
 .navButton:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--white-a16);
+  border-color: var(--white-a30);
   transform: scale(1.04);
 }
 
@@ -1227,14 +1223,14 @@
 }
 
 .counter {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   font-size: 0.88rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a04);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--white-a06);
 }
 
 @media (max-width: 640px) {

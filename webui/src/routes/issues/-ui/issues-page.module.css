@@ -21,8 +21,8 @@
 .issuesStatCard {
   flex: 1;
   min-width: 100px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   border-radius: 10px;
   padding: 14px 16px;
   text-align: center;
@@ -38,7 +38,7 @@
 
 .issuesStatLabel {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-top: 4px;
@@ -74,7 +74,7 @@
 .issuesEmpty {
   text-align: center;
   padding: 60px 20px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .issuesLoading {
@@ -89,9 +89,9 @@
 .issuesSpinner {
   width: 20px;
   height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  border: 2px solid var(--white-a10);
   border-top-color: rgba(var(--accent-light-rgb), 0.7);
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: spin 0.8s linear infinite;
 }
 
@@ -110,13 +110,13 @@
 .issuesEmptyTitle {
   font-size: 16px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   margin-bottom: 6px;
 }
 
 .issuesEmptyText {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .issueCard {
@@ -127,9 +127,9 @@
   padding: 14px 16px;
   text-align: left;
   text-decoration: none;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--white-a06);
+  background: var(--white-a03);
   color: inherit;
   cursor: pointer;
   transition:
@@ -141,8 +141,8 @@
 
 .issueCard:hover {
   transform: translateY(-1px);
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--white-a06);
+  border-color: var(--white-a12);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
 }
 
@@ -155,15 +155,15 @@
 .issueCardThumb {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   object-fit: cover;
 }
 
 .issueCardThumbPlaceholder {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  background: var(--white-a05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -210,14 +210,14 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   flex-wrap: wrap;
 }
 
 .issueCardEntityType {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -231,7 +231,7 @@
 }
 
 .issueCardMetaLine {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -239,7 +239,7 @@
 
 .issueCardDescription {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -252,13 +252,13 @@
   gap: 8px;
   flex-wrap: wrap;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--white-a30);
 }
 
 .issueCardProfile {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .issueCardDate {
@@ -310,7 +310,7 @@
 .issuePriorityDot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   display: inline-block;
 }
 
@@ -343,7 +343,7 @@
   max-height: min(90vh, 980px);
   overflow: auto;
   border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   background: linear-gradient(180deg, rgba(16, 22, 34, 0.98), rgba(12, 16, 25, 0.98));
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
 }
@@ -360,7 +360,7 @@
   justify-content: space-between;
   gap: 18px;
   padding: 20px 22px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--white-a08);
 }
 
 .modalHeaderTitle {
@@ -369,8 +369,8 @@
 }
 
 .modalClose {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a08);
+  background: var(--white-a05);
   color: #fff;
   border-radius: 14px;
   width: 40px;
@@ -388,7 +388,7 @@
   display: flex;
   gap: 16px;
   padding-bottom: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-a06);
   margin-bottom: 14px;
 }
 
@@ -400,7 +400,7 @@
 .issueHeroArtistThumb {
   width: 48px;
   height: 48px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   position: absolute;
   top: -6px;
@@ -422,13 +422,13 @@
   width: 140px;
   height: 140px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--white-a04);
+  border: 1px solid var(--white-a06);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 40px;
-  color: rgba(255, 255, 255, 0.15);
+  color: var(--white-a15);
 }
 
 .issueHeroInfo {
@@ -442,7 +442,7 @@
 
 .issueHeroArtist {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 500;
@@ -457,14 +457,14 @@
 
 .issueHeroTrackName {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
   font-weight: 500;
   margin-top: 2px;
 }
 
 .issueHeroMeta {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   margin-top: 2px;
 }
 
@@ -475,7 +475,7 @@
   flex-wrap: wrap;
   gap: 8px;
   padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--white-a05);
   margin-bottom: 14px;
 }
 
@@ -489,18 +489,18 @@
 
 .issueDetailCategory {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--white-a70);
 }
 
 .issueDetailDate {
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   font-size: 12px;
 }
 
 .issueDetailProfile {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
 }
 
@@ -512,7 +512,7 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
   margin-bottom: 8px;
   font-weight: 500;
 }
@@ -526,14 +526,14 @@
 
 .issueDetailDescription {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--white-a65);
   line-height: 1.6;
   white-space: pre-wrap;
 }
 
 .issueDetailNoDesc {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.25);
+  color: var(--white-a25);
   font-style: italic;
 }
 
@@ -548,9 +548,9 @@
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
+  background: var(--white-a03);
+  border: 1px solid var(--white-a05);
+  border-radius: var(--radius-md);
 }
 
 .issueMetaIcon {
@@ -565,13 +565,13 @@
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
   flex-shrink: 0;
 }
 
 .issueMetaValue {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   margin-left: auto;
   font-weight: 500;
   white-space: nowrap;
@@ -592,7 +592,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -709,8 +709,8 @@
   display: inline-flex;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a05);
+  border: 1px solid var(--white-a08);
 }
 
 .issuesScopeButton {
@@ -721,19 +721,19 @@
   font: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   cursor: pointer;
 }
 
 .issuesScopeButton[aria-pressed='true'] {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
   color: #fff;
 }
 
 .issueCardUnread {
   flex-shrink: 0;
   padding: 1px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.03em;
@@ -751,14 +751,14 @@
 
 .issuesMoreCount {
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
 }
 
 .issuesMoreButton {
   padding: 8px 18px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-a12);
+  background: var(--white-a05);
   color: #fff;
   font: inherit;
   font-size: 13px;
@@ -767,7 +767,7 @@
 }
 
 .issuesMoreButton:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--white-a09);
 }
 
 .issuesMoreButton:disabled {
@@ -832,7 +832,7 @@
   padding: 8px 8px 8px 16px;
   border-radius: 14px;
   background: rgba(22, 22, 26, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(10px);
 }
@@ -858,7 +858,7 @@
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--white-a80);
   cursor: pointer;
 }
 
@@ -866,7 +866,7 @@
 .bulkClose:hover,
 .bulkMenuItem:hover,
 .bulkMenuItem:focus-visible {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   color: #fff;
   outline: none;
 }
@@ -889,7 +889,7 @@
   padding: 4px 10px;
   font-size: 18px;
   line-height: 1;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--white-a50);
 }
 
 .bulkMenuRoot {
@@ -902,9 +902,9 @@
   left: 0;
   min-width: 140px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(24, 24, 26, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 

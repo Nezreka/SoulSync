@@ -22,7 +22,7 @@
     background:
         radial-gradient(120% 90% at 50% 0%, rgba(40, 44, 72, 0.55) 0%, rgba(16, 17, 26, 0.92) 62%),
         #10111a !important;
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    border: 1px solid var(--white-a09);
     box-shadow:
         0 40px 120px rgba(0, 0, 0, 0.65),
         0 0 0 1px rgba(0, 0, 0, 0.4),
@@ -154,7 +154,7 @@
     color: #bff3d4;
     background: rgba(46, 204, 113, 0.14);
     border: 1px solid rgba(46, 204, 113, 0.35);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     padding: 2px 10px;
     white-space: nowrap;
 }
@@ -164,7 +164,7 @@
 .np-v2-tabs {
     display: flex;
     gap: 4px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--white-a10);
     padding-bottom: 2px;
     flex-shrink: 0;
     overflow-x: auto;
@@ -176,7 +176,7 @@
 .np-v2-tab {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
     font-size: 0.82rem;
     font-weight: 600;
     letter-spacing: 0.04em;
@@ -225,10 +225,10 @@
 .np-queue-item-playnext {
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--white-a45);
     cursor: pointer;
     padding: 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -236,7 +236,7 @@
 
 .np-queue-item-playnext:hover {
     color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--white-a10);
 }
 
 .np-queue-item-playnext:focus-visible {
@@ -276,20 +276,20 @@
 .np-v2-history-head h3 span { opacity: 0.55; font-weight: 500; }
 
 .np-v2-ghost-btn {
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.75);
+    background: var(--white-a06);
+    border: 1px solid var(--white-a12);
+    color: var(--white-a75);
     font-size: 0.75rem;
     padding: 5px 12px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     cursor: pointer;
 }
 
-.np-v2-ghost-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.np-v2-ghost-btn:hover { background: var(--white-a12); color: #fff; }
 
 .np-v2-history-empty {
     text-align: center;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--white-a45);
     font-size: 0.85rem;
     padding: 36px 12px;
 }
@@ -314,15 +314,15 @@
     color: inherit;
 }
 
-.np-v2-history-item:hover { background: rgba(255, 255, 255, 0.07); }
+.np-v2-history-item:hover { background: var(--white-a07); }
 
 .np-v2-history-art {
     width: 42px;
     height: 42px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     object-fit: cover;
     flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--white-a06);
 }
 
 .np-v2-history-art-fallback {
@@ -330,7 +330,7 @@
     align-items: center;
     justify-content: center;
     font-size: 1.1rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--white-a50);
 }
 
 .np-v2-history-info {
@@ -350,7 +350,7 @@
 
 .np-v2-history-sub {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -378,12 +378,12 @@
     grid-template-columns: 110px minmax(0, 1fr);
     gap: 12px;
     padding: 7px 2px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--white-a06);
     font-size: 0.83rem;
 }
 
 .np-v2-detail-k {
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--white-a50);
     text-transform: uppercase;
     font-size: 0.68rem;
     letter-spacing: 0.06em;
@@ -403,7 +403,7 @@
     font-size: 0.78rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--white-a50);
     margin: 20px 0 10px;
     font-weight: 650;
 }
@@ -417,9 +417,9 @@
 }
 
 .npv2-theme-sw {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    background: var(--white-a04);
+    border: 1px solid var(--white-a10);
+    border-radius: var(--radius-lg);
     padding: 8px;
     cursor: pointer;
     display: flex;
@@ -429,7 +429,7 @@
     color: inherit;
 }
 
-.npv2-theme-sw:hover { background: rgba(255, 255, 255, 0.08); }
+.npv2-theme-sw:hover { background: var(--white-a08); }
 
 .npv2-theme-sw.selected {
     border-color: rgb(var(--np-ambient-r, 60), var(--np-ambient-g, 120), var(--np-ambient-b, 255));
@@ -438,14 +438,14 @@
 
 .npv2-theme-swatch {
     height: 44px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
 }
 
 .npv2-theme-name {
     font-size: 0.72rem;
     font-weight: 600;
     text-align: center;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--white-a85);
 }
 
 /* Static preview gradients for each visualization theme */
@@ -478,13 +478,13 @@
 }
 
 .np-v2-setting-row .np-v2-setting-label { display: flex; flex-direction: column; gap: 2px; }
-.np-v2-setting-row .np-v2-setting-label small { color: rgba(255, 255, 255, 0.5); font-size: 0.72rem; }
+.np-v2-setting-row .np-v2-setting-label small { color: var(--white-a50); font-size: 0.72rem; }
 
 .np-v2-select {
-    background: rgba(255, 255, 255, 0.07);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--white-a07);
+    border: 1px solid var(--white-a14);
     color: #fff;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 6px 10px;
     font-size: 0.82rem;
     max-width: 190px;
@@ -507,7 +507,7 @@
     width: 120px;
     height: 4px;
     border-radius: 2px;
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--white-a18);
     outline: none;
     cursor: pointer;
 }
@@ -517,7 +517,7 @@
     appearance: none;
     width: 14px;
     height: 14px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: #fff;
     border: none;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
@@ -526,7 +526,7 @@
 .np-v2-range::-moz-range-thumb {
     width: 14px;
     height: 14px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: #fff;
     border: none;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
@@ -534,7 +534,7 @@
 
 .np-v2-range-val {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--white-a75);
     min-width: 40px;
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -564,8 +564,8 @@
     position: absolute;
     inset: 0;
     cursor: pointer;
-    background: rgba(255, 255, 255, 0.14);
-    border-radius: 999px;
+    background: var(--white-a14);
+    border-radius: var(--radius-pill);
     transition: background 0.18s ease;
 }
 
@@ -577,7 +577,7 @@
     left: 3px;
     top: 3px;
     background: #fff;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     transition: transform 0.18s ease;
 }
 
@@ -615,14 +615,14 @@
 
 .npv2-eq-freq {
     font-size: 0.72rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-a60);
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
 
 .npv2-eq-val {
     font-size: 0.72rem;
-    color: rgba(255, 255, 255, 0.75);
+    color: var(--white-a75);
     font-variant-numeric: tabular-nums;
 }
 
@@ -632,7 +632,7 @@
     cursor: pointer;
 }
 
-.np-v2-danger-zone { margin-top: 26px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.np-v2-danger-zone { margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--white-a08); }
 
 /* ---- Shortcuts overlay --------------------------------------------------- */
 
@@ -651,8 +651,8 @@
 
 .np-v2-shorts-card {
     background: rgba(22, 24, 34, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 16px;
+    border: 1px solid var(--white-a12);
+    border-radius: var(--radius-xl);
     padding: 26px 30px;
     max-width: 560px;
     width: 100%;
@@ -669,7 +669,7 @@
 .np-v2-shorts-card > p {
     margin: 0 0 16px;
     font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
 }
 
 .np-v2-shorts-grid {
@@ -685,14 +685,14 @@
     gap: 12px;
     font-size: 0.82rem;
     padding: 5px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid var(--white-a05);
 }
 
 .np-v2-short kbd {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: var(--white-a10);
+    border: 1px solid var(--white-a18);
     border-bottom-width: 2px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     padding: 2px 8px;
     font-family: inherit;
     font-size: 0.74rem;
@@ -700,7 +700,7 @@
 }
 
 .np-v2-short-hint {
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--white-a55);
     font-size: 0.74rem;
     text-align: right;
 }
@@ -711,14 +711,14 @@
     right: 10px;
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-a60);
     font-size: 1.3rem;
     cursor: pointer;
     padding: 6px 10px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
 }
 
-.np-v2-shorts-close:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.np-v2-shorts-close:hover { color: #fff; background: var(--white-a08); }
 
 /* ---- Responsive: narrow / short viewports -------------------------------- */
 
@@ -896,8 +896,8 @@
     right: 36px;
     z-index: 5;
     background: rgba(8, 10, 18, 0.82);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
+    border: 1px solid var(--white-a14);
+    border-radius: var(--radius-lg);
     padding: 10px;
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -936,7 +936,7 @@
     display: flex;
     flex-direction: column;
     background: rgba(6, 8, 16, 0.88);
-    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    border-left: 1px solid var(--white-a12);
     backdrop-filter: blur(14px);
     -webkit-backdrop-filter: blur(14px);
     box-shadow: -18px 0 50px rgba(0, 0, 0, 0.55);
@@ -954,15 +954,15 @@
     color: #fff;
     font-weight: 700;
     font-size: 0.95rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--white-a08);
     flex: 0 0 auto;
 }
 
 #np-v2-sidepanel-close {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--white-a08);
+    border: 1px solid var(--white-a12);
     color: #fff;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     width: 30px;
     height: 30px;
     cursor: pointer;
@@ -971,7 +971,7 @@
 }
 
 #np-v2-sidepanel-close:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--white-a16);
 }
 
 .np-v2-sidepanel-body {
@@ -1029,7 +1029,7 @@
     gap: 2px;
     min-width: 88px;
     background: rgba(8, 10, 18, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid var(--white-a14);
     border-radius: 10px;
     padding: 6px;
     backdrop-filter: blur(10px);
@@ -1049,7 +1049,7 @@
 }
 
 .np-v2-speed-item:hover {
-    background: rgba(255, 255, 255, 0.10);
+    background: var(--white-a10);
 }
 
 .np-v2-speed-item.active {
@@ -1059,10 +1059,10 @@
 }
 
 .np-v2-drawer-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--white-a08);
+    border: 1px solid var(--white-a12);
     color: #fff;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 8px 14px;
     font-size: 0.82rem;
     cursor: pointer;
@@ -1070,7 +1070,7 @@
 }
 
 .np-v2-drawer-btn:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: var(--white-a16);
 }
 #np-modal-overlay .np-modal.npv2-visuals-on > #np-v2-visuals-header {
     display: flex;
@@ -1117,14 +1117,14 @@
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--white-a90);
     text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8);
 }
 .np-v2-visuals-arrow {
     width: 34px;
     height: 34px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: var(--radius-circle);
+    border: 1px solid var(--white-a25);
     background: rgba(10, 10, 16, 0.45);
     color: #fff;
     font-size: 1rem;
@@ -1133,7 +1133,7 @@
     transition: background 0.15s ease, transform 0.15s ease;
 }
 .np-v2-visuals-arrow:hover {
-    background: rgba(255, 255, 255, 0.18);
+    background: var(--white-a18);
     transform: scale(1.08);
 }
 
@@ -1149,8 +1149,8 @@
     z-index: 5;
     width: 40px;
     height: 40px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: var(--radius-circle);
+    border: 1px solid var(--white-a25);
     background: rgba(10, 10, 16, 0.55);
     color: #fff;
     font-size: 1.15rem;
@@ -1160,7 +1160,7 @@
     transition: background 0.15s ease, transform 0.15s ease;
 }
 #np-v2-visuals-exit:hover {
-    background: rgba(255, 255, 255, 0.20);
+    background: var(--white-a20);
     transform: scale(1.08);
 }
 

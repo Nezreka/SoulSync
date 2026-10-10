@@ -3,10 +3,10 @@
   align-items: center;
   gap: 6px;
   padding: 7px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--white-a10);
+  background: var(--white-a04);
+  color: var(--white-a50);
   font: inherit;
   font-size: 12px;
   font-weight: 700;
@@ -20,8 +20,8 @@
 
 .reportButton:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: var(--white-a08);
+  border-color: var(--white-a18);
 }
 
 .reportButton:focus-visible {

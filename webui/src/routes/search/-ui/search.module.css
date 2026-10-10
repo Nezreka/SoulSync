@@ -10,12 +10,8 @@
   --sp-surface: #13141a;
   --sp-raised: #1a1c23;
   --sp-raised-2: #22242d;
-  --sp-line: rgba(255, 255, 255, 0.07);
-  --sp-line-strong: rgba(255, 255, 255, 0.12);
   --sp-text: #f3f4f8;
-  --sp-muted: #9b9dad;
   --sp-faint: #6b6d7c;
-  --sp-ok: #4ade80;
   --sp-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   display: flex;
@@ -69,14 +65,14 @@
 
 .subtitle {
   margin: 4px 0 0;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
 .modes {
   display: inline-flex;
   padding: 3px;
-  border: 1px solid var(--sp-line);
+  border: 1px solid var(--white-a07);
   border-radius: 11px;
   background: var(--sp-surface);
 }
@@ -87,11 +83,11 @@
   gap: 7px;
   padding: 6px 14px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: none;
   font-size: 13px;
   font-weight: 500;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -115,7 +111,7 @@
   gap: 4px;
   padding: 6px;
   background: var(--sp-surface);
-  border: 1px solid var(--sp-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 14px;
   transition:
     border-color 0.15s ease,
@@ -191,9 +187,9 @@
   height: 26px;
   margin-right: 4px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--sp-raised);
-  color: var(--sp-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
@@ -208,8 +204,8 @@
   height: 16px;
   flex-shrink: 0;
   margin-right: 6px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-circle);
+  border: 2px solid var(--white-a15);
   border-top-color: rgb(var(--accent-rgb));
   animation: spin 0.8s linear infinite;
 }
@@ -228,7 +224,7 @@
 }
 
 .hint b {
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
@@ -242,7 +238,7 @@
   max-height: min(420px, 70vh);
   overflow-y: auto;
   padding: 6px;
-  border: 1px solid var(--sp-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 14px;
   background: #17181e;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
@@ -280,7 +276,7 @@
 }
 
 .menuItem[data-unconfigured] {
-  color: var(--sp-muted);
+  color: var(--text-secondary);
 }
 
 .menuNote {
@@ -323,7 +319,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--sp-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 12.5px;
   cursor: pointer;
 }
@@ -342,8 +338,8 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  border: 1px solid var(--sp-line);
-  border-radius: 999px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-pill);
   background: var(--sp-surface);
   font-size: 13px;
 }
@@ -369,7 +365,7 @@
   height: 22px;
   margin-right: 5px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--sp-faint) !important;
   line-height: 1;
@@ -407,7 +403,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--white-a08);
 }
 
 .tile:hover {
@@ -445,11 +441,11 @@
 
 .pill {
   padding: 6px 13px;
-  border: 1px solid var(--sp-line);
-  border-radius: 999px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-pill);
   background: var(--sp-surface);
   font-size: 12.5px;
-  color: var(--sp-muted) !important;
+  color: var(--text-secondary) !important;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -525,7 +521,7 @@
   align-items: end;
   min-height: 240px;
   padding: 22px;
-  border: 1px solid var(--sp-line);
+  border: 1px solid var(--white-a07);
   border-radius: 18px;
   overflow: hidden;
   background:
@@ -566,7 +562,7 @@
   width: 176px;
   height: 176px;
   flex-shrink: 0;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   object-fit: cover;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
 }
@@ -594,7 +590,7 @@
 }
 
 .topArt[data-round] {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 .topKind {
@@ -602,7 +598,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
 }
 
 .topName {
@@ -616,7 +612,7 @@
 
 .topSub {
   margin-top: 4px;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -632,8 +628,8 @@
   align-items: center;
   gap: 7px;
   padding: 9px 18px;
-  border: 1px solid var(--sp-line-strong);
-  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
   background: var(--sp-raised);
   font-size: 13.5px;
   font-weight: 600;
@@ -654,8 +650,8 @@
 }
 
 .list {
-  border: 1px solid var(--sp-line);
-  border-radius: 16px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-xl);
   background: var(--sp-surface);
   overflow: hidden;
 }
@@ -666,7 +662,7 @@
   align-items: center;
   gap: 12px;
   padding: 9px 14px;
-  border-top: 1px solid var(--sp-line);
+  border-top: 1px solid var(--white-a07);
   cursor: pointer;
   transition: background 0.12s ease;
 }
@@ -676,7 +672,7 @@
 }
 
 .trackRow:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--white-a03);
 }
 
 .trackNum,
@@ -722,7 +718,7 @@
   width: 40px;
   height: 40px;
   flex-shrink: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   object-fit: cover;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.22), #111218);
 }
@@ -740,7 +736,7 @@
 }
 
 .trackSub {
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 12.5px;
   white-space: nowrap;
   overflow: hidden;
@@ -749,12 +745,12 @@
 
 .badge {
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(74, 222, 128, 0.12);
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: 0.03em;
-  color: var(--sp-ok);
+  color: var(--success);
   white-space: nowrap;
 }
 
@@ -779,7 +775,7 @@
   width: 32px;
   height: 32px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: none;
   color: var(--sp-faint) !important;
   cursor: pointer;
@@ -816,7 +812,7 @@
   gap: 10px;
   min-width: 0;
   padding: 10px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   text-decoration: none;
   text-align: center;
   color: var(--sp-text) !important;
@@ -830,7 +826,7 @@
 .faceImg {
   width: 112px;
   height: 112px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   object-fit: cover;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.28), #16171d);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
@@ -841,7 +837,7 @@
   place-items: center;
   font-size: 30px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 .faceName {
@@ -855,7 +851,7 @@
 
 .faceSub {
   margin-top: -8px;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
@@ -864,8 +860,8 @@
   width: 6px;
   height: 6px;
   margin-right: 5px;
-  border-radius: 50%;
-  background: var(--sp-ok);
+  border-radius: var(--radius-circle);
+  background: var(--success);
   vertical-align: middle;
 }
 
@@ -921,12 +917,12 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--white-a08);
   pointer-events: none;
 }
 
 .coverRound {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 .coverPh {
@@ -936,7 +932,7 @@
   place-items: center;
   font-size: 34px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--white-a40);
 }
 
 .coverBadge {
@@ -958,7 +954,7 @@
   width: 38px;
   height: 38px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--sp-text);
   color: #0c0d11 !important;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
@@ -991,7 +987,7 @@
 
 .coverSub {
   margin-top: -6px;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -1012,7 +1008,7 @@
   align-items: center;
   gap: 12px;
   padding: 11px 14px 11px 11px;
-  border: 1px solid var(--sp-line);
+  border: 1px solid var(--white-a07);
   border-radius: 14px;
   background: var(--sp-surface);
   text-decoration: none;
@@ -1023,7 +1019,7 @@
 }
 
 .labelTile:hover {
-  border-color: var(--sp-line-strong);
+  border-color: var(--line-strong);
   background: var(--sp-raised);
 }
 
@@ -1058,7 +1054,7 @@
 }
 
 .labelMeta {
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -1109,7 +1105,7 @@
   width: 100%;
   max-width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: #111218;
 }
@@ -1125,7 +1121,7 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--white-a08);
   pointer-events: none;
 }
 
@@ -1138,7 +1134,7 @@
   margin: auto;
   width: 48px;
   height: 48px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: rgba(12, 13, 17, 0.72);
   backdrop-filter: blur(6px);
   opacity: 0;
@@ -1178,7 +1174,7 @@
 
 .videoSub {
   margin-top: -6px;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
@@ -1202,7 +1198,7 @@
 .stateText {
   margin: -8px 0 0;
   max-width: 440px;
-  color: var(--sp-muted);
+  color: var(--text-secondary);
   font-size: 13.5px;
 }
 
@@ -1216,14 +1212,14 @@
 .skel {
   width: 88px;
   height: 88px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: linear-gradient(90deg, #17181e 25%, #1f2027 50%, #17181e 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }
 
 .skelRound {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
 }
 
 @keyframes shimmer {

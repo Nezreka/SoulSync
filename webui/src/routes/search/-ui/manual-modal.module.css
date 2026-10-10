@@ -4,10 +4,7 @@
 .popup {
   --mm-raised: #1a1c23;
   --mm-raised-2: #22242d;
-  --mm-line: rgba(255, 255, 255, 0.07);
-  --mm-line-strong: rgba(255, 255, 255, 0.12);
   --mm-text: #f3f4f8;
-  --mm-muted: #9b9dad;
   --mm-faint: #6b6d7c;
   --mm-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
@@ -15,7 +12,7 @@
   height: min(720px, 92vh);
   border-radius: 20px !important;
   background: #15161c !important;
-  border-color: var(--mm-line-strong) !important;
+  border-color: var(--line-strong) !important;
   color: var(--mm-text);
 }
 
@@ -36,7 +33,7 @@
   align-items: center;
   gap: 14px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid var(--mm-line);
+  border-bottom: 1px solid var(--white-a07);
   flex-shrink: 0;
 }
 
@@ -53,7 +50,7 @@
 }
 
 .sub {
-  color: var(--mm-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -68,9 +65,9 @@
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--mm-raised);
-  color: var(--mm-muted) !important;
+  color: var(--text-secondary) !important;
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -99,7 +96,7 @@
   width: 100%;
   max-width: 100%;
   aspect-ratio: 1;
-  border: 1.5px dashed var(--mm-line-strong);
+  border: 1.5px dashed var(--line-strong);
   border-radius: 14px;
   background: repeating-linear-gradient(
     135deg,
@@ -146,7 +143,7 @@
 .label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--mm-muted);
+  color: var(--text-secondary);
 }
 
 .kinds {
@@ -157,11 +154,11 @@
 
 .kinds button {
   padding: 5px 11px;
-  border: 1px solid var(--mm-line);
-  border-radius: 999px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-pill);
   background: var(--mm-raised);
   font-size: 12.5px;
-  color: var(--mm-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -198,7 +195,7 @@
 .input {
   min-width: 0;
   padding: 9px 11px;
-  border: 1px solid var(--mm-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--mm-raised);
   outline: none;
@@ -233,8 +230,8 @@
 .tracks {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--mm-line);
-  border-radius: 12px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -244,7 +241,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  border-top: 1px solid var(--mm-line);
+  border-top: 1px solid var(--white-a07);
   background: var(--mm-raised);
 }
 
@@ -279,14 +276,14 @@
   background: none;
   font-family: var(--mm-mono);
   font-size: 12px;
-  color: var(--mm-muted);
+  color: var(--text-secondary);
   text-align: right;
   outline: none;
 }
 
 .num:focus,
 .num:hover {
-  border-color: var(--mm-line-strong);
+  border-color: var(--line-strong);
 }
 
 .num[data-dim] {
@@ -324,7 +321,7 @@
   gap: 12px;
   align-items: flex-start;
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(var(--accent-rgb), 0.1);
   font-size: 13px;
 }
@@ -338,7 +335,7 @@
 }
 
 .lock span {
-  color: var(--mm-muted);
+  color: var(--text-secondary);
 }
 
 .error {
@@ -355,7 +352,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 20px;
-  border-top: 1px solid var(--mm-line);
+  border-top: 1px solid var(--white-a07);
   flex-shrink: 0;
 }
 
@@ -372,8 +369,8 @@
 .button {
   flex-shrink: 0;
   padding: 9px 18px;
-  border: 1px solid var(--mm-line-strong);
-  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
   background: var(--mm-raised);
   font-size: 13.5px;
   font-weight: 600;
