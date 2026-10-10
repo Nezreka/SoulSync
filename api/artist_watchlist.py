@@ -1493,7 +1493,7 @@ def watchlist_artist_config(artist_id):
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
                        amazon_artist_id, musicbrainz_artist_id, auto_download,
-                       quality_profile_id, auto_download_pref
+                       quality_profile_id, auto_download_pref, include_other_artists
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
                       spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
@@ -1635,6 +1635,8 @@ def watchlist_artist_config(artist_id):
                 # WHICH way "follow the global" currently resolves.
                 'auto_download_pref': (int(result[22])
                                        if len(result) > 22 and result[22] is not None else None),
+                'include_other_artists': (bool(result[23])
+                                          if len(result) > 23 and result[23] is not None else False),
                 'global_auto_download': bool(config_manager.get('watchlist.global_auto_download', True)),
             }
 
@@ -1694,7 +1696,7 @@ def watchlist_artist_config(artist_id):
             cursor.execute("""
                 SELECT include_albums, include_eps, include_singles, include_live,
                        include_remixes, include_acoustic, include_compilations,
-                       include_instrumentals, lookback_days, preferred_metadata_source,
+                       include_instrumentals, include_other_artists, lookback_days, preferred_metadata_source,
                        auto_download, quality_profile_id, auto_download_pref
                 FROM watchlist_artists
                 WHERE profile_id = ? AND (
@@ -1735,6 +1737,7 @@ def watchlist_artist_config(artist_id):
                 include_acoustic = _field('include_acoustic', False)
                 include_compilations = _field('include_compilations', False)
                 include_instrumentals = _field('include_instrumentals', False)
+                include_other_artists = _field('include_other_artists', False)
             except _BadBool as bad:
                 conn.close()
                 return jsonify({"success": False, "error": f"{bad.field} must be a boolean"}), 400
@@ -1815,7 +1818,7 @@ def watchlist_artist_config(artist_id):
                 UPDATE watchlist_artists
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
-                    include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
+                    include_instrumentals = ?, include_other_artists = ?, lookback_days = ?, preferred_metadata_source = ?,
                     auto_download = ?, auto_download_pref = ?, quality_profile_id = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
@@ -1825,7 +1828,7 @@ def watchlist_artist_config(artist_id):
                 )
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download),
+                  int(include_instrumentals), int(include_other_artists), lookback_days, preferred_metadata_source, int(auto_download),
                   auto_download_pref, quality_profile_id, lookback_changed, active_profile_id,
                   artist_id, artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
@@ -1961,6 +1964,7 @@ def watchlist_global_config():
                 'include_acoustic': config_manager.get('watchlist.global_include_acoustic', False),
                 'include_compilations': config_manager.get('watchlist.global_include_compilations', False),
                 'include_instrumentals': config_manager.get('watchlist.global_include_instrumentals', False),
+                'include_other_artists': config_manager.get('watchlist.global_include_other_artists', False),
                 'exclude_terms': config_manager.get('watchlist.exclude_terms', ''),
                 # Auto-download is a DEFAULT, not an override: an artist's own
                 # setting beats it. Separate from global_override_enabled on
@@ -1990,6 +1994,7 @@ def watchlist_global_config():
             include_acoustic = data.get('include_acoustic', False)
             include_compilations = data.get('include_compilations', False)
             include_instrumentals = data.get('include_instrumentals', False)
+            include_other_artists = data.get('include_other_artists', False)
             exclude_terms = data.get('exclude_terms', '')
 
             # When override is enabled, validate at least one release type
@@ -2005,6 +2010,7 @@ def watchlist_global_config():
             config_manager.set('watchlist.global_include_acoustic', include_acoustic)
             config_manager.set('watchlist.global_include_compilations', include_compilations)
             config_manager.set('watchlist.global_include_instrumentals', include_instrumentals)
+            config_manager.set('watchlist.global_include_other_artists', include_other_artists)
             config_manager.set('watchlist.exclude_terms', exclude_terms)
             global_auto_download = bool(data.get('global_auto_download', True))
             config_manager.set('watchlist.global_auto_download', global_auto_download)

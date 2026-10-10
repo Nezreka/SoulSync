@@ -26,6 +26,8 @@ export interface WatchlistAddSettings {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  /** Include tracks by artists other than the watched one (tributes, soundtracks). Default off. */
+  include_other_artists: boolean;
   auto_download_pref: 'on' | 'off' | null;
 }
 
@@ -38,6 +40,7 @@ export const WATCHLIST_ADD_DEFAULTS: WatchlistAddSettings = {
   include_acoustic: false,
   include_compilations: false,
   include_instrumentals: false,
+  include_other_artists: false,
   auto_download_pref: null,
 };
 
@@ -59,6 +62,7 @@ const CONTENT_FILTERS: ReadonlyArray<readonly [WatchBoolKey, string]> = [
   ['include_acoustic', 'Acoustic'],
   ['include_compilations', 'Compilations'],
   ['include_instrumentals', 'Instrumentals'],
+  ['include_other_artists', 'Other artists'],
 ];
 
 /** One compact pill-toggle row for the watchlist settings. */
@@ -120,6 +124,7 @@ export async function addArtistToWatchlist(
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,
         include_instrumentals: settings.include_instrumentals,
+        include_other_artists: settings.include_other_artists,
         auto_download_pref: settings.auto_download_pref,
       }),
     },

@@ -29,6 +29,7 @@ const CONTENT_FILTER_KEYS = [
   'include_acoustic',
   'include_compilations',
   'include_instrumentals',
+  'include_other_artists',
 ] as const;
 
 type IncludeKey = (typeof RELEASE_TYPE_KEYS)[number] | (typeof CONTENT_FILTER_KEYS)[number];
@@ -65,6 +66,12 @@ const OPTION_COPY: Record<IncludeKey, { icon: string; title: string; description
     icon: '🎹',
     title: 'Include Instrumentals',
     description: 'Check to include instrumental, karaoke, and backing track versions',
+  },
+  include_other_artists: {
+    icon: '👥',
+    title: 'Include Other Artists',
+    description:
+      'Check to include tracks by other artists found on tributes, soundtracks and compilations',
   },
 };
 
@@ -163,6 +170,7 @@ export function WatchlistArtistConfigModal({
       include_acoustic: draft.include_acoustic,
       include_compilations: draft.include_compilations,
       include_instrumentals: draft.include_instrumentals,
+      include_other_artists: draft.include_other_artists,
       // The preference, never the legacy boolean: the server reads
       // `auto_download` as a deliberate choice, so sending it on every save
       // would opt every artist the user ever opened out of the global default.

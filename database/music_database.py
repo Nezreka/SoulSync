@@ -274,6 +274,11 @@ class WatchlistArtist:
     include_acoustic: bool = False
     include_compilations: bool = False
     include_instrumentals: bool = False
+    # When False (default), the watchlist scan only wishlists tracks credited
+    # to the monitored artist — tribute albums, soundtracks and compilations
+    # no longer flood the wishlist with other artists' tracks. When True,
+    # restores the old behaviour (every track on associated releases).
+    include_other_artists: bool = False
     lookback_days: Optional[int] = None  # Per-artist override; None = use global setting
     preferred_metadata_source: Optional[str] = None  # Per-artist override; None = use global setting
     # When False ("follow only"), the watchlist scan still discovers + surfaces new
@@ -4047,7 +4052,8 @@ class MusicDatabase:
                 'include_remixes': ('INTEGER', '0'),        # 0 = False (exclude remixes by default)
                 'include_acoustic': ('INTEGER', '0'),       # 0 = False (exclude acoustic by default)
                 'include_compilations': ('INTEGER', '0'),   # 0 = False (exclude compilations by default)
-                'include_instrumentals': ('INTEGER', '0')   # 0 = False (exclude instrumentals by default)
+                'include_instrumentals': ('INTEGER', '0'),  # 0 = False (exclude instrumentals by default)
+                'include_other_artists': ('INTEGER', '0'),  # 0 = False (only the watched artist's tracks by default)
             }
 
             for column_name, (column_type, default_value) in columns_to_add.items():
@@ -4551,6 +4557,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -4583,6 +4590,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -4601,7 +4609,7 @@ class MusicDatabase:
                             'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                             'include_albums', 'include_eps', 'include_singles', 'include_live',
                             'include_remixes', 'include_acoustic', 'include_compilations',
-                            'include_instrumentals', 'lookback_days',
+                            'include_instrumentals', 'include_other_artists', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
                             'musicbrainz_artist_id', 'amazon_artist_id',
                             'preferred_metadata_source', 'auto_download', 'profile_id']
@@ -5584,6 +5592,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -5603,7 +5612,7 @@ class MusicDatabase:
                                 'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                                 'include_albums', 'include_eps', 'include_singles', 'include_live',
                                 'include_remixes', 'include_acoustic', 'include_compilations',
-                                'include_instrumentals', 'lookback_days',
+                                'include_instrumentals', 'include_other_artists', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
                                 'musicbrainz_artist_id', 'amazon_artist_id',
                             'preferred_metadata_source', 'auto_download', 'profile_id']
@@ -17066,7 +17075,7 @@ class MusicDatabase:
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
-                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
+                                   'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
                                    'auto_download', 'auto_download_pref', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
@@ -17103,6 +17112,7 @@ class MusicDatabase:
                     include_acoustic = bool(row['include_acoustic']) if 'include_acoustic' in existing_columns else False
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
+                    include_other_artists = bool(row['include_other_artists']) if 'include_other_artists' in existing_columns else False
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
@@ -17136,6 +17146,7 @@ class MusicDatabase:
                         include_acoustic=include_acoustic,
                         include_compilations=include_compilations,
                         include_instrumentals=include_instrumentals,
+                        include_other_artists=include_other_artists,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
