@@ -108,7 +108,11 @@ def create_video_blueprint() -> Blueprint:
                                  # per-movie/per-show subtitle language overrides
                                  # (Phase 3) — per-title management, same as the
                                  # acquisition overrides. The GET stays open.
-                                 "/api/video/subtitles/overrides") \
+                                 "/api/video/subtitles/overrides",
+                                 # whisper model download (Phase 4): writes to
+                                 # server disk + pulls ~500MB from the net —
+                                 # admin-only. The status GET stays open.
+                                 "/api/video/subtitles/whisper/download") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # season-wide monitor flip — same library
                                   # management as /api/video/monitor above

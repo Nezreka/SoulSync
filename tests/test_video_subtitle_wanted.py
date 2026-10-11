@@ -51,7 +51,7 @@ def _stub_fetch(monkeypatch, results):
     (text, provider_id, candidate, score)."""
     calls = []
 
-    def fake(query, provider_order, get_setting, on_download=None):
+    def fake(query, provider_order, get_setting, on_download=None, skip_background=False):
         calls.append((query, list(provider_order)))
         text = results.get(query.language)
         if text is None:
@@ -181,7 +181,7 @@ def test_episode_id_for_resolves_and_misses(db):
 def test_hook_creates_wanted_row_before_fetching(db, monkeypatch):
     seen = {}
 
-    def fake(query, provider_order, get_setting, on_download=None):
+    def fake(query, provider_order, get_setting, on_download=None, skip_background=False):
         rows = db.subtitle_get_for_video("download", 7)
         seen["rows"] = [(r["language"], r["status"]) for r in rows]
         return "1\n00:00:00,000 --> 00:00:01,000\nHi\n", "stub", None, 100.0
@@ -236,7 +236,7 @@ def test_hook_bumps_quota_on_successful_download(db, monkeypatch):
 
 
 def test_hook_never_raises_when_fetch_explodes(db, monkeypatch):
-    def boom(query, provider_order, get_setting, on_download=None):
+    def boom(query, provider_order, get_setting, on_download=None, skip_background=False):
         raise RuntimeError("provider exploded")
 
     monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", boom)
@@ -393,7 +393,7 @@ def test_hook_threshold_tunable_via_settings_blob(db, monkeypatch):
     fs = FakeFS()
     # A weak candidate: with the default 24.0 it downloads; at 90.0 it must not.
     weak_calls = []
-    def weak_fetch(query, provider_order, get_setting, on_download=None):
+    def weak_fetch(query, provider_order, get_setting, on_download=None, skip_background=False):
         weak_calls.append(get_setting("subtitle_min_score", None))
         return None, None, None, 0.0
     monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", weak_fetch)

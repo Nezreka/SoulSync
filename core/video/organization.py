@@ -60,6 +60,18 @@ DEFAULTS = {
     "subtitle_worker_batch": 10,     # max wanted rows attempted per worker cycle
     "subtitle_daily_quota": 20,      # max subtitle DOWNLOADS per provider per day (UTC)
     "subtitle_upgrade_min_delta": 15.0,  # upgrade loop: a new candidate must beat the current subtitle's history score by this much to replace it
+    # Whisper local transcription (Phase 4): fully optional, off by default.
+    # Nothing downloads or transcribes unless the user enables it AND downloads
+    # a model via the settings UI. The *_downloaded/*_path/*_size_bytes/
+    # *_downloaded_at keys are written by the model-download endpoint and
+    # echoed back by the settings page (same echo pattern as
+    # subtitle_provider_order) so a settings save never wipes them.
+    "whisper_enabled": False,         # transcribe locally as a last resort
+    "whisper_model": "small",          # tiny | base | small (allowlisted)
+    "whisper_model_downloaded": False,
+    "whisper_model_path": "",
+    "whisper_model_size_bytes": 0,
+    "whisper_model_downloaded_at": "",
     # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
     # episodes, dismissed imports) move into an ss_recycle folder under the
     # file's library root instead of unlinking; purged after recycle_keep_days.
@@ -155,6 +167,30 @@ def normalize(raw: Any) -> dict:
         from core.video.subtitles import parse_provider_order
         d["subtitle_provider_order"] = json.dumps(
             parse_provider_order(raw.get("subtitle_provider_order")))
+    # Whisper local transcription (Phase 4). The model name is allowlisted —
+    # a bad value keeps the default rather than flowing anywhere. The
+    # downloaded-state keys are echoed by the settings page; a save that
+    # omits them must not wipe them (they're only in raw when echoed).
+    if "whisper_enabled" in raw:
+        d["whisper_enabled"] = bool(raw.get("whisper_enabled"))
+    if "whisper_model" in raw:
+        from core.video.subtitles.providers.whisper import valid_model_name
+        _wm = valid_model_name(raw.get("whisper_model"))
+        if _wm is not None:
+            d["whisper_model"] = _wm
+    if "whisper_model_downloaded" in raw:
+        d["whisper_model_downloaded"] = bool(raw.get("whisper_model_downloaded"))
+    if "whisper_model_path" in raw:
+        d["whisper_model_path"] = str(raw.get("whisper_model_path") or "")
+    if "whisper_model_size_bytes" in raw:
+        try:
+            d["whisper_model_size_bytes"] = max(
+                0, int(raw.get("whisper_model_size_bytes") or 0))
+        except (TypeError, ValueError):
+            pass
+    if "whisper_model_downloaded_at" in raw:
+        d["whisper_model_downloaded_at"] = str(
+            raw.get("whisper_model_downloaded_at") or "")
     return d
 
 

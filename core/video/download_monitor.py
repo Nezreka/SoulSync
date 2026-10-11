@@ -521,7 +521,11 @@ def _any_provider_configured(provider_order, get_setting) -> bool:
 
     fetch_subtitle returns None for both "tried and missed" and "nothing was
     configured to try" — a keyless setup must not accumulate phantom attempts
-    on wanted rows Phase 2 should retry once a key is added. Never raises."""
+    on wanted rows Phase 2 should retry once a key is added. Never raises.
+
+    Background-only providers (Whisper) don't count: they never run in the
+    import hook, so a whisper-only setup must keep rows `wanted`, not `failed`.
+    """
     try:
         from core.video.subtitles.providers import get_providers
         providers = get_providers()
@@ -532,6 +536,8 @@ def _any_provider_configured(provider_order, get_setting) -> bool:
             continue
         provider = providers.get(pid)
         if provider is None:
+            continue
+        if getattr(provider, "background_download_only", False):
             continue
         try:
             if provider.is_configured(get_setting):
@@ -756,14 +762,27 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                 # Every successful provider.download() burns real quota — count
                 # each one so the Phase 2 worker's daily cap sees what the hook
                 # spent (a missing bump would let the worker overshoot it).
+                # Quota-exempt providers (Whisper — local transcription) never
+                # bump: they consume no network quota.
+                from core.video.subtitles.providers import provider_is_quota_exempt
+                if provider_is_quota_exempt(_pid):
+                    return
                 try:
                     _db.subtitle_quota_bump(str(_pid))
                 except Exception:  # noqa: BLE001 - quota is accounting, never fatal
                     pass
+            # skip_background=True: Whisper's download() is minutes of local
+            # CPU transcription — it must never stall the download monitor.
+            # The wanted-loop worker (a background thread) runs background
+            # providers instead; the hook's miss below leaves the row
+            # 'wanted' (attempts untouched) when only deferred providers are
+            # configured, so the worker picks it up without backoff delay.
             text, pid, _candidate, _score = fetch_subtitle_detailed(
                 SubtitleQuery(identity=dict(identity), language=lang, hi=hi, forced=forced,
-                              filename=filename, moviehash=moviehash),
-                provider_order, get_setting, on_download=_bump)
+                              filename=filename, moviehash=moviehash,
+                              file_path=str(dest_path)),
+                provider_order, get_setting, on_download=_bump,
+                skip_background=True)
             if not text:
                 if key is not None and tried_any:
                     db.subtitle_mark(video_kind, video_id, lang, "failed", hi=hi, forced=forced)

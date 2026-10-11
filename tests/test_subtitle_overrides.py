@@ -228,7 +228,7 @@ def _stub_fetch(monkeypatch, results):
     """Stub fetch_subtitle_detailed: lang -> srt text (None = miss)."""
     calls = []
 
-    def fake(query, provider_order, get_setting, on_download=None):
+    def fake(query, provider_order, get_setting, on_download=None, skip_background=False):
         calls.append(query.language)
         text = results.get(query.language)
         if text is None:

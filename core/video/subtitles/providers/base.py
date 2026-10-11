@@ -2,7 +2,7 @@
 
 Phase 1 ships OpenSubtitles; provider #2 is a small isolated job: subclass
 ``SubtitleProvider``, implement the five members, add one line to
-``get_providers()``. Whisper local transcription (Phase 5) fits this interface
+``get_providers()``. Whisper local transcription (Phase 4) fits this interface
 too — ``needs_key = False``, local, slow — nothing here assumes a network or a key.
 
 Isolated: stdlib only; no music imports.
@@ -30,6 +30,9 @@ class SubtitleQuery:
     forced: bool = False
     filename: str | None = None   # video filename, for release-name similarity
     moviehash: str | None = None  # OpenSubtitles file hash, for hash-match search
+    file_path: str | None = None  # absolute path to the video file itself.
+    # Providers that need the media (Whisper local transcription) use this;
+    # network providers ignore it.
 
 
 @dataclass
@@ -58,6 +61,20 @@ class SubtitleProvider(ABC):
 
     id: str  # class attr, e.g. "opensubtitles"
     display_name: str  # class attr, e.g. "OpenSubtitles"
+
+    #: True when a successful ``download()`` consumes metered NETWORK quota
+    #: (counted via ``on_download`` → ``subtitle_quota_bump``). Local providers
+    #: (Whisper) set this False — their downloads must never burn, or be
+    #: blocked by, the network providers' daily quota.
+    burns_network_quota: bool = True
+
+    #: True when ``download()`` is long-running local work (minutes of CPU)
+    #: that must only run on a background worker thread — never inline in the
+    #: import hook / download monitor, and never in a request thread. The
+    #: wanted-loop worker is the only chain caller that runs these; the import
+    #: hook defers them (rows stay 'wanted' for the worker), and the eager
+    #: ``rank_candidates`` (upgrade loop, manual search) skips them entirely.
+    background_download_only: bool = False
 
     @property
     @abstractmethod

@@ -1383,7 +1383,7 @@
     // serves `subtitle_provider_order` as a JSON list of provider ids (parsed
     // by core.video.subtitles.parse_provider_order); the fallback below covers
     // only garbage/missing values, defaulting to OpenSubtitles alone.
-    var SUBTITLE_PROVIDER_NAMES = { opensubtitles: 'OpenSubtitles' };
+    var SUBTITLE_PROVIDER_NAMES = { opensubtitles: 'OpenSubtitles', whisper: 'Whisper (local)' };
     var DEFAULT_SUBTITLE_PROVIDER_ORDER = ['opensubtitles'];
     function subtitleProviderOrder() {
         var raw = _videoOrg && _videoOrg.subtitle_provider_order;
@@ -1408,6 +1408,16 @@
             li.textContent = SUBTITLE_PROVIDER_NAMES[id] || id;
             ol.appendChild(li);
         });
+        // Whisper is appended last by the backend whenever it is configured
+        // (enabled + model downloaded + engine present) — mirror that here so
+        // the read-only chain shows what the fetcher actually uses.
+        var st = _whisperStatus;
+        if (st && st.enabled && st.downloaded && st.engine &&
+                subtitleProviderOrder().indexOf('whisper') === -1) {
+            var li = document.createElement('li');
+            li.textContent = SUBTITLE_PROVIDER_NAMES.whisper + ' — last resort';
+            ol.appendChild(li);
+        }
     }
     // Light validation for the languages field: 2-3 letter codes, same
     // separators the backend's parse_langs accepts. Invalid input shows a
@@ -1433,6 +1443,157 @@
         _voLangsLastGood = el.value;
         return true;
     }
+    // ── Whisper local transcription (Phase 4) ────────────────────────────
+    var WHISPER_URL = '/api/video/subtitles/whisper';
+    var _whisperStatus = null;   // last status payload
+    var _whisperPoll = null;     // polling timer while a download runs
+    // Echoed download-state fields: the org blob is fully replaced on save,
+    // so these must round-trip (same echo pattern as subtitle_provider_order)
+    // or a settings save would wipe the "downloaded" state.
+    var _whisperEcho = { whisper_model_downloaded: false, whisper_model_path: '',
+        whisper_model_size_bytes: 0, whisper_model_downloaded_at: '' };
+    function _whisperFmtBytes(n) {
+        n = Number(n) || 0;
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB';
+        if (n >= 1e6) return Math.round(n / 1e6) + ' MB';
+        if (n >= 1e3) return Math.round(n / 1e3) + ' KB';
+        return n + ' B';
+    }
+    function _whisperStopPoll() {
+        if (_whisperPoll) { clearInterval(_whisperPoll); _whisperPoll = null; }
+    }
+    function _whisperStartPoll() {
+        if (_whisperPoll) return;
+        _whisperPoll = setInterval(function () { loadWhisperStatus(); }, 2000);
+    }
+    function loadWhisperStatus() {
+        return fetch(WHISPER_URL + '/status', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && !d.error) {
+                    _whisperStatus = d;
+                    renderWhisperStatus();
+                    renderProviderOrder();
+                }
+                return !!d;
+            })
+            .catch(function () { return false; });
+    }
+    function renderWhisperStatus() {
+        var st = _whisperStatus;
+        var picker = document.getElementById('vo-whisper-model');
+        var btn = document.getElementById('vo-whisper-dl');
+        var toggle = document.getElementById('vo-whisper-enabled');
+        var statusEl = document.getElementById('vo-whisper-status');
+        var errEl = document.getElementById('vo-whisper-error');
+        var prog = document.getElementById('vo-whisper-progress');
+        var bar = document.getElementById('vo-whisper-progress-bar');
+        if (!st || !picker || !btn) return;
+        // Keep the echoed state fresh (a download may have finished in another
+        // tab, or just now via the poller).
+        _whisperEcho.whisper_model_downloaded = !!st.downloaded;
+        _whisperEcho.whisper_model_size_bytes = st.size_bytes || 0;
+        _whisperEcho.whisper_model_downloaded_at = st.downloaded_at || '';
+        // Picker options carry the real snapshot sizes from the backend.
+        if (!picker._whisperSized && st.models) {
+            Array.prototype.forEach.call(picker.options, function (opt) {
+                var meta = st.models[opt.value];
+                if (meta) opt.textContent = meta.label + ' — ' + meta.blurb;
+            });
+            picker._whisperSized = true;
+        }
+        var dl = st.download || {};
+        var downloading = dl.state === 'downloading';
+        if (errEl) {
+            if (dl.state === 'error' && dl.error) {
+                errEl.textContent = 'Download failed: ' + dl.error;
+                errEl.hidden = false;
+            } else { errEl.hidden = true; errEl.textContent = ''; }
+        }
+        if (prog && bar) {
+            prog.hidden = !downloading;
+            if (downloading && dl.total_bytes > 0) {
+                bar.style.width = Math.min(100, Math.round(
+                    dl.downloaded_bytes / dl.total_bytes * 100)) + '%';
+            } else { bar.style.width = '0%'; }
+        }
+        var picked = picker.value;
+        // "Ready" = the persisted downloaded flag AND the file on disk, for
+        // the model the settings currently name. Changing the picker to a
+        // model that isn't downloaded flips the button to
+        // "Download <new> model" (downloading replaces the old one).
+        var pickedReady = !!st.downloaded && picked === st.model;
+        if (downloading) {
+            var pct = dl.total_bytes > 0
+                ? Math.round(dl.downloaded_bytes / dl.total_bytes * 100) : 0;
+            btn.textContent = 'Downloading ' + (dl.model || picked) + '… ' + pct + '%';
+            btn.disabled = true;
+        } else if (pickedReady) {
+            btn.textContent = '✓ ' + picked + ' downloaded';
+            btn.disabled = true;
+        } else {
+            btn.textContent = 'Download ' + picked + ' model';
+            btn.disabled = false;
+        }
+        if (statusEl) {
+            var bits = [];
+            if (st.downloaded) {
+                bits.push('Downloaded: ' + st.model + ' (' +
+                    _whisperFmtBytes(st.size_bytes) + ')' +
+                    (st.downloaded_at ? ' on ' + String(st.downloaded_at).slice(0, 10) : '') + '.');
+            } else {
+                bits.push('No model downloaded yet.');
+            }
+            if (st.disk_model && st.disk_model !== picked) {
+                bits.push('Note: ' + st.disk_model + ' is on disk — downloading ' +
+                    picked + ' replaces it.');
+            }
+            if (!st.engine) {
+                bits.push('Transcription engine missing on the server: ' +
+                    (st.engine_hint || 'install faster-whisper') + '.');
+            }
+            statusEl.textContent = bits.join(' ');
+        }
+        // The toggle is only meaningful when the picked model is downloaded
+        // and the engine is present; it stays disabled (never force-unchecked,
+        // so a later settings save doesn't clobber the saved intent).
+        if (toggle) {
+            var usable = pickedReady && !!st.engine;
+            toggle.disabled = !usable;
+            toggle.title = usable ? ''
+                : 'Download a model first (and install faster-whisper on the server).';
+        }
+        if (downloading) _whisperStartPoll(); else _whisperStopPoll();
+    }
+    function startWhisperDownload() {
+        var picker = document.getElementById('vo-whisper-model');
+        var errEl = document.getElementById('vo-whisper-error');
+        var model = picker ? picker.value : 'small';
+        if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
+        // Persist the picked model first so the status/download state names
+        // the model actually being downloaded.
+        saveOrganization(true).then(function () {
+            return fetch(WHISPER_URL + '/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ model: model })
+            }).then(function (r) {
+                return r.json().then(function (d) { return { ok: r.ok, status: r.status, body: d || {} }; });
+            });
+        }).then(function (res) {
+            if (!res) return;
+            if (!res.ok) {
+                if (errEl) {
+                    errEl.textContent = 'Could not start download: ' + (res.body.error || res.status);
+                    errEl.hidden = false;
+                }
+                return;
+            }
+            loadWhisperStatus();
+        }).catch(function () {
+            if (errEl) { errEl.textContent = 'Could not start download (network error).'; errEl.hidden = false; }
+        });
+    }
     function fillOrg() {
         if (!_videoOrg) return;
         var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
@@ -1450,6 +1611,13 @@
         set('vo-sub-langs', _videoOrg.subtitle_langs || 'en');
         _voLangsLastGood = _videoOrg.subtitle_langs || 'en';
         renderProviderOrder();
+        set('vo-whisper-model', _videoOrg.whisper_model || 'small');
+        chk('vo-whisper-enabled', _videoOrg.whisper_enabled);
+        _whisperEcho.whisper_model_downloaded = !!_videoOrg.whisper_model_downloaded;
+        _whisperEcho.whisper_model_path = _videoOrg.whisper_model_path || '';
+        _whisperEcho.whisper_model_size_bytes = _videoOrg.whisper_model_size_bytes || 0;
+        _whisperEcho.whisper_model_downloaded_at = _videoOrg.whisper_model_downloaded_at || '';
+        loadWhisperStatus();
         chk('vo-recycle', _videoOrg.recycle_deletes);
         set('vo-recycle-days', _videoOrg.recycle_keep_days || 7);
         set('vo-recycle-path', _videoOrg.recycle_path || '');
@@ -1480,6 +1648,14 @@
             write_nfo: on('vo-nfo'),
             download_subtitles: on('vo-subs-dl'),
             subtitle_langs: val('vo-sub-langs'),
+            whisper_enabled: on('vo-whisper-enabled'),
+            whisper_model: val('vo-whisper-model'),
+            // echoed download state — the blob is fully replaced on save, so
+            // these must round-trip or a save wipes the "downloaded" state
+            whisper_model_downloaded: _whisperEcho.whisper_model_downloaded,
+            whisper_model_path: _whisperEcho.whisper_model_path,
+            whisper_model_size_bytes: _whisperEcho.whisper_model_size_bytes,
+            whisper_model_downloaded_at: _whisperEcho.whisper_model_downloaded_at,
             recycle_deletes: on('vo-recycle'),
             recycle_keep_days: val('vo-recycle-days'),
             recycle_path: val('vo-recycle-path'),
@@ -1522,6 +1698,12 @@
             if (validateSubLangs()) { saveOrganization(false); }
             else { langsEl.value = _voLangsLastGood; }
         });
+        var wModel = document.getElementById('vo-whisper-model');
+        if (wModel) wModel.addEventListener('change', function () { renderWhisperStatus(); });
+        var wDl = document.getElementById('vo-whisper-dl');
+        if (wDl) wDl.addEventListener('click', startWhisperDownload);
+        var wTog = document.getElementById('vo-whisper-enabled');
+        if (wTog) wTog.addEventListener('change', function () { saveOrganization(false); });
         var reset = document.getElementById('vo-reset');
         if (reset) reset.addEventListener('click', function () {
             // POST blank templates + standard toggles; the backend normalises to the
