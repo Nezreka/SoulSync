@@ -266,6 +266,8 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_album_artists_artist ON lib2_album_artists(artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album ON lib2_tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc ON lib2_tracks(isrc)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc_nocase ON lib2_tracks(isrc COLLATE NOCASE)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_spotify_nocase ON lib2_tracks(spotify_id COLLATE NOCASE)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_canonical ON lib2_tracks(canonical_track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_legacy ON lib2_tracks(legacy_track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_artists_artist ON lib2_track_artists(artist_id)",

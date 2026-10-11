@@ -275,3 +275,80 @@ def test_failed_library_boundary_lookup_reports_unknown(env, monkeypatch):
         return connect()
     monkeypatch.setattr(env.db, '_get_connection', fail_once)
     assert entries(env)[0]['library_status'] == 'unknown'
+
+
+@pytest.mark.parametrize('requested_title,requested_artist,stored_title,stored_artist', [
+    ('Xtal (Remastered)', 'Aphex Twin', 'Xtal', 'Aphex Twin'),
+    ('Xtal', 'AC/DC', 'Xtal', 'ACDC'),
+])
+def test_native_shortlist_preserves_accepted_identity_variants(env, requested_title, requested_artist, stored_title, stored_artist):
+    candidate(env, title=stored_title, artist=stored_artist)
+    quarantined(env, title=requested_title, artist=requested_artist)
+    assert entries(env)[0]['library_status'] == 'present'
+
+
+def test_per_track_credits_find_a_compilation_recording(env):
+    candidate(env, artist='Various Artists')
+    with env.db._get_connection() as conn:
+        conn.execute("UPDATE lib2_tracks SET track_artist='Aphex Twin feat. Someone'")
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'present'
+
+
+def test_absent_targets_do_not_normalize_the_global_catalogue(env, monkeypatch):
+    candidate(env)
+    with env.db._get_connection() as conn:
+        conn.executemany('INSERT INTO lib2_tracks(album_id,title) VALUES(1,?)', ((f'Unowned {i}',) for i in range(2000)))
+    connect = env.db._get_connection
+    calls = 0
+    def counted_connection():
+        conn = connect()
+        def normalize(value):
+            nonlocal calls
+            calls += 1
+            return env.db._normalize_for_comparison(value or '')
+        conn.create_function('unidecode_lower', 1, normalize)
+        return conn
+    monkeypatch.setattr(env.db, '_get_connection', counted_connection)
+    quarantined(env, title='Missing')
+    assert entries(env)[0]['library_status'] == 'missing'
+    assert calls <= 2
+
+
+def test_native_candidate_cache_is_separate_for_each_library(env):
+    candidate(env, owner=2)
+    cache = {}
+    token = set_library_scope('shared')
+    try:
+        assert not env.db.get_quarantine_library_candidates('Xtal', ['Aphex Twin'], {}, lookup_cache=cache)
+    finally:
+        reset_library_scope(token)
+    token = set_library_scope(2)
+    try:
+        assert env.db.get_quarantine_library_candidates('Xtal', ['Aphex Twin'], {}, lookup_cache=cache)
+    finally:
+        reset_library_scope(token)
+
+
+@pytest.mark.parametrize('role,album_artist_counts', [('featured', True), ('primary', False)])
+def test_junction_credits_reach_the_identity_check(env, role, album_artist_counts):
+    from core.library2.importer import normalize_name
+    candidate(env, artist='Calvin Harris')
+    with env.db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_artists(id,name,name_key) VALUES(2,?,?)', ('Rihanna', normalize_name('Rihanna')))
+        conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id,role) SELECT id,2,? FROM lib2_tracks', (role,))
+    quarantined(env, artist='Rihanna')
+    assert entries(env)[0]['library_status'] == 'present'
+    quarantined(env, name='album', artist='Calvin Harris')
+    by_id = {entry['id']: entry for entry in entries(env)}
+    assert (by_id['album']['library_status'] == 'present') == album_artist_counts
+
+
+def test_explicit_track_artist_has_priority_over_junction_credits(env):
+    candidate(env, artist='Calvin Harris')
+    with env.db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_artists(id,name,name_key) VALUES(2,'Rihanna','rihanna')")
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role) SELECT id,2,'primary' FROM lib2_tracks")
+        conn.execute("UPDATE lib2_tracks SET track_artist='Other Performer'")
+    quarantined(env, artist='Rihanna')
+    assert entries(env)[0]['library_status'] != 'present'

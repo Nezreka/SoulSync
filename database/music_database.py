@@ -9990,7 +9990,7 @@ class MusicDatabase:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
 
-    def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None):
+    def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None, *, lookup_cache=None):
         """Read actual v2 files in the import's library; errors propagate.
 
         Catalogue metadata and history alone are not ownership evidence. The
@@ -9999,6 +9999,17 @@ class MusicDatabase:
         """
         from core.library_scope import current_library_scope
         from core.library2.sql_util import owner_clause
+        from core.text.normalize import normalize_key
+        from core.wishlist.library_match import _same_title
+
+        scope = current_library_scope()
+        lookup_cache = (lookup_cache if lookup_cache is not None else {}).setdefault(scope, {})
+        owner = owner_clause(scope, column='f.owner_profile_id')
+
+        def credit_keys(credit):
+            parts = re.split(r'\s*(?:[,;&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b)\s*', credit or '', flags=re.I)
+            names = [credit or '', *parts, *(name for part in parts for name in re.split(r'\s+x\s+', part, flags=re.I))]
+            return {key for name in names if (key := normalize_key(re.sub(r'^the\s+', '', name.strip(), flags=re.I)))}
 
         conn = self._get_connection()
         try:
@@ -10012,24 +10023,83 @@ class MusicDatabase:
                     {' OR '.join(column + ' = ? COLLATE NOCASE' for column, _ in ids)} LIMIT 100""",
                     [value for _, value in ids])
                 track_ids.update(row[0] for row in cursor.fetchall())
+            # Resolve names once per list request, including punctuation and
+            # compilation credits. Subsequent targets use indexed artist/album
+            # and artist/track joins, never a title UDF over the whole catalogue.
+            if 'artist_keys' not in lookup_cache:
+                by_name, by_credit = {}, {}
+                for row in cursor.execute('SELECT id,name FROM lib2_artists'):
+                    for key in credit_keys(row['name']):
+                        by_name.setdefault(key, set()).add(row['id'])
+                for row in cursor.execute(f"""
+                    SELECT DISTINCT t.id,t.track_artist FROM lib2_track_files f
+                    JOIN lib2_tracks t ON t.id=f.track_id
+                    WHERE f.file_state='active' AND f.import_status='imported'{owner}
+                      AND t.track_artist IS NOT NULL AND t.track_artist<>''
+                """):
+                    for key in credit_keys(row['track_artist']):
+                        by_credit.setdefault(key, set()).add(row['id'])
+                lookup_cache['artist_keys'] = by_name
+                lookup_cache['credit_keys'] = by_credit
+            artist_ids = set()
             for artist in artists:
-                track_ids.update(row['id'] for row in self._search_tracks_basic_rows(
-                    cursor, title, artist, 100))
+                key = normalize_key(re.sub(r'^the\s+', '', artist.strip(), flags=re.I))
+                artist_ids.update(lookup_cache['artist_keys'].get(key, ()))
+                track_ids.update(lookup_cache['credit_keys'].get(key, ()))
+            artist_key = tuple(sorted(artist_ids))
+            if artist_key and artist_key not in lookup_cache:
+                indexed = set()
+                for part in (list(artist_ids)[i:i+450] for i in range(0, len(artist_ids), 450)):
+                    marks = ','.join('?' for _ in part)
+                    cursor.execute(f"""
+                        SELECT t.id FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id
+                        WHERE al.primary_artist_id IN ({marks})
+                          AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+                                      AND f.file_state='active' AND f.import_status='imported'{owner})
+                        UNION SELECT ta.track_id FROM lib2_track_artists ta WHERE ta.artist_id IN ({marks})
+                          AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=ta.track_id
+                                      AND f.file_state='active' AND f.import_status='imported'{owner})
+                    """, part + part)
+                    indexed.update(row[0] for row in cursor.fetchall())
+                lookup_cache[artist_key] = indexed
+            track_ids.update(lookup_cache.get(artist_key, ()))
             if not track_ids:
                 return []
-            owner = owner_clause(current_library_scope(), column='f.owner_profile_id')
-            cursor.execute(f"""
+            rows = []
+            for part in (list(track_ids)[i:i+900] for i in range(0, len(track_ids), 900)):
+                cursor.execute(f"""
                 SELECT t.*, a.name AS artist_name, al.title AS album_title,
                        f.path AS file_path, f.format, f.bitrate, f.bit_depth,
                        f.verification_status, f.file_state
                 FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
                 JOIN lib2_artists a ON a.id=al.primary_artist_id
                 JOIN lib2_track_files f ON f.track_id=t.id
-                WHERE t.id IN ({','.join('?' for _ in track_ids)})
+                WHERE t.id IN ({','.join('?' for _ in part)})
                   AND f.file_state='active' AND f.import_status='imported'{owner}
                 ORDER BY f.is_primary DESC, f.id DESC
-            """, list(track_ids))
-            rows = [dict(row) for row in cursor.fetchall()]
+                """, part)
+                found = [dict(row) for row in cursor.fetchall()
+                         if _same_title(title, row['title'], row['album_title'], allow_subtitles=True)]
+                # Provider credits can live only in the native junction. A
+                # specific file/track credit wins; otherwise primary credits
+                # replace an album artist (compilations), while featured-only
+                # credits supplement that artist.
+                cursor.execute(f"""
+                    SELECT ta.track_id,a.name,ta.role FROM lib2_track_artists ta
+                    JOIN lib2_artists a ON a.id=ta.artist_id
+                    WHERE ta.track_id IN ({','.join('?' for _ in part)})
+                    ORDER BY ta.position
+                """, part)
+                credits = {}
+                for credit in cursor.fetchall():
+                    credits.setdefault(credit['track_id'], []).append(credit)
+                for row in found:
+                    names = credits.get(row['id'], [])
+                    if names and not row.get('track_artist'):
+                        primary = any(credit['role'] == 'primary' for credit in names)
+                        row['track_artist'] = ', '.join(
+                            ([] if primary else [row['artist_name']]) + [credit['name'] for credit in names])
+                rows.extend(found)
             for row in rows:
                 quality = str(row.get('format') or '').upper()
                 if row.get('bit_depth'):

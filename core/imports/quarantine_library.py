@@ -58,7 +58,7 @@ def _library_paths(database, config):
     return shared, private, config_root_path(config.get('soulseek.download_path', ''))
 
 
-def _presence(database, entry, context, config, library_paths):
+def _presence(database, entry, context, config, library_paths, lookup_cache):
     title, artist = entry.get('expected_track') or '', entry.get('expected_artist') or ''
     if not title or not artist:
         return 'unknown', None
@@ -92,7 +92,7 @@ def _presence(database, entry, context, config, library_paths):
     token = set_library_scope(scope)
     try:
         candidates = database.get_quarantine_library_candidates(
-            title, [artist], identifiers, config.get_active_media_server())
+            title, [artist], identifiers, config.get_active_media_server(), lookup_cache=lookup_cache)
     finally:
         reset_library_scope(token)
     # A relative catalogue path and an absolute history path may be the same
@@ -161,6 +161,7 @@ def annotate_quarantine_library(entries, quarantine_dir, config):
             entry.update(library_status='unknown', library_match=None)
         return
     matches = {}
+    lookup_cache = {}
     for entry in entries:
         context = get_quarantine_entry_context(quarantine_dir, entry['id'])
         key = (entry.get('expected_track'), entry.get('expected_artist'),
@@ -168,7 +169,7 @@ def annotate_quarantine_library(entries, quarantine_dir, config):
                tuple(sorted(_identifiers(context).items())))
         if key not in matches:
             try:
-                matches[key] = _presence(database, entry, context, config, library_paths)
+                matches[key] = _presence(database, entry, context, config, library_paths, lookup_cache)
             except Exception as exc:
                 logger.debug("Quarantine library lookup for %s failed: %s", entry['id'], exc)
                 matches[key] = ('unknown', None)
