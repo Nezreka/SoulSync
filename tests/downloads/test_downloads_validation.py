@@ -483,6 +483,37 @@ def test_unparsed_artist_separator_does_not_create_a_version_marker(monkeypatch)
     assert result == [correct]
 
 
+def test_expecting_marked_version_rejects_unmarked_studio_candidate(monkeypatch):
+    """Review follow-up: expecting the marked version 'Live Again (Live)',
+    the studio candidate 'Live Again' carries FEWER 'live' occurrences than
+    the expected title — it must be penalized as wrong_version even though
+    the raw word 'live' appears in it. On pre-fix code the raw word check
+    alone saw 'live' in the candidate and let it through."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Live Again (Live)')
+    studio = _deezer_candidate(title='Live Again')
+    assert get_valid_candidates([studio], expected, 'HALO Live Again (Live)') == []
+
+
+def test_expecting_marked_version_accepts_marked_candidate(monkeypatch):
+    """The marked live candidate for a live request still passes — equal
+    occurrence counts mean the version asked for is the version offered."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Live Again (Live)')
+    live = _deezer_candidate(title='Live Again (Live)')
+    result = get_valid_candidates([live], expected, 'HALO Live Again (Live)')
+    assert result == [live]
+
+
+def test_expecting_marked_version_wrong_song_still_rejected(monkeypatch):
+    """A live-marked candidate for the WRONG song must not sneak through the
+    version logic — it stays rejected."""
+    monkeypatch.setattr(validation, 'matching_engine', _MatchingEngine())
+    expected = _deezer_expected(name='Live Again (Live)')
+    wrong = _deezer_candidate(title='Completely Different (Live)')
+    assert get_valid_candidates([wrong], expected, 'HALO Live Again (Live)') == []
+
+
 def test_type_beat_chaff_still_penalized(monkeypatch):
     """The raw word check's raison d'etre: 'Drake Type Beat' is never the
     real 'Hotline Bling' — bare-suffix chaff that never qualifies as a

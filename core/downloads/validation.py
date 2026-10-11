@@ -650,9 +650,18 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     version_detail = f"{kw} version, asked for the original"
                     break
         else:
-            # Expecting specific version — penalize results that don't have it
+            # Expecting specific version — penalize results that don't have
+            # it. A raw word-boundary check alone lets the studio recording
+            # through when the expected title carries the keyword canonically
+            # ("Live Again" vs the requested "Live Again (Live)"): compare
+            # occurrence counts instead, so the candidate must carry at
+            # least as many marks of the requested version as the expected
+            # title. (Candidate count 0 is always < expected count >= 1, so
+            # the old "not present at all" case is subsumed.)
             for kw in _version_keywords:
-                if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
+                if (_has_version_kw(expected_title_lower, kw)
+                        and _count_version_kw(r_title_lower, kw)
+                        < _count_version_kw(expected_title_lower, kw)):
                     confidence *= 0.5
                     is_wrong_version = True
                     version_detail = f"asked for the {kw} version, this isn't marked {kw}"

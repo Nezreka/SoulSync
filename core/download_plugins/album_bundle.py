@@ -208,13 +208,23 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
 # Tribute to Pink Floyd" contains every significant word of "Animals" BY
 # CONSTRUCTION, so the relevance floor above cannot see it — the marker has
 # to be named explicitly.
+#
+# Bare "cover"/"covers" are deliberately NOT markers: tracker/usenet naming
+# tags legitimate rips with artwork words ([Covers], [Front Cover],
+# [FLAC + CUE + LOG + Covers], "+ Covers") and every seeded lossless copy
+# carrying scans would be refused as a "tribute album" (review BLOCK on
+# #1641). Real cover albums are caught by the explicit-phrase markers
+# ("cover album", "cover version", "cover band", "covers of").
 _TRIBUTE_COVER_MARKERS = (
     "tribute",
-    "cover",
-    "covers",
     "salute",
     "a tribute to",
     "in the style of",
+    "cover album",
+    "cover version",
+    "cover versions",
+    "cover band",
+    "covers of",
 )
 
 
@@ -260,9 +270,11 @@ def _has_unexplained_tribute_marker(candidate_title: str, album_name: str,
 # the metadata layer stores for compilations, but real-world VA release
 # titles say "VA - ..." — the placeholder words never appear there, so
 # gating on them would refuse every VA bundle. Treated like a missing
-# artist name: no opinion (fail open).
+# artist name: no opinion (fail open). "Various" included to match
+# core/library_reorganize.py's compilation placeholder set.
 _ARTIST_PLACEHOLDER_NAMES = frozenset({
     "various artists",
+    "various",
     "va",
     "unknown artist",
     "unknown",

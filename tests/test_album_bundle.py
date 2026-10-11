@@ -420,6 +420,100 @@ def test_picker_rejects_a_tribute_to_variant_too():
     assert picked is real
 
 
+def test_picker_keeps_album_rips_tagged_with_artwork_covers():
+    """Third-party review false positive: tracker/usenet naming tags legit
+    rips with artwork-scan words — [Covers], [Front Cover],
+    [FLAC + CUE + LOG + Covers], + Covers. Bare 'cover'/'covers' must NOT be
+    a tribute marker, or every seeded lossless copy carrying scans gets
+    refused and the bundle falls back to single-track for no reason."""
+    artwork_rips = [
+        _Release(title="Pink Floyd - Animals (1977) [FLAC] [cue, log, covers]",
+                 size=400_000_000, seeders=100),
+        _Release(title="Pink Floyd - Animals (1977) [FLAC] [Front Cover]",
+                 size=400_000_000, seeders=100),
+        _Release(title="Pink Floyd - Animals (1977) [FLAC + CUE + LOG + Covers]",
+                 size=400_000_000, seeders=100),
+        _Release(title="Pink Floyd - Animals (1977) [FLAC] + Covers",
+                 size=400_000_000, seeders=100),
+    ]
+    for rip in artwork_rips:
+        picked = pick_best_album_release(
+            [rip], _flac_quality_guess,
+            album_name="Animals", artist_name="Pink Floyd")
+        assert picked is rip, f"artwork tag falsely rejected: {rip.title}"
+
+
+def test_picker_still_rejects_real_cover_album_phrasing():
+    """Explicit cover-album phrasing still disqualifies a release for an
+    original wishlist item — only the bare artwork words were demoted."""
+    cover_album = _Release(title="Various Artists - Covers of Pink Floyd: Animals [FLAC]",
+                           size=400_000_000, seeders=5000)
+    real = _Release(title="Pink Floyd - Animals (1977) [FLAC]",
+                    size=380_000_000, seeders=10)
+    picked = pick_best_album_release(
+        [cover_album, real], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is real
+
+    cover_band = _Release(title="Cover Band Orchestra - Animals Reimagined [FLAC]",
+                          size=400_000_000, seeders=5000)
+    picked = pick_best_album_release(
+        [cover_band, real], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is real
+
+
+def test_picker_allows_cover_album_when_it_is_the_wishlist_item():
+    """A user who ACTUALLY wishlisted a cover album must still get it — the
+    album-name explanation works with the explicit-phrase markers too."""
+    tribute = _Release(title="Pink Floyd - Animals The Cover Album [FLAC]",
+                       size=400_000_000, seeders=100)
+    picked = pick_best_album_release(
+        [tribute], _flac_quality_guess,
+        album_name="Pink Floyd - Animals The Cover Album",
+        artist_name="Pink Floyd")
+    assert picked is tribute
+
+
+def test_picker_allows_album_literally_named_covers():
+    """An album whose canonical name is 'Covers' (or 'Cover') is no longer a
+    tribute marker at all — bare words only ever fired from artwork tags."""
+    named_covers = _Release(title="Placebo - Covers [FLAC]",
+                            size=400_000_000, seeders=100)
+    picked = pick_best_album_release(
+        [named_covers], _flac_quality_guess,
+        album_name="Covers", artist_name="Placebo")
+    assert picked is named_covers
+
+
+def test_picker_artist_gate_fail_open_for_various_placeholder():
+    """'Various' is a placeholder artist name like 'Various Artists'/'VA'
+    (core/library_reorganize.py treats 'Various' as a compilation signal) —
+    it carries no identity, so a 'VA - ...' bundle must not be refused by
+    the artist-token gate."""
+    va = _Release(title="VA - Animals (1977) [FLAC]",
+                  size=400_000_000, seeders=100)
+    picked = pick_best_album_release(
+        [va], _flac_quality_guess,
+        album_name="Animals", artist_name="Various")
+    assert picked is va
+
+
+def test_picker_bare_cover_tag_slip_through_is_the_accepted_tradeoff():
+    """Documented trade-off (third-party review demanded bare 'cover'/
+    'covers' go): a release whose ONLY marker is a bare '(Cover)'/'(Covers)'
+    no longer gets filtered. Real-world tracker naming uses explicit
+    phrasing ('tribute', 'covers of', 'cover album'), and the artist-token
+    gate still stands behind this one — so this documents the behavior
+    rather than letting it be an accident."""
+    bare_cover = _Release(title="Pink Floyd - Animals [FLAC] (Cover)",
+                          size=400_000_000, seeders=100)
+    picked = pick_best_album_release(
+        [bare_cover], _flac_quality_guess,
+        album_name="Animals", artist_name="Pink Floyd")
+    assert picked is bare_cover
+
+
 # ---------------------------------------------------------------------------
 # quality_score
 # ---------------------------------------------------------------------------
