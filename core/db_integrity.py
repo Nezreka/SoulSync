@@ -22,6 +22,7 @@ app globals. Unit-testable with real (and deliberately-corrupted) temp DBs.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import sqlite3
@@ -54,6 +55,11 @@ def quick_check(db_path: str, *, timeout: float = 30.0) -> str:
     """
     if not os.path.exists(db_path):
         raise DBIntegrityError(f"Database file not found: {db_path}")
+    # SQLite reads an empty file as a valid empty database and answers 'ok'.
+    # A backup interrupted before its first page left exactly that, and the
+    # rotation then protected the empty file as the newest healthy backup.
+    if os.path.getsize(db_path) == 0:
+        raise DBIntegrityError(f"{db_path}: empty file")
     conn = None
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout)
@@ -96,6 +102,13 @@ def safe_backup(src_path: str, dst_path: str, *, verify_source: bool = True,
         src = sqlite3.connect(src_path)
         dst = sqlite3.connect(dst_path)
         src.backup(dst)
+    except BaseException:
+        # connect() already created dst_path; don't leave it behind empty
+        _close_quietly(dst)
+        dst = None
+        with contextlib.suppress(OSError):
+            os.remove(dst_path)
+        raise
     finally:
         _close_quietly(dst)
         _close_quietly(src)
