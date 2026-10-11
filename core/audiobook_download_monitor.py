@@ -451,9 +451,38 @@ def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     # separately and never allowed to fail the import: the book is already in
     # the library by now, and a badly labelled book beats a lost one.
     if result.get("ok") and result.get("path"):
+        # Optional: fold a multi-file book into one chaptered .m4b before
+        # tagging. merge_book_files never raises and returns the original
+        # list on any skip or failure, so the book is never worse off for the
+        # attempt — the guard below is belt and suspenders.
+        files = result.get("files") or []
+        if result.get("skipped"):
+            # A retry that found some chapters already filed: `files` holds
+            # only the remainder, and merging that subset would fold a
+            # partial book and strand the rest as loose files.
+            logger.info("Skipping the M4B merge for %s: %d file(s) already filed",
+                        result.get("path"), len(result["skipped"]))
+            # A crash mid-encode can still have stranded a partial .m4b here.
+            # The merge itself is skipped, but move the unplayable strand
+            # aside (never delete) so it is neither ingested nor squatting
+            # the name a future merge wants.
+            try:
+                from core.audiobook_m4b_merge import merge_enabled, sweep_unverifiable_m4b
+                if merge_enabled():
+                    sweep_unverifiable_m4b(
+                        result["path"], files + list(result.get("skipped") or []))
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("M4B sweep failed for %s: %s", result.get("path"), exc)
+        else:
+            try:
+                from core.audiobook_m4b_merge import merge_book_files
+                files = merge_book_files(result["path"], files, book)
+            except Exception as exc:                        # noqa: BLE001
+                logger.warning("M4B merge step failed for %s: %s", result.get("path"), exc)
+                files = result.get("files") or []
         try:
             from core.audiobook_post_processor import post_process_book
-            post_process_book(result["path"], book, result.get("files") or None)
+            post_process_book(result["path"], book, files or None)
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Post-processing %s failed: %s", result.get("path"), exc)
 
