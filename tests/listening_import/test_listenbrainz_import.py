@@ -43,6 +43,7 @@ def test_normalizes_listenbrainz_listen_payload():
         "duration_ms": 449000,
         "server_source": "listenbrainz",
         "db_track_id": None,
+        "scrobble_eligible": 1,
     }
 
 

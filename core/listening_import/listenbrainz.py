@@ -534,6 +534,9 @@ def normalize_listenbrainz_listen(item: Dict[str, Any]) -> Optional[Dict[str, An
         "duration_ms": duration_ms,
         "server_source": SOURCE,
         "db_track_id": None,
+        # an attested ListenBrainz listen: may be forwarded to Last.fm, just
+        # never back to ListenBrainz (dedup marks scrobbled_listenbrainz).
+        "scrobble_eligible": 1,
     }
 
 
