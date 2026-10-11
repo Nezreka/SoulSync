@@ -131,3 +131,46 @@ def test_prune_noop_under_limit(tmp_path):
     for i in range(3):
         p = str(tmp_path / f"b{i}.db"); _make_db(p); paths.append(p)
     assert prune_backups(paths, max_keep=5) == []
+
+
+# ── empty files (a backup interrupted before its first page) ───────────────
+
+def test_empty_file_is_not_a_healthy_backup(tmp_path):
+    # SQLite answers quick_check 'ok' for a 0-byte file
+    empty = tmp_path / "music_library.db.backup_x"
+    empty.write_bytes(b"")
+    assert is_healthy(str(empty)) is False
+
+
+def test_prune_does_not_protect_empty_backups_over_a_real_one(tmp_path):
+    real = str(tmp_path / "real.db")
+    _make_db(real)
+    os.utime(real, (1000, 1000))
+    empties = []
+    for i in range(5):
+        p = tmp_path / f"empty{i}.db"
+        p.write_bytes(b"")
+        os.utime(p, (2000 + i, 2000 + i))
+        empties.append(str(p))
+    to_delete = prune_backups([real] + empties, max_keep=5)
+    assert real not in to_delete
+
+
+def test_failed_backup_leaves_no_empty_file(tmp_path, monkeypatch):
+    src = str(tmp_path / "src.db")
+    _make_db(src)
+    dst = tmp_path / "dst.db"
+    real_connect = sqlite3.connect
+
+    class _Breaks:
+        def backup(self, _dst):
+            raise sqlite3.OperationalError("database is locked")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sqlite3, "connect",
+                        lambda path, *a, **k: _Breaks() if path == src else real_connect(path, *a, **k))
+    with pytest.raises(sqlite3.OperationalError):
+        safe_backup(src, str(dst), verify_source=False)
+    assert not dst.exists()

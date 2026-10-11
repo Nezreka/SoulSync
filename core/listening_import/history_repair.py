@@ -23,6 +23,7 @@ is logged with its counts.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import time
@@ -55,6 +56,7 @@ def backup_listening_tables(db_path: str) -> Optional[str]:
     folder = os.path.dirname(os.path.abspath(db_path))
     target = os.path.join(folder, f"listening_backup_{time.strftime('%Y%m%d_%H%M%S')}.db")
     src = sqlite3.connect(db_path, timeout=30)
+    done = False
     try:
         src.execute("ATTACH DATABASE ? AS bak", (target,))
         for table in ("listening_history", "listening_import_events"):
@@ -63,9 +65,20 @@ def backup_listening_tables(db_path: str) -> Optional[str]:
                 src.execute(f"CREATE TABLE bak.{table} AS SELECT * FROM main.{table}")
         src.commit()
         src.execute("DETACH DATABASE bak")
+        done = True
     finally:
         src.close()
+        if not done:
+            # ATTACH created the file before the copy failed ("database is
+            # locked"); every retry left another empty backup behind
+            _discard(target)
     return target
+
+
+def _discard(path: Optional[str]) -> None:
+    if path:
+        with contextlib.suppress(OSError):
+            os.remove(path)
 
 
 def normalize_times(conn) -> Dict[str, int]:
@@ -170,6 +183,9 @@ def repair_once(database, db_path: Optional[str] = None) -> Optional[Dict[str, i
         conn.commit()
     except Exception:
         conn.rollback()
+        # rolled back, so this attempt's copy restores nothing; kept, one more
+        # would pile up with every retry
+        _discard(backup)
         raise
     finally:
         conn.close()
