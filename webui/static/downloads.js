@@ -2472,18 +2472,9 @@ function _ensureCandidatesClickListener(statusEl) {
         if (this.dataset.detailOpen && typeof openTrackDetail === 'function') {
             openTrackDetail(taskId);
         } else {
-            openTaskSearch(taskId);
+            showCandidatesModal(taskId);
         }
     });
-}
-
-// A failed task for a library track opens the library's Interactive Search
-// (the React app answers window.openLibraryTaskSearch); every other task keeps
-// the candidates window.
-async function openTaskSearch(taskId) {
-    if (typeof window.openLibraryTaskSearch === 'function'
-            && await window.openLibraryTaskSearch(taskId)) return;
-    showCandidatesModal(taskId);
 }
 
 // --- Live status pop-in (#1156): click an in-flight status cell to watch ---
