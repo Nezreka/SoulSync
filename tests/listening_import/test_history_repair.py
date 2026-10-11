@@ -293,7 +293,9 @@ def test_the_worker_scrobbles_the_utc_instant(db, monkeypatch):
            'lastfm.session_key': 'sk'}
     config = SimpleNamespace(get=lambda key, default=None: cfg.get(key, default))
     db.insert_listening_events([{'track_id': 'rk-1', 'title': 'Roar', 'artist': 'Katy Perry', 'album': 'A',
-                                 'played_at': '2026-10-06 17:00:00', 'duration_ms': 1, 'server_source': 'plex'}])
+                                 'played_at': '2026-10-06 17:00:00', 'duration_ms': 1, 'server_source': 'plex',
+                                 # a server attests its own plays
+                                 'scrobble_eligible': 1}])
     ListeningStatsWorker(db, config, None)._scrobble_new_events()
     instant = int(datetime(2026, 10, 6, 17, tzinfo=timezone.utc).timestamp())
     assert sent == {'lb': [instant], 'lfm': [instant]}

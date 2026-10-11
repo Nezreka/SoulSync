@@ -19,6 +19,7 @@ function initializeMediaPlayer() {
         audioPlayer.addEventListener('timeupdate', npCrossfadeTick);
         audioPlayer.addEventListener('timeupdate', npThrottledPositionState);
         audioPlayer.addEventListener('timeupdate', npMaybeLogPlay);
+        audioPlayer.addEventListener('timeupdate', npMaybeMarkScrobbleEligible);
         audioPlayer.addEventListener('ended', onAudioEnded);
         audioPlayer.addEventListener('error', onAudioError);
         audioPlayer.addEventListener('loadstart', onAudioLoadStart);
@@ -137,6 +138,9 @@ function setTrackInfo(track) {
         window.getCurrentTrack = function () { return currentTrack; };
     }
     npPlayLogged = false;   // new track — allow one play-log once it's heard a bit
+    npPlayId = null;   // listening_history id for this play (for the scrobble-eligibility ping)
+    npScrobbleEligibleSent = false;
+    npPlayGeneration++;   // invalidate any in-flight log-play response for the previous track
     // Chat now-playing (opt-in, chat.js owns the gate + throttle). Never let a
     // chat problem break playback.
     try {
@@ -3855,13 +3859,18 @@ function initMediaSession() {
     } catch (e) { /* some browsers don't support seekto — handlers above still work */ }
 }
 
-// Log a SoulSync play once a track has been heard ~10s (the standard "counts
-// as a play" threshold) — feeds 'recently played' + smart-radio recency.
+// Log a SoulSync play once a track has been heard ~10s — feeds 'recently
+// played' + smart-radio recency. 10s is a "play" for SoulSync's own stats,
+// but it is NOT a scrobble: the row only becomes scrobble-eligible via
+// npMaybeMarkScrobbleEligible once the Last.fm threshold is reached.
 let npPlayLogged = false;
+let npPlayId = null;
+let npPlayGeneration = 0;
 function npMaybeLogPlay() {
     if (npPlayLogged || !currentTrack || !audioPlayer) return;
     if (!isFinite(audioPlayer.currentTime) || audioPlayer.currentTime < 10) return;
     npPlayLogged = true;   // set first so a slow request can't double-fire
+    const gen = npPlayGeneration;   // a late response for a skipped track must not claim this track's id
     try {
         fetch('/api/library/log-play', {
             method: 'POST',
@@ -3875,7 +3884,32 @@ function npMaybeLogPlay() {
                 },
                 duration_ms: Math.round((audioPlayer.duration || 0) * 1000),
             }),
-        }).catch(() => {});   // fire-and-forget; logging must never affect playback
+        }).then(r => (r && r.ok) ? r.json() : null)
+          .then(d => { if (d && d.play_id != null && gen === npPlayGeneration) npPlayId = d.play_id; })
+          .catch(() => {});   // fire-and-forget; logging must never affect playback
+    } catch (e) { /* non-fatal */ }
+}
+
+// Mark the current play scrobble-eligible once it satisfies the Last.fm rule:
+// played for at least half the track's duration or 4 minutes, whichever comes
+// first (tracks of 30s or less never scrobble). Unknown durations (streams)
+// fall back to the 4-minute cap. Seeking past the threshold counts — this is
+// a heuristic for "actually listened", not an audit.
+let npScrobbleEligibleSent = false;
+function npMaybeMarkScrobbleEligible() {
+    if (npScrobbleEligibleSent || npPlayId == null || !currentTrack || !audioPlayer) return;
+    const dur = audioPlayer.duration;
+    const effectiveDur = (isFinite(dur) && dur > 0) ? dur : Infinity;
+    if (effectiveDur <= 30) return;
+    if (!isFinite(audioPlayer.currentTime)) return;
+    if (audioPlayer.currentTime < Math.min(effectiveDur / 2, 240)) return;
+    npScrobbleEligibleSent = true;   // set first so a slow request can't double-fire
+    try {
+        fetch('/api/library/log-play/eligible', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ play_id: npPlayId }),
+        }).catch(() => {});   // fire-and-forget; scrobbling must never affect playback
     } catch (e) { /* non-fatal */ }
 }
 

@@ -7101,6 +7101,24 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobbled_listenbrainz INTEGER DEFAULT 0")
                 logger.info("Added scrobbled_listenbrainz column to listening_history")
 
+            # Whether a play may be scrobbled to Last.fm / ListenBrainz.
+            # A media server attests its own plays, so its history is
+            # eligible. Web-player rows start at 0: a 10s log is a "play" for
+            # SoulSync's own stats, but only becomes a scrobble once the
+            # player reports the Last.fm threshold was reached (half the
+            # track or 4 minutes, whichever comes first).
+            if 'scrobble_eligible' not in lh_cols:
+                cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobble_eligible INTEGER DEFAULT 0")
+                logger.info("Added scrobble_eligible column to listening_history")
+                # every attested source: media servers attest their own plays,
+                # and lastfm/listenbrainz rows are attested imports (their
+                # pending cross-service forwards must keep working).
+                cursor.execute("""
+                    UPDATE listening_history SET scrobble_eligible = 1
+                    WHERE server_source IN ('plex', 'jellyfin', 'navidrome',
+                                            'lastfm', 'listenbrainz')
+                """)
+
         except Exception as e:
             logger.error(f"Error creating listening_history table: {e}")
 
@@ -7160,17 +7178,24 @@ class MusicDatabase:
         row AND bump tracks.play_count / last_played for the smart-radio recency
         signal. ``event`` is the dict from core.playback.play_log.build_play_event.
 
-        Returns True if the history row was newly inserted.
+        Returns the listening_history row id for the play, or None when the
+        event was matched onto an existing row from another source (that row
+        is server-attested and already scrobble-eligible) or the insert
+        failed. The player uses the id to mark the row scrobble-eligible
+        once the Last.fm threshold is reached.
         """
+        from core.listening_scope import SHARED_OWNER
+        from core.listening_import.dedup import canonical_played_at
+
         if not event:
-            return False
-        inserted = self.insert_listening_events([event])
+            return None
+        self.insert_listening_events([event])
         db_id = event.get('db_track_id')
-        if db_id is not None:
-            conn = None
-            try:
-                conn = self._get_connection()
-                cursor = conn.cursor()
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if db_id is not None:
                 cursor.execute("""
                     UPDATE tracks
                     SET play_count = COALESCE(play_count, 0) + 1,
@@ -7178,12 +7203,70 @@ class MusicDatabase:
                     WHERE id = ?
                 """, (event.get('played_at'), db_id))
                 conn.commit()
-            except Exception as e:
-                logger.error(f"Error bumping play_count for track {db_id}: {e}")
-            finally:
-                if conn:
-                    conn.close()
-        return inserted > 0
+            # IS is NULL-safe for track_id (streams may carry None). The lookup
+            # uses the canonical played_at because insert_import_events stores
+            # the canonicalized form, not the raw event value. When the event
+            # was matched onto an existing row from another source there is no
+            # soulsync_web row, and None is the right answer: that row is
+            # server-attested and already scrobble-eligible.
+            owner = event.get('profile_id')
+            if owner is None:
+                owner = SHARED_OWNER
+            played_at = canonical_played_at(event.get('played_at')) or event.get('played_at')
+            cursor.execute("""
+                SELECT id FROM listening_history
+                WHERE track_id IS ? AND played_at IS ?
+                  AND server_source = 'soulsync_web' AND profile_id = ?
+                ORDER BY id DESC LIMIT 1
+            """, (event.get('track_id'), played_at, owner))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error recording web player play: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def mark_play_scrobble_eligible(self, play_id, profile_id=None):
+        """Mark a SoulSync web-player play as scrobble-eligible.
+
+        The player calls this once playback crosses the Last.fm threshold
+        (half the track or 4 minutes, whichever comes first). Only
+        soulsync_web rows in the caller's own pile can be flipped here:
+        server and import rows are eligible from insert, and this must never
+        touch them. Tracks of 30s or less never scrobble (duration_ms 0 means
+        unknown, e.g. a stream, and is allowed through).
+
+        Returns True when a row was actually flipped.
+        """
+        from core.listening_scope import SHARED_OWNER
+
+        if isinstance(play_id, bool):
+            return False
+        try:
+            play_id = int(play_id)
+            owner = int(profile_id) if profile_id is not None else SHARED_OWNER
+        except (TypeError, ValueError):
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE listening_history SET scrobble_eligible = 1
+                WHERE id = ? AND server_source = 'soulsync_web'
+                  AND profile_id = ? AND scrobble_eligible = 0
+                  AND (duration_ms = 0 OR duration_ms > 30000)
+            """, (play_id, owner))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error marking play {play_id} scrobble-eligible: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
 
     def update_track_play_counts(self, counts):
         """Update play_count and last_played on the tracks table.

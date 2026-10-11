@@ -10998,6 +10998,10 @@ def library_log_play():
 
     Fire-and-forget from the frontend ~10s into a track. Best-effort: a logging
     failure never affects playback, so we always return 200-ish.
+
+    Returns the listening_history row id as play_id. The row is NOT
+    scrobble-eligible yet: the frontend marks it eligible via
+    /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
         from core.playback.play_log import build_play_event
@@ -11013,10 +11017,33 @@ def library_log_play():
         from core.listening_scope import listening_owner
         db = get_database()
         event['profile_id'] = listening_owner(db, get_current_profile_id())
-        db.record_web_player_play(event)
-        return jsonify({"success": True})
+        play_id = db.record_web_player_play(event)
+        return jsonify({"success": True, "play_id": play_id})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/log-play/eligible', methods=['POST'])
+def library_log_play_eligible():
+    """Mark a web-player listening_history row as scrobble-eligible.
+
+    Fire-and-forget from the frontend once playback crosses the Last.fm
+    threshold (half the track or 4 minutes, whichever comes first). A 10s
+    log-play is a "play" for SoulSync's own stats; only an eligible row may
+    be scrobbled to Last.fm / ListenBrainz. Best-effort, always 200-ish.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        from core.listening_scope import listening_owner
+        db = get_database()
+        # same pile the play was logged into: one profile's ping can never
+        # flip another pile's row.
+        owner = listening_owner(db, get_current_profile_id())
+        ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        return jsonify({"success": ok})
+    except Exception as e:
+        logger.debug(f"log-play/eligible failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
