@@ -422,6 +422,7 @@
     var btn = host.querySelector('[data-vsub="reset"]');
     btn.disabled = true;
     var itemId = currentMountItemId(kind);
+    if (itemId == null) return;
     // Stale-paint guard (mirrors mountOverrides): see saveOverrides.
     var key = keyOf(kind, itemId);
     fetch(OVERRIDES_URL + kind + '/' + itemId, {
@@ -653,7 +654,7 @@
           if (!body || body.ok !== true) throw { status: 0 };
           var name =
             String(body.path || '')
-              .split('/')
+              .split(/[/\\]/)
               .pop() || 'subtitle file';
           row.classList.add('vsub-row--done');
           var saved = document.createElement('span');
