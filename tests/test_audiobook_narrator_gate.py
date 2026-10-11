@@ -143,6 +143,20 @@ def test_release_title_naming_other_narrator_is_not_held(monkeypatch, tmp_path):
     assert verdict["complete"] is True
 
 
+def test_different_narration_below_floor_is_held(monkeypatch, tmp_path):
+    # A confidently different narration skips the strict gate, but not all
+    # checks: 400/1164 is below the plausibility floor, so a fragment or
+    # sample naming another narrator is still held.
+    verdict = _check(
+        monkeypatch, tmp_path,
+        release_title="The Silmarillion narrated by Martin Shaw",
+        tag_narrators=[],
+        measured_minutes=400,
+    )
+    assert verdict["complete"] is False
+    assert "minutes short" in verdict["reason"]
+
+
 def test_abbreviated_tag_narrator_still_matches_edition(monkeypatch, tmp_path):
     verdict = _check(
         monkeypatch, tmp_path,
@@ -261,15 +275,27 @@ def test_tag_reader_finds_txxx_narrator(tmp_path):
     assert completeness.narrator_from_file_tags([path]) == ["Andy Serkis"]
 
 
-def test_tag_reader_ignores_the_author_slot_for_narrator_purposes(tmp_path):
-    # TPE1 is read as a weak hint: the author sitting there must not come
-    # back as a narrator name. (Whether it SHOULD hint is decided by
-    # narration_confidence, not here — here it is just another tag name.)
+def test_tag_reader_reads_author_slot_as_narrator_hint(tmp_path):
+    # TPE1 is the author slot, but rippers put the narrator there often
+    # enough that the reader takes it as a (weak) hint. The value comes back
+    # as an ordinary candidate name; whether it may only confirm (never
+    # contradict) is decided by narration_confidence, not here.
     from mutagen.id3 import TPE1
 
     path = _synth_mp3(tmp_path / "a.mp3",
                       [TPE1(encoding=3, text=["J. R. R. Tolkien"])])
     assert completeness.narrator_from_file_tags([path]) == ["J. R. R. Tolkien"]
+
+
+def test_tag_reader_splits_multi_value_id3_frame(tmp_path):
+    # ID3v2.4 multi-value frames serialize with embedded null bytes; the
+    # reader must return clean separate names, not one leaked blob.
+    from mutagen.id3 import TCOM
+
+    path = _synth_mp3(tmp_path / "a.mp3",
+                      [TCOM(encoding=3, text=["Michael Kramer", "Kate Reading"])])
+    assert completeness.narrator_from_file_tags([path]) == [
+        "Michael Kramer", "Kate Reading"]
 
 
 def test_tag_reader_returns_empty_for_untagged_files(tmp_path):

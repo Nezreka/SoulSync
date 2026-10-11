@@ -323,33 +323,32 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     # release again.
     #
     # A download confidently identified as the edition's own narration gets
-    # the hard runtime gate. A confidently different one skips it — the
-    # edition's runtime describes another reading entirely. An unidentified
-    # one keeps a loose plausibility floor instead of the exacting gate
-    # (UNKNOWN_NARRATION_TOLERANCE): speaking rate is the only thing that
+    # the hard runtime gate. Any other outcome — confidently different, or
+    # unidentified — gets a loose plausibility floor instead of the exacting
+    # gate (UNKNOWN_NARRATION_TOLERANCE): speaking rate is the only thing that
     # moves a complete unabridged reading, so anything far below is a sample
-    # pack or a grossly truncated download, not an alternate narration.
+    # pack or a grossly truncated download, not an alternate narration. A
+    # partial download naming a different narrator must not sail through
+    # unchecked.
     #
     # When the edition names no narrator there is nothing to be aware of, and
     # the runtime stays the book's only completeness signal — the gate keeps
     # working exactly as before. Same when there is no expected runtime or
     # the release is abridged/dramatized: the narration question is moot, so
     # it is not even asked.
-    gate_expected, gate_tolerance = expected, tolerance_from_settings()
+    gate_tolerance = tolerance_from_settings()
     narration: Optional[Dict[str, Any]] = None
     edition_narrators = [n for n in (book.get("narrator_names") or [])
                          if str(n).strip()]
     if expected > 0 and not abridged and edition_narrators:
         narration = narration_confidence(
             source_path, row.get("release_title"), book)
-        if narration["confidence"] == "different":
-            gate_expected = 0
-        elif narration["confidence"] == "unknown":
+        if narration["confidence"] in ("different", "unknown"):
             # A floor, never a ceiling: it may only loosen the user's own
             # tolerance, never tighten it.
             gate_tolerance = min(gate_tolerance, UNKNOWN_NARRATION_TOLERANCE)
 
-    verdict = assess(source_path, gate_expected, gate_tolerance,
+    verdict = assess(source_path, expected, gate_tolerance,
                      abridged=abridged)
     if narration is not None and verdict.get("complete"):
         measured = int(verdict.get("measured_minutes") or 0)
@@ -358,14 +357,14 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
             verdict["reason"] = (
                 f"{measured} minutes present; narrated by "
                 f"{narration['detected_narrator']} rather than the edition's "
-                f"narrator, so the edition runtime was not checked"
+                f"narrator, so only a plausibility floor was checked"
             )
         elif narration["confidence"] == "unknown":
             verdict["measured_by"] = "narration-unverified"
             verdict["reason"] = (
                 f"{measured} minutes present; the narration could not be "
-                f"confirmed as the edition's, so the edition runtime was not "
-                f"used as the gate"
+                f"confirmed as the edition's, so a plausibility floor was "
+                f"used instead of the strict gate"
             )
     elif (narration is not None and narration["confidence"] == "unknown"
             and not verdict.get("complete") and verdict.get("files")

@@ -110,15 +110,19 @@ def collect_audio(folder: Path) -> List[Path]:
 
 
 # Tag names that can name the narrator, by container. TCOM and TXXX:NARRATOR
-# are ID3, \xa9wrt is MP4, and the NARRATOR/COMPOSER keys are what Vorbis
-# comments and other rippers use. TPE1 is the artist slot: it SHOULD be the
-# author, but a large share of rippers put the narrator there instead, so it
-# is read as a weak hint only — safe because tags can only ever confirm the
-# edition's narration, never contradict it (see narration_confidence). These
-# are the same names SoulSync writes itself when it tags a finished book
+# are ID3 (plus likely case variants of the TXXX description — ID3 key
+# lookups are case-sensitive), \xa9wrt is MP4, the NARRATOR/COMPOSER keys are
+# what Vorbis comments and other rippers use, and the ----:com.apple.iTunes
+# freeform atoms are where m4b-tool, tone and Audiobookshelf write it in
+# MP4. TPE1 is the artist slot: it SHOULD be the author, but a large share
+# of rippers put the narrator there instead, so it is read as a weak hint
+# only — safe because tags can only ever confirm the edition's narration,
+# never contradict it (see narration_confidence). These are the same names
+# SoulSync writes itself when it tags a finished book
 # (core/audiobook_post_processor.py).
 _NARRATOR_TAG_NAMES = (
-    "TCOM", "TXXX:NARRATOR", "\xa9wrt",
+    "TCOM", "TXXX:NARRATOR", "TXXX:narrator", "TXXX:Narrator", "\xa9wrt",
+    "----:com.apple.iTunes:NARRATOR", "----:com.apple.iTunes:narrator",
     "NARRATOR", "narrator", "COMPOSER", "composer", "TPE1",
 )
 
@@ -136,12 +140,30 @@ _TAG_SAMPLE_LIMIT = 5
 UNKNOWN_NARRATION_TOLERANCE = 0.6
 
 
-def _tag_text(value: Any) -> str:
-    if isinstance(value, (list, tuple)):
-        value = value[0] if value else ""
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    return str(value or "").strip()
+def _extract_tag_strings(value: Any) -> List[str]:
+    """Every narrator-ish string a tag value carries.
+
+    ID3 frames expose ``.text`` (a list); MP4/Vorbis tags are plain dicts of
+    lists. Taking all of them matters for co-narrated books: first-only
+    would drop "Kate Reading" from ["Michael Kramer", "Kate Reading"] and
+    miss the edition's narrator. ID3v2.4 multi-value frames stringify with
+    embedded null bytes, so each item is split on ``\\x00`` too — otherwise
+    the raw bytes leak into the name and into user-facing reasons.
+    """
+    if value is None:
+        return []
+    if hasattr(value, "text"):
+        value = value.text
+    items = value if isinstance(value, (list, tuple)) else [value]
+    results: List[str] = []
+    for item in items:
+        if isinstance(item, bytes):
+            item = item.decode("utf-8", errors="replace")
+        for part in str(item or "").split("\x00"):
+            cleaned = part.strip()
+            if cleaned and cleaned not in results:
+                results.append(cleaned)
+    return results
 
 
 def narrator_from_file_tags(files: Sequence[Path]) -> List[str]:
@@ -165,9 +187,9 @@ def narrator_from_file_tags(files: Sequence[Path]) -> List[str]:
                     raw = get(name) if get else None
                 except Exception:                           # noqa: BLE001
                     raw = None
-                text = _tag_text(raw)
-                if text and text not in found:
-                    found.append(text)
+                for text in _extract_tag_strings(raw):
+                    if text not in found:
+                        found.append(text)
         except Exception:                                   # noqa: BLE001
             continue
     return found
