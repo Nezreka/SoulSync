@@ -24,7 +24,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, 'config_manager', config)
     monkeypatch.setattr(routes, 'docker_resolve_path', lambda p: p)
     monkeypatch.setattr(databases, 'get_database', lambda *args, **kwargs: db)
-    monkeypatch.setattr('core.imports.quarantine_library.library_scope_for_profile', lambda pid: pid if pid and pid > 1 else 'shared')
+    monkeypatch.setattr('core.imports.quarantine_library.import_owner_id',
+                        lambda ctx: ctx['library_owner_id'] if 'library_owner_id' in ctx else (ctx.get('profile_id') if ctx.get('profile_id', 1) > 1 else None))
     monkeypatch.setattr('core.imports.quarantine_library.library_root_for_profile', lambda pid, **kwargs: str(library) if pid and pid > 1 else None)
     token = set_library_scope('shared')
     app = Flask(__name__)
@@ -37,17 +38,16 @@ def candidate(env, *, title='Xtal', artist='Aphex Twin', owner=None, filename='X
     path = env.library / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b'library audio')
+    from core.library2.importer import normalize_name
     with env.db._get_connection() as conn:
-        conn.execute('INSERT OR IGNORE INTO artists(id,name,server_source,owner_profile_id) VALUES(1,?,?,?)',
-                     (artist, 'soulsync', owner))
-        conn.execute('INSERT OR IGNORE INTO albums(id,artist_id,title,server_source,owner_profile_id) VALUES(1,1,?,?,?)',
-                     ('Selected Ambient Works', 'soulsync', owner))
-        conn.execute('INSERT INTO tracks(album_id,artist_id,title,file_path,server_source,owner_profile_id,isrc) VALUES(1,1,?,?,?,?,?)',
-                     (title, str(path), 'soulsync', owner, isrc))
-        conn.execute('UPDATE artists SET name_norm = ?, name_key = ? WHERE id=1',
-                     (env.db._normalize_for_comparison(artist), artist.lower().replace(' ', '')))
-        conn.execute('UPDATE tracks SET title_norm = ? WHERE file_path = ?',
-                     (env.db._normalize_for_comparison(title), str(path)))
+        conn.execute('INSERT OR IGNORE INTO lib2_artists(id,name,name_key) VALUES(1,?,?)',
+                     (artist, normalize_name(artist)))
+        conn.execute('INSERT OR IGNORE INTO lib2_albums(id,primary_artist_id,title) VALUES(1,1,?)',
+                     ('Selected Ambient Works',))
+        track = conn.execute('INSERT INTO lib2_tracks(album_id,title,isrc) VALUES(1,?,?)',
+                             (title, isrc)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,owner_profile_id,is_primary,format,bit_depth) VALUES(?,?,?,1,'flac',16)",
+                     (track, str(path), owner))
     return path
 
 
@@ -73,6 +73,8 @@ def test_presence_updates_after_a_later_download_then_file_deletion(env):
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin',
                                     album_name='Selected Ambient Works', file_path=str(path),
                                     quality='FLAC 16-bit', verification_status='human_verified')
+    with env.db._get_connection() as conn:
+        conn.execute("UPDATE lib2_track_files SET verification_status='human_verified'")
     hit = entries(env)[0]
     assert hit['library_status'] == 'present'
     assert hit['library_match']['album'] == 'Selected Ambient Works'
@@ -111,8 +113,7 @@ def test_album_staging_never_counts_as_a_published_copy(env):
 
 
 def test_an_import_counts_before_the_media_server_scan(env):
-    path = env.library / 'Xtal.flac'
-    path.write_bytes(b'newly published audio')
+    path = candidate(env)
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin',
                                     file_path=str(path), verification_status='verified')
     quarantined(env)
@@ -182,17 +183,64 @@ def test_another_library_cannot_supply_a_missing_shared_copy(env, monkeypatch):
 def test_path_aliases_cannot_bypass_conflicting_recording_ids(env):
     path = candidate(env, isrc='OTHER0000001')
     with env.db._get_connection() as conn:
-        conn.execute('UPDATE tracks SET file_path=?', ('Xtal.flac',))
+        conn.execute('UPDATE lib2_track_files SET path=?', ('Xtal.flac',))
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
     quarantined(env, context={'profile_id': 1, 'track_info': {'name': 'Xtal', 'isrc': 'TARGET000001'}})
     assert entries(env)[0]['library_status'] != 'present'
 
 
 def test_history_uses_the_mapped_import_root(env, monkeypatch):
-    path = env.library / 'Xtal.flac'
-    path.write_bytes(b'imported audio')
+    path = candidate(env)
     env.settings['soulseek.transfer_path'] = 'Z:\\Music'
     monkeypatch.setattr('core.imports.paths.docker_resolve_path', lambda raw: str(env.library) if raw == 'Z:\\Music' else raw)
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
     quarantined(env)
     assert entries(env)[0]['library_status'] == 'present'
+
+
+def test_catalogue_metadata_without_a_file_does_not_count(env):
+    candidate(env)
+    with env.db._get_connection() as conn:
+        conn.execute('DELETE FROM lib2_track_files')
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'missing'
+
+
+@pytest.mark.parametrize('state,status', [('deleted', 'imported'), ('quarantined', 'imported'),
+                                         ('missing_confirmed', 'imported'), ('active', 'staged')])
+def test_unpublished_file_states_cannot_be_overridden_by_history(env, state, status):
+    path = candidate(env)
+    with env.db._get_connection() as conn:
+        conn.execute('UPDATE lib2_track_files SET file_state=?, import_status=?', (state,status))
+    env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
+    quarantined(env)
+    assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_destination_stamp_overrides_the_requesting_profile(env):
+    candidate(env, owner=2)
+    quarantined(env, context={'profile_id': 1, 'library_owner_id': 2, 'track_info': {'name': 'Xtal'}})
+    assert entries(env)[0]['library_status'] == 'present'
+    quarantined(env, name='shared', context={'profile_id': 2, 'library_owner_id': None, 'track_info': {'name': 'Xtal'}})
+    by_id = {entry['id']: entry for entry in entries(env)}
+    assert by_id['shared']['library_status'] == 'missing'
+
+
+def test_an_active_alternative_counts_when_the_primary_file_is_missing(env):
+    path = candidate(env)
+    path.unlink()
+    alternative = env.library / 'Xtal.mp3'
+    alternative.write_bytes(b'valid alternative')
+    with env.db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,format) SELECT track_id,?,'mp3' FROM lib2_track_files LIMIT 1", (str(alternative),))
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'present'
+    assert entries(env)[0]['library_match']['filename'] == 'Xtal.mp3'
+
+
+def test_history_without_a_registered_file_is_not_v2_ownership(env):
+    path = env.library / 'Xtal.flac'
+    path.write_bytes(b'unregistered audio')
+    env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'missing'

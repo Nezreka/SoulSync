@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 from core.downloads.atomic_album_publish import contains_staging_segment
 from core.imports.context import get_import_context_album, get_import_track_info
-from core.imports.paths import config_root_path, import_profile_id, library_root_for_profile
+from core.imports.paths import config_root_path, import_owner_id, library_root_for_profile
 from core.imports.quarantine import get_quarantine_entry_context
 from core.library.path_resolver import resolve_library_file_path
-from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+from core.library_scope import reset_library_scope, set_library_scope
 from core.wishlist.library_match import _strict_identity_matches
 from utils.logging_config import get_logger
 
@@ -62,9 +62,9 @@ def _presence(database, entry, context, config, library_paths):
     title, artist = entry.get('expected_track') or '', entry.get('expected_artist') or ''
     if not title or not artist:
         return 'unknown', None
-    profile = import_profile_id(context)
-    scope = library_scope_for_profile(profile)
-    root = library_root_for_profile(profile, announce=False)
+    owner = import_owner_id(context)
+    scope = owner if owner is not None else 'shared'
+    root = library_root_for_profile(owner, announce=False) if owner is not None else None
     shared, private, download_root = library_paths
     roots = [config_root_path(root)] if root else (shared if scope == 'shared' else [])
     foreign = [path for owner, path in private if owner != scope]
@@ -158,7 +158,7 @@ def annotate_quarantine_library(entries, quarantine_dir, config):
     for entry in entries:
         context = get_quarantine_entry_context(quarantine_dir, entry['id'])
         key = (entry.get('expected_track'), entry.get('expected_artist'),
-               import_profile_id(context), str(get_import_context_album(context).get('name') or ''),
+               import_owner_id(context), str(get_import_context_album(context).get('name') or ''),
                tuple(sorted(_identifiers(context).items())))
         if key not in matches:
             try:

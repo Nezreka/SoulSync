@@ -9989,53 +9989,52 @@ class MusicDatabase:
             return []
 
     def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None):
-        """Read scoped candidates for quarantine review; database errors propagate.
+        """Read actual v2 files in the import's library; errors propagate.
 
-        Returns physical-library paths and recent import paths so a successful
-        retry is visible before the media server's next scan. The review helper
-        checks recording identity and file presence, including history scope.
+        Catalogue metadata and history alone are not ownership evidence. The
+        import pipeline links files before the media-server scan, so this also
+        covers a successful retry that has not reached the server yet.
         """
+        from core.library_scope import current_library_scope
+        from core.library2.sql_util import owner_clause
+
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            rows = []
-            columns = {'spotify': 'spotify_track_id', 'isrc': 'isrc'}
+            track_ids = set()
+            columns = {'spotify': 'spotify_id', 'isrc': 'isrc'}
             ids = [(columns[key], value) for key, value in identifiers.items()
                    if key in columns and value]
             if ids:
-                scope, params = self._current_scope_sql('t.owner_profile_id')
-                source = ' AND t.server_source = ?' if server_source else ''
-                cursor.execute(f"""
-                    SELECT t.*, a.name AS artist_name, al.title AS album_title
-                    FROM tracks t JOIN artists a ON a.id = t.artist_id
-                    JOIN albums al ON al.id = t.album_id
-                    WHERE ({' OR '.join('t.' + column + ' = ? COLLATE NOCASE' for column, _ in ids)})
-                      AND {scope} {source} LIMIT 100
-                """, [value for _, value in ids] + params + ([server_source] if server_source else []))
-                rows.extend(dict(row) for row in cursor.fetchall())
+                cursor.execute(f"""SELECT id FROM lib2_tracks WHERE
+                    {' OR '.join(column + ' = ? COLLATE NOCASE' for column, _ in ids)} LIMIT 100""",
+                    [value for _, value in ids])
+                track_ids.update(row[0] for row in cursor.fetchall())
             for artist in artists:
-                rows.extend(dict(row) for row in self._search_track_rows(
-                    cursor, title, artist, 100, server_source))
-                cursor.execute("""
-                    SELECT title, artist_name, album_name AS album_title, file_path,
-                           quality, verification_status, 1 AS _history_only
-                    FROM library_history WHERE event_type IN ('download', 'import')
-                      AND title = ? COLLATE NOCASE AND artist_name = ? COLLATE NOCASE
-                    ORDER BY id DESC LIMIT 100
-                """, (title, artist))
-                rows.extend(dict(row) for row in cursor.fetchall())
-            paths = list({row['file_path'] for row in rows if row.get('file_path')})
-            if paths:
-                cursor.execute(f"""
-                    SELECT file_path, quality, verification_status FROM library_history
-                    WHERE file_path IN ({','.join('?' for _ in paths)}) ORDER BY id DESC
-                """, paths)
-                history = {}
-                for row in cursor.fetchall():
-                    history.setdefault(row['file_path'], dict(row))
-                for row in rows:
-                    if not row.get('_history_only'):
-                        row.update(history.get(row.get('file_path'), {}))
+                track_ids.update(row['id'] for row in self._search_tracks_basic_rows(
+                    cursor, title, artist, 100))
+            if not track_ids:
+                return []
+            owner = owner_clause(current_library_scope(), column='f.owner_profile_id')
+            cursor.execute(f"""
+                SELECT t.*, a.name AS artist_name, al.title AS album_title,
+                       f.path AS file_path, f.format, f.bitrate, f.bit_depth,
+                       f.verification_status, f.file_state
+                FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id
+                JOIN lib2_artists a ON a.id=al.primary_artist_id
+                JOIN lib2_track_files f ON f.track_id=t.id
+                WHERE t.id IN ({','.join('?' for _ in track_ids)})
+                  AND f.file_state='active' AND f.import_status='imported'{owner}
+                ORDER BY f.is_primary DESC, f.id DESC
+            """, list(track_ids))
+            rows = [dict(row) for row in cursor.fetchall()]
+            for row in rows:
+                quality = str(row.get('format') or '').upper()
+                if row.get('bit_depth'):
+                    quality += f" {row['bit_depth']}-bit"
+                elif row.get('bitrate'):
+                    quality += f" {row['bitrate']} kbps"
+                row['quality'] = quality.strip()
             return rows
         finally:
             conn.close()
