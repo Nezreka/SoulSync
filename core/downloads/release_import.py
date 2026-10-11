@@ -233,6 +233,11 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         # profile's own library while the request sits in another one.
         BATCH_OWNER_KEY: import_owner_id(parent),
         "is_album_download": True,
+        "_album_import_extra": {
+            "album": album.get("name") or "",
+            "download_source": str(parent.get("_download_username") or
+                                   (parent.get("original_search_result") or {}).get("username") or ""),
+        },
         "has_clean_metadata": True,
         "has_full_metadata": True,
         "_monitor_album_extra": True,

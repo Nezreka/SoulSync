@@ -212,6 +212,15 @@ export interface AdlReviewSummary {
 
 /** A quarantined file plus its sidecar. */
 export interface AdlQuarantineEntry {
+  library_status?: 'present' | 'missing' | 'unknown';
+  library_match?: {
+    album: string;
+    filename: string;
+    quality: string;
+    verification_status: string;
+  } | null;
+  /** Only tracks added by the album_tracks expansion carry this provenance. */
+  album_extra?: { album: string; download_source: string } | null;
   id: string;
   filename: string;
   original_filename: string;

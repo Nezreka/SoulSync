@@ -562,3 +562,14 @@ def test_download_catalogue_date_refinement_respects_manual_edition_pin(album_en
     _ensure_album(env.db, context, {**album, "release_date": "2008-02-08"}, "deezer")
     with env.db._get_connection() as conn:
         assert conn.execute("SELECT release_date FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == expected
+
+
+def test_only_additional_album_tracks_keep_the_album_import_provenance(album_environment):
+    env = album_environment
+    _request(env)
+    assert _expand(env) == 2
+    contexts = env.contexts
+    assert contexts
+    for ctx in contexts:
+        assert ctx['_album_import_extra'] == {'album': ALBUM, 'download_source': 'usenet'}
+    assert '_album_import_extra' not in env.context

@@ -9984,6 +9984,58 @@ class MusicDatabase:
             logger.error(f"Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
 
+    def get_quarantine_library_candidates(self, title, artists, identifiers, server_source=None):
+        """Read scoped candidates for quarantine review; database errors propagate.
+
+        Returns physical-library paths and recent import paths so a successful
+        retry is visible before the media server's next scan. The review helper
+        checks recording identity and file presence, including history scope.
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            rows = []
+            columns = {'spotify': 'spotify_track_id', 'isrc': 'isrc'}
+            ids = [(columns[key], value) for key, value in identifiers.items()
+                   if key in columns and value]
+            if ids:
+                scope, params = self._current_scope_sql('t.owner_profile_id')
+                source = ' AND t.server_source = ?' if server_source else ''
+                cursor.execute(f"""
+                    SELECT t.*, a.name AS artist_name, al.title AS album_title
+                    FROM tracks t JOIN artists a ON a.id = t.artist_id
+                    JOIN albums al ON al.id = t.album_id
+                    WHERE ({' OR '.join('t.' + column + ' = ? COLLATE NOCASE' for column, _ in ids)})
+                      AND {scope} {source} LIMIT 100
+                """, [value for _, value in ids] + params + ([server_source] if server_source else []))
+                rows.extend(dict(row) for row in cursor.fetchall())
+            for artist in artists:
+                rows.extend(dict(row) for row in self._search_track_rows(
+                    cursor, title, artist, 100, server_source))
+                cursor.execute("""
+                    SELECT title, artist_name, album_name AS album_title, file_path,
+                           quality, verification_status, 1 AS _history_only
+                    FROM library_history WHERE event_type IN ('download', 'import')
+                      AND title = ? COLLATE NOCASE AND artist_name = ? COLLATE NOCASE
+                    ORDER BY id DESC LIMIT 100
+                """, (title, artist))
+                rows.extend(dict(row) for row in cursor.fetchall())
+            paths = list({row['file_path'] for row in rows if row.get('file_path')})
+            if paths:
+                cursor.execute(f"""
+                    SELECT file_path, quality, verification_status FROM library_history
+                    WHERE file_path IN ({','.join('?' for _ in paths)}) ORDER BY id DESC
+                """, paths)
+                history = {}
+                for row in cursor.fetchall():
+                    history.setdefault(row['file_path'], dict(row))
+                for row in rows:
+                    if not row.get('_history_only'):
+                        row.update(history.get(row.get('file_path'), {}))
+            return rows
+        finally:
+            conn.close()
+
     def api_search_tracks(self, title: str = "", artist: str = "", limit: int = 50,
                           server_source: Optional[str] = None) -> List[Dict[str, Any]]:
         """Search tracks and return full dict rows (all track columns plus artist_name,

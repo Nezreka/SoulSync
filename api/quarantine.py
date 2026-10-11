@@ -101,6 +101,8 @@ def list_quarantine():
     try:
         from core.imports.quarantine import list_quarantine_entries
         entries = list_quarantine_entries(_get_quarantine_dir())
+        from core.imports.quarantine_library import annotate_quarantine_library
+        annotate_quarantine_library(entries, _get_quarantine_dir(), config_manager)
         return jsonify({"success": True, "entries": entries})
     except Exception as e:
         logger.error(f"[Quarantine] Error listing entries: {e}")
