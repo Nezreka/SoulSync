@@ -45,7 +45,7 @@ async function confirmed(options: {
   if (typeof window.showConfirmDialog === 'function') {
     return Boolean(await window.showConfirmDialog({ ...options, destructive: true }));
   }
-  return true;
+  return window.confirm(options.message);
 }
 
 export interface VdlReviewController {

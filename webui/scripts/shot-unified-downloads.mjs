@@ -11,7 +11,7 @@
  * Run: node scripts/shot-unified-downloads.mjs
  * Needs: vitest run src/test/vdl-fixtures.test.tsx  (regenerates fixtures)
  */
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -42,8 +42,13 @@ const SHOTS = [
   ['video-expanded', 'video', 'unified-downloads-video-expanded.png'],
 ];
 
+/* Prefer an explicit override, then the lab Chromium, then Playwright's own
+ * bundled Chromium — so the script runs on ordinary dev machines too. */
+const executablePath =
+  process.env.CHROME_BIN ||
+  (existsSync('/opt/meta-chromium/chrome') ? '/opt/meta-chromium/chrome' : undefined);
 const browser = await chromium.launch({
-  executablePath: '/opt/meta-chromium/chrome',
+  ...(executablePath ? { executablePath } : {}),
   args: ['--no-sandbox', '--disable-dev-shm-usage'],
 });
 try {

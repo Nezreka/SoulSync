@@ -471,16 +471,35 @@ function VdlDrawer({
   const ym = (meta || {}) as VdlYtMeta;
   const active = vdlIsActive(d.status);
 
+  /* navigator.clipboard is unavailable on plain-HTTP installs (self-hosted
+   * over a LAN IP) — fall back to the legacy execCommand path before giving
+   * up, so copy keeps working there instead of just toasting. */
+  const legacyCopy = (text: string) => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      toast(ok ? 'Path copied' : 'Copy not supported here', ok ? 'success' : 'info');
+    } catch {
+      toast('Copy not supported here', 'info');
+    }
+  };
+
   const copyPath = () => {
     const path = d.dest_path;
     if (!path) return;
     if (navigator.clipboard) {
       void navigator.clipboard.writeText(path).then(
         () => toast('Path copied', 'success'),
-        () => {},
+        () => legacyCopy(path),
       );
     } else {
-      toast('Copy not supported here', 'info');
+      legacyCopy(path);
     }
   };
 

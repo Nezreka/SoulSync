@@ -226,18 +226,20 @@ export function VdlHistoryModal({
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /* concurrency guard: only one in-flight request — a slow earlier response
-   * must never resolve after a later one and clobber items/counts with stale
-   * data (the old modal began its loader with `if (state.loading) return;`). */
-  const loadingRef = useRef(false);
+  /* request sequencing: a newer tab/search/page request supersedes an older
+   * in-flight one. The older response is discarded when it lands instead of
+   * clobbering items/counts with stale data — and, unlike a boolean
+   * in-flight guard, newer requests are never silently dropped while the
+   * user is already looking at the new tab. */
+  const reqSeqRef = useRef(0);
 
   const load = useCallback(
     async (nextPage: number, nextSearch: string, nextTab: VdlHistoryTab, append: boolean) => {
-      if (loadingRef.current) return;
-      loadingRef.current = true;
+      const seq = ++reqSeqRef.current;
       setLoading(true);
       try {
         const data = await fetchVideoHistory(nextTab, nextSearch, nextPage);
+        if (seq !== reqSeqRef.current) return; // superseded — discard stale response
         setCounts({
           movie: data.counts.movie ?? 0,
           show: data.counts.show ?? 0,
@@ -248,8 +250,7 @@ export function VdlHistoryModal({
         setTotalPages(data.totalPages);
         setItems((prev) => (append ? [...prev, ...data.items] : data.items));
       } finally {
-        loadingRef.current = false;
-        setLoading(false);
+        if (seq === reqSeqRef.current) setLoading(false);
       }
     },
     [onCountChange],

@@ -1,8 +1,10 @@
 /**
- * Regression: the history modal's loader has a concurrency guard (parity
- * with the old modal's `if (state.loading) return;`). While one request is
- * in flight, later loads are dropped — so a slow earlier response can never
- * resolve after a newer one and clobber the list with stale data.
+ * Regression: the history modal's loader sequences concurrent requests. A
+ * newer tab/search/page request supersedes an older in-flight one — the
+ * older response is discarded when it lands, so it can never clobber the
+ * list with stale data, and the newer request is never silently dropped
+ * (the previous boolean in-flight guard dropped it, leaving the UI on the
+ * new tab while showing the old tab's data).
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -46,26 +48,33 @@ describe('history load concurrency', () => {
     fetchVideoHistory.mockReset();
   });
 
-  it('drops a second load while the first is in flight, so stale responses cannot clobber the list', async () => {
+  it('a stale in-flight response is discarded when a newer tab request wins the race', async () => {
     const allPage = page([{ id: 'a1', kind: 'movie', title: 'All Tab Result' }]);
-    fetchVideoHistory.mockImplementation(() => Promise.resolve(allPage));
+    const moviesPage = page([{ id: 'm1', kind: 'movie', title: 'Movies Tab Result' }]);
     const first = deferred<VdlHistoryPage>();
     fetchVideoHistory.mockImplementationOnce(() => first.promise);
+    // stray debounce refires (and the tab-switch load below) resolve fast
+    fetchVideoHistory.mockImplementation(() => Promise.resolve(moviesPage));
     render(<VdlHistoryModal open onClose={() => {}} onCountChange={() => {}} />);
 
-    // the open effect fires load #1
+    // the open effect fires load #1 (slow — still in flight)
     await waitFor(() => expect(fetchVideoHistory).toHaveBeenCalledTimes(1));
 
-    // a tab switch while load #1 is still in flight must not start load #2
+    // a tab switch while load #1 is in flight fires load #2 — newer
+    // requests are never silently dropped
     fireEvent.click(screen.getByRole('tab', { name: /Movies/ }));
-    expect(fetchVideoHistory).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(fetchVideoHistory).toHaveBeenCalledTimes(2));
 
-    // the slow first request resolves — the list shows its data, and no
-    // second request was ever in flight to be clobbered by it
+    // load #2 resolves first: the list shows the Movies tab data
+    expect(await screen.findByText('Movies Tab Result')).not.toBeNull();
+
+    // the slow stale load #1 resolves last — its data must be discarded,
+    // never clobbering the list the user is looking at
     await act(async () => {
       first.resolve(allPage);
     });
-    expect(await screen.findByText('All Tab Result')).not.toBeNull();
+    expect(screen.queryByText('All Tab Result')).toBeNull();
+    expect(screen.getByText('Movies Tab Result')).not.toBeNull();
   });
 
   it('loads again once the in-flight request settles', async () => {
