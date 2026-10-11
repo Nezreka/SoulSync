@@ -1614,7 +1614,7 @@ def _register_automation_handlers():
         process_watchlist_scan_automatically=_process_watchlist_scan_automatically,
         is_wishlist_actually_processing=is_wishlist_actually_processing,
         is_watchlist_actually_scanning=is_watchlist_actually_scanning,
-        get_watchlist_scan_state=lambda: watchlist_scan_state,
+        get_watchlist_scan_state=lambda: _watchlist_scan_state.get_state(),
         run_playlist_discovery_worker=_run_playlist_discovery_worker,
         run_sync_task=_run_sync_task,
         run_playlist_organize_download=_run_playlist_organize_download,
@@ -20559,12 +20559,10 @@ from api.user_profiles import _get_lb_credentials_for_profile  # one outside cal
 # the chat/labels/beatport/repair blueprints below) ---
 # --- Watchlist Auto-Scanning System ---
 
-watchlist_scan_state = {
-    'status': 'idle',
-    'results': [],
-    'summary': {},
-    'error': None
-}
+# Shared scan state lives in core/watchlist/scan_state.py — single source of
+# truth for both manual scans (api/artist_watchlist.py) and auto-scans here.
+# The socket emit loop and the API endpoint read the same dict.
+from core.watchlist import scan_state as _watchlist_scan_state
 
 # Watchlist auto-scan logic lives in core/watchlist/auto_scan.py.
 from core.watchlist import auto_scan as _watchlist_auto_scan
@@ -20599,11 +20597,13 @@ def _build_watchlist_auto_scan_deps():
         watchlist_auto_scanning_heartbeat = value
 
     def _get_state():
-        return watchlist_scan_state
+        return _watchlist_scan_state.get_state()
 
     def _set_state(value):
-        global watchlist_scan_state
-        watchlist_scan_state = value
+        # Mutate in place to preserve the shared object identity.
+        state = _watchlist_scan_state.get_state()
+        state.clear()
+        state.update(value)
 
     return _watchlist_auto_scan.WatchlistAutoScanDeps(
         app=app,
@@ -24197,7 +24197,7 @@ def _emit_scan_status_loop():
             continue
         # Watchlist scan
         try:
-            state = watchlist_scan_state.copy()
+            state = _watchlist_scan_state.get_state().copy()
             if state.get('started_at'):
                 state['started_at'] = state['started_at'].isoformat()
             if state.get('completed_at'):

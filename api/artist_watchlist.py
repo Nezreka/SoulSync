@@ -32,6 +32,7 @@ from core.edition_grouping import (
 )
 from core.artists.map import _artmap_cache_invalidate
 from core.metadata.registry import get_spotify_client
+from core.watchlist import scan_state as _scan_state
 from utils.logging_config import get_logger
 
 logger = get_logger("api.artist_watchlist")
@@ -1046,7 +1047,7 @@ def start_watchlist_scan():
         def run_scan():
             _ew_state = {}
             try:
-                global watchlist_scan_state, watchlist_auto_scanning, watchlist_auto_scanning_timestamp
+                global watchlist_auto_scanning, watchlist_auto_scanning_timestamp
                 from core.watchlist_scanner import WatchlistScanner
                 from database.music_database import get_database
 
@@ -1062,8 +1063,8 @@ def start_watchlist_scan():
                 watchlist_artists = database.get_watchlist_artists(profile_id=scan_profile_id)
 
                 if not watchlist_artists:
-                    watchlist_scan_state['status'] = 'completed'
-                    watchlist_scan_state['summary'] = {
+                    _scan_state.get_state()['status'] = 'completed'
+                    _scan_state.get_state()['summary'] = {
                         'total_artists': 0,
                         'successful_scans': 0,
                         'new_tracks_found': 0,
@@ -1103,7 +1104,7 @@ def start_watchlist_scan():
                     logger.error(f"Image backfill error: {img_err}")
 
                 # Initialize detailed progress tracking
-                watchlist_scan_state.update({
+                _scan_state.get_state().update({
                     'total_artists': len(watchlist_artists),
                     'current_artist_index': 0,
                     'current_artist_name': '',
@@ -1131,8 +1132,8 @@ def start_watchlist_scan():
                 scan_results = scanner.scan_watchlist_profile(
                     scan_profile_id,
                     watchlist_artists=watchlist_artists,
-                    scan_state=watchlist_scan_state,
-                    cancel_check=lambda: watchlist_scan_state.get('cancel_requested', False),
+                    scan_state=_scan_state.get_state(),
+                    cancel_check=lambda: _scan_state.get_state().get('cancel_requested', False),
                 )
 
                 # --- Label watchlist phase (same thread, same live state) ---
@@ -1140,34 +1141,34 @@ def start_watchlist_scan():
                 # (also used by the scheduled automation), so one "Scan Watchlist"
                 # covers artists THEN labels with the identical live display.
                 _lbl_tracks = 0
-                if not watchlist_scan_state.get('cancel_requested', False):
+                if not _scan_state.get_state().get('cancel_requested', False):
                     try:
                         from core.automation.handlers.scan_watchlist_labels import run_label_scan_phase
                         _lbl_tracks = run_label_scan_phase(
-                            watchlist_scan_state, database=database,
+                            _scan_state.get_state(), database=database,
                             get_deezer=_get_deezer_client, profile_id=scan_profile_id)
                     except Exception as _lbl_err:
                         logger.error("Label watchlist scan phase failed: %s", _lbl_err, exc_info=True)
 
                 # Store final results (skip if cancelled — already set by cancel handler)
-                was_cancelled = watchlist_scan_state.get('cancel_requested', False)
+                was_cancelled = _scan_state.get_state().get('cancel_requested', False)
                 if not was_cancelled:
                     _artmap_cache_invalidate(scan_profile_id)
                     successful_scans = [r for r in scan_results if r.success]
                     total_new_tracks = sum(r.new_tracks_found for r in successful_scans)
                     total_added_to_wishlist = sum(r.tracks_added_to_wishlist for r in successful_scans)
 
-                    watchlist_scan_state['status'] = 'completed'
-                    watchlist_scan_state['results'] = scan_results
-                    watchlist_scan_state['completed_at'] = datetime.now()
-                    watchlist_scan_state['current_phase'] = 'completed'
+                    _scan_state.get_state()['status'] = 'completed'
+                    _scan_state.get_state()['results'] = scan_results
+                    _scan_state.get_state()['completed_at'] = datetime.now()
+                    _scan_state.get_state()['current_phase'] = 'completed'
 
                     try:
                         _labels_scanned = len(database.get_watchlist_labels() or [])
                     except Exception:
                         # a label COUNT must never abort an otherwise successful scan
                         _labels_scanned = 0
-                    watchlist_scan_state['summary'] = {
+                    _scan_state.get_state()['summary'] = {
                         'total_artists': len(scan_results),
                         'successful_scans': len(successful_scans),
                         'new_tracks_found': total_new_tracks + _lbl_tracks,
@@ -1187,7 +1188,7 @@ def start_watchlist_scan():
                 try:
                     from core.watchlist.scan_history import persist_scan_run
                     persist_scan_run(
-                        get_database(), watchlist_scan_state,
+                        get_database(), _scan_state.get_state(),
                         profile_id=scan_profile_id, was_cancelled=was_cancelled,
                     )
                 except Exception as _hist_err:
@@ -1197,7 +1198,7 @@ def start_watchlist_scan():
                 if not was_cancelled:
                     # Populate discovery pool from similar artists
                     logger.info("Starting discovery pool population...")
-                    watchlist_scan_state['current_phase'] = 'populating_discovery_pool'
+                    _scan_state.get_state()['current_phase'] = 'populating_discovery_pool'
                     try:
                         scanner.populate_discovery_pool(profile_id=scan_profile_id)
                         logger.info("Discovery pool population complete")
@@ -1208,7 +1209,7 @@ def start_watchlist_scan():
 
                     # Update ListenBrainz playlists cache
                     logger.info("Starting ListenBrainz playlists update...")
-                    watchlist_scan_state['current_phase'] = 'updating_listenbrainz'
+                    _scan_state.get_state()['current_phase'] = 'updating_listenbrainz'
                     try:
                         from core.listenbrainz_manager import ListenBrainzManager
                         db = get_database()
@@ -1236,7 +1237,7 @@ def start_watchlist_scan():
 
                     # Update current seasonal playlist (weekly refresh)
                     logger.info("Starting seasonal content update...")
-                    watchlist_scan_state['current_phase'] = 'updating_seasonal'
+                    _scan_state.get_state()['current_phase'] = 'updating_seasonal'
                     try:
                         from core.seasonal_discovery import get_seasonal_discovery_service
                         seasonal_service = get_seasonal_discovery_service(_spotify_client(), database)
@@ -1260,7 +1261,7 @@ def start_watchlist_scan():
 
                     # Generate Last.fm radio playlists (weekly refresh)
                     logger.info("Starting Last.fm radio generation...")
-                    watchlist_scan_state['current_phase'] = 'generating_lastfm_radio'
+                    _scan_state.get_state()['current_phase'] = 'generating_lastfm_radio'
                     try:
                         scanner._generate_lastfm_radio_playlists()
                         logger.info("Last.fm radio generation complete")
@@ -1269,7 +1270,7 @@ def start_watchlist_scan():
 
                     # Sync Spotify library cache
                     logger.info("Syncing Spotify library cache...")
-                    watchlist_scan_state['current_phase'] = 'syncing_spotify_library'
+                    _scan_state.get_state()['current_phase'] = 'syncing_spotify_library'
                     try:
                         scanner.sync_spotify_library_cache(profile_id=scan_profile_id)
                         logger.info("Spotify library cache sync complete")
@@ -1278,8 +1279,8 @@ def start_watchlist_scan():
 
             except Exception as e:
                 logger.error(f"Error during watchlist scan: {e}")
-                watchlist_scan_state['status'] = 'error'
-                watchlist_scan_state['error'] = str(e)
+                _scan_state.get_state()['status'] = 'error'
+                _scan_state.get_state()['error'] = str(e)
 
             finally:
                 # Resume enrichment workers if we paused them
@@ -1297,16 +1298,8 @@ def start_watchlist_scan():
                     watchlist_auto_scanning_timestamp = 0
                     logger.info("[Manual Watchlist Scan] Flag reset - scan complete")
         
-        # Initialize scan state
-        global watchlist_scan_state
-        watchlist_scan_state = {
-            'status': 'scanning',
-            'started_at': datetime.now(),
-            'results': [],
-            'summary': {},
-            'error': None,
-            'cancel_requested': False
-        }
+        # Initialize scan state (shared with web_server socket loop)
+        _scan_state.reset_state()
         
         # Start scan in background
         thread = threading.Thread(target=run_scan)
@@ -1323,16 +1316,8 @@ def start_watchlist_scan():
 def get_watchlist_scan_status():
     """Get the current status of watchlist scanning"""
     try:
-        global watchlist_scan_state
-        if 'watchlist_scan_state' not in globals():
-            return jsonify({
-                "success": True,
-                "status": "idle",
-                "summary": {}
-            })
-
         # Convert datetime objects to ISO format for JSON serialization
-        state = watchlist_scan_state.copy()
+        state = _scan_state.get_state().copy()
         if 'started_at' in state and state['started_at']:
             state['started_at'] = state['started_at'].isoformat()
         if 'completed_at' in state and state['completed_at']:
@@ -1376,11 +1361,10 @@ def get_watchlist_scan_history_tracks(run_id):
 def cancel_watchlist_scan():
     """Cancel a running watchlist scan"""
     try:
-        global watchlist_scan_state
-        if watchlist_scan_state.get('status') != 'scanning':
+        if _scan_state.get_state().get('status') != 'scanning':
             return jsonify({"success": False, "error": "No scan is currently running"}), 400
 
-        watchlist_scan_state['cancel_requested'] = True
+        _scan_state.get_state()['cancel_requested'] = True
         logger.info("[Watchlist Scan] Cancel requested by user")
         return jsonify({"success": True, "message": "Cancel request sent"})
 
