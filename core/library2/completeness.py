@@ -516,7 +516,7 @@ def _persist_tracklist_tracks(
                 inferred_disc += 1
             disc = inferred_disc
             previous_number = number
-        duration = entry.get("duration_ms")
+        duration = entry.get("duration_ms") or None  # 0 = unknown
         incoming_ids = parse_external_ids(entry.get("external_ids"))
         if entry.get("spotify_id"):
             incoming_ids.setdefault("spotify", str(entry["spotify_id"]))

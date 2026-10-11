@@ -330,3 +330,21 @@ def test_mapping_delete_trigger_removes_only_deleted_entity(cur):
         "SELECT COUNT(*) FROM lib2_media_server_mappings "
         "WHERE entity_type='artist' AND entity_id=?", (artist,),
     ).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("allow_create", [False, True])
+def test_server_length_fills_a_missing_one_and_never_replaces_the_catalogues(cur, allow_create):
+    # the studio cut sat at the slowed track's path; Navidrome's 136 s became
+    # the catalogue length every later download was checked against
+    artist, album, track, _file = _imported(cur)
+
+    def sync(duration):
+        upsert_track(cur, server_source="navidrome", server_id="t1", album_id=album,
+                     artist_id=artist, title="Time Is Running Out", track_number=4,
+                     disc_number=1, duration=duration, file_path="/music/song.flac",
+                     allow_create=allow_create)
+        return cur.execute("SELECT duration FROM lib2_tracks WHERE id=?", (track,)).fetchone()[0]
+
+    assert sync(0) is None
+    assert sync(237000) == 237000
+    assert sync(136000) == 237000

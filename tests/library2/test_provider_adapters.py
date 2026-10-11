@@ -643,3 +643,20 @@ def test_genius_descriptive_refresh_uses_existing_lyrics_scraper(monkeypatch):
     result = fetch_descriptive_metadata('track', {'genius': '123'}, clients={'genius': client})
     assert result.lyrics == 'Complete lyrics'
     assert calls == ['https://genius.com/test-song']
+
+
+def test_deezer_zero_bpm_and_length_are_unknown_not_values():
+    # Deezer sends bpm 0 for a track it has no tempo for; stored, the retag
+    # wrote BPM 0 into the file
+    from types import SimpleNamespace
+    track = {'id': 'dz-exact', 'isrc': 'QM4TW2234953', 'bpm': 0, 'duration': 0}
+    result = fetch_descriptive_metadata(
+        'track', {'deezer': 'dz-exact'},
+        clients={'deezer': SimpleNamespace(get_track_details=lambda identifier: track)})
+    assert result.bpm is None
+    assert result.duration_ms is None
+    track.update(bpm=128, duration=136)
+    result = fetch_descriptive_metadata(
+        'track', {'deezer': 'dz-exact'},
+        clients={'deezer': SimpleNamespace(get_track_details=lambda identifier: track)})
+    assert (result.bpm, result.duration_ms) == (128.0, 136000)

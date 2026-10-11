@@ -1422,6 +1422,18 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             logger.error("primary-file backfill failed (will retry next start): %s", e)
 
     if not _stopped():
+        # A provider's 0 ("no BPM", "no length") was stored as a value: the
+        # retag wrote BPM 0 into files, and a length of 0 switched off the
+        # import's duration check while COALESCE kept it over real lengths.
+        try:
+            stats["zero_track_metadata"] = cursor.execute(
+                "UPDATE lib2_tracks SET bpm=NULLIF(bpm, 0), duration=NULLIF(duration, 0)"
+                " WHERE bpm=0 OR duration=0").rowcount
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("zero track-metadata cleanup failed (will retry next start): %s", e)
+
+    if not _stopped():
         try:
             from core.library2.wanted import ensure_wanted_projection
             stats["wanted"] = ensure_wanted_projection(

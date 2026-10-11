@@ -232,10 +232,7 @@ class TracklistTrack:
         number = _optional_nonnegative_int(
             item.get("track_number") or item.get("track_position") or item.get("position"))
         disc = _optional_nonnegative_int(item.get("disc_number")) or 1
-        duration = _optional_nonnegative_int(item.get("duration_ms"))
-        if duration is None and provider == "deezer":
-            seconds = _optional_nonnegative_int(item.get("duration"))
-            duration = seconds * 1000 if seconds is not None else None
+        duration = _provider_duration_ms(item, provider, "duration_ms")
         provider_id = _optional_text(item.get("id"))
         external_ids = item.get("external_ids")
         if not isinstance(external_ids, Mapping):
@@ -531,6 +528,16 @@ def _mapping_payload(payload: Any) -> Optional[Dict[str, Any]]:
     return normalized
 
 
+def _provider_duration_ms(data: Mapping[str, Any], provider: str, *keys: str) -> Optional[int]:
+    """A provider's track length in ms, or None. A 0 is "unknown", never a
+    length: stored, it switched off the import's duration check."""
+    duration = _optional_nonnegative_int(_first(data, *keys))
+    if not duration and provider == "deezer":
+        seconds = _optional_nonnegative_int(data.get("duration"))
+        duration = seconds * 1000 if seconds else None
+    return duration or None
+
+
 def _first(payload: Mapping[str, Any], *keys: str) -> Any:
     for key in keys:
         if payload.get(key) not in (None, ""):
@@ -597,13 +604,15 @@ def _optional_bool(value: Any) -> Optional[bool]:
     return bool(value)
 
 
-def _optional_float(value: Any) -> Optional[float]:
+def _optional_positive_float(value: Any) -> Optional[float]:
+    """0 is how Deezer says "no BPM"; stored, it landed in the file as BPM 0."""
     if value in (None, ""):
         return None
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return None
+    return parsed if parsed > 0 else None
 
 
 def _descriptive_getter(client: Any, entity_type: str) -> Optional[Any]:
@@ -671,12 +680,8 @@ def fetch_descriptive_metadata(
             ))
             if year is None and release_date:
                 year = _optional_nonnegative_int(release_date[:4])
-            duration = _optional_nonnegative_int(_first(
-                payload, "duration_ms", "trackTimeMillis", "durationMillis",
-            ))
-            if duration is None and provider == "deezer":
-                seconds = _optional_nonnegative_int(payload.get("duration"))
-                duration = seconds * 1000 if seconds is not None else None
+            duration = _provider_duration_ms(
+                payload, provider, "duration_ms", "trackTimeMillis", "durationMillis")
             result = DescriptiveMetadataProviderResult(
                 provider=provider,
                 provider_entity_id=provider_id,
@@ -703,7 +708,7 @@ def fetch_descriptive_metadata(
                 )),
                 duration_ms=duration,
                 isrc=_optional_text(_first(payload, "isrc", "ISRC")),
-                bpm=_optional_float(_first(payload, "bpm", "tempo")),
+                bpm=_optional_positive_float(_first(payload, "bpm", "tempo")),
                 lyrics=_optional_text(_first(
                     payload, "genius_lyrics", "lyrics", "strTrackLyrics",
                 )),
@@ -766,12 +771,7 @@ def fetch_track_metadata(
                 details = getter(provider_id)
             if not isinstance(details, Mapping):
                 continue
-            duration = _optional_nonnegative_int(
-                details.get("duration_ms") or details.get("trackTimeMillis")
-            )
-            if duration is None and provider == "deezer":
-                seconds = _optional_nonnegative_int(details.get("duration"))
-                duration = seconds * 1000 if seconds is not None else None
+            duration = _provider_duration_ms(details, provider, "duration_ms", "trackTimeMillis")
             if duration is None:
                 continue
             return TrackMetadataProviderResult(

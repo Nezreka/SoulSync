@@ -1990,7 +1990,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             title = row["title"]
             tfields = (
                 album_id, title, _pick(row, "track_number"),
-                _pick(row, "disc_number") or 1, _pick(row, "duration"),
+                _pick(row, "disc_number") or 1, _pick(row, "duration") or None,
                 _pick(row, "isrc"), _pick(row, "musicbrainz_recording_id"),
                 _legacy_spotify_id(row, "spotify_track_id"),
                 _pick(row, "bpm"), _pick(row, "explicit"),
@@ -2817,7 +2817,8 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         assigned_profiles[entity_key] = (quality_profile_id, row["id"])
         track_number = payload.get("track_number")
         disc_number = payload.get("disc_number") or 1
-        duration = payload.get("duration_ms")
+        # 0 is "unknown" here; stored, COALESCE kept it over every real length
+        duration = payload.get("duration_ms") or None
         track_spotify, track_external = _provider_id_fields(provider, track_id)
         if existing_track_id is not None and not shared_intent:
             lib2_track_id = existing_track_id

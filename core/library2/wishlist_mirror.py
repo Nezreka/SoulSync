@@ -207,6 +207,42 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     }
 
 
+def fill_catalogue_durations(db, tracks: List[Dict[str, Any]]) -> None:
+    """Give queued download tracks without a length the catalogue's.
+
+    A queue row can lose it (a failed attempt re-adds the row from the
+    download's own track data). With no length the import skips its duration
+    check, and the studio cut was imported for the slowed edit.
+    """
+    import json
+    missing = [t for t in tracks if not t.get("duration_ms")]
+    if not missing:
+        return
+    def lib2_id(track):
+        info = track.get("source_info")
+        try:
+            info = json.loads(info) if isinstance(info, str) else info
+            return int((info or {}).get("lib2_track_id") or 0) or None
+        except (ValueError, TypeError, AttributeError):
+            return None
+    keys = [(t, lib2_id(t), str(t.get("id") or "").split("::", 1)[0]) for t in missing]
+    ids = [k[1] for k in keys if k[1]] or [0]
+    pids = [k[2] for k in keys if k[2]] or [""]
+    with closing(db._get_connection()) as conn:
+        rows = conn.execute(
+            f"""SELECT id, spotify_id, duration FROM lib2_tracks WHERE duration > 0
+                AND (id IN ({",".join("?" * len(ids))}) OR spotify_id IN ({",".join("?" * len(pids))}))""",
+            (*ids, *pids)).fetchall()
+    by_id = {r[0]: r[2] for r in rows}
+    by_pid = {r[1]: r[2] for r in rows if r[1]}
+    for track, tid, pid in keys:
+        duration = by_id.get(tid) or by_pid.get(pid)
+        if duration:
+            track["duration_ms"] = duration
+            if isinstance(track.get("track_data"), dict):
+                track["track_data"]["duration_ms"] = duration
+
+
 def track_direct_download_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build one transient pipeline input for a scoped track search.
 

@@ -349,6 +349,11 @@ class WishlistService:
                 formatted_track.setdefault("profile_id", profile_id)
                 formatted_tracks.append(formatted_track)
 
+            try:
+                from core.library2.wishlist_mirror import fill_catalogue_durations
+                fill_catalogue_durations(self.database, formatted_tracks)
+            except Exception as e:  # noqa: BLE001 - a length is a check, not the queue
+                logger.warning("Wishlist: catalogue lengths not filled in: %s", e)
             return formatted_tracks
 
         except Exception as e:

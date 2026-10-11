@@ -271,6 +271,7 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
                  file_source: Optional[str] = None,
                  server_path: Optional[str] = None) -> Optional[int]:
     """The catalogue id for a track the server reported, plus its file row."""
+    duration = duration or None  # a server's 0 is no length
     mapped_id = resolve_mapping(cursor, "track", server_source, server_id)
     row = ((mapped_id,) if mapped_id is not None else cursor.execute(
         "SELECT id FROM lib2_tracks WHERE server_source=? AND server_id=? AND (? OR"
@@ -311,10 +312,13 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
         ).lastrowid)
     else:
         track_id = int(row[0])
+        # The file's length only fills a missing one. Written over the
+        # catalogue's, a wrong file (the studio cut imported for the slowed
+        # track) became the length every later download was checked against.
         if not allow_create:
             cursor.execute(
                 "UPDATE lib2_tracks SET track_number=COALESCE(?,track_number),"
-                "disc_number=COALESCE(?,disc_number),duration=COALESCE(?,duration),"
+                "disc_number=COALESCE(?,disc_number),duration=COALESCE(duration,?),"
                 "track_artist=COALESCE(?,track_artist),"
                 "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                 (track_number, disc_number, duration, track_artist,
@@ -337,7 +341,7 @@ def upsert_track(cursor, *, server_source: str, server_id: str, album_id: int,
             "   SET album_id=?, title=?,"
             "       track_number=COALESCE(?, track_number),"
             "       disc_number=COALESCE(?, disc_number),"
-            "       duration=COALESCE(?, duration),"
+            "       duration=COALESCE(duration, ?),"
             "       track_artist=COALESCE(?, track_artist),"
             "       musicbrainz_id=COALESCE(?, musicbrainz_id),"
             "       server_source=?, server_id=?, updated_at=CURRENT_TIMESTAMP"
