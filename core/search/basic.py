@@ -10,10 +10,14 @@ module.
 
 from __future__ import annotations
 
+import contextvars
 import logging
-from typing import Any, Callable, Mapping, Optional
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
+# Queries of one entity search asked of a source at the same time.
+_PARALLEL_QUERIES = 4
 _CANONICAL_SOURCES = frozenset({
     'soulseek', 'torrent', 'usenet', 'youtube', 'hifi', 'qobuz', 'tidal',
     'deezer_dl', 'lidarr', 'soundcloud', 'amazon',
@@ -77,6 +81,33 @@ def _quality_score(result) -> float:
         return 0.0
 
 
+def _search_all(search: Callable[[str], tuple], queries: Sequence[str]) -> tuple:
+    """Every query at once; one row per hit. A failing query costs only its
+    own hits -- unless every query failed."""
+    def attempt(q):
+        try:
+            return search(q), None
+        except Exception as exc:  # noqa: BLE001 - one query must not sink the others
+            logger.warning("basic search: query %r failed: %s", q, exc)
+            return ([], []), exc
+
+    # each query thread keeps the request's context (candidate binding, ...)
+    contexts = [contextvars.copy_context() for _ in queries]
+    with ThreadPoolExecutor(max_workers=min(_PARALLEL_QUERIES, len(queries))) as pool:
+        answers = list(pool.map(lambda ctx, q: ctx.run(attempt, q), contexts, queries))
+    errors = [error for _, error in answers if error is not None]
+    if len(errors) == len(answers):
+        raise errors[0]
+    tracks, albums = {}, {}
+    for (found_tracks, found_albums), _error in answers:
+        for row in found_tracks or []:
+            tracks.setdefault((row.username, row.filename), row)
+        for row in found_albums or []:
+            albums.setdefault((row.username, row.album_path), row)
+    from core.download_plugins.release_identity import dedupe_release_candidates
+    return dedupe_release_candidates(list(tracks.values())), list(albums.values())
+
+
 def run_basic_search(
     query: str,
     download_orchestrator,
@@ -85,6 +116,8 @@ def run_basic_search(
     source: Optional[str] = None,
     entity_context: Optional[Mapping[str, Any]] = None,
     judge: Optional[Callable[[list, list, str], dict]] = None,
+    more_queries: Sequence[str] = (),
+    track_hint: Optional[Mapping[str, Any]] = None,
 ) -> list[dict]:
     """Search ``source`` (or the active/first hybrid source) for ``query``.
 
@@ -103,6 +136,11 @@ def run_basic_search(
         ``(tracks, albums, query) -> {id(result): decision}`` -- the download
         pipeline's verdict per hit, stamped on its row as ``decision`` before
         any display decoration rewrites the row's artist.
+    more_queries / track_hint:
+        An entity search asks the same queries an automatic download walks,
+        side by side, under the song's hint (release sources add its
+        artist + album query, core/downloads/track_hint.py); one hit found
+        by several queries -- or by several indexers -- shows once.
     """
     # A pasted SoundCloud link only resolves on the SoundCloud source (its
     # share URL carries the access token; no other source can find an
@@ -117,6 +155,7 @@ def run_basic_search(
     except Exception as exc:   # noqa: BLE001 - routing sugar must never kill a search
         logger.debug("soundcloud URL routing skipped: %s", exc)
 
+    target = download_orchestrator
     if source and download_orchestrator:
         # Target a specific source: resolve the client and call search()
         # directly instead of going through the orchestrator chain.
@@ -135,12 +174,26 @@ def run_basic_search(
                                  "Settings to resolve a SoundCloud link.")
             logger.warning("basic search: no client for source %r — falling back to orchestrator", source)
             source = None
-            tracks, albums = run_async(download_orchestrator.search(query))
         else:
             logger.info("basic search: targeting %r for %r", source, query)
-            tracks, albums = run_async(client.search(query))
+            target = client
+
+    def search(q):
+        if track_hint is None:
+            return run_async(target.search(q))
+        from core.downloads.track_hint import track_hint_context
+
+        async def hinted():
+            # set inside the coroutine: the shared loop runs it in its own context
+            with track_hint_context(dict(track_hint)):
+                return await target.search(q)
+        return run_async(hinted())
+
+    queries = list(dict.fromkeys([query, *more_queries]))
+    if len(queries) == 1:
+        tracks, albums = search(query)
     else:
-        tracks, albums = run_async(download_orchestrator.search(query))
+        tracks, albums = _search_all(search, queries)
 
     verdicts = {}
     if judge is not None:

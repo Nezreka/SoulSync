@@ -6324,11 +6324,10 @@ def search_music():
     _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
     if _lib2_state == 'invalid':
         return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
-    # A Library-v2 Interactive Search sends no text: it looks for the track
-    # and for its release, and every hit carries the pipeline's verdict.
+    # A Library-v2 Interactive Search sends no text: it asks the sources what
+    # an automatic download would ask, and every hit carries the verdict.
     queries = [query] if query else (
-        entity_search.entity_search_queries(_lib2_ctx)
-        if _lib2_ctx else [])
+        entity_search.entity_search_queries(_lib2_ctx, matching_engine) if _lib2_ctx else [])
     if not queries:
         return jsonify({"error": "No search query provided."}), 400
     judge = None
@@ -6337,18 +6336,20 @@ def search_music():
             return entity_search.judge_results(get_database(), _lib2_ctx, tracks, albums, q)
 
     logger.info(f"Web UI Search initiated for: {queries}" + (f" (source={requested_source})" if requested_source else ""))
-    add_activity_item("", "Search Started", f"'{' · '.join(queries)}'", "Now")
+    add_activity_item("", "Search Started", f"'{queries[0]}'", "Now")
 
     try:
         with candidate_binding(get_current_profile_id(),
                                lib2_track_id=(_lib2_ctx or {}).get('track_id'),
                                lib2_album_id=(_lib2_ctx or {}).get('album_id')):
-            results = entity_search.merge_results(_search_basic.run_basic_search(
-                q, download_orchestrator, run_async,
-                source=requested_source, entity_context=_lib2_ctx, judge=judge)
-                for q in queries)
-        add_activity_item("", "Search Complete", f"'{' · '.join(queries)}' - {len(results)} results", "Now")
-        return jsonify({"results": results, "queries": queries})
+            results = _search_basic.run_basic_search(
+                queries[0], download_orchestrator, run_async,
+                source=requested_source, entity_context=_lib2_ctx, judge=judge,
+                more_queries=queries[1:],
+                track_hint=entity_search.entity_track_hint(_lib2_ctx) if not query and _lib2_ctx else None)
+        add_activity_item("", "Search Complete", f"'{queries[0]}' - {len(results)} results", "Now")
+        return jsonify({"results": results, "queries": queries,
+                        **({"target": entity_search.entity_search_target(_lib2_ctx)} if _lib2_ctx else {})})
     except ValueError as ve:
         # user-facing config problem (e.g. SoundCloud link with the source
         # disabled) — a clear 400, not a silent empty result

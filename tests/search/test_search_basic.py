@@ -227,6 +227,31 @@ def test_judge_sees_the_raw_hits_before_the_entity_artist_is_painted_on():
     assert result[0]['decision'] == {'accepted': False, 'code': 'artist_mismatch'}
 
 
+def test_an_entity_search_asks_every_query_and_survives_one_failing():
+    track = _real_track(username='peer', filename='a/Song.flac')
+
+    class _Flaky:
+        def __init__(self):
+            self.asked = []
+
+        async def search(self, query):
+            self.asked.append(query)
+            if query.startswith('broken'):
+                raise RuntimeError('indexer down')
+            return [track], []
+
+    client = _Flaky()
+    result = basic.run_basic_search('artist song', client, _sync_run_async,
+                                    more_queries=['song', 'broken', 'artist song'])
+
+    assert sorted(client.asked) == ['artist song', 'broken', 'song']
+    assert len(result) == 1  # the same file found by two queries shows once
+
+    import pytest
+    with pytest.raises(RuntimeError):  # every query failed: say so
+        basic.run_basic_search('broken', client, _sync_run_async, more_queries=['broken again'])
+
+
 def test_no_source_param_falls_through_to_orchestrator_default():
     """When ``source`` is omitted, behaviour is identical to pre-redesign:
     orchestrator.search() is called and routes to the configured source

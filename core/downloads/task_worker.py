@@ -19,7 +19,6 @@ a large web_server.py helper that will get its own lift in subsequent PRs.
 
 from __future__ import annotations
 
-import re
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
@@ -670,59 +669,8 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
         # 1. Generate multiple search queries (like GUI's generate_smart_search_queries)
         artist_name = track.artists[0] if track.artists else None
         track_name = track.name
-
-        # Start with matching engine queries
-        search_queries = deps.matching_engine.generate_download_queries(track)
-
-        # Add legacy fallback queries (like GUI does)
-        legacy_queries = []
-
-        if artist_name:
-            # Add first word of artist approach (legacy compatibility)
-            artist_words = artist_name.split()
-            if artist_words:
-                first_word = artist_words[0]
-                if first_word.lower() == 'the' and len(artist_words) > 1:
-                    first_word = artist_words[1]
-
-                if len(first_word) > 1:
-                    legacy_queries.append(f"{track_name} {first_word}".strip())
-
-        # Add track-only query only when it is distinctive enough to broadcast.
-        # generate_download_queries() already enforces this guard; the legacy
-        # fallback must honor the same contract or short wishlist titles like
-        # "Vortex" still fan out to hundreds of noisy Soulseek responses.
-        if (
-            track_name.strip()
-            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(track_name.strip())
-        ):
-            legacy_queries.append(track_name.strip())
-
-        # Add traditional cleaned queries
-        cleaned_name = re.sub(r'\s*\([^)]*\)', '', track_name).strip()
-        cleaned_name = re.sub(r'\s*\[[^\]]*\]', '', cleaned_name).strip()
-
-        if (
-            cleaned_name
-            and cleaned_name.lower() != track_name.lower()
-            and deps.matching_engine._title_is_distinctive_enough_to_broadcast(cleaned_name)
-        ):
-            legacy_queries.append(cleaned_name.strip())
-
-        # Release plugins add the known artist/album hint locally. Keeping
-        # album queries out of this list avoids sending them to Soulseek or
-        # streaming sources and preserves the hybrid source order.
-        all_queries = search_queries + legacy_queries
-
-        # Remove duplicates while preserving order
-        unique_queries = []
-        seen = set()
-        for query in all_queries:
-            if query and query.lower() not in seen:
-                unique_queries.append(query)
-                seen.add(query.lower())
-
-        search_queries = unique_queries
+        from core.downloads.search_queries import automatic_search_queries
+        search_queries = automatic_search_queries(deps.matching_engine, track)
         # Where we're about to look, for the live status payload (#1156). The
         # chain label is what the orchestrator will actually walk; the hybrid
         # fallback loop below overwrites it with the specific source it tries.

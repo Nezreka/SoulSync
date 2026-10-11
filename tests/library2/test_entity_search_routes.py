@@ -46,9 +46,18 @@ def test_a_failed_download_names_its_library_track(env):  # noqa: F811
     assert client.get('/api/downloads/task/nope/library-track').status_code == 404
 
 
-def test_an_entity_search_needs_no_text_and_judges_every_hit(env, monkeypatch):  # noqa: F811
+def test_an_entity_search_asks_what_an_automatic_download_asks(env, monkeypatch):  # noqa: F811
+    from core.downloads.track_hint import current_track_hint
+
     track_id = _library_track(env['db'])
-    source = _Source(lambda: [
+    hints = []
+
+    class _HintedSource(_Source):
+        async def search(self, query, timeout=20):
+            hints.append(current_track_hint())
+            return await super().search(query, timeout)
+
+    source = _HintedSource(lambda: [
         _hit(),
         _hit(username='bob', filename='Mazzy Star/Live/03 - Fade Into You (Live).flac', title=None),
     ])
@@ -62,8 +71,13 @@ def test_an_entity_search_needs_no_text_and_judges_every_hit(env, monkeypatch): 
     body = env['client'].post('/api/search', json={
         'source': 'soulseek', 'lib2_track_id': track_id}).get_json()
 
-    assert body['queries'] == ['Mazzy Star Fade Into You', 'Mazzy Star So Tonight That I Might See']
-    assert source.queries == body['queries']
+    assert len(body['queries']) > 1
+    assert sorted(source.queries) == sorted(body['queries'])
+    assert body['target'] == {'title': 'Fade Into You', 'album': 'So Tonight That I Might See',
+                              'artists': ['Mazzy Star']}
+    assert all(hint and hint['album'] == 'So Tonight That I Might See' for hint in hints)
+    # every query found the same two files: they show once each
     verdicts = {row['username']: row['decision'] for row in body['results']}
+    assert len(body['results']) == 2
     assert verdicts['alice']['accepted'] is True
     assert verdicts['bob'] == {**verdicts['bob'], 'accepted': False, 'code': 'version_conflict'}

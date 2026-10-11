@@ -4,7 +4,13 @@ verdict on each hit (core/library2/entity_search.py)."""
 from __future__ import annotations
 
 from core.download_plugins.types import TrackResult
-from core.library2.entity_search import entity_search_queries, judge_results, merge_results
+from core.library2.entity_search import (
+    entity_search_queries,
+    entity_search_target,
+    entity_track_hint,
+    judge_results,
+)
+from core.matching_engine import MusicMatchingEngine
 from tests.downloads.test_download_decisions import env  # noqa: F401 - the real-engine fixture
 
 KERNKRAFT = {
@@ -23,12 +29,31 @@ def _hit(artist, title, **over):
     return TrackResult(**base)
 
 
-def test_a_track_is_searched_by_itself_and_by_its_release():
-    assert entity_search_queries(KERNKRAFT) == ["Topic Kernkraft 400 (A Better Day)"]
-    on_album = {**KERNKRAFT, "album_name": "Greatest Hits"}
-    assert entity_search_queries(on_album) == ["Topic Kernkraft 400 (A Better Day)", "Topic Greatest Hits"]
+def test_a_track_is_searched_like_an_automatic_download_searches_it():
+    from core.downloads.pinned_batch import track_object
+    from core.downloads.search_queries import automatic_search_queries
+
+    engine = MusicMatchingEngine()
+    ladder = automatic_search_queries(engine, track_object({
+        "name": "Kernkraft 400 (A Better Day)", "artists": ["Topic", "A7S"],
+        "album": "Kernkraft 400 (A Better Day)", "duration_ms": 165_800}))
+
+    assert entity_search_queries(KERNKRAFT, engine) == ladder
+    assert len(ladder) > 2 and "Kernkraft 400 (A Better Day)" in ladder
     release = {"album_id": 9, "artist_name": "Topic", "album_name": "Greatest Hits"}
-    assert entity_search_queries(release) == ["Topic Greatest Hits"]
+    assert entity_search_queries(release, engine) == ["Topic Greatest Hits"]
+
+
+def test_release_sources_get_the_song_and_the_window_names_everyone_on_it():
+    # the hint adds the artist + album query on Usenet/torrent; no catalogue
+    # context, whose hydration would write to the library during a search
+    assert entity_track_hint(KERNKRAFT) == {
+        "title": "Kernkraft 400 (A Better Day)", "artist": "Topic",
+        "album": "Kernkraft 400 (A Better Day)", "deezer_id": None}
+    assert entity_track_hint({"album_id": 9, "artist_name": "Topic"}) is None
+    assert entity_search_target(KERNKRAFT) == {
+        "title": "Kernkraft 400 (A Better Day)", "album": "Kernkraft 400 (A Better Day)",
+        "artists": ["Topic", "A7S"]}
 
 
 def test_hits_are_judged_against_every_credited_artist(env):  # noqa: F811
@@ -59,15 +84,3 @@ def test_hits_are_judged_against_every_credited_artist(env):  # noqa: F811
     assert verdicts[id(lead_plain)]["accepted"] is False
     assert verdicts[id(cover)]["accepted"] is False
     assert verdicts[id(sped_up)]["accepted"] is False
-
-
-def test_merged_searches_keep_one_row_and_prefer_an_accepted_sighting():
-    rejected = {"username": "u", "filename": "a.flac", "quality_score": 0.9,
-                "decision": {"accepted": False, "code": "artist_mismatch"}}
-    accepted = {"username": "u", "filename": "a.flac", "quality_score": 0.9,
-                "decision": {"accepted": True, "code": "accepted"}}
-    other = {"username": "v", "filename": "b.mp3", "quality_score": 0.5}
-
-    merged = merge_results([[rejected, other], [accepted]])
-
-    assert merged == [accepted, other]

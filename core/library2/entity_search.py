@@ -1,38 +1,57 @@
 """What a Library-v2 Interactive Search looks for, and the download
 pipeline's verdict on what it finds.
 
-The search takes the two angles an automatic download takes -- the track
-itself, and the release it is on -- and judges every hit with the same
-``evaluate_candidates`` the pipeline uses, so the modal can show what the
-pipeline would take and keep the rest one click away.
+A track is searched exactly like an automatic download searches it: the same
+query ladder (core/downloads/search_queries.py), asked of every source, with
+the song as the hint release sources use to add its artist + album query.
+Every hit is judged with the same ``evaluate_candidates`` the pipeline uses, so
+the modal can show what the pipeline would take and keep the rest at hand.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.entity_search")
 
 
-def entity_search_queries(lib2_context: Mapping[str, Any]) -> List[str]:
-    """``artist track`` and ``artist release`` for a track, ``artist release``
-    for a release; a single named after its track searches once. The names go
-    out as they are: a cleaner would lowercase them and romanize CJK titles."""
-    artist = str(lib2_context.get("artist_name") or "").strip()
-    track_artist = (lib2_context.get("track_artists") or [artist])[0]
-    candidates = []
+def _target_track(lib2_context: Mapping[str, Any]):
+    from core.downloads.pinned_batch import track_object
+    return track_object({
+        "name": lib2_context.get("track_title") or "",
+        "artists": lib2_context.get("track_artists") or [lib2_context.get("artist_name")],
+        "album": lib2_context.get("album_name") or "",
+        "duration_ms": lib2_context.get("duration_ms") or 0,
+    })
+
+
+def entity_search_queries(lib2_context: Mapping[str, Any], matching_engine: Any) -> List[str]:
+    """A track's automatic-download query ladder; ``artist release`` for a
+    release."""
     if lib2_context.get("track_title"):
-        candidates.append(f"{track_artist} {lib2_context['track_title']}")
-    if lib2_context.get("album_name"):
-        candidates.append(f"{artist} {lib2_context['album_name']}")
-    queries, seen = [], set()
-    for query in (" ".join(q.split()) for q in candidates):
-        if query and query.casefold() not in seen:
-            seen.add(query.casefold())
-            queries.append(query)
-    return queries
+        from core.downloads.search_queries import automatic_search_queries
+        return automatic_search_queries(matching_engine, _target_track(lib2_context))
+    query = " ".join(f"{lib2_context.get('artist_name') or ''} {lib2_context.get('album_name') or ''}".split())
+    return [query] if query else []
+
+
+def entity_track_hint(lib2_context: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The song for sources that search better with it (core/downloads/
+    track_hint.py) -- without the catalogue context a download carries, whose
+    hydration would write to the library during a search."""
+    if not lib2_context.get("track_title"):
+        return None
+    return {"title": lib2_context["track_title"],
+            "artist": (lib2_context.get("track_artists") or [lib2_context.get("artist_name")])[0],
+            "album": lib2_context.get("album_name") or "", "deezer_id": None}
+
+
+def entity_search_target(lib2_context: Mapping[str, Any]) -> Dict[str, Any]:
+    """What the window says it is looking for: the song and everyone on it."""
+    return {"title": lib2_context.get("track_title"), "album": lib2_context.get("album_name"),
+            "artists": list(lib2_context.get("track_artists") or [lib2_context.get("artist_name")])}
 
 
 def _album_credits(db, lib2_context: Mapping[str, Any]) -> List[str]:
@@ -58,15 +77,8 @@ def judge_results(db, lib2_context: Mapping[str, Any], tracks: Iterable[Any],
     if lib2_context.get("track_id") is not None:
         if not tracks:
             return {}
-        from core.downloads.pinned_batch import track_object
-        target = track_object({
-            "name": lib2_context.get("track_title") or "",
-            "artists": lib2_context.get("track_artists") or [lib2_context.get("artist_name")],
-            "album": lib2_context.get("album_name") or "",
-            "duration_ms": lib2_context.get("duration_ms") or 0,
-        })
         return {id(row): decision.to_dict() for row, decision in validation.evaluate_candidates(
-            tracks, target, query, lib2_context.get("quality_profile_id"))}
+            tracks, _target_track(lib2_context), query, lib2_context.get("quality_profile_id"))}
 
     from core.imports.compilation import is_various_artists_name
     if validation.matching_engine is None or is_various_artists_name(lib2_context.get("artist_name")):
@@ -83,22 +95,4 @@ def judge_results(db, lib2_context: Mapping[str, Any], tracks: Iterable[Any],
     return verdicts
 
 
-def merge_results(result_lists: Iterable[List[dict]]) -> List[dict]:
-    """One row per file or folder across the queries; a hit one query's judge
-    accepted beats the same hit another rejected. Best quality first."""
-    picked: Dict[tuple, dict] = {}
-    for results in result_lists:
-        for row in results:
-            key = (row.get("username"), row.get("filename") or row.get("album_path")
-                   or row.get("album_title"))
-            held = picked.get(key)
-            if held is None or (_accepted(row) and not _accepted(held)):
-                picked[key] = row
-    return sorted(picked.values(), key=lambda row: row.get("quality_score", 0), reverse=True)
-
-
-def _accepted(row: Mapping[str, Any]) -> bool:
-    return (row.get("decision") or {}).get("accepted", True) is not False
-
-
-__all__ = ["entity_search_queries", "judge_results", "merge_results"]
+__all__ = ["entity_search_queries", "entity_search_target", "entity_track_hint", "judge_results"]
