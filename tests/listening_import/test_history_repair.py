@@ -299,3 +299,35 @@ def test_the_worker_scrobbles_the_utc_instant(db, monkeypatch):
     ListeningStatsWorker(db, config, None)._scrobble_new_events()
     instant = int(datetime(2026, 10, 6, 17, tzinfo=timezone.utc).timestamp())
     assert sent == {'lb': [instant], 'lfm': [instant]}
+
+
+def test_a_failed_attempt_leaves_no_backup_behind(db, tmp_path, monkeypatch):
+    # the repair retries every poll; each failure used to leave a backup file
+    import core.listening_import.history_repair as hr
+    _raw(db, 'Roar', 'Katy Perry', '2026-10-06T10:00:00', 'plex')
+    monkeypatch.setattr(hr, 'merge_echoes', lambda conn: (_ for _ in ()).throw(RuntimeError('locked')))
+    with pytest.raises(RuntimeError):
+        repair_once(db)
+    assert not [f for f in os.listdir(tmp_path) if f.startswith('listening_backup_')]
+
+
+def test_a_backup_that_cannot_copy_removes_its_file(db, tmp_path, monkeypatch):
+    import core.listening_import.history_repair as hr
+    real_connect = sqlite3.connect
+
+    class _Locked:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, *args):
+            if sql.startswith('CREATE TABLE bak.'):
+                raise sqlite3.OperationalError('database is locked')
+            return self._conn.execute(sql, *args)
+
+        def close(self):
+            self._conn.close()
+
+    monkeypatch.setattr(hr.sqlite3, 'connect', lambda *a, **k: _Locked(real_connect(*a, **k)))
+    with pytest.raises(sqlite3.OperationalError):
+        hr.backup_listening_tables(str(tmp_path / 'music.db'))
+    assert not [f for f in os.listdir(tmp_path) if f.startswith('listening_backup_')]

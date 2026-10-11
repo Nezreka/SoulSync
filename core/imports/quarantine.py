@@ -336,6 +336,11 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 # quality/AcoustID gates) so the review UI shows what the file
                 # actually is when deciding to approve/delete.
                 "quality": ctx.get("_audio_quality", "") if isinstance(ctx, dict) else "",
+                "album_extra": (
+                    {key: str(ctx["_album_import_extra"].get(key) or "")
+                     for key in ("album", "download_source")}
+                    if isinstance(ctx.get("_album_import_extra"), dict) else None
+                ),
             }
         )
 

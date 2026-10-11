@@ -14,6 +14,8 @@ warnings" change (commit 73ec9c7a):
 
 from __future__ import annotations
 
+import pytest
+
 from core.tag_writer import _date_to_write, _normalize_date_str, build_tag_diff
 
 
@@ -96,3 +98,40 @@ def test_build_tag_diff_still_flags_a_genuine_year_difference():
     diffs = build_tag_diff(file_tags, db_data)
     year_diff = next(d for d in diffs if d['field'] == 'Year')
     assert year_diff['changed'] is True
+
+
+@pytest.mark.parametrize("file_date,catalogue_date,changed", [
+    ("2008-02-08", "2008", False),
+    ("2008-02-08T00:00:00Z", "2008", False),
+    ("2008-02", "2008", False),
+    ("2008-02-08", "2008-02", False),
+    ("2008-03-08", "2008-02", True),
+    ("2007-02-08", "2008", True),
+    ("2008-02-08", "2008-02-11", True),
+    ("2008", "2008-02-08", True),
+    ("", "2008", True),
+])
+def test_partial_release_date_accepts_more_precise_file_tags(file_date, catalogue_date, changed):
+    diff = next(d for d in build_tag_diff(
+        {"year": file_date}, {"year": 2008, "release_date": catalogue_date}
+    ) if d["file_key"] == "year")
+    assert diff["changed"] is changed
+    assert diff["file_value"] == file_date
+    assert diff["db_value"] == catalogue_date
+
+
+@pytest.mark.parametrize("catalogue_date", ["2008", "2008-02"])
+def test_retag_with_partial_release_date_keeps_the_full_file_date(tmp_path, catalogue_date):
+    import shutil
+    import subprocess
+    from core.tag_writer import read_file_tags, write_tags_to_file
+    if not shutil.which("ffmpeg"):
+        pytest.skip("real audio retag requires ffmpeg")
+    path = tmp_path / "track.flac"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "sine=duration=0.01",
+                    "-c:a", "flac", str(path)], check=True, capture_output=True)
+    assert write_tags_to_file(str(path), {"year": 2008, "release_date": "2008-02-08"}, embed_cover=False)["success"]
+    assert write_tags_to_file(str(path), {"year": 2008, "release_date": catalogue_date}, embed_cover=False)["success"]
+    tags = read_file_tags(str(path))
+    assert tags["year"] == "2008-02-08"
+    assert next(d for d in build_tag_diff(tags, {"year": 2008, "release_date": catalogue_date}) if d["file_key"] == "year")["changed"] is False
