@@ -4028,6 +4028,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             _delete_artwork_files(db, "album", aid_)
         return {"albums": removed_albums, "tracks": len(track_ids), "unmirrored": unmirrored}
 
+    def _refresh_cached_artwork(db, album_ids, artist_ids) -> None:
+        """Rebuild the covers a refresh scope already shows, in place.
+
+        They used to be deleted before the scan, so every cover on the page
+        blanked until the background build caught up. A rebuild replaces a
+        changed cover atomically, keeps an unchanged one (and its ?v=), and
+        keeps the old one when nothing resolves. A manual pick still wins:
+        the build reads the override first. Uncached entities stay lazy.
+        """
+        from core.library2.artwork import artwork_file, build_artwork
+        with closing(db._get_connection()) as conn:
+            for kind, ids in (("album", album_ids), ("artist", artist_ids)):
+                for eid in ids:
+                    if not artwork_file(db, kind, eid).exists():
+                        continue
+                    try:
+                        build_artwork(db, conn, config_manager, kind, eid, force=True)
+                    except Exception as e:  # noqa: BLE001 - a cover never fails the scan
+                        logger.debug("artwork refresh failed (%s %s): %s", kind, eid, e)
+
     def _delete_artwork_files(db, kind: str, eid: int) -> None:
         """Remove the cached artwork (full + thumb) of a deleted entity."""
         try:
@@ -5052,13 +5072,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
         def _run():
             try:
-                # Bust full image AND thumbnail — the thumb wins the serve
-                # fast path, so leaving it behind pins stale covers in lists.
-                for album_id in album_ids:
-                    _delete_artwork_files(db, "album", album_id)
-                for artist_id in artist_ids:
-                    _delete_artwork_files(db, "artist", artist_id)
-
                 # Per-file probe errors stay tolerant inside rescan_files; a
                 # top-level scope/database failure terminates this observable
                 # job with an error instead of being reported as success.
@@ -5100,6 +5113,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     )
                     scan_stats["acquisition_tracks"] = sync_stats["tracks"]
                     scan_stats["acquisition_mirrored"] = sync_stats["mirrored"]
+                _refresh_cached_artwork(db, album_ids, artist_ids)
                 _job_registry.update(
                     job_id,
                     current=int(scan_stats.get("scanned", 0))

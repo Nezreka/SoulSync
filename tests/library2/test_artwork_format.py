@@ -123,3 +123,31 @@ def test_both_variants_take_the_extra_huffman_optimize_pass(monkeypatch):
     assert full.get("optimize") is True
     assert thumbnail["size"] == (2, 2)
     assert thumbnail.get("optimize") is True
+
+
+def test_a_forced_rebuild_keeps_the_cover_until_a_new_one_is_in_hand(
+        imported_conn, legacy_db, monkeypatch):
+    # Refresh & Scan deleted every cover first, so the page blanked until the
+    # background build caught up; now a rebuild only swaps a changed cover
+    import os
+    album_id = imported_conn.execute("SELECT id FROM lib2_albums LIMIT 1").fetchone()[0]
+    database = _art_db(legacy_db)
+    cover = {"bytes": _image_bytes("PNG", "RGB")}
+    monkeypatch.setattr(artwork, "_embedded_art_for_album", lambda *_args: cover["bytes"])
+    monkeypatch.setattr(artwork, "_provider_art_url", lambda *_args, **_kwargs: None)
+    cached = artwork.artwork_file(database, "album", album_id)
+
+    artwork.build_artwork(database, imported_conn, None, "album", album_id, force=True)
+    os.utime(cached, (1000, 1000))
+    artwork.build_artwork(database, imported_conn, None, "album", album_id, force=True)
+    assert cached.stat().st_mtime == 1000, "the same cover keeps its file and ?v="
+
+    cover["bytes"] = None
+    artwork.build_artwork(database, imported_conn, None, "album", album_id, force=True)
+    assert cached.exists(), "nothing resolved: the old cover stays"
+
+    blue = BytesIO()
+    Image.new("RGB", (4, 3), "blue").save(blue, "PNG")
+    cover["bytes"] = blue.getvalue()
+    artwork.build_artwork(database, imported_conn, None, "album", album_id, force=True)
+    assert cached.stat().st_mtime != 1000, "a changed cover replaces the file"

@@ -651,9 +651,7 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
                             *, force: bool = False) -> Optional[str]:
     deadline = time.monotonic() + PROVIDER_WALK_BUDGET_S
     out = artwork_file(database, kind, entity_id)
-    if out.exists() and not force:
-        if is_cached_jpeg(out):
-            return str(out)
+    if out.exists() and not is_cached_jpeg(out):
         # Self-heal caches created before artwork bytes were normalized.
         try:
             out.unlink()
@@ -662,11 +660,12 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
                 old_thumb.unlink()
         except OSError:
             return None
-    if force and out.exists():
-        try:
-            out.unlink()
-        except OSError:
-            pass
+    elif out.exists() and not force:
+        return str(out)
+    # A forced rebuild keeps the cached cover until a new one is in hand. It
+    # used to delete it first, so every Refresh & Scan blanked the page's
+    # covers until the background build caught up, and a failed lookup lost
+    # the cover outright.
 
     data: Optional[bytes] = None
     override_url = _manual_art_override_url(conn, kind, entity_id)
@@ -725,11 +724,21 @@ def _build_artwork_unlocked(database, conn, config_manager, kind: str, entity_id
     if not variants:
         return None
     data, thumbnail = variants
+    thumb_out = thumb_file(database, kind, entity_id)
+    try:
+        unchanged = out.read_bytes() == data
+    except OSError:
+        unchanged = False
+    if unchanged:
+        # Same cover: the file and its ?v= stay, so nothing reloads.
+        if not thumb_out.exists():
+            _write_thumbnail_bytes(thumb_out, thumbnail)
+        return str(out)
     tmp = _unique_tmp_path(out, ".writing")
     try:
         tmp.write_bytes(data)
         os.replace(tmp, out)
-        _write_thumbnail_bytes(thumb_file(database, kind, entity_id), thumbnail)
+        _write_thumbnail_bytes(thumb_out, thumbnail)
         forget_artwork_versions(database, kind, entity_id)
         return str(out)
     except OSError as e:

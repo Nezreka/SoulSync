@@ -2880,9 +2880,10 @@ def test_refresh_artist_without_albums_scans_nothing(api):
     assert state["result"]["scanned"] == 0
 
 
-def test_refresh_busts_full_artwork_and_thumbnails(api):
-    """Refresh must invalidate BOTH cached variants — the thumb wins the serve
-    fast path, so a stale one would pin the old cover in lists forever."""
+def test_refresh_drops_unreadable_artwork_and_thumbnails(api):
+    """Refresh rebuilds covers in place; a cached file that is no JPEG goes,
+    and BOTH variants with it — the thumb wins the serve fast path, so a stale
+    one would pin the old cover in lists forever."""
     client, db, ids = api
     from core.library2.artwork import artwork_file, thumb_file
     files = [
@@ -2899,7 +2900,7 @@ def test_refresh_busts_full_artwork_and_thumbnails(api):
     assert started["success"] is True
     assert _wait_for_job(client, started["job_id"])["error"] is None
     for f in files:
-        assert not f.exists(), f"{f.name} must be invalidated by refresh"
+        assert not f.exists() or f.read_bytes() != b"jpg", f"{f.name} kept unreadable bytes"
 
 
 def test_artist_refresh_scans_all_albums_and_file_versions(api, monkeypatch, tmp_path):
