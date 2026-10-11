@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
+import { decisionPill, rejectionSummary } from '@/features/downloads/decisions';
 
 import type {
   LibraryV2QualityProfile,
@@ -148,6 +149,11 @@ function resultTitle(r: SourceSearchResult): string {
   if (rawRelease) return rawRelease;
   if (r.result_type === 'album') return r.album_title || baseName(r.album_path ?? '') || '—';
   return r.title ?? baseName(r.filename);
+}
+
+/** Why the download pipeline passed this hit over: "wrong artist", "version: remix". */
+function filteredReason(r: SourceSearchResult): string {
+  return decisionPill({ decision: r.decision, duration: r.duration ?? undefined });
 }
 
 function resultSize(r: SourceSearchResult): number | null | undefined {
@@ -468,12 +474,18 @@ export function InteractiveSearchModal({
   const queryClient = useQueryClient();
   // where a grab from this window lands, when libraries are separated (#1199)
   const { data: scopes } = useQuery(libraryScopesQueryOptions());
-  const [query, setQuery] = useState(initialQuery);
   // An empty set means the explicit "All sources" choice. Once a user clicks
   // a source chip, the set becomes the exact subset to search. This makes a
   // click on "Usenet" select Usenet instead of silently excluding it
   // (iss27-12).
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+  // Sources outside the download setup (YouTube, SoundCloud) join on request.
+  const [includeExtra, setIncludeExtra] = useState(false);
+  // A library track or release is searched for by the server (its track and
+  // its release); only an artist-wide search still sends text.
+  const entityScoped = Boolean(entity?.trackId || entity?.albumId);
+  const [searchedQueries, setSearchedQueries] = useState<string[]>([]);
+  const [showFiltered, setShowFiltered] = useState(false);
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
@@ -507,7 +519,6 @@ export function InteractiveSearchModal({
   // (the user is done watching, and the component is about to unmount).
   const cancelledRef = useRef(false);
   const runSequenceRef = useRef(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   useEffect(
     () => () => {
       cancelledRef.current = true;
@@ -520,21 +531,38 @@ export function InteractiveSearchModal({
     [results, sort],
   );
   const canFilterByCutoff = !!effectiveProfile && effectiveProfile.ranked_targets.length > 0;
+  // What the download pipeline would take; the rest waits behind one row.
   const filtered = useMemo(
     () =>
-      cutoffOnly && effectiveProfile
-        ? sorted.filter((r) => meetsCutoffOnly(r, effectiveProfile))
-        : sorted,
+      sorted.filter(
+        (r) =>
+          r.decision?.accepted !== false &&
+          (!cutoffOnly || !effectiveProfile || meetsCutoffOnly(r, effectiveProfile)),
+      ),
     [sorted, cutoffOnly, effectiveProfile],
   );
+  const rejected = useMemo(() => sorted.filter((r) => r.decision?.accepted === false), [sorted]);
+  const rejectedSummary = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of rejected) {
+      const code = r.decision?.code ?? 'unexplained';
+      counts[code] = (counts[code] ?? 0) + 1;
+    }
+    return rejectionSummary(
+      Object.fromEntries(Object.entries(counts).sort(([, a], [, b]) => b - a)),
+    );
+  }, [rejected]);
+  const visible = showFiltered ? [...filtered, ...rejected] : filtered;
   const progressItems = useMemo(() => Object.entries(sourceProgress), [sourceProgress]);
   const showPeers =
     columns.peers &&
-    filtered.some((r) => {
+    visible.some((r) => {
       const source = (r.source ?? r.username ?? '').toLowerCase();
       return source === 'torrent' || source === 'soulseek' || !SOURCE_LABELS[source];
     });
-  const showGrabs = columns.grabs && filtered.some((r) => effMeta(r).grabs != null);
+  const showGrabs = columns.grabs && visible.some((r) => effMeta(r).grabs != null);
+  const columnCount =
+    4 + [columns.artist, columns.size, columns.age, showPeers, showGrabs].filter(Boolean).length;
 
   useEffect(() => {
     try {
@@ -563,8 +591,13 @@ export function InteractiveSearchModal({
   }
 
   const allSources = searchSourcesQuery.data?.sources ?? [];
-  const activeSources =
-    selectedSources.size === 0 ? allSources : allSources.filter((s) => selectedSources.has(s.name));
+  const extraSources = searchSourcesQuery.data?.extra ?? [];
+  const activeSources = [
+    ...(selectedSources.size === 0
+      ? allSources
+      : allSources.filter((s) => selectedSources.has(s.name))),
+    ...(includeExtra ? extraSources : []),
+  ];
 
   /** Select an exact source subset. Selecting every source normalizes back to
    *  "All sources"; removing the last explicit source does the same. */
@@ -587,18 +620,20 @@ export function InteractiveSearchModal({
    *  mode) no longer silently stands in for "all sources". One source
    *  failing (timeout, disconnected) doesn't blank the whole result set.
    *  Narrowing the chip row to a subset searches exactly that subset. */
-  async function run(q: string) {
+  async function run() {
     const runSequence = ++runSequenceRef.current;
+    const q = entityScoped ? undefined : initialQuery.trim();
     // dd28-36: bailing out silently made an empty query look like a completed
-    // search with no hits. Say what actually happened so the user can type one.
-    if (!q.trim()) {
+    // search with no hits. Say what actually happened.
+    if (q === '') {
       setResults([]);
       setSourceFailures([]);
       setSourceProgress({});
       setLoading(false);
-      setError('Enter something to search for — this entity has no usable title.');
+      setError('Nothing to search for — this entity has no usable title.');
       return;
     }
+    setShowFiltered(false);
     const sources = [...activeSources];
     const targets =
       sources.length > 0 ? sources : [{ name: '__current__', display_name: 'Current source' }];
@@ -625,13 +660,14 @@ export function InteractiveSearchModal({
       targets.map(async (source) => {
         const sourceStartedAt = Date.now();
         try {
-          const sourceResults = await searchSources(
+          const { results: sourceResults, queries } = await searchSources(
             q,
             source.name === '__current__' ? undefined : source.name,
             entity,
           );
           merged.push(...sourceResults);
           if (runSequence !== runSequenceRef.current) return;
+          if (queries.length > 0) setSearchedQueries(queries);
           if (sourceResults.length > 0) {
             setResults((current) => [...current, ...sourceResults]);
           }
@@ -678,19 +714,30 @@ export function InteractiveSearchModal({
     setLoading(false);
   }
 
-  // Auto-run once with the prefilled context query — deferred until the
-  // source list has settled so the very first run already benefits from
-  // the all-sources fan-out above instead of racing it.
-  const autoRanRef = useRef(false);
+  // There is nothing to type: the window searches as soon as the source list
+  // has settled (so the first run already fans out over every source), and
+  // again whenever the source choice changes.
+  const selectionKey = `${[...selectedSources].sort().join(',')}|${includeExtra}`;
+  const lastRunKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (autoRanRef.current || searchSourcesQuery.isLoading) return;
-    autoRanRef.current = true;
-    void run(initialQuery);
+    if (searchSourcesQuery.isLoading || lastRunKeyRef.current === selectionKey) return;
+    lastRunKeyRef.current = selectionKey;
+    void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchSourcesQuery.isLoading]);
+  }, [searchSourcesQuery.isLoading, selectionKey]);
 
   async function grab(r: SourceSearchResult) {
     if (!canWrite || (entity?.trackId && r.result_type === 'album')) return;
+    if (r.decision?.accepted === false) {
+      const why = `${filteredReason(r)}${r.decision.detail ? `: ${r.decision.detail}` : ''}`;
+      const checks = acoustidCheck
+        ? 'AcoustID still checks the file after the download.'
+        : 'AcoustID is off for this window, so nothing will catch a wrong song.';
+      const confirmed = window.confirm(
+        `"${resultTitle(r)}" was filtered out (${why}). ${checks} Download it anyway?`,
+      );
+      if (!confirmed) return;
+    }
     // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
     // but only downloadable via a separate, explicitly confirmed Force action
     // when the user has turned the Quality check off — the pipeline audits the
@@ -796,7 +843,6 @@ export function InteractiveSearchModal({
   return (
     <DialogFrame
       open
-      initialFocus={searchInputRef}
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
@@ -804,39 +850,19 @@ export function InteractiveSearchModal({
     >
       <DialogHeader title="Interactive Search" closeLabel="Close interactive search" compact>
         <span className={styles.searchHeaderMeta}>
-          Search sources and compare results before downloading.
+          {searchedQueries.length > 0
+            ? `Searching for ${searchedQueries.map((q) => `“${q}”`).join(' and ')}`
+            : 'Search sources and compare results before downloading.'}
         </span>
       </DialogHeader>
       <div className={styles.searchModalBody}>
-        <div className={styles.searchBar}>
-          <input
-            ref={searchInputRef}
-            className={styles.searchInput}
-            aria-label="Search query"
-            value={query}
-            placeholder="Search query…"
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void run(query);
-            }}
-          />
-          <button
-            type="button"
-            className={styles.btnPrimary}
-            disabled={loading}
-            onClick={() => void run(query)}
-          >
-            {loading ? 'Searching…' : 'Search'}
-          </button>
-        </div>
-
-        {allSources.length > 1 ? (
+        {allSources.length > 1 || extraSources.length > 0 ? (
           <div className={styles.sourceChips} role="group" aria-label="Download sources">
             <button
               type="button"
               className={styles.sourceChip}
               aria-pressed={selectedSources.size === 0}
-              disabled={loading || searchSourcesQuery.isLoading}
+              disabled={searchSourcesQuery.isLoading}
               onClick={() => setSelectedSources(new Set())}
             >
               All sources
@@ -847,12 +873,23 @@ export function InteractiveSearchModal({
                 type="button"
                 className={styles.sourceChip}
                 aria-pressed={selectedSources.has(source.name)}
-                disabled={loading || searchSourcesQuery.isLoading}
+                disabled={searchSourcesQuery.isLoading}
                 onClick={() => toggleSource(source.name)}
               >
                 {source.display_name}
               </button>
             ))}
+            {extraSources.length > 0 ? (
+              <button
+                type="button"
+                className={styles.sourceChip}
+                aria-pressed={includeExtra}
+                title="Sources that work without being part of your download setup"
+                onClick={() => setIncludeExtra((on) => !on)}
+              >
+                + {extraSources.map((source) => source.display_name).join(', ')}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -990,9 +1027,9 @@ export function InteractiveSearchModal({
             </div>
           ) : results.length === 0 ? (
             <div className={styles.inlineLoading}>
-              {error ? 'Search failed.' : 'No results — refine the query and search again.'}
+              {error ? 'Search failed.' : 'No results from the searched sources.'}
             </div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && rejected.length === 0 ? (
             <div className={styles.inlineLoading}>
               No results meet{' '}
               {effectiveProfile?.name ? `"${effectiveProfile.name}"'s` : "the profile's"} cutoff —
@@ -1026,98 +1063,30 @@ export function InteractiveSearchModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((r, i) => {
-                    const key = resultKey(r);
-                    const live = grabbed[key];
-                    const isAlbum = r.result_type === 'album';
-                    const wrongScope = Boolean(entity?.trackId && isAlbum);
-                    return (
-                      <tr key={`${key}-${i}`}>
-                        <td>
-                          <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
-                            {sourceLabel(r)}
-                          </span>
-                          {sourceDetail(r) ? (
-                            <span className={styles.sourceDetail}>{sourceDetail(r)}</span>
-                          ) : null}
-                        </td>
-                        <td title={resultTitle(r)}>
-                          <span className={styles.isTitle}>{resultTitle(r)}</span>
-                          {r.matched_track_title || r.matched_album_title ? (
-                            <span className={styles.releaseMatch}>
-                              Matched to {r.matched_track_title ?? r.matched_album_title}
-                            </span>
-                          ) : null}
-                          {isAlbum ? (
-                            <span className={styles.albumResultBadge}>
-                              album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
-                            </span>
-                          ) : null}
-                        </td>
-                        {columns.artist ? <td data-label="Artist">{r.artist ?? '—'}</td> : null}
-                        <td data-label="Quality" className={styles.qualityText}>
-                          <span className={styles.qualityCellRow}>
-                            {resultQuality(r)}
-                            <ProfileBadge result={r} profile={effectiveProfile} />
-                          </span>
-                        </td>
-                        {columns.size ? (
-                          <td data-label="Size" className={styles.colNum}>
-                            {fmtBytes(resultSize(r))}
-                          </td>
-                        ) : null}
-                        {columns.age ? (
-                          <td
-                            data-label="Age"
-                            className={styles.colNum}
-                            title={effMeta(r).publish_date ?? undefined}
-                          >
-                            {ageText(effMeta(r).publish_date)}
-                          </td>
-                        ) : null}
-                        {showPeers ? (
-                          <td data-label="Peers" className={styles.isAvailCell}>
-                            {peerCell(r)}
-                          </td>
-                        ) : null}
-                        {showGrabs ? (
-                          <td data-label="Grabs" className={styles.isAvailCell}>
-                            {grabsCell(r)}
-                          </td>
-                        ) : null}
-                        <td>
-                          <span className={styles.grabAction}>
-                            <button
-                              type="button"
-                              className={styles.toolButton}
-                              data-requires-write=""
-                              title={
-                                wrongScope
-                                  ? 'An album result cannot be attached to one library track'
-                                  : undefined
-                              }
-                              disabled={
-                                !canWrite || wrongScope || Boolean(live && live.state !== 'error')
-                              }
-                              onClick={() => void grab(r)}
-                            >
-                              {wrongScope ? 'Album result' : grabLabel(live)}
-                            </button>
-                            {live?.state === 'downloading' ? (
-                              <span className={styles.grabProgress} aria-hidden="true">
-                                <span style={{ width: `${live.progress ?? 0}%` }} />
-                              </span>
-                            ) : null}
-                            {live?.state === 'error' ? (
-                              <span className={styles.grabError} role="alert">
-                                {grabErrors[key] ?? 'Download failed'}
-                              </span>
-                            ) : null}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {filtered.map((r, i) => renderRow(r, i))}
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={columnCount} className={styles.filteredEmpty}>
+                        Nothing here passed the download checks.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {rejected.length > 0 ? (
+                    <tr>
+                      <td colSpan={columnCount} className={styles.filteredToggleCell}>
+                        <button
+                          type="button"
+                          className={styles.filteredToggle}
+                          aria-expanded={showFiltered}
+                          onClick={() => setShowFiltered((on) => !on)}
+                        >
+                          {showFiltered ? 'Hide' : 'Show'} {rejected.length} filtered
+                          <span className={styles.filteredSummary}>{rejectedSummary}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ) : null}
+                  {showFiltered ? rejected.map((r, i) => renderRow(r, i)) : null}
                 </tbody>
               </table>
             </>
@@ -1136,4 +1105,97 @@ export function InteractiveSearchModal({
       </div>
     </DialogFrame>
   );
+
+  function renderRow(r: SourceSearchResult, i: number) {
+    const key = resultKey(r);
+    const live = grabbed[key];
+    const isAlbum = r.result_type === 'album';
+    const wrongScope = Boolean(entity?.trackId && isAlbum);
+    const passedOver = r.decision?.accepted === false;
+    return (
+      <tr key={`${key}-${i}`} className={passedOver ? styles.filteredRow : undefined}>
+        <td>
+          <span className={styles.sourceBadge} data-tone={sourceTone(r)}>
+            {sourceLabel(r)}
+          </span>
+          {sourceDetail(r) ? <span className={styles.sourceDetail}>{sourceDetail(r)}</span> : null}
+        </td>
+        <td title={resultTitle(r)}>
+          <span className={styles.isTitle}>{resultTitle(r)}</span>
+          {r.matched_track_title || r.matched_album_title ? (
+            <span className={styles.releaseMatch}>
+              Matched to {r.matched_track_title ?? r.matched_album_title}
+            </span>
+          ) : null}
+          {isAlbum ? (
+            <span className={styles.albumResultBadge}>
+              album · {r.track_count ?? r.tracks?.length ?? '?'} tracks
+            </span>
+          ) : null}
+          {passedOver ? (
+            <span className={styles.filteredReason} title={r.decision?.detail}>
+              {filteredReason(r)}
+            </span>
+          ) : null}
+        </td>
+        {columns.artist ? <td data-label="Artist">{r.artist ?? '—'}</td> : null}
+        <td data-label="Quality" className={styles.qualityText}>
+          <span className={styles.qualityCellRow}>
+            {resultQuality(r)}
+            <ProfileBadge result={r} profile={effectiveProfile} />
+          </span>
+        </td>
+        {columns.size ? (
+          <td data-label="Size" className={styles.colNum}>
+            {fmtBytes(resultSize(r))}
+          </td>
+        ) : null}
+        {columns.age ? (
+          <td
+            data-label="Age"
+            className={styles.colNum}
+            title={effMeta(r).publish_date ?? undefined}
+          >
+            {ageText(effMeta(r).publish_date)}
+          </td>
+        ) : null}
+        {showPeers ? (
+          <td data-label="Peers" className={styles.isAvailCell}>
+            {peerCell(r)}
+          </td>
+        ) : null}
+        {showGrabs ? (
+          <td data-label="Grabs" className={styles.isAvailCell}>
+            {grabsCell(r)}
+          </td>
+        ) : null}
+        <td>
+          <span className={styles.grabAction}>
+            <button
+              type="button"
+              className={styles.toolButton}
+              data-requires-write=""
+              title={
+                wrongScope ? 'An album result cannot be attached to one library track' : undefined
+              }
+              disabled={!canWrite || wrongScope || Boolean(live && live.state !== 'error')}
+              onClick={() => void grab(r)}
+            >
+              {wrongScope ? 'Album result' : grabLabel(live)}
+            </button>
+            {live?.state === 'downloading' ? (
+              <span className={styles.grabProgress} aria-hidden="true">
+                <span style={{ width: `${live.progress ?? 0}%` }} />
+              </span>
+            ) : null}
+            {live?.state === 'error' ? (
+              <span className={styles.grabError} role="alert">
+                {grabErrors[key] ?? 'Download failed'}
+              </span>
+            ) : null}
+          </span>
+        </td>
+      </tr>
+    );
+  }
 }

@@ -2312,15 +2312,63 @@ button.statusWarn:disabled {
   font-size: 10.5px;
 }
 
-.searchBar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+/* Interactive Search: what the download pipeline passed over waits behind one row. */
+.filteredRow td {
+  opacity: 0.55;
 }
 
-.searchBar .btnPrimary {
-  min-width: 110px;
+.filteredRow td:last-child {
+  opacity: 1;
+}
+
+.filteredReason {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.16);
+  color: rgb(254, 150, 150);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.filteredToggleCell,
+.filteredEmpty {
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.filteredEmpty {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+}
+
+.filteredToggle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filteredToggle:hover {
+  color: #fff;
+}
+
+.filteredSummary {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .searchOptions {
@@ -2680,6 +2728,11 @@ button.statusWarn:disabled {
 
 .searchResultsTable td {
   max-width: none;
+}
+
+/* The track table's 32px number column clipped "38 MB" to "38 MI". */
+.searchResultsTable .colNum {
+  width: 64px;
 }
 
 .modalFootNote {

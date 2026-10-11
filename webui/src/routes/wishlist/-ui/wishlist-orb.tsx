@@ -16,7 +16,7 @@ import {
   orbSizeClass,
   trackCountLabel,
 } from '../-wishlist.helpers';
-import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { openWishlistSearch } from '../../library/-ui/interactive-search-host';
 import { WishlistCover } from './wishlist-cover';
 
 interface Props {
@@ -273,12 +273,7 @@ export function WishlistOrb({
                   aria-label={`Interactive Search for ${single.track}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    openWishlistInspector({
-                      id: single.id,
-                      name: single.track,
-                      artist: single.artist,
-                      album: single.album,
-                    });
+                    openWishlistSearch(single);
                   }}
                 >
                   🔍
@@ -320,12 +315,7 @@ function TileTrack({ track, onRemove }: { track: ParsedWishlistTrack; onRemove: 
         aria-label={`Interactive Search for ${track.track}`}
         onClick={(event) => {
           event.stopPropagation();
-          openWishlistInspector({
-            id: track.id,
-            name: track.track,
-            artist: track.artist,
-            album: track.album,
-          });
+          openWishlistSearch(track);
         }}
       >
         🔍

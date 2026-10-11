@@ -33,6 +33,7 @@ import {
   trackCountLabel,
 } from '../-wishlist.helpers';
 import { useLiveWishlist } from '../-wishlist.live';
+import { LibrarySearchHost } from '../../library/-ui/interactive-search-host';
 import { Route } from '../route';
 import { WishlistAudiobooks } from './wishlist-audiobooks';
 import { WishlistList } from './wishlist-list';
@@ -317,6 +318,7 @@ export function WishlistPage() {
 
   return (
     <div className="page-shell wlp">
+      <LibrarySearchHost />
       {/* Media tabs. Music and audiobooks are kept as separate lists, the same
           isolation the video side keeps between movies, shows and channels:
           they share a page and nothing else — different database, different

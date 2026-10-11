@@ -2,6 +2,8 @@ import type { ResponsePromise } from 'ky';
 
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 
+import type { CandidateDecision } from '@/features/downloads/decisions';
+
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
@@ -2208,6 +2210,8 @@ export interface SourceSearchResult {
     publish_date?: string | null;
     release_title?: string | null;
   } | null;
+  /** The download pipeline's verdict on this hit, for a library-entity search. */
+  decision?: CandidateDecision;
 }
 
 /** Rank a search result's quality for sorting/picking (lossless hi-res >
@@ -2251,19 +2255,37 @@ function lib2EntityFields(entity?: Lib2EntityRef): Record<string, number> {
   };
 }
 
+export interface SourceSearchResponse {
+  results: SourceSearchResult[];
+  /** What the server searched for: the text given, or for a library entity
+   *  without one, its track and its release. */
+  queries: string[];
+}
+
+/** Search one source. With no query a library entity is searched for by the
+ *  server itself (its track and its release), and every hit carries the
+ *  download pipeline's verdict. */
 export async function searchSources(
-  query: string,
+  query: string | undefined,
   source?: string,
   entity?: Lib2EntityRef,
-): Promise<SourceSearchResult[]> {
-  const payload = await readJson<{ results?: SourceSearchResult[]; error?: string }>(
+): Promise<SourceSearchResponse> {
+  const payload = await readJson<{
+    results?: SourceSearchResult[];
+    queries?: string[];
+    error?: string;
+  }>(
     apiClient.post('search', {
-      json: { query, ...(source ? { source } : {}), ...lib2EntityFields(entity) },
+      json: {
+        ...(query ? { query } : {}),
+        ...(source ? { source } : {}),
+        ...lib2EntityFields(entity),
+      },
       timeout: 90_000, // source search (Soulseek etc.) can take up to ~75s
     }),
   );
   if (payload.error) throw new Error(payload.error);
-  return payload.results ?? [];
+  return { results: payload.results ?? [], queries: payload.queries ?? (query ? [query] : []) };
 }
 
 export interface DownloadSearchSource {
@@ -2274,28 +2296,37 @@ export interface DownloadSearchSource {
 export interface DownloadSearchSources {
   mode: string;
   sources: DownloadSearchSource[];
+  /** Usable without being part of the download setup (YouTube, SoundCloud). */
+  extra: DownloadSearchSource[];
+}
+
+type RawSearchSources = Array<{ name?: string; display_name?: string } | string> | undefined;
+
+function searchSourceList(raw: RawSearchSources): DownloadSearchSource[] {
+  return (raw ?? [])
+    .map((source) => {
+      const name = typeof source === 'string' ? source : (source.name ?? '');
+      const displayName =
+        typeof source === 'string' ? source : (source.display_name ?? source.name ?? '');
+      return { name, display_name: displayName };
+    })
+    .filter((source) => source.name);
 }
 
 export async function listSearchSources(): Promise<DownloadSearchSources> {
   try {
     const payload = await readJson<{
       mode?: string;
-      sources?: Array<{ name?: string; display_name?: string } | string>;
+      sources?: RawSearchSources;
+      extra?: RawSearchSources;
     }>(apiClient.get('search/sources'));
-    const raw = payload.sources ?? [];
     return {
       mode: payload.mode ?? 'unknown',
-      sources: raw
-        .map((source) => {
-          const name = typeof source === 'string' ? source : (source.name ?? '');
-          const displayName =
-            typeof source === 'string' ? source : (source.display_name ?? source.name ?? '');
-          return { name, display_name: displayName };
-        })
-        .filter((source) => source.name),
+      sources: searchSourceList(payload.sources),
+      extra: searchSourceList(payload.extra),
     };
   } catch {
-    return { mode: 'unknown', sources: [] };
+    return { mode: 'unknown', sources: [], extra: [] };
   }
 }
 
@@ -2380,11 +2411,14 @@ export async function autoGrabBest(
   options: DownloadOptions = {},
   entity?: Lib2EntityRef,
 ): Promise<SourceSearchResult | null> {
-  const all = await searchSources(query, undefined, entity);
+  const { results: all } = await searchSources(query, undefined, entity);
   if (all.length === 0) return null;
   // A track action must not grab a release-bundle result (audit P1-18):
-  // the pipeline would import one arbitrary file of a whole album.
-  const pool = entity?.trackId ? all.filter((r) => r.result_type === 'track') : all;
+  // the pipeline would import one arbitrary file of a whole album. Nor a hit
+  // the pipeline's own checks passed over (wrong artist, wrong length, ...).
+  const pool = all.filter(
+    (r) => r.decision?.accepted !== false && (!entity?.trackId || r.result_type === 'track'),
+  );
   if (pool.length === 0) return null;
   // Prefer the same quality tier Interactive Search ranks best, then
   // highest quality_score, then most upload slots.

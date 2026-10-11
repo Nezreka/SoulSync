@@ -76,10 +76,14 @@ describe('classifyGrabOutcome', () => {
 });
 
 describe('library v2 interactive grab', () => {
-  it('labels and initially focuses the search field, and Escape closes the dialog', async () => {
+  it('searches without a text field, and Escape closes the dialog', async () => {
+    const searches: unknown[] = [];
     server.use(
       http.get('/api/search/sources', () => HttpResponse.json({ mode: 'soulseek', sources: [] })),
-      http.post('/api/search', () => HttpResponse.json({ results: [] })),
+      http.post('/api/search', async ({ request }) => {
+        searches.push(await request.json());
+        return HttpResponse.json({ results: [] });
+      }),
     );
     const onClose = vi.fn();
     render(
@@ -88,8 +92,9 @@ describe('library v2 interactive grab', () => {
       </QueryClientProvider>,
     );
 
-    const input = screen.getByRole('textbox', { name: 'Search query' });
-    await waitFor(() => expect(input).toHaveFocus());
+    // An artist-wide search has no library entity, so it still sends its text.
+    await waitFor(() => expect(searches).toEqual([{ query: 'Artist' }]));
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
@@ -294,38 +299,121 @@ describe('library v2 interactive grab', () => {
 
     // The initial auto-run waits for the source list, then fans out to
     // every configured source instead of relying on a single fallback pick.
+    // A library entity sends no text: the server searches its track and release.
     await waitFor(() => expect(searches).toHaveLength(2));
     expect(searches).toEqual(
       expect.arrayContaining([
-        {
-          query: 'Artist Selected',
-          source: 'soulseek',
-          lib2_track_id: 321,
-          lib2_album_id: 12,
-        },
-        {
-          query: 'Artist Selected',
-          source: 'usenet',
-          lib2_track_id: 321,
-          lib2_album_id: 12,
-        },
+        { source: 'soulseek', lib2_track_id: 321, lib2_album_id: 12 },
+        { source: 'usenet', lib2_track_id: 321, lib2_album_id: 12 },
       ]),
     );
 
     // Regression: the selected-looking Usenet chip must INCLUDE Usenet. The
     // old exclusion-set implementation did the opposite and made live
-    // Usenet results appear to have disappeared.
+    // Usenet results appear to have disappeared. The click searches again.
     fireEvent.click(await screen.findByRole('button', { name: 'Usenet' }));
     expect(screen.getByRole('button', { name: 'Usenet' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
 
     await waitFor(() => expect(searches).toHaveLength(3));
-    expect(searches[2]).toEqual({
-      query: 'Artist Selected',
-      source: 'usenet',
-      lib2_track_id: 321,
-      lib2_album_id: 12,
+    expect(searches[2]).toEqual({ source: 'usenet', lib2_track_id: 321, lib2_album_id: 12 });
+  });
+
+  it('searches the sources outside the download setup only on request', async () => {
+    const searches: unknown[] = [];
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'soulseek',
+          sources: [{ name: 'soulseek', display_name: 'Soulseek' }],
+          extra: [
+            { name: 'youtube', display_name: 'YouTube' },
+            { name: 'soundcloud', display_name: 'SoundCloud' },
+          ],
+        }),
+      ),
+      http.post('/api/search', async ({ request }) => {
+        searches.push(((await request.json()) as { source?: string }).source);
+        return HttpResponse.json({ results: [] });
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal
+          canWrite
+          initialQuery="x"
+          entity={{ trackId: 1 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(searches).toEqual(['soulseek']));
+    fireEvent.click(await screen.findByRole('button', { name: '+ YouTube, SoundCloud' }));
+    await waitFor(() => expect(searches).toHaveLength(4));
+    expect(searches.slice(1).sort()).toEqual(['soulseek', 'soundcloud', 'youtube']);
+  });
+
+  it('keeps what the download checks passed over behind one row', async () => {
+    const hit = (title: string, decision?: object) => ({
+      result_type: 'track',
+      username: 'hifi',
+      filename: `hifi::${title}`,
+      size: 1,
+      title,
+      artist: 'Topic, A7S',
+      quality: 'flac',
+      ...(decision ? { decision } : {}),
     });
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({ mode: 'hifi', sources: [{ name: 'hifi', display_name: 'HiFi' }] }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          queries: ['Topic Kernkraft 400 (A Better Day)'],
+          results: [
+            hit('Kernkraft 400 (A Better Day)', { accepted: true, code: 'accepted' }),
+            hit('Kernkraft 400 (Sped Up)', {
+              accepted: false,
+              code: 'version_conflict',
+              detail: 'sped up version, asked for the original',
+              stage: 'version',
+            }),
+            hit('Kernkraft 400 (cover)', {
+              accepted: false,
+              code: 'artist_mismatch',
+              detail: 'Robbe vs Topic, A7S',
+              stage: 'identity',
+            }),
+          ],
+        }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal
+          canWrite
+          initialQuery="x"
+          entity={{ trackId: 1 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('Kernkraft 400 (A Better Day)')).toBeInTheDocument();
+    expect(
+      screen.getByText('Searching for “Topic Kernkraft 400 (A Better Day)”'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Kernkraft 400 (Sped Up)')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: /Show 2 filtered/ });
+    expect(toggle).toHaveTextContent('1 wrong version · 1 wrong artist');
+
+    fireEvent.click(toggle);
+    expect(screen.getByText('Kernkraft 400 (Sped Up)')).toBeInTheDocument();
+    expect(screen.getByText('version: sped up')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Hide 2 filtered/ })).toBeInTheDocument();
   });
 
   it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {

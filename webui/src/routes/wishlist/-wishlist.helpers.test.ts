@@ -321,6 +321,13 @@ describe('quality-upgrade rows', () => {
     expect(parsed?.currentQuality).toBe('');
   });
 
+  it('knows the library track a wish was made for', () => {
+    expect(
+      parseWishlistTrack(row({ source_info: { lib2_track_id: 1726 } }), 'single')?.lib2TrackId,
+    ).toBe(1726);
+    expect(parseWishlistTrack(row(), 'single')?.lib2TrackId).toBeUndefined();
+  });
+
   it('leaves a row with no source_info at all unmarked', () => {
     expect(parseWishlistTrack(row(), 'album')?.upgrade).toBe(false);
   });

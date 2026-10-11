@@ -8,7 +8,7 @@ import type {
 } from '../-wishlist.types';
 
 import { trackCountLabel, upgradeTitle } from '../-wishlist.helpers';
-import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { openWishlistSearch } from '../../library/-ui/interactive-search-host';
 import { WishlistCover } from './wishlist-cover';
 
 /**
@@ -134,14 +134,7 @@ function TrackRow({
           type="button"
           className="wl-list-btn"
           title="Interactive Search"
-          onClick={() =>
-            openWishlistInspector({
-              id: track.id,
-              name: track.track,
-              artist: track.artist,
-              album: track.album,
-            })
-          }
+          onClick={() => openWishlistSearch(track)}
         >
           🔍
         </button>

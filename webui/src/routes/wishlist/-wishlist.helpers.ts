@@ -80,6 +80,7 @@ export function parseWishlistTrack(
     failReason: row.failure_reason || '',
     upgrade: source.upgrade_check === true,
     currentQuality: typeof source.original_quality === 'string' ? source.original_quality : '',
+    ...(Number(source.lib2_track_id) > 0 ? { lib2TrackId: Number(source.lib2_track_id) } : {}),
   };
 }
 

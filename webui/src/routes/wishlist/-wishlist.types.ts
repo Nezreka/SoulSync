@@ -110,6 +110,8 @@ export interface ParsedWishlistTrack {
   upgrade?: boolean;
   /** The quality of the file already on disk, for an upgrade row. */
   currentQuality?: string;
+  /** The Library-v2 track this wish is for: its Interactive Search is the library's. */
+  lib2TrackId?: number;
 }
 
 export interface WishlistAlbumGroup {
