@@ -5476,7 +5476,7 @@ class MusicDatabase:
             logger.error(f"Error reading library mode for profile {profile_id}: {e}")
             return {'mode': 'shared', 'root': None}
 
-    def get_own_library_profiles(self) -> List[Dict[str, Any]]:
+    def get_own_library_profiles(self, *, strict: bool = False) -> List[Dict[str, Any]]:
         """every profile with a library of its own: id, name, root."""
         try:
             with self._get_connection() as conn:
@@ -5487,6 +5487,8 @@ class MusicDatabase:
                 return [{'id': r[0], 'name': r[1], 'root': r[2]} for r in cursor.fetchall()]
         except Exception as e:
             logger.error(f"Error listing own-library profiles: {e}")
+            if strict:
+                raise
             return []
 
     @staticmethod

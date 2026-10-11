@@ -54,7 +54,7 @@ def _library_paths(database, config):
     if isinstance(music_paths, (list, tuple)):
         shared.extend(config_root_path(path) for path in music_paths if path)
     private = [(profile['id'], config_root_path(profile['root']))
-               for profile in database.get_own_library_profiles()]
+               for profile in database.get_own_library_profiles(strict=True)]
     return shared, private, config_root_path(config.get('soulseek.download_path', ''))
 
 
@@ -97,8 +97,14 @@ def _presence(database, entry, context, config, library_paths):
         reset_library_scope(token)
     # A relative catalogue path and an absolute history path may be the same
     # file. Conflicting recording IDs must reject both spellings of that copy.
-    resolved = {candidate.get('file_path'): resolve(candidate.get('file_path'))
-                for candidate in candidates if candidate.get('file_path')}
+    resolved = {}
+    for candidate in candidates:
+        raw = candidate.get('file_path')
+        conflict = (identifiers.get('isrc') and candidate.get('isrc')
+                    and identifiers['isrc'].casefold() != candidate['isrc'].casefold())
+        relevant = _strict_identity_matches(SimpleNamespace(**candidate), title, artist, album, False)
+        if raw and raw not in resolved and candidate.get('file_state', 'active') == 'active' and (relevant or conflict):
+            resolved[raw] = resolve(raw)
     conflicting_paths = {os.path.normcase(os.path.realpath(path))
                          for candidate in candidates
                          if identifiers.get('isrc') and candidate.get('isrc')

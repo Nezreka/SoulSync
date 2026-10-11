@@ -175,7 +175,7 @@ def test_another_library_cannot_supply_a_missing_shared_copy(env, monkeypatch):
     foreign.mkdir()
     (foreign / 'Xtal.flac').write_bytes(b'private audio')
     env.settings['library.music_paths'] = [str(foreign)]
-    monkeypatch.setattr(env.db, 'get_own_library_profiles', lambda: [{'id': 2, 'root': str(foreign)}])
+    monkeypatch.setattr(env.db, 'get_own_library_profiles', lambda **kwargs: [{'id': 2, 'root': str(foreign)}])
     quarantined(env)
     assert entries(env)[0]['library_status'] != 'present'
 
@@ -244,3 +244,34 @@ def test_history_without_a_registered_file_is_not_v2_ownership(env):
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
     quarantined(env)
     assert entries(env)[0]['library_status'] == 'missing'
+
+
+def test_unrelated_recordings_do_not_trigger_filesystem_fallbacks(env, monkeypatch):
+    path = candidate(env, title='Xtal (Live)')
+    path.unlink()
+    calls = []
+    monkeypatch.setattr('core.imports.quarantine_library.resolve_library_file_path',
+                        lambda *args, **kwargs: calls.append(args) or None)
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'missing'
+    assert not calls
+
+
+def test_failed_library_boundary_lookup_reports_unknown(env, monkeypatch):
+    import sqlite3
+    candidate(env).unlink()
+    foreign = env.library.parent / 'Private'
+    foreign.mkdir()
+    (foreign / 'Xtal.flac').write_bytes(b'private audio')
+    env.settings['library.music_paths'] = [str(foreign)]
+    quarantined(env)
+    connect = env.db._get_connection
+    calls = 0
+    def fail_once():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError('profile lookup unavailable')
+        return connect()
+    monkeypatch.setattr(env.db, '_get_connection', fail_once)
+    assert entries(env)[0]['library_status'] == 'unknown'
