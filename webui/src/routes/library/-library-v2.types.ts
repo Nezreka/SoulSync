@@ -686,6 +686,8 @@ export interface LibraryV2UiPreferences {
     quality_show_format: boolean;
     quality_show_resolution: boolean;
     quality_show_bitrate: boolean;
+    /** The title opens the track editor; no pencil in Actions. */
+    edit_via_title: boolean;
   };
   artist_table: {
     columns: LibraryV2ArtistTableColumns;

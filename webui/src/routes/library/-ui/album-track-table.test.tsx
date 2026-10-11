@@ -348,6 +348,56 @@ describe('library v2 album track table', () => {
     expect(screen.queryByText('Plex')).not.toBeInTheDocument();
   });
 
+  it.each([
+    [false, 106],
+    [true, 80],
+  ])(
+    'edits a track through the pencil or the title (edit_via_title=%s)',
+    async (viaTitle, width) => {
+      // a fourth 24px action in an 80px column was clipped away: the pencil was
+      // in the DOM but nobody could see it
+      server.use(
+        http.get('/api/library/v2/albums/42', () =>
+          HttpResponse.json({ success: true, album: album([track()]) }),
+        ),
+        http.get('/api/library/v2/albums/42/match-status', () =>
+          HttpResponse.json({ success: true, album: [], tracks: {} }),
+        ),
+        http.get('/api/library/v2/quality-profiles', () =>
+          HttpResponse.json({ success: true, profiles: [] }),
+        ),
+        http.get('/api/library/v2/ui-preferences', () =>
+          HttpResponse.json({
+            success: true,
+            preferences: { track_table: { edit_via_title: viaTitle } },
+          }),
+        ),
+        http.get('/api/library/v2/albums/42/queue-status', () =>
+          HttpResponse.json({ tracks: {}, albums: {} }),
+        ),
+      );
+
+      const { container } = render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </QueryClientProvider>,
+      );
+
+      await screen.findByText('Track Seven');
+      const pencil = screen.queryByRole('button', { name: /Edit track/ });
+      const titleButton = screen.queryByRole('button', { name: 'Track Seven' });
+      const cols = container.querySelectorAll('colgroup col');
+      expect((cols[cols.length - 1] as HTMLElement).style.width).toBe(`${width}px`);
+      if (viaTitle) {
+        expect(pencil).toBeNull();
+        expect(titleButton).toHaveAttribute('title', expect.stringMatching(/^Edit track/));
+      } else {
+        expect(pencil).toBeInTheDocument();
+        expect(titleButton).toBeNull();
+      }
+    },
+  );
+
   it('shows the quality profile in its own column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>
@@ -899,7 +949,8 @@ describe('library v2 album track table', () => {
     expect(tableColumns[0].style.width).toBe('24px');
     expect(tableColumns[1].style.width).toBe('28px');
     expect(tableColumns[2].style.width).toBe('32px');
-    expect(tableColumns.at(-1)?.style.width).toBe('80px');
+    // three actions plus the edit pencil (the default); 80px clipped the pencil
+    expect(tableColumns.at(-1)?.style.width).toBe('106px');
     expect(tableColumns.slice(3, -1).every((column) => column.style.width.endsWith('px'))).toBe(
       true,
     );

@@ -7816,9 +7816,12 @@ const LEGACY_PIXEL_WIDTH_THRESHOLD = 100;
 const CHECKBOX_COLUMN_WIDTH = 24;
 const MONITOR_COLUMN_WIDTH = 28;
 const TRACK_NUMBER_COLUMN_WIDTH = 32;
-const ACTION_COLUMN_WIDTH = 80;
-const UTILITY_COLUMN_WIDTH =
-  CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + TRACK_NUMBER_COLUMN_WIDTH + ACTION_COLUMN_WIDTH;
+/** Search, interactive search and add-to-playlist, plus the edit pencil
+ *  unless the title opens the editor. A fourth 24px button in 80px was
+ *  clipped away by the cell's overflow. */
+const trackActionColumnWidth = (editViaTitle: boolean) => (editViaTitle ? 80 : 106);
+const UTILITY_COLUMN_WIDTH_BASE =
+  CHECKBOX_COLUMN_WIDTH + MONITOR_COLUMN_WIDTH + TRACK_NUMBER_COLUMN_WIDTH;
 
 const DEFAULT_TRACK_TABLE_COLUMN_WIDTHS: Record<string, number> = {
   number: 2.532,
@@ -8510,6 +8513,7 @@ function TrackTableOptionsMenu({
   const qualityShowFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
   const qualityShowResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
   const qualityShowBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
+  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? false;
 
   return (
     <ColumnsOptionsMenu
@@ -8573,6 +8577,23 @@ function TrackTableOptionsMenu({
             >
               Reset column widths
             </button>
+            <div className={styles.tableOptionsGroupLabel}>Edit a track</div>
+            {(
+              [
+                [false, 'Pencil in Actions'],
+                [true, 'Click the title'],
+              ] as const
+            ).map(([viaTitle, text]) => (
+              <label key={String(viaTitle)} className={styles.tableOptionsItem}>
+                <input
+                  type="radio"
+                  name="track-edit-via"
+                  checked={editViaTitle === viaTitle}
+                  onChange={() => mutation.mutate({ track_table: { edit_via_title: viaTitle } })}
+                />
+                {text}
+              </label>
+            ))}
           </section>
 
           <section className={styles.tableOptionsSection}>
@@ -9131,6 +9152,9 @@ export function AlbumTrackTable({
     title: true,
   };
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
+  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? false;
+  const actionColumnWidth = trackActionColumnWidth(editViaTitle);
+  const utilityColumnWidth = UTILITY_COLUMN_WIDTH_BASE + actionColumnWidth;
   const columnWidths =
     prefsQuery.data?.track_table.column_widths ?? DEFAULT_TRACK_TABLE_COLUMN_WIDTHS;
   const defaultOrder: (keyof LibraryV2TrackTableColumns)[] = [
@@ -9220,18 +9244,18 @@ export function AlbumTrackTable({
   }, [visibleColumnsSignature, persistedWidthsSignature]);
 
   const responsiveColumnWidths =
-    tableWidth != null && tableWidth > UTILITY_COLUMN_WIDTH
+    tableWidth != null && tableWidth > utilityColumnWidth
       ? resolveResponsiveColumnWidths(
           visibleColumnKeys,
           columnWeights,
-          tableWidth - UTILITY_COLUMN_WIDTH,
+          tableWidth - utilityColumnWidth,
           responsiveMinimumWidths,
         )
       : null;
   const renderedTableWidth =
     responsiveColumnWidths == null
       ? null
-      : UTILITY_COLUMN_WIDTH +
+      : utilityColumnWidth +
         Object.values(responsiveColumnWidths).reduce((sum, width) => sum + width, 0);
 
   const stackedTable =
@@ -9305,7 +9329,7 @@ export function AlbumTrackTable({
     resizeSnapshot.current = {
       key,
       widths: columnWeights,
-      availableWidth: Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH),
+      availableWidth: Math.max(1, liveTableWidth - utilityColumnWidth),
       minimumWidths: responsiveMinimumWidths,
     };
   }
@@ -9335,7 +9359,7 @@ export function AlbumTrackTable({
 
   function resizeColumnByKeyboard(key: string, deltaPercent: number) {
     const liveTableWidth = measureTrackTableWidth(tableWrapElement) ?? tableWidth ?? 1;
-    const availableWidth = Math.max(1, liveTableWidth - UTILITY_COLUMN_WIDTH);
+    const availableWidth = Math.max(1, liveTableWidth - utilityColumnWidth);
     const deltaPixels = (deltaPercent / 100) * availableWidth;
     const next = resizeResponsiveColumnWidths(
       columnWeights,
@@ -9618,7 +9642,7 @@ export function AlbumTrackTable({
               }}
             />
           ))}
-          <col style={{ width: `${ACTION_COLUMN_WIDTH}px` }} />
+          <col style={{ width: `${actionColumnWidth}px` }} />
         </colgroup>
         <thead>
           <tr>
@@ -9665,6 +9689,7 @@ export function AlbumTrackTable({
               columnWidths={columnWeights}
               responsiveColumnWidths={responsiveColumnWidths}
               showAllProviders={showAllProviders}
+              editViaTitle={editViaTitle}
               selected={track.id != null && selected.has(track.id)}
               onToggleSelect={
                 track.id != null ? () => toggleSelected(track.id as number) : undefined
@@ -9899,6 +9924,7 @@ function TrackRow({
   columnWidths,
   responsiveColumnWidths,
   showAllProviders,
+  editViaTitle,
   selected,
   onToggleSelect,
   onAction,
@@ -9914,6 +9940,8 @@ function TrackRow({
   columnWidths: Record<string, number | null>;
   responsiveColumnWidths: Record<string, number> | null;
   showAllProviders: boolean;
+  /** Table option: the title opens the track editor instead of a pencil. */
+  editViaTitle: boolean;
   selected: boolean;
   onToggleSelect: (() => void) | undefined;
   onAction: ActionHandler;
@@ -9948,7 +9976,18 @@ function TrackRow({
           >
             {/* Legacy parity: present/missing shown inline with the title. */}
             <span className={styles.trackTitleCell}>
-              <span className={missing ? styles.muted : undefined}>{label}</span>
+              {editViaTitle && track.id ? (
+                <button
+                  type="button"
+                  className={`${styles.linkButton} ${styles.titleEditLink} ${missing ? styles.muted : ''}`}
+                  title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
+                  onClick={() => setDetailTab('metadata')}
+                >
+                  {label}
+                </button>
+              ) : (
+                <span className={missing ? styles.muted : undefined}>{label}</span>
+              )}
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
               {(track.file_count ?? 0) > 1 ? (
                 <span className={styles.fileVersionCount}>{track.file_count} versions</span>
@@ -10252,6 +10291,7 @@ function TrackRow({
             openTab={detailTab}
             onOpenTab={setDetailTab}
             onClose={() => setDetailTab(null)}
+            showButton={!editViaTitle}
           />
         ) : null}
       </td>
@@ -10720,21 +10760,25 @@ function TrackDetailButton({
   openTab,
   onOpenTab,
   onClose,
+  showButton = true,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
   openTab: TrackDetailTab | null;
   onOpenTab: (tab: TrackDetailTab) => void;
   onClose: () => void;
+  showButton?: boolean;
 }) {
   if (!track.id) return null;
   return (
     <>
-      <IconActionButton
-        icon="edit"
-        title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
-        onClick={() => onOpenTab('metadata')}
-      />
+      {showButton ? (
+        <IconActionButton
+          icon="edit"
+          title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
+          onClick={() => onOpenTab('metadata')}
+        />
+      ) : null}
       {openTab ? (
         <TrackDetailModal
           key={openTab}

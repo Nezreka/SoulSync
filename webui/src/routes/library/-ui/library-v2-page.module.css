@@ -1325,6 +1325,13 @@ button.featureTag:disabled {
   text-decoration: underline;
 }
 
+/* Track title as the editor's door (table option): reads as text, underlined. */
+.titleEditLink {
+  color: inherit;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.35);
+  text-underline-offset: 3px;
+}
+
 .tableRow {
   cursor: pointer;
 }

@@ -2100,6 +2100,7 @@ type UiPreferencesPatch = {
     quality_show_format?: boolean;
     quality_show_resolution?: boolean;
     quality_show_bitrate?: boolean;
+    edit_via_title?: boolean;
   };
   artist_table?: {
     columns?: Partial<LibraryV2ArtistTableColumns>;
