@@ -6278,20 +6278,26 @@ def search_sources():
     source-picker chip row and let the user search specific sources.
 
     Response shape: ``{"mode": "hybrid"|<source>, "sources": [{"name": str,
-    "display_name": str}]}``
+    "display_name": str}], "extra": [...]}`` -- ``extra`` are sources that
+    work without being part of the download setup (YouTube, SoundCloud),
+    searched only on request.
     """
     if not download_orchestrator:
-        return jsonify({"mode": "soulseek", "sources": [{"name": "soulseek", "display_name": "Soulseek"}]})
+        return jsonify({"mode": "soulseek", "sources": [{"name": "soulseek", "display_name": "Soulseek"}],
+                        "extra": []})
     mode = download_orchestrator.mode
-    if mode == 'hybrid':
-        chain = download_orchestrator._resolve_source_chain()
-        sources = [
-            {"name": s, "display_name": download_orchestrator.registry.display_name(s)}
-            for s in chain
-        ]
-    else:
-        sources = [{"name": mode, "display_name": download_orchestrator.registry.display_name(mode)}]
-    return jsonify({"mode": mode, "sources": sources})
+    names = download_orchestrator._resolve_source_chain() if mode == 'hybrid' else [mode]
+
+    def _described(name):
+        return {"name": name, "display_name": download_orchestrator.registry.display_name(name)}
+
+    try:
+        extra = [_described(name) for name in download_orchestrator.configured_clients()
+                 if name not in names]
+    except Exception as e:  # noqa: BLE001 - the configured sources are what matters
+        logger.debug(f"extra search sources unavailable: {e}")
+        extra = []
+    return jsonify({"mode": mode, "sources": [_described(name) for name in names], "extra": extra})
 
 
 @app.route('/api/search', methods=['POST'])
@@ -6304,12 +6310,7 @@ def search_music():
     """
     data = request.get_json()
     query = data.get('query')
-    if not query:
-        return jsonify({"error": "No search query provided."}), 400
-
     requested_source = (data.get('source') or '').strip().lower() or None
-    logger.info(f"Web UI Search initiated for: '{query}'" + (f" (source={requested_source})" if requested_source else ""))
-    add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     # Candidate-token binding (audit §16.1): torrent/usenet results carry
     # opaque candidate tokens; mint them bound to the searching profile.
@@ -6318,20 +6319,36 @@ def search_music():
     # a named-but-invalid entity fails the search instead of minting
     # unbound tokens.
     from core.download_plugins.candidate_store import candidate_binding
+    from core.library2 import entity_search
     from core.library2.grab_context import resolve_lib2_grab_context
     _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
     if _lib2_state == 'invalid':
         return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
+    # A Library-v2 Interactive Search sends no text: it looks for the track
+    # and for its release, and every hit carries the pipeline's verdict.
+    queries = [query] if query else (
+        entity_search.entity_search_queries(_lib2_ctx, matching_engine.clean_title)
+        if _lib2_ctx else [])
+    if not queries:
+        return jsonify({"error": "No search query provided."}), 400
+    judge = None
+    if _lib2_ctx:
+        def judge(tracks, albums, q):
+            return entity_search.judge_results(get_database(), _lib2_ctx, tracks, albums, q)
+
+    logger.info(f"Web UI Search initiated for: {queries}" + (f" (source={requested_source})" if requested_source else ""))
+    add_activity_item("", "Search Started", f"'{' · '.join(queries)}'", "Now")
 
     try:
         with candidate_binding(get_current_profile_id(),
                                lib2_track_id=(_lib2_ctx or {}).get('track_id'),
                                lib2_album_id=(_lib2_ctx or {}).get('album_id')):
-            results = _search_basic.run_basic_search(
-                query, download_orchestrator, run_async,
-                source=requested_source, entity_context=_lib2_ctx)
-        add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
-        return jsonify({"results": results})
+            results = entity_search.merge_results(_search_basic.run_basic_search(
+                q, download_orchestrator, run_async,
+                source=requested_source, entity_context=_lib2_ctx, judge=judge)
+                for q in queries)
+        add_activity_item("", "Search Complete", f"'{' · '.join(queries)}' - {len(results)} results", "Now")
+        return jsonify({"results": results, "queries": queries})
     except ValueError as ve:
         # user-facing config problem (e.g. SoundCloud link with the source
         # disabled) — a clear 400, not a silent empty result

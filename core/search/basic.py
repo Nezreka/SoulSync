@@ -84,6 +84,7 @@ def run_basic_search(
     *,
     source: Optional[str] = None,
     entity_context: Optional[Mapping[str, Any]] = None,
+    judge: Optional[Callable[[list, list, str], dict]] = None,
 ) -> list[dict]:
     """Search ``source`` (or the active/first hybrid source) for ``query``.
 
@@ -98,6 +99,10 @@ def run_basic_search(
         ``"soulseek"``, ``"tidal"``, ``"qobuz"``). When ``None``, behaviour
         is unchanged from before: orchestrator.search() picks the active
         source (single mode) or the first in chain (hybrid).
+    judge:
+        ``(tracks, albums, query) -> {id(result): decision}`` -- the download
+        pipeline's verdict per hit, stamped on its row as ``decision`` before
+        any display decoration rewrites the row's artist.
     """
     # A pasted SoundCloud link only resolves on the SoundCloud source (its
     # share URL carries the access token; no other source can find an
@@ -137,6 +142,13 @@ def run_basic_search(
     else:
         tracks, albums = run_async(download_orchestrator.search(query))
 
+    verdicts = {}
+    if judge is not None:
+        try:
+            verdicts = judge(list(tracks or []), list(albums or []), query) or {}
+        except Exception as exc:  # noqa: BLE001 - an unjudged hit is still a hit
+            logger.warning("basic search: judging results failed: %s", exc)
+
     processed_albums = []
     for album in albums:
         album_dict = album.__dict__.copy()
@@ -145,6 +157,8 @@ def run_basic_search(
         ]
         album_dict['result_type'] = 'album'
         album_dict['quality_score'] = _quality_score(album)
+        if id(album) in verdicts:
+            album_dict['decision'] = verdicts[id(album)]
         processed_albums.append(_decorate_result(
             album_dict, source=source, entity_context=entity_context))
 
@@ -153,6 +167,8 @@ def run_basic_search(
         track_dict = track.__dict__.copy()
         track_dict['result_type'] = 'track'
         track_dict['quality_score'] = _quality_score(track)
+        if id(track) in verdicts:
+            track_dict['decision'] = verdicts[id(track)]
         processed_tracks.append(_decorate_result(
             track_dict, source=source, entity_context=entity_context))
 

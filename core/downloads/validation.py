@@ -439,6 +439,19 @@ def _filter_prowlarr_by_quality(candidates, profile_id=None, why=None):
     return filtered
 
 
+_TITLE_FEATURE_RE = re.compile(
+    r'[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[)\]]', re.IGNORECASE)
+
+
+def _credited_in_title(expected_artists, candidate_title) -> bool:
+    """A hit whose artist field names only the lead ("Topic") still credits
+    the wanted second artist when its title says "(feat. A7S)"."""
+    from core.matching.artist_aliases import split_artist_credit
+    return any(_release_artist_matches(expected_artists, name)
+               for group in _TITLE_FEATURE_RE.findall(candidate_title or '')
+               for name in split_artist_credit(group))
+
+
 def _release_artist_matches(expected_artists, candidate_artist):
     """Require a whole artist credit, rather than a name inside another band."""
     from difflib import SequenceMatcher
@@ -608,6 +621,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     break
                 else:
                     _best_artist = max(_best_artist, SequenceMatcher(None, _ea_norm, _cand_artist).ratio())
+            if _best_artist < 0.5 and _credited_in_title(expected_artists, r.title):
+                _best_artist = 1.0
             # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
             # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
             # 10 chars with 2 coincidental char matches), which bypassed the

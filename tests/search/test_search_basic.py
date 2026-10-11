@@ -206,6 +206,27 @@ def test_scoped_prowlarr_result_keeps_release_title_and_uses_entity_artist():
     assert result[0]['source'] == 'usenet'
 
 
+def test_judge_sees_the_raw_hits_before_the_entity_artist_is_painted_on():
+    """The verdict must be about what the indexer said ("TEAM"), not about the
+    library artist the row is displayed under afterwards."""
+    meta = {'protocol': 'usenet', 'release_title': 'TEAM-WEB-Compilation-FLAC-2026'}
+    track = _real_track(username='usenet', artist='TEAM', title='WEB', _source_metadata=meta)
+    seen = []
+
+    def judge(tracks, albums, query):
+        seen.extend((row.artist, query) for row in tracks)
+        return {id(track): {'accepted': False, 'code': 'artist_mismatch'}}
+
+    result = basic.run_basic_search(
+        'Real Artist Real Song', _FakeSoulseek(tracks=[track]), _sync_run_async,
+        source='usenet', judge=judge,
+        entity_context={'track_id': 3, 'artist_name': 'Real Artist', 'track_title': 'Real Song'})
+
+    assert seen == [('TEAM', 'Real Artist Real Song')]
+    assert result[0]['artist'] == 'Real Artist'
+    assert result[0]['decision'] == {'accepted': False, 'code': 'artist_mismatch'}
+
+
 def test_no_source_param_falls_through_to_orchestrator_default():
     """When ``source`` is omitted, behaviour is identical to pre-redesign:
     orchestrator.search() is called and routes to the configured source
