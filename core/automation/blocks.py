@@ -490,17 +490,21 @@ ACTIONS: list[dict] = [
      "description": "For every YouTube playlist you follow, wishlist the newest N (the 'videos to grab' setting on Settings → Library) on the first scan, then only videos newly added to it — the same rule as channels, no whole-list flood. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},
     # Stage 2 — processors that DRAIN the wishlist by downloading.
     {"type": "video_process_movie_wishlist", "label": "Process Movie Wishlist", "icon": "download", "scope": "video",
-     "description": "Auto-grab your wished, released MOVIES from Soulseek: searches each, picks the best release per your quality profile, and downloads it (the monitor finishes + organises it). Skips unreleased ('monitored') ones and any already downloading. Needs the Movie library folder + slskd set. Pair with an hourly schedule.", "available": True,
+     "description": "Auto-grab your wished, released MOVIES from Soulseek: searches each, picks the best release per your quality profile, and downloads it (the monitor finishes + organises it). Skips unreleased ('monitored') ones and any already downloading. Needs the Movie library folder + slskd set. Pair with an hourly schedule. One run hands at most 'Max downloads per run' items (default 3) to the download clients — the rest stay wishlisted for the next run.", "available": True,
      "config_fields": [
-         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
+         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1},
+         {"key": "max_simultaneous_downloads", "type": "number", "label": "Max downloads per run", "default": 3, "min": 1,
+          "description": "Caps how many items one drain run hands to the download clients; the rest wait for the next run. Does not affect RSS Sync or manual grabs."}
      ]},
     {"type": "video_process_episode_wishlist", "label": "Process Episode Wishlist", "icon": "download", "scope": "video",
-     "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Today's Airings' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule.", "available": True,
+     "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Today's Airings' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule. One run hands at most 'Max downloads per run' items (default 3) to the download clients — the rest wait for the next run.", "available": True,
      "config_fields": [
-         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
+         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1},
+         {"key": "max_simultaneous_downloads", "type": "number", "label": "Max downloads per run", "default": 3, "min": 1,
+          "description": "Caps how many items one drain run hands to the download clients; the rest wait for the next run. Does not affect RSS Sync or manual grabs."}
      ]},
     {"type": "video_rss_sync", "label": "RSS Sync (Instant Grabs)", "icon": "download", "scope": "video",
-     "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule.", "available": True},
+     "description": "Sonarr-speed acquisition: every few minutes, pull your indexers' newest releases from Prowlarr (one aggregate call, no searching) and instantly grab any that match your wishlist — a wanted episode lands minutes after it's posted instead of at the next hourly drain. Respects your quality profile, upgrade cutoff, blocklist and download mode (needs torrent/usenet enabled + Prowlarr). Pair with a 15-minute schedule. Grabs new feed matches on sight — it is NOT subject to the Process Movie/Episode Wishlist 'Max downloads per run' cap.", "available": True},
     {"type": "video_extto_fresh_refresh", "label": "Refresh Fresh Releases", "icon": "download", "scope": "video",
      "description": "Keep Search \u2192 Fresh Releases warm: pull the EXT.to board, match every release against its own detail page (poster, IMDb id + rating, genres, runtime), and store the result so the tab opens instantly instead of waiting on Cloudflare. Matched releases are cached by release, so an hourly run only pays for what is genuinely new \u2014 the first run is the slow one. The Refresh button on the tab does exactly this on demand. Needs FlareSolverr. Pair with an hourly schedule.", "available": True,
      "config_fields": [

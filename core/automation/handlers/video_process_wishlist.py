@@ -5,10 +5,13 @@ people/airing scans pay off. For wished, RELEASED movies (and aired episodes) it
 Soulseek, picks the best release per the quality profile, and enqueues the download; the
 existing ``download_monitor`` finishes + organises + archives it, exactly like a manual grab.
 
-Shape mirrors the YouTube drain (Boulder: "same standard"): it processes the WHOLE eligible
-wishlist (no total cap), but the slow part — each item needs a ~20s blocking Soulseek search
-— runs only a FEW at a time (``max_concurrent``). A ``guard`` keeps the next hourly tick from
-overlapping a run that's still working, so it can't pile up.
+Shape mirrors the YouTube drain (Boulder: "same standard"): the slow part — each item
+needs a ~20s blocking Soulseek search — runs only a FEW at a time (``max_concurrent``,
+"Max simultaneous searches"), and each run hands at most ``max_simultaneous_downloads``
+items ("Max downloads per run", default 3) to the download clients. The rest stay
+on the wishlist and are picked up on the next tick — no starvation, no loss. A ``guard``
+keeps the next hourly tick from overlapping a run that's still working, so it can't
+pile up.
 
 Movies are gated on ``status='wanted'`` (released; skips 'monitored'/unreleased). Episodes
 are all-wished (the airing scan only adds aired ones). Items already downloading are skipped
@@ -901,7 +904,9 @@ def auto_video_process_wishlist(
     record_note: Optional[Callable[[Dict[str, Any], str, str, Optional[str]], None]] = None,
 ) -> Dict[str, Any]:
     """Auto-grab the wished movies (or episodes): search Soulseek, pick the best release,
-    enqueue. Processes the whole eligible wishlist, a few searches at a time.
+    enqueue — at most ``max_simultaneous_downloads`` grabs per run (default 3); the rest
+    stay on the wishlist for the next tick. Searches run a few at a time
+    (``max_concurrent``).
 
     Returns ``{'status': 'completed', 'searched': int, 'grabbed': int, ...}``."""
     fetch_items = fetch_items or _default_fetch_items
@@ -913,6 +918,16 @@ def auto_video_process_wishlist(
     record_note = record_note or _default_record_note
     automation_id = config.get('_automation_id')
     concurrency = max(1, int(config.get('max_concurrent', 3) or 3))
+    # Grab budget ("Max downloads per run", default 3): how many items one
+    # drain run may hand to slskd / the torrent / usenet client. The rest stay
+    # on the wishlist for the next tick — no starvation, no loss. Distinct from
+    # `concurrency` above, which only sizes the search thread pool. A garbage
+    # value fails open to the default — the drain never strands itself on a
+    # mis-typed config.
+    try:
+        max_downloads = max(1, int(config.get('max_simultaneous_downloads', 3) or 3))
+    except (ValueError, TypeError):
+        max_downloads = 3
     label = 'movie' if media_type == 'movie' else 'episode'
 
     if not _try_claim(media_type):
@@ -978,10 +993,19 @@ def auto_video_process_wishlist(
         rejected = [0]     # source had hits, but none passed the quality profile
         notrun = [0]       # the search never ran (slskd didn't accept it)
         refused = [0]      # releases passed the profile; the download client said no
+        deferred = [0]      # budget spent: left on the wishlist for the next run
+        slots_claimed = [0]  # atomic grab-budget claims this run (never > max_downloads)
         total = len(todo)
         lock = threading.Lock()
 
         def _one(it):
+            # Grab budget: once this run has claimed `max_downloads` slots, the
+            # rest wait for the next tick — no search wasted, no outcome
+            # recorded (this is not a fruitless search), no row lost.
+            with lock:
+                if slots_claimed[0] >= max_downloads:
+                    deferred[0] += 1
+                    return
             found = search(it, media_type)
             # the seam returns (candidates, error); tolerate a bare list/None too (test fakes)
             cands, err = found if isinstance(found, tuple) else (found, None)
@@ -997,20 +1021,46 @@ def auto_video_process_wishlist(
             usable = [c for c, remaining in cooled if remaining <= 0]
             cooldown_wait = max([remaining for _c, remaining in cooled], default=0)
             ok, refusal = False, None
-            for cand in usable[:MAX_GRAB_ATTEMPTS]:
-                out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
-                if out["ok"]:
-                    clear_source_refusal(it, media_type, cand)
-                    ok = True
-                    break
-                note_source_refusal(it, media_type, cand)
-                refusal = out["error"] or refusal
+            budget_deferred = False
+            if usable:
+                # Atomic claim (YouTube's slots_free() pattern): threads race
+                # here, so the check + increment must be one locked step — at
+                # most `max_downloads` items are ever handed to the clients.
+                with lock:
+                    slot = slots_claimed[0] < max_downloads
+                    if slot:
+                        slots_claimed[0] += 1
+                if slot:
+                    for cand in usable[:MAX_GRAB_ATTEMPTS]:
+                        out = enqueue_outcome(enqueue(it, cand, cands, media_type, root))
+                        if out["ok"]:
+                            clear_source_refusal(it, media_type, cand)
+                            ok = True
+                            break
+                        note_source_refusal(it, media_type, cand)
+                        refusal = out["error"] or refusal
+                    if not ok:
+                        # A refused grab is not a download — hand the slot back
+                        # so a later item can still use it this run.
+                        with lock:
+                            slots_claimed[0] -= 1
+                else:
+                    # Found releases, but racing threads spent the budget first.
+                    # The item stays on the wishlist for the next tick.
+                    budget_deferred = True
+                    with lock:
+                        deferred[0] += 1
             name = display_name(it, media_type)
             # tell apart: grabbed / search-didn't-run / source-empty / hits-but-all-rejected.
             # `err` alongside RESULTS is a non-fatal note (a chain source was skipped,
             # e.g. 'torrent skipped — Prowlarr not configured') — always show it, or a
             # mis-configured first source silently degrades every search.
-            if ok:
+            if budget_deferred:
+                msg = ("Found release(s) for '%s' but this run already grabbed %d "
+                       "(Max downloads per run) — deferred to the next run"
+                       % (name, max_downloads))
+                lt = 'info'
+            elif ok:
                 msg, lt = "Grabbed '%s'" % name, 'success'
             elif didnt_run:
                 msg = ("Search didn't run for '%s' — %s" % (name, err)) if err \
@@ -1055,8 +1105,10 @@ def auto_video_process_wishlist(
             # A search that never ran (slskd down / rate-limited) says nothing;
             # neither does a client refusing a release we did find, and counting
             # that as a fruitless search is how a row reached 133 "attempts"
-            # while its release was available the whole time.
-            if not didnt_run and not (usable and not ok):
+            # while its release was available the whole time. A budget-deferred
+            # item is skipped for the same reason: the release exists, it just
+            # waits for the next tick.
+            if not didnt_run and not (usable and not ok) and not budget_deferred:
                 # Keep the receipt. Every candidate was just judged and is about to
                 # be discarded; the best one refused for a reason about
                 # AVAILABILITY (not "wrong season", which is only search noise) is
@@ -1068,6 +1120,8 @@ def auto_video_process_wishlist(
                 searched[0] += 1
                 if ok:
                     grabbed[0] += 1
+                elif budget_deferred:
+                    pass   # already tallied in deferred[]; not a client refusal
                 elif didnt_run:
                     notrun[0] += 1
                 elif usable_all:
@@ -1095,6 +1149,9 @@ def auto_video_process_wishlist(
             tail.append('%d rejected on quality' % rejected[0])
         if refused[0]:
             tail.append('%d refused by the download client' % refused[0])
+        if deferred[0]:
+            tail.append('%d deferred to the next run (download cap %d)'
+                        % (deferred[0], max_downloads))
         breakdown = (' · ' + ', '.join(tail)) if tail else ''
         done = ('Grabbed %d %s(s) of %d searched%s' % (grabbed[0], label, searched[0], breakdown)) if grabbed[0] \
             else ('Searched %d %s(s), grabbed 0%s' % (searched[0], label, breakdown))
@@ -1102,7 +1159,8 @@ def auto_video_process_wishlist(
                              log_line=done, log_type='success' if grabbed[0] else 'info')
         return {'status': 'completed', 'searched': searched[0], 'grabbed': grabbed[0],
                 'noresults': noresults[0], 'rejected': rejected[0], 'notrun': notrun[0],
-                'refused': refused[0], '_manages_own_progress': True}
+                'refused': refused[0], 'deferred': deferred[0],
+                '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
