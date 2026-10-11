@@ -228,6 +228,11 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         "source": source,
         "profile_id": import_profile_id(parent),
         "is_album_download": True,
+        "_album_import_extra": {
+            "album": album.get("name") or "",
+            "download_source": str(parent.get("_download_username") or
+                                   (parent.get("original_search_result") or {}).get("username") or ""),
+        },
         "has_clean_metadata": True,
         "has_full_metadata": True,
         "original_search_result": {

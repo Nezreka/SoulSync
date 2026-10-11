@@ -385,3 +385,38 @@ describe('review counts', () => {
     await waitFor(() => expect(summary.calls).toBeGreaterThan(before));
   });
 });
+
+it('refreshes library presence while reviewing the same quarantine entries', async () => {
+  let owned = false;
+  server.use(
+    http.get('/api/quarantine/list', () =>
+      HttpResponse.json({
+        success: true,
+        entries: [entry({ library_status: owned ? 'present' : 'missing' })],
+      }),
+    ),
+  );
+  const scheduled: (() => void)[] = [];
+  const realSetInterval = globalThis.setInterval;
+  const spy = vi.spyOn(globalThis, 'setInterval').mockImplementation(((
+    fn: () => void,
+    ms: number,
+    ...rest: unknown[]
+  ) => {
+    if (ms === REVIEW_SUMMARY_POLL_MS) {
+      scheduled.push(fn);
+      return 0 as unknown as ReturnType<typeof setInterval>;
+    }
+    return realSetInterval(fn, ms, ...rest);
+  }) as unknown as typeof setInterval);
+  const { result } = renderHook(() => useAdlVerification());
+  await waitFor(() => expect(result.current.acoustidEnabled).toBe(true));
+  act(() => result.current.setSubView('quarantine'));
+  await waitFor(() => expect(result.current.state.quarantine[0]?.library_status).toBe('missing'));
+  spy.mockRestore();
+  owned = true;
+  await act(async () => {
+    scheduled.at(-1)?.();
+  });
+  await waitFor(() => expect(result.current.state.quarantine[0]?.library_status).toBe('present'));
+});
