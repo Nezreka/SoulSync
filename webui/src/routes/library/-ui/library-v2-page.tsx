@@ -8359,6 +8359,7 @@ function ColumnsOptionsMenu<K extends string>({
   onReorder,
   lockedColumns,
   extra,
+  workspace = false,
 }: {
   title: string;
   columnLabels: Record<K, string>;
@@ -8368,6 +8369,9 @@ function ColumnsOptionsMenu<K extends string>({
   onReorder?: (newOrder: K[]) => void;
   lockedColumns?: ReadonlySet<K>;
   extra?: ReactNode;
+  /** The size of the other library workspaces (Preview Retag, Rename,
+   *  History), sections side by side, so nothing needs scrolling. */
+  workspace?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [dragKey, setDragKey] = useState<K | null>(null);
@@ -8394,9 +8398,17 @@ function ColumnsOptionsMenu<K extends string>({
         onClick={() => setOpen((v) => !v)}
       />
       {open ? (
-        <ModalShell title={title} settings onClose={() => setOpen(false)}>
+        <ModalShell
+          title={title}
+          settings={!workspace}
+          wide={workspace}
+          className={workspace ? styles.toolWorkspace : undefined}
+          onClose={() => setOpen(false)}
+        >
           <div className={styles.tableOptionsDialogBody}>
-            <div className={styles.tableOptionsLayout}>
+            <div
+              className={`${styles.tableOptionsLayout} ${workspace ? styles.tableOptionsWorkspace : ''}`}
+            >
               <section className={styles.tableOptionsSection}>
                 <div className={styles.tableOptionsGroupLabel}>Visible columns</div>
                 <div
@@ -8527,6 +8539,7 @@ function TrackTableOptionsMenu({
       columnOrder={columnOrder}
       onReorder={(newOrder) => mutation.mutate({ track_table: { column_order: newOrder } })}
       lockedColumns={TRACK_TABLE_LOCKED_COLUMNS}
+      workspace
       extra={
         <div className={styles.tableOptionsExtraGrid}>
           <section className={styles.tableOptionsSection}>

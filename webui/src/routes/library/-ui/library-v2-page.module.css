@@ -4363,6 +4363,22 @@ button.statusWarn:disabled {
   }
 }
 
+/* Track table options: the size of the other workspaces, the three sections
+ * side by side so every setting is visible at once. */
+.tableOptionsWorkspace {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tableOptionsWorkspace .tableOptionsExtraGrid {
+  display: contents;
+}
+
+@media (max-width: 780px) {
+  .tableOptionsWorkspace {
+    grid-template-columns: 1fr;
+  }
+}
+
 .tableOptionsReorder {
   display: flex;
   align-items: center;
