@@ -612,8 +612,11 @@ def test_the_completeness_gate_uses_the_captured_runtime(db, tmp_path):
     # storefront is shedding.
     from core.audiobook_download_monitor import _check_complete
 
+    # The release names the edition's narrator, so the narration check is a
+    # confident match and the captured runtime is what gets compared.
     db.record_download("hash-1", "B1", "The Final Empire", "torrent",
-                       client_id="hash-1", book=_stored_book(runtime_minutes=600))
+                       client_id="hash-1", book=_stored_book(runtime_minutes=600),
+                       release_title="The Final Empire narrated by Michael Kramer")
     row = db.get_downloads()[0]
     folder = tmp_path / "dl"
     folder.mkdir()

@@ -290,7 +290,9 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     waiting forever means one broken release holds a row for good.
     """
     from core.audiobook_completeness import (
+        UNKNOWN_NARRATION_TOLERANCE,
         assess,
+        narration_confidence,
         staging_days_from_settings,
         staging_expired,
         tolerance_from_settings,
@@ -313,8 +315,64 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
     labels = f"{row.get('release_title') or ''} {Path(source_path).name}"
     abridged = is_abridged(labels) or is_dramatized(labels)
 
-    verdict = assess(source_path, expected, tolerance_from_settings(),
+    # The edition's runtime is the runtime of ONE reading. When the edition
+    # names its narrator and the download is (or may be) a different reading,
+    # that number is not the book's runtime and must not gate the import: a
+    # complete alternate narration would be held as incomplete, then failed
+    # back to the wishlist after staging expires, which would grab the same
+    # release again.
+    #
+    # A download confidently identified as the edition's own narration gets
+    # the hard runtime gate. Any other outcome — confidently different, or
+    # unidentified — gets a loose plausibility floor instead of the exacting
+    # gate (UNKNOWN_NARRATION_TOLERANCE): speaking rate is the only thing that
+    # moves a complete unabridged reading, so anything far below is a sample
+    # pack or a grossly truncated download, not an alternate narration. A
+    # partial download naming a different narrator must not sail through
+    # unchecked.
+    #
+    # When the edition names no narrator there is nothing to be aware of, and
+    # the runtime stays the book's only completeness signal — the gate keeps
+    # working exactly as before. Same when there is no expected runtime or
+    # the release is abridged/dramatized: the narration question is moot, so
+    # it is not even asked.
+    gate_tolerance = tolerance_from_settings()
+    narration: Optional[Dict[str, Any]] = None
+    edition_narrators = [n for n in (book.get("narrator_names") or [])
+                         if str(n).strip()]
+    if expected > 0 and not abridged and edition_narrators:
+        narration = narration_confidence(
+            source_path, row.get("release_title"), book)
+        if narration["confidence"] in ("different", "unknown"):
+            # A floor, never a ceiling: it may only loosen the user's own
+            # tolerance, never tighten it.
+            gate_tolerance = min(gate_tolerance, UNKNOWN_NARRATION_TOLERANCE)
+
+    verdict = assess(source_path, expected, gate_tolerance,
                      abridged=abridged)
+    if narration is not None and verdict.get("complete"):
+        measured = int(verdict.get("measured_minutes") or 0)
+        if narration["confidence"] == "different":
+            verdict["measured_by"] = "alternate-narration"
+            verdict["reason"] = (
+                f"{measured} minutes present; narrated by "
+                f"{narration['detected_narrator']} rather than the edition's "
+                f"narrator, so only a plausibility floor was checked"
+            )
+        elif narration["confidence"] == "unknown":
+            verdict["measured_by"] = "narration-unverified"
+            verdict["reason"] = (
+                f"{measured} minutes present; the narration could not be "
+                f"confirmed as the edition's, so a plausibility floor was "
+                f"used instead of the strict gate"
+            )
+    elif (narration is not None and narration["confidence"] == "unknown"
+            and not verdict.get("complete") and verdict.get("files")
+            and verdict.get("reason")):
+        # Held below the plausibility floor: the shortfall is still framed
+        # against the edition's runtime, so say the narration is unconfirmed
+        # rather than implying a definitive measurement.
+        verdict["reason"] = f"{verdict['reason']} (narration unconfirmed)"
     if not verdict.get("complete") and not verdict.get("files"):
         from core.audiobook_completeness import has_files_but_no_audio
         verdict["no_audio"] = has_files_but_no_audio(source_path)
