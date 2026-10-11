@@ -157,7 +157,14 @@ def _batch_force_replace(context: dict) -> bool:
     ``force_download_all``: the wishlist sets that on every background batch
     (it means "skip ownership checks" there) and Wing It auto-enables it —
     neither may ever overwrite library files. Anything missing or unreadable
-    → False, i.e. the protective default."""
+    → False, i.e. the protective default.
+
+    A file the user approved out of quarantine is replace-intent too: the
+    approve endpoint stamps ``_approved_quarantine_trigger``, and without this
+    the guard deleted the approved file as "redundant" whenever the wrong file
+    already sat at its destination."""
+    if (context or {}).get('_approved_quarantine_trigger'):
+        return True
     try:
         batch_id = (context or {}).get('batch_id')
         if not batch_id:
