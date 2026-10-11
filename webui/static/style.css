@@ -23592,14 +23592,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ===== WISHLIST OVERVIEW MODAL STYLES ===== */
 
-/* Category Grid */
-.wishlist-category-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-    padding: 28px;
-}
-
 /* Category Card */
 .wishlist-category-card {
     background: linear-gradient(135deg,
@@ -23711,13 +23703,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     pointer-events: none;
 }
 
-/* Content layer above mosaic */
-.wishlist-category-content {
-    position: relative;
-    z-index: 2;
-    width: 100%;
-}
-
 /* Fade in rows initially */
 @keyframes fadeInRow {
     0% {
@@ -23773,53 +23758,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
             rgba(0, 0, 0, 0.8) 100%);
 }
 
-.wishlist-category-card.next-in-queue {
-    border-color: rgba(var(--accent-rgb), 0.4);
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.08) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-}
-
-.wishlist-category-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    filter: drop-shadow(0 4px 12px rgba(var(--accent-rgb), 0.3));
-}
-
-.wishlist-category-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #ffffff;
-    margin-bottom: 8px;
-}
-
-.wishlist-category-count {
-    font-size: 32px;
-    font-weight: 700;
-    color: rgb(var(--accent-light-rgb));
-    margin: 12px 0;
-}
-
-.wishlist-category-badge {
-    display: inline-block;
-    background: rgba(var(--accent-rgb), 0.2);
-    border: 1px solid rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 20px;
-    margin-top: 12px;
-}
-
-/* Category Tracks View */
-.wishlist-category-tracks {
-    padding: 0 28px;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
-
 .wishlist-category-header {
     display: flex;
     align-items: center;
@@ -23845,13 +23783,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: var(--white-a12);
     color: #ffffff;
     transform: translateX(-2px);
-}
-
-.wishlist-category-name {
-    font-size: 18px;
-    font-weight: 600;
-    color: #ffffff;
-    flex: 1;
 }
 
 .wishlist-select-all-btn {
@@ -23924,56 +23855,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 8px 0;
 }
 
-/* per-artist sections (#1065): tri-state select + remove/download the whole
-   catalog in one click */
-.wishlist-artist-section {
-    margin-bottom: 18px; border: 1px solid var(--white-a06);
-    border-radius: var(--radius-lg); padding: 4px 10px 8px;
-    background: rgba(255,255,255,0.015);
-}
-.wishlist-artist-header {
-    display: flex; align-items: center; gap: 10px; padding: 8px 4px;
-    border-bottom: 1px solid var(--white-a06);
-}
-.wishlist-artist-title {
-    font-size: 15px; font-weight: 800; color: #fff;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.wishlist-artist-counts {
-    flex: 1; font-size: 12px; color: var(--white-a40); white-space: nowrap;
-}
-.wishlist-artist-download-btn {
-    flex: none; width: 30px; height: 28px; border-radius: var(--radius-md); cursor: pointer;
-    border: 1px solid rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.12);
-    color: var(--accent); font-size: 14px; line-height: 1;
-}
-.wishlist-artist-download-btn:hover { background: rgba(var(--accent-rgb), 0.28); }
-.wishlist-delete-artist-btn { flex: none; }
-
-.wishlist-load-more-btn {
-    display: block;
-    width: 100%;
-    padding: 12px;
-    margin-top: 12px;
-    background: rgba(138, 43, 226, 0.1);
-    border: 1px solid rgba(138, 43, 226, 0.3);
-    color: var(--white-a70);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    font-size: 13px;
-    transition: all 0.2s;
-}
-
-.wishlist-load-more-btn:hover {
-    background: rgba(138, 43, 226, 0.2);
-    color: #fff;
-}
-
-.wishlist-load-more-btn:disabled {
-    opacity: 0.5;
-    cursor: wait;
-}
-
 .wishlist-album-card {
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.95) 0%, rgba(18, 18, 18, 0.98) 100%);
     border: 1px solid var(--white-a08);
@@ -23996,21 +23877,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 16px;
 }
 
-.wishlist-album-image {
-    width: 64px;
-    height: 64px;
-    background-size: cover;
-    background-position: center;
-    background-color: var(--white-a05);
-    border-radius: var(--radius-md);
-    flex-shrink: 0;
-}
-
-.wishlist-album-info {
-    flex: 1;
-    min-width: 0;
-}
-
 .wishlist-album-name {
     font-size: 16px;
     font-weight: 600;
@@ -24021,76 +23887,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     white-space: nowrap;
 }
 
-.wishlist-album-artist {
-    font-size: 14px;
-    color: #b3b3b3;
-    margin-bottom: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.wishlist-album-track-count {
-    font-size: 12px;
-    color: rgb(var(--accent-rgb));
-    font-weight: 500;
-}
-
-.wishlist-album-expand-icon {
-    font-size: 14px;
-    color: #b3b3b3;
-    transition: transform 0.3s ease;
-    flex-shrink: 0;
-}
-
 .wishlist-album-tracks {
     border-top: 1px solid var(--white-a05);
     padding: 0;
     background: rgba(0, 0, 0, 0.2);
-}
-
-.wishlist-album-track {
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--white-a03);
-    transition: background 0.2s ease;
-}
-
-.wishlist-album-track:last-child {
-    border-bottom: none;
-}
-
-.wishlist-album-track:hover {
-    background: rgba(var(--accent-rgb), 0.05);
-}
-
-.wishlist-album-track-name {
-    font-size: 14px;
-    color: #e0e0e0;
-}
-
-/* Singles Track Items with Images */
-.playlist-track-item-with-image {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px;
-    border-radius: var(--radius-md);
-    transition: background 0.2s ease;
-    border-bottom: 1px solid var(--white-a03);
-}
-
-.playlist-track-item-with-image:hover {
-    background: rgba(var(--accent-rgb), 0.05);
-}
-
-.playlist-track-image {
-    width: 48px;
-    height: 48px;
-    background-size: cover;
-    background-position: center;
-    background-color: var(--white-a05);
-    border-radius: var(--radius-sm);
-    flex-shrink: 0;
 }
 
 /* Wishlist Delete Buttons */
@@ -24100,199 +23900,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     contain-intrinsic-size: auto 64px;
 }
 
-.wishlist-delete-btn {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(220, 53, 69, 0.9);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 8px 12px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 10;
-}
-
-.wishlist-track-item:hover .wishlist-delete-btn {
-    opacity: 1;
-    pointer-events: all;
-}
-
-.wishlist-delete-btn:hover {
-    background: rgba(220, 53, 69, 1);
-    transform: translateY(-50%) scale(1.1);
-}
-
-.wishlist-delete-btn:active {
-    transform: translateY(-50%) scale(0.95);
-}
-
-/* Smaller delete button for tracks within albums */
-.wishlist-delete-btn-small {
-    padding: 6px 10px;
-    font-size: 14px;
-}
-
 /* Album header delete button */
 .wishlist-album-header {
     position: relative;
 }
 
-.wishlist-delete-album-btn {
-    position: absolute;
-    right: 40px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: rgba(220, 53, 69, 0.9);
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 8px 12px;
-    font-size: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 10;
-}
-
-.wishlist-album-card:hover .wishlist-delete-album-btn {
-    opacity: 1;
-    pointer-events: all;
-}
-
-.wishlist-delete-album-btn:hover {
-    background: rgba(220, 53, 69, 1);
-    transform: translateY(-50%) scale(1.1);
-}
-
-.wishlist-delete-album-btn:active {
-    transform: translateY(-50%) scale(0.95);
-}
-
-/* Ensure album track items have proper positioning for delete button */
-.wishlist-album-track.wishlist-track-item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.wishlist-album-track.wishlist-track-item .wishlist-album-track-name {
-    flex: 1;
-}
-
-/* Confirmation Modal - Higher z-index to show above wishlist modal */
-.confirmation-modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(8px);
-    z-index: 200000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.2s ease;
-}
-
-.confirmation-modal-overlay.show {
-    opacity: 1;
-    pointer-events: all;
-}
-
-.confirmation-modal {
-    background: #1a1a1a;
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-radius: var(--radius-lg);
-    padding: 32px;
-    max-width: 400px;
-    width: 90%;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-    transform: scale(0.9);
-    transition: transform 0.2s ease;
-}
-
-.confirmation-modal-overlay.show .confirmation-modal {
-    transform: scale(1);
-}
-
-.confirmation-modal-icon {
-    font-size: 48px;
-    text-align: center;
-    margin-bottom: 16px;
-}
-
-.confirmation-modal-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #ffffff;
-    text-align: center;
-    margin-bottom: 12px;
-}
-
-.confirmation-modal-message {
-    font-size: 14px;
-    color: #b3b3b3;
-    text-align: center;
-    margin-bottom: 24px;
-    line-height: 1.5;
-}
-
-.confirmation-modal-buttons {
-    display: flex;
-    gap: 12px;
-    justify-content: center;
-}
-
-.confirmation-modal-btn {
-    padding: 12px 32px;
-    border-radius: var(--radius-md);
-    border: none;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    min-width: 100px;
-}
-
-.confirmation-modal-btn-cancel {
-    background: var(--white-a10);
-    color: #ffffff;
-}
-
-.confirmation-modal-btn-cancel:hover {
-    background: var(--white-a15);
-}
-
-.confirmation-modal-btn-confirm {
-    background: #dc3545;
-    color: #ffffff;
-}
-
-.confirmation-modal-btn-confirm:hover {
-    background: #c82333;
-    transform: scale(1.05);
-}
-
-.confirmation-modal-btn:active {
-    transform: scale(0.95);
-}
-
 /* Mobile Responsive */
 @media (max-width: 768px) {
-    .wishlist-category-grid {
-        grid-template-columns: 1fr;
-        gap: 16px;
-        padding: 20px;
-    }
 
     .wishlist-category-card {
         padding: 24px 20px;
@@ -24303,53 +23917,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         width: 60px;
         /* Smaller tiles on mobile */
     }
-
-    .wishlist-category-icon {
-        font-size: 36px;
-    }
-
-    .wishlist-category-title {
-        font-size: 18px;
-    }
-
-    .wishlist-category-count {
-        font-size: 28px;
-    }
-}
-
-.watchlist-artist-info {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-}
-
-.watchlist-artist-name {
-    font-size: 16px;
-    font-weight: 600;
-    color: #ffffff;
-    margin-bottom: 4px;
-}
-
-.watchlist-artist-date {
-    font-size: 13px;
-    color: var(--white-a60);
-    font-weight: 400;
-}
-
-.watchlist-artist-scan {
-    font-size: 12px;
-    color: rgba(var(--accent-rgb), 0.7);
-    font-weight: 500;
-}
-
-.watchlist-actions {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    justify-content: center;
-    padding: 20px 0;
-    border-bottom: 1px solid var(--white-a08);
 }
 
 /* ===== WATCHLIST ARTIST CONFIG MODAL STYLES ===== */
