@@ -383,21 +383,23 @@ def narration_confidence(
         return result
 
     # The release title first, then the folder it downloaded as: the title
-    # does not always say what the download turns out to be.
-    labels = f"{release_title or ''} {Path(source_path).name}"
-    verdict = narrator_verdict(labels, wanted)
-    if verdict == "match":
-        result["confidence"] = "match"
-        result["reason"] = "the release names the edition's narrator"
-        return result
-    if verdict == "mismatch":
-        named = narrator_in_release(labels)
-        result["confidence"] = "different"
-        result["detected_narrator"] = named
-        result["reason"] = (
-            f"the release names {named}, not the edition's narrator"
-        )
-        return result
+    # does not always say what the download turns out to be. Checked
+    # separately — concatenating them would let a folder name bleed into a
+    # narrator name captured from the title.
+    for text in (release_title or "", Path(source_path).name):
+        verdict = narrator_verdict(text, wanted)
+        if verdict == "match":
+            result["confidence"] = "match"
+            result["reason"] = "the download names the edition's narrator"
+            return result
+        if verdict == "mismatch":
+            named = narrator_in_release(text)
+            result["confidence"] = "different"
+            result["detected_narrator"] = named
+            result["reason"] = (
+                f"the download names {named}, not the edition's narrator"
+            )
+            return result
 
     tagged = narrator_from_file_tags(collect_audio(Path(source_path)))
     for name in tagged:
