@@ -1191,6 +1191,16 @@ class MusicMatchingEngine:
                 'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
                 'penalty': 0.08  # -8% penalty for radio edits (minor difference)
             },
+            # tempo edits ahead of remix: "Slowed Edit" holds the remix word
+            # 'edit', but its audio is the slowed cut, not a remix
+            'slowed': {
+                'patterns': [r'\bslowed\b', r'\bdaycore\b'],
+                'penalty': 0.20
+            },
+            'sped_up': {
+                'patterns': [r'\bsped\s*up\b', r'\bspeed\s*up\b', r'\bnightcore\b'],
+                'penalty': 0.20
+            },
             'remix': {
                 'patterns': [r'\bremix\b', r'\brmx\b', r'\brework\b', r'\bedit\b(?!ion)'],
                 'penalty': 0.15  # -15% penalty for remixes
@@ -1268,6 +1278,14 @@ class MusicMatchingEngine:
         # which is the exact case the setting exists for.
         _preferred = self._preferred_version()
         _wanted_on_purpose = bool(_preferred) and version_type == _preferred
+
+        # A slowed / sped-up cut is its own audio in BOTH directions. The checks
+        # below only reject a versioned candidate, so the plain studio file
+        # scored 0.73 for "Devil Eyes - Slowed" and got imported as it.
+        _wanted_version = self.detect_version_type(spotify_track.name)[0]
+        if ((version_type in self.TEMPO_EDITS or _wanted_version in self.TEMPO_EDITS)
+                and version_type != _wanted_version):
+            return 0.0, 'rejected_version_mismatch'
 
         # STRICT VERSION MATCHING: Reject mismatched versions
         if version_type == 'live' and not _wanted_on_purpose:
@@ -1370,6 +1388,8 @@ class MusicMatchingEngine:
     # silently matching nothing.
     PREFERABLE_VERSIONS = ('extended', 'radio', 'remix', 'live', 'acoustic',
                            'instrumental', 'demo', 'clean', 'explicit')
+    # tempo edits: never a stand-in for the original, nor the original for them
+    TEMPO_EDITS = ('slowed', 'sped_up')
 
     _BRACKET_GROUP = re.compile(r'[\(\[][^\)\]]*[\)\]]')
 

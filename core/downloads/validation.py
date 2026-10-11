@@ -687,7 +687,7 @@ def _score_streaming_candidates(results, spotify_track, why=None):
     return []
 
 
-_ZERO_SCORE_VERSIONS = frozenset({'live', 'remix', 'acoustic', 'instrumental'})
+_ZERO_SCORE_VERSIONS = frozenset({'live', 'remix', 'acoustic', 'instrumental', 'slowed', 'sped_up'})
 
 
 def _note_unmatched(results, matched, max_q, why):
