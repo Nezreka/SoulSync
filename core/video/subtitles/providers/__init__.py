@@ -10,9 +10,11 @@ from typing import Any, Callable
 from ..scoring import DEFAULT_MIN_SCORE
 from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
 from .opensubtitles import OpenSubtitlesProvider
+from .whisper import WhisperProvider
 
 __all__ = ["get_providers", "fetch_subtitle", "fetch_subtitle_detailed",
            "rank_candidates", "iter_configured_providers",
+           "provider_is_quota_exempt",
            "SubtitleProvider", "SubtitleQuery", "SubtitleCandidate"]
 
 
@@ -24,10 +26,25 @@ def get_providers() -> dict[str, SubtitleProvider]:
     we do it properly.) Fresh instances per call: providers cache resolved config
     on ``is_configured()``, so sharing instances across different settings would
     leak one caller's config into another's.
+
+    Whisper is ALWAYS last: local transcription is the final fallback, after
+    every network provider has missed.
     """
     return {
         "opensubtitles": OpenSubtitlesProvider(),
+        "whisper": WhisperProvider(),
     }
+
+
+def provider_is_quota_exempt(pid: Any) -> bool:
+    """True when ``pid``'s downloads never burn network-provider quota
+    (``burns_network_quota = False`` — local providers like Whisper).
+    Unknown ids are NOT exempt. Never raises."""
+    try:
+        provider = get_providers().get(pid)
+    except Exception:  # noqa: BLE001
+        return False
+    return not bool(getattr(provider, "burns_network_quota", True))
 
 
 def _min_score(get_setting: Callable[[str, Any], Any]) -> float:
@@ -39,14 +56,27 @@ def _min_score(get_setting: Callable[[str, Any], Any]) -> float:
         return DEFAULT_MIN_SCORE
 
 
-def _iter_configured(provider_order, get_setting):
-    """(provider_id, provider) for each usable entry in the order. Best-effort."""
+def _iter_configured(provider_order, get_setting, skip_background=False):
+    """(provider_id, provider) for each usable entry in the order. Best-effort.
+
+    Background-only providers (Whisper: ``background_download_only``) are
+    pinned LAST and are appended even when the stored order predates them —
+    enabling local transcription needs no chain editing, and it can never
+    jump ahead of a network provider. ``skip_background=True`` leaves them
+    out entirely (the import hook defers them to the worker; the eager
+    ``rank_candidates`` never runs them).
+    """
     if not isinstance(provider_order, (list, tuple)):
         return
     providers = get_providers()
+    seen: set[str] = set()
+    deferred: list[tuple[str, SubtitleProvider]] = []
     for pid in provider_order:
         if not isinstance(pid, str):
             continue  # unhashable / non-id garbage — skip, never raise
+        if pid in seen:
+            continue
+        seen.add(pid)
         provider = providers.get(pid)
         if provider is None:
             continue  # unknown provider id
@@ -55,13 +85,36 @@ def _iter_configured(provider_order, get_setting):
                 continue
         except Exception:  # noqa: BLE001 - a broken config check reads as unconfigured
             continue
+        if getattr(provider, "background_download_only", False):
+            if skip_background:
+                continue
+            deferred.append((pid, provider))  # pinned below, after network
+            continue
+        yield pid, provider
+    if skip_background:
+        return
+    # Append configured background-only providers the stored order doesn't
+    # name (fresh installs, or orders saved before Whisper existed).
+    for pid, provider in providers.items():
+        if pid in seen:
+            continue
+        if not getattr(provider, "background_download_only", False):
+            continue
+        try:
+            if not provider.is_configured(get_setting):
+                continue
+        except Exception:  # noqa: BLE001 - a broken config check reads as unconfigured
+            continue
+        deferred.append((pid, provider))
+    for pid, provider in deferred:
         yield pid, provider
 
 
-def iter_configured_providers(provider_order, get_setting):
+def iter_configured_providers(provider_order, get_setting, skip_background=False):
     """Public alias of the configured-provider iterator (the manual-search API
     needs it too)."""
-    return _iter_configured(provider_order, get_setting)
+    return _iter_configured(provider_order, get_setting,
+                             skip_background=skip_background)
 
 
 def _rank_provider_candidates(provider, query, min_score):
@@ -113,11 +166,17 @@ def rank_candidates(query: SubtitleQuery, provider_order: list[str],
     across providers. The fetch chain (``fetch_subtitle_detailed``) stays LAZY
     per provider and never consults a later provider once an earlier one
     succeeds.
+
+    Background-only providers (Whisper) are NEVER ranked here: their
+    ``download()`` is minutes of local CPU work that can't run in an upgrade
+    pass or a request thread. (The upgrade loop must also never auto-replace
+    a real subtitle with a generated transcript.)
     """
     min_score = _gate(get_setting, query)
     merged: list = []
     for order_idx, (pid, provider) in enumerate(
-            _iter_configured(provider_order, get_setting)):
+            _iter_configured(provider_order, get_setting,
+                             skip_background=True)):
         ordered, _miss = _rank_provider_candidates(provider, query, min_score)
         for score, candidate in ordered:
             merged.append((score, order_idx, pid, provider, candidate))
@@ -128,7 +187,8 @@ def rank_candidates(query: SubtitleQuery, provider_order: list[str],
 
 def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
                             get_setting: Callable[[str, Any], Any],
-                            on_download: Callable[[str], None] | None = None
+                            on_download: Callable[[str], None] | None = None,
+                            skip_background: bool = False
                             ) -> tuple[str | None, str | None, SubtitleCandidate | None, float]:
     """(text, provider_id, candidate, score) for the best above-threshold candidate.
 
@@ -143,11 +203,18 @@ def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
     ``on_download`` is called with the provider id for EVERY successful
     provider.download() — a quota-burning call. Quota-tracking callers should
     bump there, not once per fetch, because several candidates can burn quota
-    before one succeeds.
+    before one succeeds. (Whisper sets ``burns_network_quota = False`` — the
+    bump callbacks skip it via ``provider_is_quota_exempt``.)
+
+    ``skip_background=True`` leaves background-only providers (Whisper) out of
+    the chain: the import hook uses it so a minutes-long transcription never
+    stalls the download monitor — the wanted-loop worker runs those providers
+    instead (its call uses the default False).
     """
     min_score = _gate(get_setting, query)
     best_miss: tuple[float, str | None, Any] = (0.0, None, None)  # score, pid, candidate
-    for pid, provider in _iter_configured(provider_order, get_setting):
+    for pid, provider in _iter_configured(provider_order, get_setting,
+                                          skip_background=skip_background):
         # LAZY per provider: a later provider is never searched once an
         # earlier one yields a download (its search() is an API call — don't
         # spend it when the answer is already in hand).

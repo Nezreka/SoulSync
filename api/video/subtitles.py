@@ -77,6 +77,38 @@ def _clear_search_cache_for_tests():
         _search_cache.clear()
 
 
+def _whisper_store_download_result(db, model, info, error):
+    """Persist a finished model download into the organization blob
+    (load-modify-save). Runs on the download worker thread; never raises.
+
+    Success marks the model downloaded with its path/size/timestamp. Failure
+    recomputes the flag from disk truth — a failed re-download must not wipe
+    a still-good previous download, and must not claim a model whose file is
+    gone.
+    """
+    from core.video import organization
+    from core.video.subtitles.providers import whisper as whisper_mod
+    try:
+        current = organization.load(db)
+    except Exception:  # noqa: BLE001
+        current = {}
+    try:
+        if info is not None:
+            current.update({
+                "whisper_model": info["name"],
+                "whisper_model_downloaded": True,
+                "whisper_model_path": info["path"],
+                "whisper_model_size_bytes": info["size_bytes"],
+                "whisper_model_downloaded_at": info["downloaded_at"],
+            })
+        else:
+            current["whisper_model_downloaded"] = bool(
+                whisper_mod.model_file_exists(model))
+        organization.save(db, current)
+    except Exception:  # noqa: BLE001 - persistence is bookkeeping, never fatal
+        logger.exception("whisper: could not persist download state")
+
+
 def _get_setting(db, settings, key, default=None):
     """Blob-first, top-level fallback — the same get_setting the import hook
     and worker build: tuning knobs live in the organization blob, provider
@@ -98,6 +130,45 @@ def _settings_for(db):
 
 
 def register_routes(bp):
+    @bp.route("/subtitles/whisper/status", methods=["GET"])
+    def subtitles_whisper_status():
+        from . import get_video_db
+        from core.video.subtitles.providers import whisper as whisper_mod
+        db = get_video_db()
+        settings = _settings_for(db)
+
+        def get_setting(k, d=None):
+            return _get_setting(db, settings, k, d)
+
+        try:
+            payload = whisper_mod.status_payload(get_setting)
+        except Exception:  # noqa: BLE001 - status is best-effort
+            logger.exception("whisper status failed")
+            payload = {"error": "status unavailable"}
+        return jsonify(payload)
+
+    @bp.route("/subtitles/whisper/download", methods=["POST"])
+    def subtitles_whisper_download():
+        from . import get_video_db
+        from core.video.subtitles.providers import whisper as whisper_mod
+        body = request.get_json(silent=True) or {}
+        model = body.get("model")
+        if whisper_mod.valid_model_name(model) is None:
+            return jsonify({"error": "unknown model — choose one of: %s"
+                            % ", ".join(sorted(whisper_mod.WHISPER_MODELS))}), 400
+        db = get_video_db()
+
+        def _on_complete(info, error):
+            _whisper_store_download_result(db, whisper_mod.valid_model_name(model),
+                                           info, error)
+
+        ok, reason = whisper_mod.start_download(model, on_complete=_on_complete)
+        if not ok:
+            code = 409 if "already in progress" in str(reason) else 400
+            return jsonify({"error": reason}), code
+        return jsonify({"ok": True,
+                        "model": whisper_mod.valid_model_name(model)}), 202
+
     @bp.route("/subtitles/overrides/<kind>/<int:item_id>", methods=["GET"])
     def subtitles_get_override(kind, item_id):
         from . import get_video_db

@@ -185,20 +185,19 @@ def _rekey_download_from_history(db, row: dict) -> dict | None:
 
 
 def quota_ok(db, provider_order, get_setting, quota_limit: int) -> bool:
-    """True when at least one configured provider has daily quota left."""
-    from .providers import get_providers
-    providers = get_providers()
-    for pid in provider_order or []:
-        if not isinstance(pid, str):
-            continue
-        provider = providers.get(pid)
-        if provider is None:
-            continue
-        try:
-            if not provider.is_configured(get_setting):
-                continue
-        except Exception:  # noqa: BLE001
-            continue
+    """True when at least one configured provider has daily quota left.
+
+    Quota-exempt providers (Whisper — local, no network quota) always read as
+    OK: a configured Whisper means the cycle is never blocked by an exhausted
+    network quota. Never raises."""
+    from .providers import iter_configured_providers, provider_is_quota_exempt
+    try:
+        configured = iter_configured_providers(provider_order, get_setting)
+    except Exception:  # noqa: BLE001
+        return True  # quota unreadable → don't block on it
+    for pid, _provider in configured:
+        if provider_is_quota_exempt(pid):
+            return True
         try:
             if int(db.subtitle_quota_used(pid)) < quota_limit:
                 return True
@@ -370,12 +369,18 @@ def run_cycle(db, settings, fs=None) -> dict:
             moviehash = opensubtitles_hash(file_path)
             query = SubtitleQuery(identity=dict(identity), language=lang,
                                   hi=hi, forced=forced,
-                                  filename=filename, moviehash=moviehash)
+                                  filename=filename, moviehash=moviehash,
+                                  file_path=file_path)
             stats["attempted"] += 1
             def _bump(_pid):
                 # Every successful provider.download() burns real quota — count
                 # each one, not just the fetch, since several candidates can
-                # burn quota before one succeeds.
+                # burn quota before one succeeds. Quota-exempt providers
+                # (Whisper — local transcription) never bump: they consume no
+                # network quota.
+                from .providers import provider_is_quota_exempt
+                if provider_is_quota_exempt(_pid):
+                    return
                 try:
                     db.subtitle_quota_bump(str(_pid))
                 except Exception:  # noqa: BLE001 - quota is accounting, never fatal
@@ -508,6 +513,7 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
         from .providers import rank_candidates
         from .providers.base import SubtitleQuery
         from .scoring import opensubtitles_hash
+        from .providers import provider_is_quota_exempt
 
         provider_order = parse_provider_order(settings.get("subtitle_provider_order"))
         # Blob-first, top-level fallback — same as run_cycle: Phase 2/3 tuning
@@ -622,7 +628,8 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
             moviehash = opensubtitles_hash(file_path)
             query = SubtitleQuery(identity=dict(identity), language=lang,
                                   hi=hi, forced=forced,
-                                  filename=filename, moviehash=moviehash)
+                                  filename=filename, moviehash=moviehash,
+                                  file_path=file_path)
             stats["checked"] += 1
             try:
                 ranked = rank_candidates(query, provider_order, get_setting)
@@ -658,10 +665,13 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
                     continue
                 if not text:
                     continue
-                try:
-                    db.subtitle_quota_bump(str(pid))
-                except Exception:  # noqa: BLE001 - quota is accounting, never fatal
-                    pass
+                # Quota-exempt providers (Whisper — local transcription) never
+                # burn network quota, even on the upgrade path.
+                if not provider_is_quota_exempt(pid):
+                    try:
+                        db.subtitle_quota_bump(str(pid))
+                    except Exception:  # noqa: BLE001 - quota is accounting, never fatal
+                        pass
                 try:
                     fs.write_text(os.path.join(folder, name), text)
                 except Exception:  # noqa: BLE001
