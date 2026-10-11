@@ -308,11 +308,40 @@
         var ap = cp.allowed_pages;
         return !ap || ap.indexOf(pageId) > -1;
     }
+    // Hand off to the unified React downloads page with its video view
+    // preselected. Flips to the music shell (where the React page lives) and
+    // routes in-app — no full reload. mode 'replace' (boot / deep link) must
+    // not leave /video-downloads in history, or Back would bounce straight
+    // back into this redirect.
+    function gotoUnifiedDownloads(mode) {
+        _backStack = [];
+        setActiveNav('video-downloads');
+        var replace = mode === 'replace' || mode === 'restore';
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('active-downloads', { query: { media: 'video' }, replace: replace });
+                // Flip the side AFTER routing: the path is already a non-video
+                // one, so switchSide('music') skips its history.replaceState('/')
+                // and Browser Back lands on the previous video page.
+                if (typeof window._switchAppSide === 'function') window._switchAppSide('music');
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        try { window.location.assign('/active-downloads?media=video'); }
+        catch (e2) { window.location.href = '/active-downloads?media=video'; }
+    }
+
     function navigate(pageId, mode) {
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
         if (!sideAllowed('video')) { switchSide('music', { force: true }); return; }
         if (!videoPageAllowed(pageId)) { pageId = DEFAULT_VIDEO_PAGE; mode = 'replace'; }
+        // The music + video downloads pages are unified into the React
+        // /active-downloads page — the old video shell subpage is gone, so
+        // every in-shell navigation (sidebar, goto links) and every
+        // /video-downloads deep link lands on the unified page's video view.
+        if (pageId === 'video-downloads') { gotoUnifiedDownloads(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

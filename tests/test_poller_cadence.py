@@ -42,6 +42,11 @@ def test_detail_download_tracker_is_adaptive():
 
 
 def test_downloads_page_poller_untouched():
-    js = (_ROOT / "webui" / "static" / "video" / "video-downloads-page.js").read_text(
-        encoding="utf-8", errors="replace")
-    assert "anyActive() ? 2000 : 6000" in js
+    # the legacy vanilla page was rewritten in React (PR #1651); the poller now
+    # lives in -vdl.use-downloads.ts with the same 2s-active / 6s-idle cadence.
+    vdl = _ROOT / "webui" / "src" / "routes" / "active-downloads"
+    use = (vdl / "-vdl.use-downloads.ts").read_text(encoding="utf-8", errors="replace")
+    types = (vdl / "-vdl.types.ts").read_text(encoding="utf-8", errors="replace")
+    assert "active ? VDL_POLL_ACTIVE_MS : VDL_POLL_IDLE_MS" in use
+    assert "VDL_POLL_ACTIVE_MS = 2000" in types
+    assert "VDL_POLL_IDLE_MS = 6000" in types
