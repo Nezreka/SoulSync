@@ -521,7 +521,11 @@ def _any_provider_configured(provider_order, get_setting) -> bool:
 
     fetch_subtitle returns None for both "tried and missed" and "nothing was
     configured to try" — a keyless setup must not accumulate phantom attempts
-    on wanted rows Phase 2 should retry once a key is added. Never raises."""
+    on wanted rows Phase 2 should retry once a key is added. Never raises.
+
+    Background-only providers (Whisper) don't count: they never run in the
+    import hook, so a whisper-only setup must keep rows `wanted`, not `failed`.
+    """
     try:
         from core.video.subtitles.providers import get_providers
         providers = get_providers()
@@ -532,6 +536,8 @@ def _any_provider_configured(provider_order, get_setting) -> bool:
             continue
         provider = providers.get(pid)
         if provider is None:
+            continue
+        if getattr(provider, "background_download_only", False):
             continue
         try:
             if provider.is_configured(get_setting):
