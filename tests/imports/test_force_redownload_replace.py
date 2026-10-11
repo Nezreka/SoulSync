@@ -42,6 +42,12 @@ class TestBatchForceReplace:
                             {"force_download_all": True})
         assert pipeline._batch_force_replace({"batch_id": "wl"}) is False
 
+    def test_true_for_a_file_the_user_approved_out_of_quarantine(self):
+        # the approve endpoint stamps the trigger; the guard used to delete the
+        # approved file as "redundant" when the wrong file sat at its path
+        assert pipeline._batch_force_replace(
+            {"_approved_quarantine_trigger": "acoustid_unverified"}) is True
+
     def test_false_without_a_batch(self):
         assert pipeline._batch_force_replace({}) is False
         assert pipeline._batch_force_replace({"batch_id": "nope-unknown"}) is False
