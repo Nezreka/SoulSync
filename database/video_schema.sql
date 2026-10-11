@@ -932,6 +932,7 @@ CREATE TABLE IF NOT EXISTS subtitle_wanted (
     user_set INTEGER NOT NULL DEFAULT 0,    -- 1 = per-item override (Phase 4 UI)
     attempts INTEGER NOT NULL DEFAULT 0,
     last_attempt_at TEXT,
+    last_upgrade_check_at TEXT,      -- Phase 3: upgrade loop re-check cooldown
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(video_kind, video_id, language, hi, forced)
 );
@@ -961,4 +962,17 @@ CREATE TABLE IF NOT EXISTS subtitle_quota (
     day TEXT NOT NULL,               -- YYYY-MM-DD (UTC)
     used INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (provider, day)
+);
+
+-- ── "Replace Bazarr" Phase 3: per-movie/per-show subtitle language overrides ──
+-- Policy vs state separation (see VideoDatabase.subtitle_override_set): the
+-- override is POLICY ("this show wants en+es"); subtitle_wanted rows are
+-- per-video×language fetch state. A show-level override must not require
+-- materializing per-episode wanted rows, and clearing is a single-row delete.
+CREATE TABLE IF NOT EXISTS subtitle_overrides (
+    kind TEXT NOT NULL,              -- 'movie' | 'show'
+    item_id INTEGER NOT NULL,        -- movies.id | shows.id
+    languages TEXT NOT NULL,         -- JSON array of language codes, e.g. '["en","es"]'
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, item_id)
 );

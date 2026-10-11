@@ -42,6 +42,7 @@ _ALLOWED_WINDOW = {
     "window.VideoGrab", "window.VideoManage", "window.VideoPoster", "window.VideoIssues",
     "window.VideoRequestSheet", "window.VideoRequests",
     "window.VideoCalendar", "window.VideoOverlayEditor", "window.VideoCollectionEditor",
+    "window.VideoSubtitles",
     "window.videoWorkerOrbs", "window._videoWorkerOrbsEnabled",
     "window._buildAutomationSection", "window._buildAutomationHub",
     "window._reloadVideoAutomations", "window._vdpgAnyActive", "window._reduceEffectsActive",

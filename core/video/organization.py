@@ -59,6 +59,7 @@ DEFAULTS = {
     "subtitle_worker_interval_min": 30,  # wanted-loop retry cadence (minutes)
     "subtitle_worker_batch": 10,     # max wanted rows attempted per worker cycle
     "subtitle_daily_quota": 20,      # max subtitle DOWNLOADS per provider per day (UTC)
+    "subtitle_upgrade_min_delta": 15.0,  # upgrade loop: a new candidate must beat the current subtitle's history score by this much to replace it
     # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
     # episodes, dismissed imports) move into an ss_recycle folder under the
     # file's library root instead of unlinking; purged after recycle_keep_days.
@@ -116,6 +117,11 @@ def normalize(raw: Any) -> dict:
             d["subtitle_min_score"] = max(0.0, min(200.0, float(raw.get("subtitle_min_score"))))
         except (TypeError, ValueError):
             pass
+    if "subtitle_upgrade_min_delta" in raw:
+        try:
+            d["subtitle_upgrade_min_delta"] = max(0.0, min(200.0, float(raw.get("subtitle_upgrade_min_delta"))))
+        except (TypeError, ValueError):
+            pass
     for _key, _lo, _hi in (("subtitle_worker_interval_min", 5, 1440),
                            ("subtitle_worker_batch", 1, 200),
                            ("subtitle_daily_quota", 1, 1000)):
@@ -141,6 +147,9 @@ def normalize(raw: Any) -> dict:
         d["transfer_mode"] = tm
     if "subtitle_langs" in raw:
         from core.video.subtitles import parse_langs
+        # parse_langs DROPS tokens that aren't valid language codes: a code
+        # flows into the sidecar filename (srt_name), so '../../evil' here
+        # would otherwise write outside the media folder (path traversal).
         d["subtitle_langs"] = ",".join(parse_langs(raw.get("subtitle_langs")))
     if "subtitle_provider_order" in raw:
         from core.video.subtitles import parse_provider_order

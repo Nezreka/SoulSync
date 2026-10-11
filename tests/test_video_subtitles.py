@@ -52,6 +52,28 @@ def test_srt_name():
         "M (2020) Bluray-1080p.en.srt"
 
 
+def test_srt_name_hi_forced_tiers():
+    # Bazarr/Plex/Jellyfin convention: hi/forced variants get distinct names.
+    v = "/lib/M (2020)/M (2020) Bluray-1080p.mkv"
+    assert subtitles.srt_name(v, "en") == "M (2020) Bluray-1080p.en.srt"
+    assert subtitles.srt_name(v, "en", hi=True) == "M (2020) Bluray-1080p.en.hi.srt"
+    assert subtitles.srt_name(v, "en", forced=True) == \
+        "M (2020) Bluray-1080p.en.forced.srt"
+    assert subtitles.srt_name(v, "en", hi=True, forced=True) == \
+        "M (2020) Bluray-1080p.en.hi.forced.srt"
+
+
+def test_srt_name_hi_and_forced_rows_never_collide():
+    # The overwrite bug the Phase 1 gap warned about: the four variants for one
+    # video+language must be four distinct filenames.
+    v = "/lib/Show/Show - S01E01.mkv"
+    names = {subtitles.srt_name(v, "en"),
+             subtitles.srt_name(v, "en", hi=True),
+             subtitles.srt_name(v, "en", forced=True),
+             subtitles.srt_name(v, "en", hi=True, forced=True)}
+    assert len(names) == 4
+
+
 # ── the write loop ────────────────────────────────────────────────────────────
 class FakeFS:
     def __init__(self, dirs=None):
@@ -100,3 +122,62 @@ def test_write_subtitles_best_effort_on_fetch_failure():
 def test_no_fetcher_without_a_key():
     assert subtitles.opensubtitles_fetcher("") is None
     assert subtitles.opensubtitles_fetcher(None) is None
+
+
+def test_parse_langs_drops_path_traversal():
+    # N1 (security): a language code flows into the sidecar filename
+    # (srt_name) — traversal payloads must never survive parsing.
+    assert subtitles.parse_langs("../../evil, en") == ["en"]
+    assert subtitles.parse_langs("../../../../../../tmp/pwned, en") == ["en"]
+    assert subtitles.parse_langs("en, /abs/path, es") == ["en", "es"]
+    assert subtitles.parse_langs("..") == ["en"]          # all dropped → default
+
+
+def test_valid_lang_code():
+    assert subtitles.valid_lang_code("en")
+    assert subtitles.valid_lang_code("pt-br")
+    assert subtitles.valid_lang_code("zh-tw")
+    assert not subtitles.valid_lang_code("../../evil")
+    assert not subtitles.valid_lang_code("/abs")
+    assert not subtitles.valid_lang_code("e")             # too short
+    assert not subtitles.valid_lang_code("toolongcode")
+    assert not subtitles.valid_lang_code("")
+    assert not subtitles.valid_lang_code(None)
+
+
+def test_normalize_drops_traversal_from_subtitle_langs():
+    # The settings write path: junk can never be STORED via the UI/API.
+    from core.video.organization import normalize
+    assert normalize({"subtitle_langs": "../../evil, en"})["subtitle_langs"] == "en"
+    assert normalize({"subtitle_langs": "en, es"})["subtitle_langs"] == "en,es"
+
+
+def test_traversal_setting_never_reaches_filesystem(tmp_path):
+    # End-to-end: even if a junk setting were somehow stored (legacy), the
+    # hook resolves it through parse_langs — no junk row, no escaping file.
+    import json as _json
+    from database.video_database import VideoDatabase
+    from core.video.download_monitor import write_subtitles_for
+
+    db = VideoDatabase(database_path=str(tmp_path / "v.db"))
+
+    class _FS:
+        def __init__(self):
+            self.texts = {}
+        def list_dir(self, folder):
+            return []
+        def write_text(self, path, content):
+            self.texts[path] = content
+
+    dl_id = db.add_video_download({"kind": "movie", "title": "M", "status": "completed",
+                                   "media_id": "603", "media_source": "tmdb",
+                                   "search_ctx": _json.dumps({})})
+    dl = db.get_video_download(dl_id)
+    fs = _FS()
+    write_subtitles_for(db, dl, "/media/Films/Film.mkv",
+                        {"subtitle_langs": "../../../../../../tmp/pwned, en"}, fs)
+    rows = db.subtitle_get_for_video("download", dl_id)
+    assert [r["language"] for r in rows] == ["en"]
+    for path in fs.texts:
+        assert os.path.normpath(os.path.dirname(path)) == \
+            os.path.normpath("/media/Films"), path

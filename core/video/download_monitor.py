@@ -609,9 +609,12 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
     and marks the row 'have', a real miss (a provider was configured and tried)
     marks it 'failed' so Phase 2's retry loop can pick it back up. Rows already
     present for the video only define the language list when the USER set them
-    (``user_set=1``, written by the future Phase 4 UI) — rows the hook itself
+    (``user_set=1``, explicit per-video picks) — rows the hook itself
     created on a previous import are residue, not an override, so changing the
-    global ``subtitle_langs`` takes effect on re-grab. youtube-kind downloads
+    global ``subtitle_langs`` takes effect on re-grab. The language list itself
+    comes from ``effective_subtitle_languages``: explicit user_set rows first,
+    then the per-movie/per-show ``subtitle_overrides`` table (Phase 3), then
+    the global setting. youtube-kind downloads
     are skipped entirely (no wanted rows, no fetch), matching ``write_sidecars``.
     Pack episodes (the transient ``pack_episode`` marker from ``_episode_row``)
     get no key here — the pack importer calls this per episode AFTER
@@ -644,14 +647,16 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
         if not (identity.get("tmdb_id") or identity.get("imdb_id")):
             return
 
-        # Per-item override: only rows the USER set (user_set=1, written by the
-        # future Phase 4 UI/API) define the language list. Rows the hook itself
-        # created on a previous import (user_set=0) are residue, not intent —
-        # changing subtitle_langs must take effect on re-grab, so when no
-        # user-set row exists the wanted rows are (re)created for the CURRENT
-        # settings languages. Pre-existing user_set=0 rows for languages no
-        # longer wanted are left alone (not deleted) — their history stays
-        # honest and Phase 2 still sees them.
+        # Language list precedence: (1) rows the USER set (user_set=1, explicit
+        # per-video picks); (2) the Phase 3 per-movie/per-show
+        # ``subtitle_overrides`` table (via effective_subtitle_languages); (3)
+        # the global subtitle_langs. Rows the hook itself created on a previous
+        # import (user_set=0) are residue, not intent — changing
+        # subtitle_langs (or the override) must take effect on re-grab, so when
+        # no user-set row exists the wanted rows are (re)created for the
+        # CURRENT effective languages. Pre-existing user_set=0 rows for
+        # languages no longer wanted are left alone (not deleted) — their
+        # history stays honest and Phase 2 still sees them.
         key = _wanted_video_key(db, dl)
         rows = []
         if key is not None:
@@ -661,11 +666,32 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
             if user_rows:
                 rows = user_rows
             else:
-                for lang in subtitles.parse_langs((settings or {}).get("subtitle_langs")):
+                # One code path for the hook and the worker: the central
+                # lookup re-reads the download row from the DB. A caller acting
+                # on a different identity than the row carries (the
+                # manual-import endpoint applies the user's corrected
+                # identity) must persist it onto the row BEFORE calling —
+                # otherwise the worker's residue check sees the stale identity
+                # and deletes these rows. Falls back to the global list when
+                # the show isn't in the library (yet).
+                #
+                # A transient lookup failure (SubtitleLookupError) reads as
+                # UNKNOWN, not "global": still create rows for the global list
+                # so the import doesn't lose a fetch to a hiccup. The worker
+                # only deletes residue when the set is KNOWN, so these rows
+                # are reconciled (not orphaned) once lookups succeed.
+                try:
+                    langs = subtitles.effective_subtitle_languages(
+                        db, video_kind, video_id, settings)
+                except subtitles.SubtitleLookupError:
+                    langs = subtitles.parse_langs((settings or {}).get("subtitle_langs"))
+                for lang in langs:
                     db.subtitle_want(video_kind, video_id, lang)
                 rows = db.subtitle_get_for_video(video_kind, video_id)
         else:
-            for lang in subtitles.parse_langs((settings or {}).get("subtitle_langs")):
+            # kind=None never touches the DB (no override branch runs), so
+            # this can't raise SubtitleLookupError — global list, directly.
+            for lang in subtitles.effective_subtitle_languages(db, None, None, settings):
                 rows.append({"language": lang, "hi": 0, "forced": 0})
 
         provider_order = _subtitle_provider_order(db)
@@ -702,9 +728,17 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                 moviehash = None
         for row in rows:
             lang = str(row.get("language") or "en")
+            if not subtitles.valid_lang_code(lang):
+                # Filesystem boundary: a language code flows into the sidecar
+                # filename, so a corrupt/legacy row (e.g. '../../evil' written
+                # before parse_langs filtered codes) must never reach
+                # srt_name — skip it. The worker's residue check deletes these
+                # system rows on its next pass; explicit user picks are kept
+                # but never fetched under a corrupt code.
+                continue
             hi = bool(row.get("hi"))
             forced = bool(row.get("forced"))
-            name = subtitles.srt_name(dest_path, lang)
+            name = subtitles.srt_name(dest_path, lang, hi=hi, forced=forced)
             if name.lower() in existing:
                 # Already on disk (e.g. carried over with the file on import) —
                 # truthfully 'have', no fetch needed (and no fetch ran, so no
@@ -747,6 +781,14 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                 continue
             if key is not None:
                 db.subtitle_mark(video_kind, video_id, lang, "have", hi=hi, forced=forced)
+                # Just evaluated: the fetch picked the best available candidate,
+                # so the Phase 3 upgrade loop must not re-search this row right
+                # away — start its re-check cooldown now.
+                try:
+                    db.subtitle_stamp_upgrade_check(video_kind, video_id, lang,
+                                                    hi=hi, forced=forced)
+                except Exception:  # noqa: BLE001 - the stamp is hygiene, never fatal
+                    pass
     except Exception:  # noqa: BLE001 - subtitle fetch is best-effort, never fatal
         logger.exception("subtitle fetch failed for download %s", (dl or {}).get("id"))
 

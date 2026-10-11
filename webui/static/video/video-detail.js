@@ -408,6 +408,9 @@
             }).join('');
         }
         renderSubtitles(d);
+        // Subtitle language overrides (Phase 3; video-subtitles.js): per-title
+        // config section. Gates itself to library movie/show pages.
+        if (window.VideoSubtitles) window.VideoSubtitles.mountOverrides(d.kind, d.id, currentSource);
         renderRatings(d);
         renderAwards(d);
         renderCrewLine(d);
@@ -754,6 +757,18 @@
                 '<button class="library-artist-watchlist-btn' + (wished ? ' watching' : '') + '" type="button" data-vd-act="wishtoggle">' +
                 '<span class="watchlist-icon">' + (wished ? '✓' : '＋') + '</span>' +
                 '<span class="watchlist-text">' + (wished ? 'In Wishlist' : 'Wishlist') + '</span></button>';
+            // Subtitle search (Phase 3): Bazarr-style manual subtitle search for
+            // an owned library movie — the modal writes the .srt next to the
+            // file, and the pick is protected from auto-upgrade. A profile
+            // without download rights gets no button (the manual-download
+            // API 403s for it, like the other grab actions).
+            if (currentSource === 'library' && d.owned && _canDl && window.VideoSubtitles) {
+                html +=
+                    '<button class="library-artist-watchlist-btn vd-action-secondary" type="button" data-vd-act="subsearch" ' +
+                    'title="Search subtitles — pick one yourself">' +
+                    '<span class="watchlist-icon">💬</span>' +
+                    '<span class="watchlist-text">Subtitles</span></button>';
+            }
             // Reflect wishlist membership on the button (like the show watchlist eye):
             // check once, then re-render. Re-checked on soulsync:video-wishlist-changed.
             if (!d._wl_checked && d.tmdb_id) {
@@ -1423,6 +1438,8 @@
         // Clear any YouTube-channel playlists from the show DOM so they don't leak
         // onto the next movie/show you open (the section is reused across loads).
         ytResetPlaylists();
+        // Same for the subtitles config section (Phase 3; video-subtitles.js).
+        if (window.VideoSubtitles) window.VideoSubtitles.reset();
         galleryImages = [];
         stopBillboardTrailer();
     }
@@ -2086,6 +2103,13 @@
                         '" title="Manual search — pick a release" aria-label="Manual search">⌕</button>' +
                     '<button class="vd-ep-getbtn vd-ep-wish" type="button" data-vd-ep-wish="' + ep.episode_number +
                         '" title="' + (ep.owned ? 'Wishlist for an upgrade' : 'Add this episode to the wishlist') + '" aria-label="Wishlist episode">＋</button>' +
+                    // Subtitle search (Phase 3): Bazarr-style manual subtitle
+                    // search for an owned episode (needs a library file to
+                    // write the .srt next to).
+                    ((ep.id != null && ep.owned && data && data.source === 'library')
+                        ? '<button class="vd-ep-getbtn vd-ep-sub" type="button" data-vd-ep-subsearch="' + ep.episode_number +
+                            '" title="Search subtitles — pick one yourself" aria-label="Search subtitles">CC</button>'
+                        : '') +
                   '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '"' + episodeReportAttrs(ep) + ' hidden></div>';
@@ -3302,6 +3326,8 @@
         if (epSearch && r.contains(epSearch)) { e.preventDefault(); e.stopPropagation(); manualSearchEpisode(epSearch); return; }
         var epWish = e.target.closest('[data-vd-ep-wish]');
         if (epWish && r.contains(epWish)) { e.preventDefault(); e.stopPropagation(); wishEpisodeInline(epWish); return; }
+        var epSub = e.target.closest('[data-vd-ep-subsearch]');
+        if (epSub && r.contains(epSub)) { e.preventDefault(); e.stopPropagation(); subSearchEpisode(epSub); return; }
         var seasonGrab = e.target.closest('[data-vd-season-grab]');
         if (seasonGrab && r.contains(seasonGrab)) {
             e.preventDefault();
@@ -3340,6 +3366,7 @@
             else if (which === 'request') sendRequest(act);
             else if (which === 'wishtoggle') toggleMovieWishlist(act);
             else if (which === 'get') openGetModal();
+            else if (which === 'subsearch') subSearchMovie();
             else if (which === 'missing') openGetModal(true);
             else if (which === 'wishlist-missing') wishlistAllMissing(act);
             else if (which === 'poster') openPosterModal();
@@ -3692,6 +3719,24 @@
     }
     function manualSearchEpisode(btn) { _openManualSearch('episode', parseInt(btn.getAttribute('data-vd-ep-search'), 10)); }
     function manualSearchSeason() { _openManualSearch('season'); }
+
+    // Subtitle manual search (Phase 3; video-subtitles.js): the button carries
+    // the episode number; the library id comes from the loaded season payload.
+    function subSearchEpisode(btn) {
+        if (!window.VideoSubtitles || !data) return;
+        var en = parseInt(btn.getAttribute('data-vd-ep-subsearch'), 10);
+        var s = seasonByNum(selectedSeason);
+        var ep = (s && (s.episodes || []).filter(function (e) { return e.episode_number === en; })[0]) || {};
+        if (ep.id == null) { toast('That episode has no library copy to search subtitles for.', 'error'); return; }
+        var label = 'S' + String(selectedSeason).padStart(2, '0') + 'E' + String(en).padStart(2, '0');
+        window.VideoSubtitles.openManualSearch('episode', ep.id, ep.title || ('Episode ' + en), label,
+            { defaultLang: window.VideoSubtitles.effectiveFirstLang('show', data.id) });
+    }
+    function subSearchMovie() {
+        if (!window.VideoSubtitles || !data || data.kind !== 'movie') return;
+        window.VideoSubtitles.openManualSearch('movie', data.id, data.title, '',
+            { defaultLang: window.VideoSubtitles.effectiveFirstLang('movie', data.id) });
+    }
 
     // ── Live download tracking on episode rows ──
     // Poll /downloads/active while viewing a show; match grabs to episode rows by

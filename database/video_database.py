@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 51   # v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 52   # v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -441,6 +441,9 @@ _COLUMN_MIGRATIONS = [
     # created before this commit needs the idempotent ALTER. The CREATE TABLE
     # in video_schema.sql already carries it for fresh DBs.
     ("subtitle_wanted", "user_set", "INTEGER NOT NULL DEFAULT 0"),
+    # subtitle_wanted last_upgrade_check_at ("Replace Bazarr" Phase 3): the
+    # upgrade loop's per-row re-check cooldown. Same story as user_set above.
+    ("subtitle_wanted", "last_upgrade_check_at", "TEXT"),
 ]
 
 
@@ -2730,6 +2733,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def subtitle_set_user_set(self, video_kind, video_id, language, user_set=True,
+                              hi=False, forced=False) -> None:
+        """Flip a wanted row's user_set flag. The manual-download API sets it
+        to 1: an explicit user pick is protected from the Phase 3 upgrade
+        loop. (``subtitle_want`` is INSERT OR IGNORE, so it can't flip a
+        pre-existing row — hence the separate UPDATE.)"""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE subtitle_wanted SET user_set=? WHERE video_kind=? "
+                "AND video_id=? AND language=? AND hi=? AND forced=?",
+                (int(bool(user_set)),) + key)
+            conn.commit()
+        finally:
+            conn.close()
+
     def subtitle_mark(self, video_kind, video_id, language, status, hi=False, forced=False,
                       count_attempt: bool = True) -> None:
         """Update a wanted row's status. Any status other than 'wanted' records a
@@ -2914,6 +2934,25 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def subtitle_delete_row(self, video_kind, video_id, language,
+                            hi=False, forced=False) -> bool:
+        """Delete one subtitle_wanted row (video × language × flags). Returns
+        True when a row was removed. Used for residue rows: system-created
+        (user_set=0) rows whose language fell out of the effective set after
+        an override/global change — skipping them forever would accumulate
+        dead rows that never get fetched. Never call for user_set=1 rows
+        (explicit user picks)."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM subtitle_wanted WHERE video_kind=? AND video_id=? "
+                "AND language=? AND hi=? AND forced=?", key)
+            conn.commit()
+            return bool(cur.rowcount)
+        finally:
+            conn.close()
+
     def subtitle_source_exists(self, video_kind: str, video_id: int) -> bool | None:
         """Does the thing a subtitle_wanted row refers to still exist?
 
@@ -2937,6 +2976,9 @@ class VideoDatabase:
                                    (video_id,)).fetchone()
             elif kind == "episode":
                 row = conn.execute("SELECT 1 FROM episodes WHERE id = ?",
+                                   (video_id,)).fetchone()
+            elif kind == "show":
+                row = conn.execute("SELECT 1 FROM shows WHERE id = ?",
                                    (video_id,)).fetchone()
             else:
                 return False
@@ -3052,6 +3094,160 @@ class VideoDatabase:
         finally:
             conn.close()
         return info
+
+    # ── subtitle Phase 3: per-movie/per-show language overrides ──────────
+    # Why a SEPARATE table instead of reusing subtitle_wanted's user_set rows?
+    # Policy vs state separation. The override is POLICY ("this show wants
+    # en+es"); subtitle_wanted rows are per-video×language FETCH STATE. A
+    # show-level override must not require materializing per-episode wanted
+    # rows (a 200-episode show would need hundreds of rows before anything is
+    # even wanted), and clearing an override is a single-row delete instead of
+    # a sweep over every episode's rows. The import hook and the worker read
+    # the override at fetch time (see
+    # core.video.subtitles.helpers.effective_subtitle_languages); user_set=1
+    # wanted rows keep their existing meaning (explicit per-video picks, e.g.
+    # from the manual-download API, protected from the upgrade loop).
+    _SUBTITLE_OVERRIDE_KINDS = ("movie", "show")
+
+    @classmethod
+    def _check_override_kind(cls, kind) -> str:
+        k = str(kind or "").strip().lower()
+        if k not in cls._SUBTITLE_OVERRIDE_KINDS:
+            raise ValueError("kind must be 'movie' or 'show', got %r" % (kind,))
+        return k
+
+    def subtitle_override_set(self, kind, item_id, languages) -> list:
+        """Set the per-item subtitle language override. Returns the stored
+        (validated, lower-cased, de-duped) language list. Raises ValueError on
+        a bad kind or bad language codes."""
+        from core.video.subtitles.helpers import validate_lang_codes
+        k = self._check_override_kind(kind)
+        langs = validate_lang_codes(languages)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO subtitle_overrides(kind, item_id, languages, updated_at) "
+                "VALUES (?, ?, ?, datetime('now')) "
+                "ON CONFLICT(kind, item_id) DO UPDATE SET languages=excluded.languages, "
+                "updated_at=excluded.updated_at",
+                (k, int(item_id), json.dumps(langs)))
+            conn.commit()
+            return langs
+        finally:
+            conn.close()
+
+    def subtitle_override_clear(self, kind, item_id) -> bool:
+        """Delete the override. Returns True when a row was removed."""
+        k = self._check_override_kind(kind)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM subtitle_overrides WHERE kind=? AND item_id=?",
+                (k, int(item_id)))
+            conn.commit()
+            return bool(cur.rowcount)
+        finally:
+            conn.close()
+
+    def subtitle_override_get(self, kind, item_id) -> list | None:
+        """The override languages, or None when no override exists."""
+        k = self._check_override_kind(kind)
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT languages FROM subtitle_overrides WHERE kind=? AND item_id=?",
+                (k, int(item_id))).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            langs = json.loads(row["languages"])
+            return [str(x) for x in langs] if isinstance(langs, list) else None
+        except (ValueError, TypeError):
+            return None
+
+    def subtitle_show_for_episode(self, episode_id) -> int | None:
+        """The shows.id owning an episode, or None. Used to resolve an
+        episode's parent show for per-show subtitle language overrides."""
+        try:
+            eid = int(episode_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT show_id FROM episodes WHERE id=?", (eid,)).fetchone()
+            return int(row["show_id"]) if row and row["show_id"] is not None else None
+        except Exception:  # noqa: BLE001 - lookup failure reads as "no show"
+            return None
+        finally:
+            conn.close()
+
+    # ── subtitle Phase 3: upgrade loop ────────────────────────────────────
+    def subtitle_get_upgradable(self, limit: int = 50, cooldown_hours: int = 24) -> list:
+        """Rows the Phase 3 upgrade loop may evaluate: status='have' AND
+        user_set=0 (explicit user picks are NEVER upgraded), whose upgrade
+        re-check cooldown has expired (``last_upgrade_check_at`` — each video
+        is re-evaluated at most once per cooldown, so a row that can't beat
+        the delta doesn't burn a provider search every 30-minute worker
+        cycle). Never-checked rows come first. Oldest first within that."""
+        try:
+            hours = max(1, int(cooldown_hours))
+        except (TypeError, ValueError):
+            hours = 24
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM subtitle_wanted "
+                "WHERE status='have' AND user_set=0 "
+                "AND (last_upgrade_check_at IS NULL "
+                "OR last_upgrade_check_at < datetime('now', ?)) "
+                "ORDER BY last_upgrade_check_at ASC, id ASC LIMIT ?",
+                ("-%d hours" % hours, max(1, int(limit)))).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def subtitle_latest_download_score(self, video_kind, video_id, language,
+                                       hi=False, forced=False) -> float | None:
+        """The score of the newest 'downloaded' history row for this
+        video×language×flags — the upgrade loop's baseline for "is the new
+        candidate better?". None when the current subtitle has no recorded
+        score: the upgrade loop SKIPS those rows rather than upgrading blind."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT score FROM subtitle_fetch_history "
+                "WHERE video_kind=? AND video_id=? AND language=? AND hi=? AND forced=? "
+                "AND outcome='downloaded' AND score IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1", key).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            return float(row["score"])
+        except (TypeError, ValueError):
+            return None
+
+    def subtitle_stamp_upgrade_check(self, video_kind, video_id, language,
+                                     hi=False, forced=False) -> None:
+        """Record that the upgrade loop evaluated this row — starts (or
+        restarts) its re-check cooldown. Called for every evaluated row,
+        including skips: a row with no history score will never become
+        upgradable by waiting, so re-checking it every cycle is pure waste."""
+        key = self._subtitle_wanted_key(video_kind, video_id, language, hi, forced)
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "UPDATE subtitle_wanted SET last_upgrade_check_at=datetime('now') "
+                "WHERE video_kind=? AND video_id=? AND language=? AND hi=? AND forced=?",
+                key)
+            conn.commit()
+        finally:
+            conn.close()
 
     def get_import_failed_video_downloads(self) -> list:
         """Downloads that finished but couldn't be auto-placed (sample / wrong episode /
