@@ -937,7 +937,7 @@ export function FindingsSurface({
       const total = (group.dismissed || 0) + (group.resolved || 0);
       const confirmed = await window.showConfirmDialog?.({
         title: `Reopen all ${label}`,
-        message: `Reopen ${total.toLocaleString()} dismissed ${label.toLowerCase()} findings? They will show as pending again.`,
+        message: `Reopen ${total.toLocaleString()} dismissed and resolved ${label.toLowerCase()} findings? They will show as pending again.`,
         confirmText: 'Reopen all',
         destructive: false,
       });

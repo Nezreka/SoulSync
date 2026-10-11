@@ -145,6 +145,8 @@ export function FindingsInbox({
                   >
                     Dismiss all
                   </button>
+                ) : null}
+                {group.dismissed > 0 || group.resolved > 0 ? (
                   <button
                     type="button"
                     className="repair-inbox-btn ghost"
