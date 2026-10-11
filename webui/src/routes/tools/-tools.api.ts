@@ -300,6 +300,21 @@ export async function reopenFinding(id: number): Promise<boolean> {
   }
 }
 
+/** Reopen all dismissed findings, optionally filtered by job and/or
+ *  type. The bulk undo for dismiss. Returns the count reopened, or
+ *  throws with the backend error message. */
+export async function reopenFindingsBulk(jobId?: string, findingType?: string): Promise<number> {
+  const response = await postJson('/api/repair/findings/reopen-all', {
+    job_id: jobId,
+    finding_type: findingType,
+  });
+  const data = (await response.json()) as { success?: boolean; reopened?: number; error?: string };
+  if (!data.success) {
+    throw new Error(data.error || 'Failed to reopen findings');
+  }
+  return data.reopened ?? 0;
+}
+
 /** Dismiss every PENDING finding of one type — the group-level dismiss.
  *  Scoped by type server-side; the alternative was shipping thousands of ids
  *  to the browser only to post them straight back. */
