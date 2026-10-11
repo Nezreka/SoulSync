@@ -145,10 +145,24 @@ describe('season-pack grouping', () => {
         dl({ kind: 'show', search_ctx: JSON.stringify({ season: 1, scope: 'season' }) }),
       ),
     ).toBe(true);
+    // the server's verdict wins: an explicit is_pack:false is not overridden
+    // by a season-looking ctx (otherwise the fallback becomes the real rule).
+    expect(
+      vdlIsPackRow(
+        dl({
+          kind: 'show',
+          is_pack: false,
+          search_ctx: JSON.stringify({ season: 1, scope: 'season' }),
+        }),
+      ),
+    ).toBe(false);
   });
   it('keys same show+season together, nothing else', () => {
     expect(vdlGroupKey(ep(1))).toBe('g:42:s1');
     expect(vdlGroupKey(ep(2, 2, 1))).toBe('g:42:s2');
+    // the pack shares its episodes' key — the original bug was groupKey
+    // returning null for the pack, so it rendered alone.
+    expect(vdlGroupKey(pack(9))).toBe(vdlGroupKey(ep(1)));
     expect(vdlGroupKey(dl({ kind: 'movie', title: 'M' }))).toBeNull();
     expect(vdlGroupKey(dl({ kind: 'show', title: 'NoSeason' }))).toBeNull();
   });
