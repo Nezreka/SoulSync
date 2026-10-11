@@ -3,8 +3,9 @@
 Lifted from ``web_server._register_automation_handlers`` (the
 ``_auto_scan_watchlist`` closure). The watchlist scanner returns
 summary stats for the trigger card only when a fresh scan actually
-ran — detected by snapshotting ``id(state_dict)`` before/after, since
-the live processor reassigns the dict on each new scan.
+ran — detected by snapshotting the state's ``started_at`` before/after,
+since the live processor resets the shared state dict in place on each
+new scan.
 """
 
 from __future__ import annotations
