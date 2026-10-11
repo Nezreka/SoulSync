@@ -17,22 +17,22 @@ from core.automation.deps import AutomationDeps
 def auto_scan_watchlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
     """Run a watchlist scan when the automation triggers.
 
-    Pre-scan we capture ``id(watchlist_scan_state)`` so we can tell
-    afterwards whether the worker ran (and reassigned the state dict)
-    or short-circuited (kept the same dict). Only fresh scans report
-    summary stats — repeat triggers without an intervening run return
-    a bare ``completed``.
+    Pre-scan we capture the state's ``started_at`` so we can tell afterwards
+    whether the worker ran (and reset the state with a new timestamp) or
+    short-circuited (kept the same state). Only fresh scans report summary
+    stats — repeat triggers without an intervening run return a bare
+    ``completed``.
     """
     try:
         pre_state = deps.get_watchlist_scan_state()
-        pre_state_id = id(pre_state)
+        pre_started_at = pre_state.get('started_at')
         deps.process_watchlist_scan_automatically(
             automation_id=config.get('_automation_id'),
             profile_id=config.get('_profile_id'),
         )
         post_state = deps.get_watchlist_scan_state()
-        # Fresh scan = state dict was reassigned mid-run.
-        if id(post_state) != pre_state_id:
+        # Fresh scan = state was reset mid-run (new started_at timestamp).
+        if post_state.get('started_at') != pre_started_at:
             summary = post_state.get('summary', {}) if isinstance(post_state, dict) else {}
             return {
                 'status': 'completed',

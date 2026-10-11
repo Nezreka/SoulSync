@@ -54,3 +54,27 @@ def test_initial_state_is_idle():
         'error': None,
     })
     assert scan_state.get_state()['status'] == 'idle'
+
+
+def test_started_at_distinguishes_fresh_scan():
+    """The automation handler detects fresh scans via started_at, not id().
+
+    Regression: the old handler used id(state_dict) to detect reassignment.
+    With the shared in-place-mutated dict, id() never changes — so the
+    handler now compares started_at timestamps instead.
+    """
+    from datetime import datetime, timedelta
+
+    scan_state.reset_state()
+    pre_started = scan_state.get_state().get('started_at')
+    assert pre_started is not None
+
+    # Simulate a second scan starting later (in-place mutation, same id)
+    later = datetime.now() + timedelta(seconds=60)
+    scan_state.get_state()['started_at'] = later
+
+    post_started = scan_state.get_state().get('started_at')
+    # Same object...
+    assert scan_state.get_state() is scan_state.get_state()
+    # ...but the handler can still tell a fresh scan ran
+    assert post_started != pre_started
