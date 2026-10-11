@@ -26434,108 +26434,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-bottom: 0;
 }
 
-.artists-welcome-section {
-    margin-bottom: 40px;
-}
-
-.artists-welcome-title {
-    font-size: 36px;
-    font-weight: 700;
-    margin-bottom: 12px;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-    letter-spacing: -0.3px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-
-.artists-welcome-title > span {
-    background: linear-gradient(90deg, #ffffff 0%, rgb(var(--accent-light-rgb)) 50%, rgb(var(--accent-rgb)) 100%);
-    background-size: 200% 100%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: page-title-shimmer 6s ease-in-out infinite;
-}
-
-.artists-welcome-subtitle {
-    font-size: 16px;
-    color: var(--white-a70);
-    font-weight: 400;
-    line-height: 1.5;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artists-search-input-container {
-    position: relative;
-    margin-bottom: 20px;
-}
-
-.artists-search-input {
-    width: 100%;
-    padding: 18px 24px 18px 60px;
-    font-size: 16px;
-    font-weight: 500;
-    color: #ffffff;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-
-    /* Premium glassmorphic foundation */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.9) 0%,
-            rgba(18, 18, 18, 0.95) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
-    border-radius: 24px;
-    border: 1px solid var(--white-a10);
-    border-top: 1px solid var(--white-a15);
-
-    /* Elegant shadow system */
-    box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(var(--accent-rgb), 0.05),
-        inset 0 1px 0 var(--white-a08),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.1);
-
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    outline: none;
-}
-
-.artists-search-input:focus {
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.95) 0%,
-            rgba(22, 22, 22, 1.0) 100%);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    border-top-color: rgba(var(--accent-rgb), 0.4);
-
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(var(--accent-rgb), 0.15),
-        0 0 20px rgba(var(--accent-rgb), 0.1),
-        inset 0 1px 0 var(--white-a12),
-        inset 0 -1px 0 rgba(0, 0, 0, 0.15);
-
-    transform: translateY(-1px);
-}
-
-.artists-search-input::placeholder {
-    color: var(--white-a50);
-    font-weight: 400;
-}
-
-.artists-search-icon {
-    position: absolute;
-    left: 22px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 18px;
-    color: var(--white-a60);
-    pointer-events: none;
-    transition: color 0.3s ease;
-}
-
-.artists-search-input:focus+.artists-search-icon {
-    color: rgba(var(--accent-rgb), 0.8);
-}
-
 .artists-search-status {
     font-size: 14px;
     color: var(--white-a60);
@@ -26553,51 +26451,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: rgba(255, 65, 54, 0.8);
 }
 
-/* Artists Results State */
-.artists-results-state {
-    opacity: 0;
-    transform: translateY(20px);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    padding: 20px;
-}
-
-.artists-results-state.show {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.artists-results-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 30px;
-    gap: 20px;
-}
-
-.artists-back-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--white-a80);
-
-    background: var(--white-a08);
-    border: 1px solid var(--white-a12);
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    outline: none;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artists-back-button:hover {
-    background: var(--white-a12);
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
 .back-icon {
     font-size: 16px;
 }
@@ -26605,77 +26458,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .artists-search-header {
     flex: 1;
     max-width: 400px;
-}
-
-.artists-header-search-input {
-    width: 100%;
-    padding: 12px 20px;
-    font-size: 14px;
-    font-weight: 500;
-    color: #ffffff;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-
-    background: var(--white-a08);
-    backdrop-filter: blur(8px);
-    border: 1px solid var(--white-a12);
-    border-radius: var(--radius-xl);
-
-    transition: all 0.2s ease;
-    outline: none;
-}
-
-.artists-header-search-input:focus {
-    background: var(--white-a12);
-    border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
-}
-
-.artists-header-search-input::placeholder {
-    color: var(--white-a50);
-}
-
-.artists-results-content {
-    margin-bottom: 40px;
-}
-
-.artists-results-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #ffffff;
-    margin-bottom: 20px;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artists-cards-container {
-    display: flex;
-    gap: 20px;
-    overflow-x: auto;
-    overflow-y: visible;
-    padding: 30px;
-    scroll-behavior: smooth;
-
-    /* Custom scrollbar styling */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(var(--accent-rgb), 0.6) var(--white-a10);
-}
-
-.artists-cards-container::-webkit-scrollbar {
-    height: 8px;
-}
-
-.artists-cards-container::-webkit-scrollbar-track {
-    background: var(--white-a10);
-    border-radius: var(--radius-xs);
-}
-
-.artists-cards-container::-webkit-scrollbar-thumb {
-    background: rgba(var(--accent-rgb), 0.6);
-    border-radius: var(--radius-xs);
-    transition: background 0.3s ease;
-}
-
-.artists-cards-container::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--accent-rgb), 0.8);
 }
 
 /* Artist Card Styles with Background Images */
@@ -26744,19 +26526,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     transform: scale(1.05);
 }
 
-.artist-card-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(0deg,
-            rgba(0, 0, 0, 0.9) 0%,
-            rgba(0, 0, 0, 0.3) 40%,
-            rgba(0, 0, 0, 0.1) 70%,
-            transparent 100%);
-}
-
 .artist-card-content {
     position: absolute;
     bottom: 0;
@@ -26773,36 +26542,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-bottom: 8px;
     line-height: 1.2;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artist-card-genres {
-    font-size: 14px;
-    color: var(--white-a80);
-    font-weight: 500;
-    margin-bottom: 12px;
-    line-height: 1.3;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artist-card-popularity {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: rgba(var(--accent-rgb), 0.9);
-    font-weight: 600;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.popularity-icon {
-    font-size: 12px;
-}
-
-/* Artist Card Actions (Watchlist) */
-.artist-card-actions {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid var(--white-a10);
 }
 
 .watchlist-toggle-btn {
@@ -26916,10 +26655,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
-    .artists-cards-container {
-        gap: 16px;
-        padding: 15px 0 25px 0;
-    }
 
     .artist-card {
         width: 250px;
@@ -26929,19 +26664,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .artist-card-name {
         font-size: 20px;
     }
-}
-
-/* Artist Detail State */
-.artist-detail-state {
-    opacity: 0;
-    transform: translateY(20px);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    padding: 20px;
-}
-
-.artist-detail-state.show {
-    opacity: 1;
-    transform: translateY(0);
 }
 
 /* ========================================= */
@@ -26957,97 +26679,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a06);
 }
 
-.artists-hero-bg {
-    position: absolute;
-    inset: -20px;
-    background-size: cover;
-    background-position: center top;
-    filter: blur(50px) brightness(0.35) saturate(1.4);
-    transform: scale(1.3);
-    z-index: 0;
-}
-
-.artists-hero-overlay {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg,
-        rgba(8, 8, 8, 0.5) 0%,
-        rgba(12, 12, 12, 0.75) 50%,
-        rgba(12, 12, 12, 0.92) 100%);
-    z-index: 1;
-}
-
 .artists-hero-content {
     position: relative;
     z-index: 2;
     padding: 32px 36px 36px;
-}
-
-.artists-hero-back {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    padding: 6px 14px;
-    color: var(--white-a50);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    margin-bottom: 24px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    letter-spacing: 0.02em;
-}
-
-.artists-hero-back:hover {
-    background: var(--white-a12);
-    color: #fff;
-}
-
-.artists-hero-main {
-    display: flex;
-    gap: 36px;
-    align-items: center;
-}
-
-.artists-hero-image {
-    width: 400px;
-    height: 480px;
-    border-radius: 14px;
-    background-size: cover;
-    background-position: center top;
-    background-color: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    flex-shrink: 0;
-    box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.6),
-        0 0 0 1px var(--white-a04);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
-}
-
-.artists-hero-section:hover .artists-hero-image {
-    border-color: rgba(var(--accent-rgb), 0.2);
-    box-shadow:
-        0 16px 48px rgba(0, 0, 0, 0.6),
-        0 0 30px rgba(var(--accent-rgb), 0.1);
-    transform: scale(1.02);
-}
-
-.artists-hero-image-fallback {
-    font-size: 64px;
-    opacity: 0.2;
-}
-
-.artists-hero-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
 }
 
 .artists-hero-name {
@@ -27060,130 +26695,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
-.artists-hero-badges {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-}
-
-.artists-hero-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    background: var(--white-a06);
-    border: 1px solid var(--white-a08);
-    border-radius: 10px;
-    text-decoration: none;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    overflow: hidden;
-    backdrop-filter: blur(8px);
-}
-
-.artists-hero-badge img {
-    width: 18px;
-    height: 18px;
-    object-fit: contain;
-}
-
-.artists-hero-badge:hover {
-    background: var(--white-a14);
-    transform: translateY(-2px) scale(1.08);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.artists-hero-genres {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 2px;
-}
-
-.artists-hero-genre-pill {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a06);
-    border-radius: 20px;
-    padding: 5px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a65);
-    letter-spacing: 0.01em;
-    backdrop-filter: blur(4px);
-    transition: all 0.15s ease;
-}
-
-.artists-hero-genre-pill:hover {
-    background: var(--white-a10);
-    color: var(--white-a90);
-}
-
-.artists-hero-bio {
-    max-width: 600px;
-    max-height: 3.9em;
-    overflow: hidden;
-    position: relative;
-    transition: max-height 0.3s ease;
-}
-
-.artists-hero-bio.expanded {
-    max-height: 500px;
-}
-
-.artists-hero-bio-text {
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--white-a55);
-    margin: 0;
-    display: inline;
-}
-
-.artists-hero-bio-toggle {
-    background: none;
-    border: none;
-    color: rgba(var(--accent-rgb), 0.9);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0;
-    margin-left: 4px;
-    display: inline;
-}
-
-.artists-hero-bio-toggle:hover {
-    color: rgb(var(--accent-rgb));
-}
-
 .artists-hero-stats {
     display: flex;
     gap: 24px;
     margin-top: 4px;
-}
-
-.artists-hero-stat {
-    font-size: 13px;
-    color: var(--white-a40);
-    display: flex;
-    align-items: baseline;
-    gap: 5px;
-}
-
-.artists-hero-stat strong {
-    font-size: 18px;
-    color: #fff;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-}
-
-.artists-hero-actions {
-    position: absolute;
-    top: 32px;
-    right: 36px;
-    display: flex;
-    gap: 8px;
-    align-items: center;
 }
 
 /* Mobile responsive */
@@ -27193,28 +26708,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         min-height: 0;
     }
 
-    .artists-hero-main {
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        gap: 20px;
-    }
-
-    .artists-hero-image {
-        width: 160px;
-        height: 200px;
-    }
-
     .artists-hero-name {
         font-size: 1.6em;
-    }
-
-    .artists-hero-genres {
-        justify-content: center;
-    }
-
-    .artists-hero-badges {
-        justify-content: center;
     }
 
     .artists-hero-stats {
@@ -27223,16 +26718,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     .artists-hero-content {
         padding: 20px 16px 24px;
-    }
-
-    .artists-hero-actions {
-        position: static;
-        justify-content: center;
-        margin-top: 8px;
-    }
-
-    .artists-hero-stat strong {
-        font-size: 16px;
     }
 }
 
@@ -27244,13 +26729,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-bottom: 40px;
     padding-bottom: 30px;
     border-bottom: 1px solid var(--white-a10);
-}
-
-.artist-detail-header-left {
-    display: flex;
-    align-items: center;
-    gap: 30px;
-    flex: 1;
 }
 
 .artist-detail-back-button {
@@ -27275,91 +26753,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: var(--white-a12);
     color: #ffffff;
     transform: translateY(-1px);
-}
-
-.artist-detail-watchlist-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 18px;
-    font-size: 14px;
-    font-weight: 600;
-    color: #e0e0e0;
-
-    background: var(--white-a08);
-    border: 1px solid var(--white-a12);
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    outline: none;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.artist-detail-watchlist-btn:hover:not(:disabled) {
-    background: rgba(var(--accent-rgb), 0.15);
-    color: #ffffff;
-    border-color: rgba(var(--accent-rgb), 0.3);
-    transform: translateY(-1px);
-}
-
-.artist-detail-watchlist-btn.watching {
-    background: rgba(255, 193, 7, 0.15);
-    color: #ffc107;
-    border-color: rgba(255, 193, 7, 0.3);
-}
-
-.artist-detail-watchlist-btn.watching:hover:not(:disabled) {
-    background: rgba(255, 193, 7, 0.25);
-    color: #ffffff;
-    border-color: rgba(255, 193, 7, 0.5);
-}
-
-.artist-detail-watchlist-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-}
-
-/* Artist Detail Watchlist Button Group (with settings gear) */
-.artist-detail-watchlist-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.artist-detail-watchlist-settings-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    font-size: 18px;
-    color: #aaa;
-    background: var(--white-a08);
-    border: 1px solid var(--white-a12);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    outline: none;
-}
-
-.artist-detail-watchlist-settings-btn:hover {
-    background: rgba(255, 193, 7, 0.15);
-    color: #ffc107;
-    border-color: rgba(255, 193, 7, 0.3);
-    transform: translateY(-1px);
-}
-
-/* Artist Card Watchlist Button Group (artists/discover page) */
-.watchlist-btn-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.watchlist-btn-group .watchlist-toggle-btn {
-    flex: 1;
 }
 
 .watchlist-settings-btn {
