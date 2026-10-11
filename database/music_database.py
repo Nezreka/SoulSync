@@ -1492,6 +1492,10 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_target ON library_history "
+                           "(title COLLATE NOCASE, artist_name COLLATE NOCASE, id DESC) "
+                           "WHERE event_type IN ('download', 'import')")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_path ON library_history (file_path, id DESC)")
 
             # Migration: add download_source column
             cursor.execute("PRAGMA table_info(library_history)")
