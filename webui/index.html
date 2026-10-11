@@ -8329,6 +8329,42 @@
                                                             style="color: #22a079;">Services &rarr;
                                                             OpenSubtitles</a>.</small>
                                                 </div>
+
+                                                <div class="form-group">
+                                                    <label>Local transcription (Whisper):</label>
+                                                    <div class="vo-whisper-row">
+                                                        <select id="vo-whisper-model"
+                                                            aria-label="Whisper model">
+                                                            <option value="tiny">tiny</option>
+                                                            <option value="base">base</option>
+                                                            <option value="small">small</option>
+                                                        </select>
+                                                        <button class="test-button" id="vo-whisper-dl"
+                                                            type="button">Download model</button>
+                                                    </div>
+                                                    <div class="vo-whisper-progress" id="vo-whisper-progress"
+                                                        hidden>
+                                                        <div class="vo-whisper-progress-bar"
+                                                            id="vo-whisper-progress-bar"></div>
+                                                    </div>
+                                                    <small class="settings-hint"
+                                                        id="vo-whisper-status"></small>
+                                                    <small class="settings-hint" id="vo-whisper-error" hidden
+                                                        style="color: #ff6b6b;"></small>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-whisper-enabled">
+                                                        <span>Enable local transcription</span>
+                                                    </label>
+                                                    <small class="settings-hint">Last-resort fallback: when no
+                                                        provider has subtitles, this server transcribes the
+                                                        video's own audio &mdash; no API key, no quota, fully
+                                                        offline after the one-time model download. Transcription
+                                                        runs in the background subtitle worker (a 45-minute
+                                                        episode takes roughly 10&ndash;20 minutes on a typical
+                                                        CPU). Requires the
+                                                        <code>faster-whisper</code> Python package on the
+                                                        server.</small>
+                                                </div>
                                             </div>
 
                                         </div>

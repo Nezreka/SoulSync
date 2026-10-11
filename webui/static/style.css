@@ -4256,6 +4256,31 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 13px;
 }
 
+/* Whisper local transcription: model picker + download button + progress */
+.vo-whisper-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0 4px;
+}
+.vo-whisper-row select {
+    max-width: 220px;
+}
+.vo-whisper-progress {
+    height: 8px;
+    border-radius: 4px;
+    background: var(--white-a06);
+    overflow: hidden;
+    margin: 6px 0;
+}
+.vo-whisper-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    background: rgb(var(--accent-rgb));
+    transition: width 0.3s ease;
+}
+
 .post-processing-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
