@@ -47842,22 +47842,6 @@ div.artist-hero-badge {
     font-weight: 500;
 }
 
-.hydrabase-input-group {
-    display: flex;
-    gap: 8px;
-}
-
-.hydrabase-input-group input {
-    flex: 1;
-}
-
-.hydrabase-icon {
-    width: 18px;
-    height: 18px;
-    filter: invert(1);
-    vertical-align: middle;
-}
-
 .hydra-payload {
     width: 100%;
     background: rgba(0, 0, 0, 0.3);
@@ -48617,12 +48601,6 @@ div.artist-hero-badge {
     margin-top: 20px;
     padding-top: 16px;
     border-top: 1px solid var(--white-a08);
-}
-
-.admin-pin-note {
-    color: #9ca3af;
-    font-size: 12px;
-    margin: 0 0 10px;
 }
 
 /* Profile Settings in Management Panel */
