@@ -114,8 +114,8 @@ DEFAULT_PREFERENCES: Dict[str, Any] = {
         "quality_show_format": True,
         "quality_show_resolution": True,
         "quality_show_bitrate": True,
-        # the title opens the track editor instead of a pencil in Actions
-        "edit_via_title": False,
+        # the title opens the track editor (default); False puts a pencil in Actions
+        "edit_via_title": True,
     },
     # Round 5 (deep-dive D6): mirrors track_table's shape for the artist
     # overview's table view. All default off — the table view's whole point

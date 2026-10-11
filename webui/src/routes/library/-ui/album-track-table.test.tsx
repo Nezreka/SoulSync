@@ -722,7 +722,8 @@ describe('library v2 album track table', () => {
     expect(container).not.toContainElement(dialog);
     expect(document.body).toContainElement(dialog);
     expect(within(dialog).getByText('Visible columns')).toBeInTheDocument();
-    expect(within(dialog).getByText('Quality & sizing')).toBeInTheDocument();
+    expect(within(dialog).getByText('Quality column')).toBeInTheDocument();
+    expect(within(dialog).getByText('Track editor')).toBeInTheDocument();
     expect(within(dialog).getByText('Match providers')).toBeInTheDocument();
     expect(within(dialog).getByText('Check')).toBeInTheDocument();
     expect(within(dialog).getByRole('checkbox', { name: /Title/ })).toBeChecked();
@@ -949,8 +950,8 @@ describe('library v2 album track table', () => {
     expect(tableColumns[0].style.width).toBe('24px');
     expect(tableColumns[1].style.width).toBe('28px');
     expect(tableColumns[2].style.width).toBe('32px');
-    // three actions plus the edit pencil (the default); 80px clipped the pencil
-    expect(tableColumns.at(-1)?.style.width).toBe('106px');
+    // the title opens the editor by default, so three actions fit 80px
+    expect(tableColumns.at(-1)?.style.width).toBe('80px');
     expect(tableColumns.slice(3, -1).every((column) => column.style.width.endsWith('px'))).toBe(
       true,
     );

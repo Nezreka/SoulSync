@@ -4373,6 +4373,73 @@ button.statusWarn:disabled {
   display: contents;
 }
 
+.tableOptionsStack {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-width: 0;
+}
+
+.tableOptionsHint {
+  margin: 0 0 6px;
+  padding: 0 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.tableOptionsExample {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.tableOptionsChoices {
+  display: grid;
+  gap: 8px;
+  padding: 2px 14px 6px;
+}
+
+.tableOptionsChoice {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.tableOptionsChoice:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.tableOptionsChoice:focus-within {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+.tableOptionsChoiceActive,
+.tableOptionsChoiceActive:hover {
+  border-color: rgba(var(--accent-rgb), 0.65);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+
+.tableOptionsChoiceTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.tableOptionsChoiceActive .tableOptionsChoiceTitle {
+  color: rgb(var(--accent-rgb));
+}
+
+.tableOptionsChoiceText {
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.55);
+}
+
 @media (max-width: 780px) {
   .tableOptionsWorkspace {
     grid-template-columns: 1fr;

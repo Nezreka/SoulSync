@@ -8359,6 +8359,7 @@ function ColumnsOptionsMenu<K extends string>({
   onReorder,
   lockedColumns,
   extra,
+  columnsFooter,
   workspace = false,
 }: {
   title: string;
@@ -8369,6 +8370,8 @@ function ColumnsOptionsMenu<K extends string>({
   onReorder?: (newOrder: K[]) => void;
   lockedColumns?: ReadonlySet<K>;
   extra?: ReactNode;
+  /** Under the column list, e.g. resetting the column widths. */
+  columnsFooter?: ReactNode;
   /** The size of the other library workspaces (Preview Retag, Rename,
    *  History), sections side by side, so nothing needs scrolling. */
   workspace?: boolean;
@@ -8494,6 +8497,7 @@ function ColumnsOptionsMenu<K extends string>({
                     );
                   })}
                 </div>
+                {columnsFooter}
               </section>
               {extra}
             </div>
@@ -8525,7 +8529,7 @@ function TrackTableOptionsMenu({
   const qualityShowFormat = prefsQuery.data?.track_table.quality_show_format ?? true;
   const qualityShowResolution = prefsQuery.data?.track_table.quality_show_resolution ?? true;
   const qualityShowBitrate = prefsQuery.data?.track_table.quality_show_bitrate ?? true;
-  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? false;
+  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? true;
 
   return (
     <ColumnsOptionsMenu
@@ -8540,77 +8544,89 @@ function TrackTableOptionsMenu({
       onReorder={(newOrder) => mutation.mutate({ track_table: { column_order: newOrder } })}
       lockedColumns={TRACK_TABLE_LOCKED_COLUMNS}
       workspace
+      columnsFooter={
+        <button
+          type="button"
+          className={styles.tableOptionsReset}
+          disabled={!Object.values(columnWidths).some((width) => width != null)}
+          onClick={onResetColumnWidths}
+        >
+          Reset column widths
+        </button>
+      }
       extra={
         <div className={styles.tableOptionsExtraGrid}>
-          <section className={styles.tableOptionsSection}>
-            <div className={styles.tableOptionsGroupLabel}>Quality & sizing</div>
-            <label className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={qualityShowFormat}
-                onChange={() =>
-                  mutation.mutate({
-                    track_table: { quality_show_format: !qualityShowFormat },
-                  })
-                }
-              />
-              Show format
-            </label>
-            <label className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={qualityShowResolution}
-                onChange={() =>
-                  mutation.mutate({
-                    track_table: {
-                      quality_show_resolution: !qualityShowResolution,
-                    },
-                  })
-                }
-              />
-              Show resolution
-            </label>
-            <label className={styles.tableOptionsItem}>
-              <input
-                type="checkbox"
-                checked={qualityShowBitrate}
-                onChange={() =>
-                  mutation.mutate({
-                    track_table: { quality_show_bitrate: !qualityShowBitrate },
-                  })
-                }
-              />
-              Show bitrate
-            </label>
-            <button
-              type="button"
-              className={styles.tableOptionsReset}
-              disabled={!Object.values(columnWidths).some((width) => width != null)}
-              onClick={onResetColumnWidths}
-            >
-              Reset column widths
-            </button>
-            <div className={styles.tableOptionsGroupLabel}>Edit a track</div>
-            {(
-              [
-                [false, 'Pencil in Actions'],
-                [true, 'Click the title'],
-              ] as const
-            ).map(([viaTitle, text]) => (
-              <label key={String(viaTitle)} className={styles.tableOptionsItem}>
-                <input
-                  type="radio"
-                  name="track-edit-via"
-                  checked={editViaTitle === viaTitle}
-                  onChange={() => mutation.mutate({ track_table: { edit_via_title: viaTitle } })}
-                />
-                {text}
-              </label>
-            ))}
-          </section>
+          <div className={styles.tableOptionsStack}>
+            <section className={styles.tableOptionsSection}>
+              <div className={styles.tableOptionsGroupLabel}>Quality column</div>
+              <p className={styles.tableOptionsHint}>What the Quality badge of each file shows.</p>
+              {(
+                [
+                  ['quality_show_format', qualityShowFormat, 'Format', 'FLAC, MP3, Opus'],
+                  ['quality_show_resolution', qualityShowResolution, 'Resolution', '16bit/44.1kHz'],
+                  ['quality_show_bitrate', qualityShowBitrate, 'Bitrate', '1411 kbps'],
+                ] as const
+              ).map(([key, checked, label, example]) => (
+                <label key={key} className={styles.tableOptionsItem}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => mutation.mutate({ track_table: { [key]: !checked } })}
+                  />
+                  {label}
+                  <span className={styles.tableOptionsExample}>{example}</span>
+                </label>
+              ))}
+            </section>
+
+            <section className={styles.tableOptionsSection}>
+              <div className={styles.tableOptionsGroupLabel}>Track editor</div>
+              <p className={styles.tableOptionsHint}>
+                How a track's metadata, tags, lyrics and quality profile open.
+              </p>
+              <div
+                className={styles.tableOptionsChoices}
+                role="radiogroup"
+                aria-label="Track editor"
+              >
+                {(
+                  [
+                    [
+                      true,
+                      'Click the title (default)',
+                      'The underlined track title opens the editor. The Actions column stays narrow.',
+                    ],
+                    [
+                      false,
+                      'Pencil button',
+                      'An edit button in the Actions column, next to search and add to playlist.',
+                    ],
+                  ] as const
+                ).map(([viaTitle, label, text]) => (
+                  <label
+                    key={label}
+                    className={`${styles.tableOptionsChoice} ${editViaTitle === viaTitle ? styles.tableOptionsChoiceActive : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="track-edit-via"
+                      className={styles.srOnly}
+                      checked={editViaTitle === viaTitle}
+                      onChange={() =>
+                        mutation.mutate({ track_table: { edit_via_title: viaTitle } })
+                      }
+                    />
+                    <span className={styles.tableOptionsChoiceTitle}>{label}</span>
+                    <span className={styles.tableOptionsChoiceText}>{text}</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          </div>
 
           <section className={styles.tableOptionsSection}>
             <div className={styles.tableOptionsGroupLabel}>Match providers</div>
+            <p className={styles.tableOptionsHint}>Which provider chips the Match column shows.</p>
             <label className={styles.tableOptionsItem}>
               <input
                 type="checkbox"
@@ -9165,7 +9181,7 @@ export function AlbumTrackTable({
     title: true,
   };
   const showAllProviders = prefsQuery.data?.track_table.show_all_match_providers ?? false;
-  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? false;
+  const editViaTitle = prefsQuery.data?.track_table.edit_via_title ?? true;
   const actionColumnWidth = trackActionColumnWidth(editViaTitle);
   const utilityColumnWidth = UTILITY_COLUMN_WIDTH_BASE + actionColumnWidth;
   const columnWidths =
