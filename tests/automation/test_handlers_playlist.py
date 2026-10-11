@@ -304,6 +304,42 @@ class TestRefreshMirrored:
         assert result['errors'] == '1'
         assert result['refreshed'] == '0'
 
+    def test_failed_spotify_fetch_keeps_the_stored_tracks(self):
+        # Since Feb 2026 Spotify answers 403 for the items of a playlist the user
+        # follows but doesn't own. The refresh must count an error and leave the
+        # mirror alone, not store an empty track list over the old one.
+        import spotipy
+        from core.spotify_client import SpotifyClient
+
+        class _ForbiddenItemsSp:
+            def playlist(self, pid):
+                return {'id': pid, 'name': 'Followed', 'description': '', 'public': True,
+                        'collaborative': False, 'owner': {'display_name': 'someone else'},
+                        'items': {'total': 1}}
+
+            def _get_id(self, kind, pid):
+                return pid
+
+            def _get(self, url, **params):
+                raise spotipy.SpotifyException(403, -1, 'Forbidden')
+
+            def playlist_items(self, pid, **params):
+                raise spotipy.SpotifyException(403, -1, 'Forbidden')
+
+        spotify = SpotifyClient.__new__(SpotifyClient)
+        spotify.sp = _ForbiddenItemsSp()
+        spotify.is_spotify_authenticated = lambda: True
+        db = _StubDB(
+            playlists=[{'id': 7, 'name': 'Followed', 'source': 'spotify',
+                        'source_playlist_id': 'spot-followed', 'profile_id': 2}],
+            playlist_tracks={7: [{'source_track_id': 'keep-me'}]},
+        )
+        deps = _build_deps(get_database=lambda: db, spotify_client=spotify)
+        result = auto_refresh_mirrored({'playlist_id': '7'}, deps)
+        assert result['errors'] == '1'
+        assert result['refreshed'] == '0'
+        assert db.mirror_calls == []
+
     def test_spotify_public_missing_source_url_is_reported_as_error(self):
         db = _StubDB(playlists=[
             {'id': 1, 'name': 'No URL', 'source': 'spotify_public', 'source_playlist_id': 'hash'},

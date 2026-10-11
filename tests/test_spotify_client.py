@@ -238,3 +238,62 @@ def test_has_write_scope_false_when_no_client():
     c = _SpotifyClient.__new__(_SpotifyClient)
     c.sp = None
     assert c.has_write_scope() is False
+
+
+# ── get_playlist_by_id: a failed track fetch is a failure, not an empty playlist ──
+#    A mirror refresh stores what comes back, so [] from an error used to delete
+#    every stored track. Since Feb 2026 Spotify answers 403 for the items of any
+#    playlist the user doesn't own or collaborate on (a followed playlist).
+
+import logging as _logging
+
+import spotipy as _spotipy
+
+
+class _PlaylistSp:
+    def __init__(self, items_error=None, items=None):
+        self.items_error = items_error
+        self.items = items or []
+
+    def playlist(self, pid):
+        return {'id': pid, 'name': 'Followed', 'description': '', 'public': True,
+                'collaborative': False, 'owner': {'display_name': 'someone else'},
+                'items': {'total': len(self.items)}}
+
+    def _get_id(self, kind, pid):
+        return pid
+
+    def _get(self, url, **params):
+        if self.items_error:
+            raise self.items_error
+        return {'items': [{'item': t} for t in self.items], 'next': None}
+
+    def playlist_items(self, pid, **params):
+        return self._get(f'playlists/{pid}/tracks', **params)
+
+
+def _forbidden():
+    return _spotipy.SpotifyException(403, -1, 'Forbidden')
+
+
+def test_followed_playlist_403_returns_none_and_says_why(caplog):
+    client = _spotify_with(_PlaylistSp(items_error=_forbidden()))
+    with caplog.at_level(_logging.ERROR):
+        assert client.get_playlist_by_id('pl-followed') is None
+    assert 'own or collaborate on' in caplog.text
+
+
+def test_other_track_fetch_errors_also_return_none():
+    client = _spotify_with(_PlaylistSp(items_error=RuntimeError('connection reset')))
+    assert client.get_playlist_by_id('pl-x') is None
+
+
+def test_genuinely_empty_playlist_still_returns_a_playlist():
+    playlist = _spotify_with(_PlaylistSp(items=[])).get_playlist_by_id('pl-empty')
+    assert playlist is not None and playlist.tracks == []
+
+
+def test_track_fetch_error_still_returns_empty_list_by_default():
+    # The playlist listing keeps going past one unreadable playlist.
+    client = _spotify_with(_PlaylistSp(items_error=_forbidden()))
+    assert client._get_playlist_tracks('pl-followed') == []

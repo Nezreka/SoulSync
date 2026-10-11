@@ -55,7 +55,7 @@ def test_real_playlist_id_still_uses_playlist_endpoint(monkeypatch):
         'collaborative': False, 'owner': {'display_name': 'Wolf'},
         'tracks': {'total': 0},
     }
-    monkeypatch.setattr(client, '_get_playlist_tracks', lambda pid: [])
+    monkeypatch.setattr(client, '_get_playlist_tracks', lambda pid, **kw: [])
 
     pl = client.get_playlist_by_id('pl1')
 
