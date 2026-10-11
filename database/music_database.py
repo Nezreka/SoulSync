@@ -4786,6 +4786,7 @@ class MusicDatabase:
             if 'itunes_track_id' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_track_id TEXT")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_id ON tracks (spotify_track_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_nocase ON tracks (spotify_track_id COLLATE NOCASE)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_id ON tracks (itunes_track_id)")
 
         except Exception as e:
@@ -5451,6 +5452,7 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc_nocase ON tracks (isrc COLLATE NOCASE)")
 
             # one-time requeue (#1290): tidal retired /searchResults/{query},
             # so every search 400'd and got recorded as not_found. those rows
