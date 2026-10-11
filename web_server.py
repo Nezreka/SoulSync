@@ -6327,7 +6327,7 @@ def search_music():
     # A Library-v2 Interactive Search sends no text: it looks for the track
     # and for its release, and every hit carries the pipeline's verdict.
     queries = [query] if query else (
-        entity_search.entity_search_queries(_lib2_ctx, matching_engine.clean_title)
+        entity_search.entity_search_queries(_lib2_ctx)
         if _lib2_ctx else [])
     if not queries:
         return jsonify({"error": "No search query provided."}), 400
@@ -11499,6 +11499,25 @@ def inspect_task_sources(task_id):
     except Exception as e:
         logger.error(f"Error in task source inspection: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/downloads/task/<task_id>/library-track', methods=['GET'])
+def task_library_track(task_id):
+    """The Library-v2 track a download task is for, so its Interactive Search
+    can be the library's own; ``track_id`` is null when it names none."""
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        track_info = dict(task.get('track_info') or {}) if isinstance(task, dict) else None
+    if track_info is None:
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    from core.downloads.origin import _parse_source_info
+    from core.library2.grab_context import resolve_lib2_grab_context
+    entity = track_info.get('lib2_entity')
+    claimed = (entity.get('track_id') if isinstance(entity, dict) else None) \
+        or _parse_source_info(track_info.get('source_info')).get('lib2_track_id')
+    state, ctx = resolve_lib2_grab_context(get_database(), {'lib2_track_id': claimed}) \
+        if claimed else ('absent', None)
+    return jsonify({"success": True, "track_id": ctx['track_id'] if state == 'ok' else None})
 
 
 def _wishlist_track_for_inspector(track_id):

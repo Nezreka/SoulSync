@@ -28,7 +28,7 @@ def test_a_track_is_searched_by_itself_and_by_its_release():
     on_album = {**KERNKRAFT, "album_name": "Greatest Hits"}
     assert entity_search_queries(on_album) == ["Topic Kernkraft 400 (A Better Day)", "Topic Greatest Hits"]
     release = {"album_id": 9, "artist_name": "Topic", "album_name": "Greatest Hits"}
-    assert entity_search_queries(release, str.upper) == ["Topic GREATEST HITS"]
+    assert entity_search_queries(release) == ["Topic Greatest Hits"]
 
 
 def test_hits_are_judged_against_every_credited_artist(env):  # noqa: F811

@@ -1,14 +1,18 @@
 import { useSyncExternalStore } from 'react';
 
-import { openWishlistInspector } from '@/features/downloads/inspector-modal';
+import { apiClient, readJson } from '@/app/api-client';
+import {
+  openDownloadTaskInspector,
+  openWishlistInspector,
+} from '@/features/downloads/inspector-modal';
 
 import { InteractiveSearchModal } from './interactive-search';
 
 /**
  * The library's Interactive Search, opened from outside the library (the
- * wishlist). One window for the whole app: a wish linked to a library track
- * gets the same search the library uses; any other falls back to the
- * candidate inspector.
+ * wishlist, a failed download). One window for the whole app: anything linked
+ * to a library track gets the same search the library uses; the rest falls
+ * back to the candidate inspector.
  */
 
 interface LibrarySearchTarget {
@@ -21,8 +25,14 @@ let current: (LibrarySearchTarget & { key: number }) | null = null;
 let opened = 0;
 const listeners = new Set<() => void>();
 
-function setCurrent(next: typeof current) {
-  current = next;
+function openLibrarySearch(target: LibrarySearchTarget) {
+  opened += 1;
+  current = { ...target, key: opened };
+  for (const listener of listeners) listener();
+}
+
+function closeLibrarySearch() {
+  current = null;
   for (const listener of listeners) listener();
 }
 
@@ -42,11 +52,35 @@ export function openWishlistSearch(track: {
     });
     return;
   }
-  opened += 1;
-  setCurrent({ trackId: track.lib2TrackId, label: `${track.artist} ${track.track}`, key: opened });
+  openLibrarySearch({ trackId: track.lib2TrackId, label: `${track.artist} ${track.track}` });
 }
 
-/** Render once inside the page's providers. */
+/** A failed or not-found download: the library search when the task is for a
+ *  library track, the inspector otherwise. */
+export async function openDownloadTaskSearch(
+  taskId: string,
+  track: { name?: string; artist?: string; album?: string },
+): Promise<void> {
+  let trackId: number | null = null;
+  try {
+    const payload = await readJson<{ track_id?: number | null }>(
+      apiClient.get(`downloads/task/${encodeURIComponent(taskId)}/library-track`),
+    );
+    trackId = payload.track_id ?? null;
+  } catch {
+    // an unknown or finished task still gets the inspector
+  }
+  if (!trackId) {
+    openDownloadTaskInspector(taskId, track);
+    return;
+  }
+  openLibrarySearch({
+    trackId,
+    label: [track.artist, track.name].filter(Boolean).join(' '),
+  });
+}
+
+/** Render once inside the app's providers. */
 export function LibrarySearchHost() {
   const open = useSyncExternalStore(
     (listener) => {
@@ -63,7 +97,7 @@ export function LibrarySearchHost() {
       canWrite
       initialQuery={open.label}
       entity={{ trackId: open.trackId }}
-      onClose={() => setCurrent(null)}
+      onClose={closeLibrarySearch}
     />
   );
 }

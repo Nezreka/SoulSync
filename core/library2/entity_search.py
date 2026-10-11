@@ -9,25 +9,24 @@ pipeline would take and keep the rest one click away.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
+from typing import Any, Dict, Iterable, List, Mapping
 
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.entity_search")
 
 
-def entity_search_queries(lib2_context: Mapping[str, Any],
-                          clean: Optional[Callable[[str], str]] = None) -> List[str]:
+def entity_search_queries(lib2_context: Mapping[str, Any]) -> List[str]:
     """``artist track`` and ``artist release`` for a track, ``artist release``
-    for a release; a single named after its track searches once."""
-    clean = clean or (lambda text: text)
+    for a release; a single named after its track searches once. The names go
+    out as they are: a cleaner would lowercase them and romanize CJK titles."""
     artist = str(lib2_context.get("artist_name") or "").strip()
     track_artist = (lib2_context.get("track_artists") or [artist])[0]
     candidates = []
     if lib2_context.get("track_title"):
-        candidates.append(f"{track_artist} {clean(str(lib2_context['track_title']))}")
+        candidates.append(f"{track_artist} {lib2_context['track_title']}")
     if lib2_context.get("album_name"):
-        candidates.append(f"{artist} {clean(str(lib2_context['album_name']))}")
+        candidates.append(f"{artist} {lib2_context['album_name']}")
     queries, seen = [], set()
     for query in (" ".join(q.split()) for q in candidates):
         if query and query.casefold() not in seen:
