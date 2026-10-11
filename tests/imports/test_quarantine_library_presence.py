@@ -352,3 +352,22 @@ def test_explicit_track_artist_has_priority_over_junction_credits(env):
         conn.execute("UPDATE lib2_tracks SET track_artist='Other Performer'")
     quarantined(env, artist='Rihanna')
     assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_recording_identifier_lookups_do_not_scan_the_catalogue(env, monkeypatch):
+    candidate(env)
+    with env.db._get_connection() as conn:
+        conn.executemany('INSERT INTO lib2_tracks(album_id,title) VALUES(1,?)', ((f'Unowned {i}',) for i in range(2000)))
+    connect = env.db._get_connection
+    steps = 0
+    def counted_connection():
+        conn = connect()
+        def progress():
+            nonlocal steps
+            steps += 1
+            return 0
+        conn.set_progress_handler(progress, 100)
+        return conn
+    monkeypatch.setattr(env.db, '_get_connection', counted_connection)
+    assert not env.db.get_quarantine_library_candidates('Missing', [], {'spotify': 'absent', 'isrc': 'ABSENT'})
+    assert steps < 20

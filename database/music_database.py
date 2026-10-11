@@ -10018,10 +10018,8 @@ class MusicDatabase:
             columns = {'spotify': 'spotify_id', 'isrc': 'isrc'}
             ids = [(columns[key], value) for key, value in identifiers.items()
                    if key in columns and value]
-            if ids:
-                cursor.execute(f"""SELECT id FROM lib2_tracks WHERE
-                    {' OR '.join(column + ' = ? COLLATE NOCASE' for column, _ in ids)} LIMIT 100""",
-                    [value for _, value in ids])
+            for column, value in ids:
+                cursor.execute(f"SELECT id FROM lib2_tracks WHERE {column} = ? COLLATE NOCASE LIMIT 100", (value,))
                 track_ids.update(row[0] for row in cursor.fetchall())
             # Resolve names once per list request, including punctuation and
             # compilation credits. Subsequent targets use indexed artist/album
