@@ -25,11 +25,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, 'docker_resolve_path', lambda p: p)
     monkeypatch.setattr(databases, 'get_database', lambda *args, **kwargs: db)
     monkeypatch.setattr('core.imports.quarantine_library.library_scope_for_profile', lambda pid: pid if pid and pid > 1 else 'shared')
-    monkeypatch.setattr('core.imports.quarantine_library.library_root_for_profile', lambda *args, **kwargs: None)
+    monkeypatch.setattr('core.imports.quarantine_library.library_root_for_profile', lambda pid, **kwargs: str(library) if pid and pid > 1 else None)
     token = set_library_scope('shared')
     app = Flask(__name__)
     app.register_blueprint(routes.bp)
-    yield SimpleNamespace(db=db, library=library, quarantine=quarantine, client=app.test_client())
+    yield SimpleNamespace(db=db, library=library, quarantine=quarantine, client=app.test_client(), settings=settings)
     reset_library_scope(token)
 
 
@@ -150,3 +150,49 @@ def test_history_does_not_override_a_conflicting_recording_id(env):
     env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
     quarantined(env, context={'profile_id': 1, 'track_info': {'name': 'Xtal', 'isrc': 'TARGET000001'}})
     assert entries(env)[0]['library_status'] != 'present'
+
+
+@pytest.mark.parametrize('folder', ['.deleted', 'deleted'])
+def test_deleted_library_copies_do_not_count(env, folder):
+    candidate(env, filename=f'{folder}/Xtal.flac')
+    quarantined(env)
+    assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_download_seed_copy_does_not_replace_a_missing_library_copy(env):
+    path = candidate(env)
+    path.unlink()
+    (env.library.parent / 'Xtal.flac').write_bytes(b'retained download')
+    quarantined(env)
+    assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_another_library_cannot_supply_a_missing_shared_copy(env, monkeypatch):
+    path = candidate(env)
+    path.unlink()
+    foreign = env.library.parent / 'Private'
+    foreign.mkdir()
+    (foreign / 'Xtal.flac').write_bytes(b'private audio')
+    env.settings['library.music_paths'] = [str(foreign)]
+    monkeypatch.setattr(env.db, 'get_own_library_profiles', lambda: [{'id': 2, 'root': str(foreign)}])
+    quarantined(env)
+    assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_path_aliases_cannot_bypass_conflicting_recording_ids(env):
+    path = candidate(env, isrc='OTHER0000001')
+    with env.db._get_connection() as conn:
+        conn.execute('UPDATE tracks SET file_path=?', ('Xtal.flac',))
+    env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
+    quarantined(env, context={'profile_id': 1, 'track_info': {'name': 'Xtal', 'isrc': 'TARGET000001'}})
+    assert entries(env)[0]['library_status'] != 'present'
+
+
+def test_history_uses_the_mapped_import_root(env, monkeypatch):
+    path = env.library / 'Xtal.flac'
+    path.write_bytes(b'imported audio')
+    env.settings['soulseek.transfer_path'] = 'Z:\\Music'
+    monkeypatch.setattr('core.imports.paths.docker_resolve_path', lambda raw: str(env.library) if raw == 'Z:\\Music' else raw)
+    env.db.add_library_history_entry('download', 'Xtal', artist_name='Aphex Twin', file_path=str(path))
+    quarantined(env)
+    assert entries(env)[0]['library_status'] == 'present'

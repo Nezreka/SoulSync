@@ -161,16 +161,9 @@ export function useAdlVerification(): AdlVerificationController {
    */
   useEffect(() => {
     void refreshSummary();
-    const timer = setInterval(() => {
-      if (state.subView === 'quarantine' && loadedRef.current) {
-        // A later retry can import the target without changing the queue count.
-        void loadQuarantine(true);
-      } else {
-        void refreshSummary();
-      }
-    }, REVIEW_SUMMARY_POLL_MS);
+    const timer = setInterval(() => void refreshSummary(), REVIEW_SUMMARY_POLL_MS);
     return () => clearInterval(timer);
-  }, [refreshSummary, loadQuarantine, state.subView]);
+  }, [refreshSummary]);
 
   /**
    * Read the config once and decide whether the unverified queue can exist.
