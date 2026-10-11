@@ -1492,7 +1492,6 @@
         // Keep the echoed state fresh (a download may have finished in another
         // tab, or just now via the poller).
         _whisperEcho.whisper_model_downloaded = !!st.downloaded;
-        _whisperEcho.whisper_model_path = st.model_path || '';
         _whisperEcho.whisper_model_size_bytes = st.size_bytes || 0;
         _whisperEcho.whisper_model_downloaded_at = st.downloaded_at || '';
         // Picker options carry the real snapshot sizes from the backend.

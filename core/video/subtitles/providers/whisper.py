@@ -314,6 +314,18 @@ def get_download_status() -> dict:
         return dict(_download_state)
 
 
+def _public_download_status() -> dict:
+    """Download state safe for the open status endpoint: the raw ``error``
+    string can embed server filesystem paths, so non-admin callers get a
+    generic message instead."""
+    st = get_download_status()
+    err = st.get("error")
+    if err:
+        st = dict(st)
+        st["error"] = "download failed — check the server log for details"
+    return st
+
+
 def _set_download_state(**kw) -> None:
     with _download_lock:
         _download_state.update(kw)
@@ -513,13 +525,11 @@ def status_payload(get_setting: Callable[[str, Any], Any]) -> dict:
         },
         "downloaded": bool(flag and on_disk),
         "disk_model": disk_model,
-        "model_path": _s("whisper_model_path",
-                         str(model_file_path(name)) if on_disk else ""),
         "size_bytes": size_bytes,
         "downloaded_at": _s("whisper_model_downloaded_at"),
         "engine": engine,
         "engine_hint": None if engine else "pip install faster-whisper",
-        "download": get_download_status(),
+        "download": _public_download_status(),
     }
 
 

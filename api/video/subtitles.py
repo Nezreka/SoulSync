@@ -102,8 +102,19 @@ def _whisper_store_download_result(db, model, info, error):
                 "whisper_model_downloaded_at": info["downloaded_at"],
             })
         else:
-            current["whisper_model_downloaded"] = bool(
-                whisper_mod.model_file_exists(model))
+            # Failure: recompute the flag from disk truth. If the requested
+            # model isn't on disk but another one is (e.g. the user switched
+            # the picker then the download failed), restore whisper_model to
+            # the working one instead of orphaning a good setup.
+            on_disk = [m for m in whisper_mod.WHISPER_MODELS
+                       if whisper_mod.model_file_exists(m)]
+            if whisper_mod.model_file_exists(model):
+                current["whisper_model_downloaded"] = True
+            elif on_disk:
+                current["whisper_model"] = on_disk[0]
+                current["whisper_model_downloaded"] = True
+            else:
+                current["whisper_model_downloaded"] = False
         organization.save(db, current)
     except Exception:  # noqa: BLE001 - persistence is bookkeeping, never fatal
         logger.exception("whisper: could not persist download state")
