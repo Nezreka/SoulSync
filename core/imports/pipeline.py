@@ -2462,6 +2462,13 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     "shorter than the current primary"
                 )
 
+        if _replace_reason in ('force', 'enhance') and os.path.exists(final_path):
+            # A forced or approved replacement at the same path overwrote the
+            # old file outright; like every other removal it stays restorable.
+            try:
+                _retire_replaced_library_file(final_path, _replace_reason, context)
+            except OSError as retire_error:
+                logger.warning("[Replace] Old file overwritten, not retired: %s", retire_error)
         safe_move_file(file_path, final_path)
         for companion_source in _upgrade_companions:
             companion_final = os.path.splitext(final_path)[0] + os.path.splitext(
