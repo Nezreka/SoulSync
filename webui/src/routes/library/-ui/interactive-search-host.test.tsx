@@ -10,6 +10,7 @@ import { HttpResponse, http, server } from '@/test/msw';
 import {
   LibrarySearchHost,
   openDownloadTaskSearch,
+  openLibraryTaskSearch,
   openWishlistSearch,
 } from './interactive-search-host';
 
@@ -62,6 +63,25 @@ describe('Interactive Search outside the library', () => {
       expect(screen.getByText('library search for track 1105')).toBeInTheDocument(),
     );
     expect(openDownloadTaskInspector).not.toHaveBeenCalled();
+  });
+
+  it('tells the downloads list whether it opened, so the list keeps its own window', async () => {
+    server.use(
+      http.get('*/api/downloads/task/t3/library-track', () =>
+        HttpResponse.json({ success: true, track_id: 7 }),
+      ),
+      http.get('*/api/downloads/task/t4/library-track', () =>
+        HttpResponse.json({ success: false, error: 'Task not found' }, { status: 404 }),
+      ),
+    );
+    render(<LibrarySearchHost />);
+    let opened = false;
+    await act(async () => {
+      opened = await openLibraryTaskSearch('t3');
+    });
+    expect(opened).toBe(true);
+    expect(screen.getByText('library search for track 7')).toBeInTheDocument();
+    expect(await openLibraryTaskSearch('t4')).toBe(false);
   });
 
   it('keeps the inspector for a download that is for no library track', async () => {

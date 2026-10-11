@@ -55,12 +55,9 @@ export function openWishlistSearch(track: {
   openLibrarySearch({ trackId: track.lib2TrackId, label: `${track.artist} ${track.track}` });
 }
 
-/** A failed or not-found download: the library search when the task is for a
- *  library track, the inspector otherwise. */
-export async function openDownloadTaskSearch(
-  taskId: string,
-  track: { name?: string; artist?: string; album?: string },
-): Promise<void> {
+/** Open the library's search for the library track a download task is for;
+ *  false when the task is for none (the caller keeps its own window). */
+export async function openLibraryTaskSearch(taskId: string, label = ''): Promise<boolean> {
   let trackId: number | null = null;
   try {
     const payload = await readJson<{ track_id?: number | null }>(
@@ -68,16 +65,21 @@ export async function openDownloadTaskSearch(
     );
     trackId = payload.track_id ?? null;
   } catch {
-    // an unknown or finished task still gets the inspector
+    // an unknown or finished task keeps the caller's window
   }
-  if (!trackId) {
-    openDownloadTaskInspector(taskId, track);
-    return;
-  }
-  openLibrarySearch({
-    trackId,
-    label: [track.artist, track.name].filter(Boolean).join(' '),
-  });
+  if (!trackId) return false;
+  openLibrarySearch({ trackId, label });
+  return true;
+}
+
+/** A failed or not-found download: the library search when the task is for a
+ *  library track, the inspector otherwise. */
+export async function openDownloadTaskSearch(
+  taskId: string,
+  track: { name?: string; artist?: string; album?: string },
+): Promise<void> {
+  const label = [track.artist, track.name].filter(Boolean).join(' ');
+  if (!(await openLibraryTaskSearch(taskId, label))) openDownloadTaskInspector(taskId, track);
 }
 
 /** Render once inside the app's providers. */

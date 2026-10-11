@@ -54,6 +54,8 @@ declare global {
       taskId: string,
       track: { name?: string; artist?: string; album?: string },
     ) => void;
+    /** Opens the library's Interactive Search when the task is for a library track. */
+    openLibraryTaskSearch?: (taskId: string, label?: string) => Promise<boolean>;
     /**
      * The wishlist download flow. Cannot move to React: it reads
      * `activeDownloadProcesses` and `WishlistModalState`, both module-scoped in

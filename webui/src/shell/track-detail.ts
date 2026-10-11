@@ -27,6 +27,7 @@ declare global {
       }) => Promise<boolean>)
     | undefined;
   var showCandidatesModal: (taskId: string) => void;
+  var openTaskSearch: (taskId: string) => Promise<void>;
   /* eslint-enable no-var */
 }
 
@@ -434,7 +435,7 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
     );
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
-      if (taskId) showCandidatesModal(taskId);
+      if (taskId) void openTaskSearch(taskId);
     });
   } else if (kind === 'failed' || kind === 'not_found') {
     // The candidate inspector: every source searched for this track, with why
@@ -451,7 +452,7 @@ function _tdRenderActions(d: TrackDetailPayload, taskId: string, kind: string): 
     }
     add('🔍 Search for a different result', 'td-action-secondary', () => {
       closeTrackDetail();
-      if (taskId) showCandidatesModal(taskId);
+      if (taskId) void openTaskSearch(taskId);
     });
   }
   // completed / in_progress: no destructive actions - the player + info is it.

@@ -6,7 +6,10 @@ import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
 import { bindWindowWebRouter, SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 import { ROUTER_ROOT_ID } from '@/platform/shell/route-controllers';
-import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
+import {
+  openDownloadTaskSearch,
+  openLibraryTaskSearch,
+} from '@/routes/library/-ui/interactive-search-host';
 
 import { createAppQueryClient } from './query-client';
 import { AppRouterProvider, createAppRouter } from './router';
@@ -69,5 +72,7 @@ void mountLibraryDiscographySourceSelector();
 mountCandidateInspectorHost();
 // A failed download's Interactive Search is the library's when it is for a library track.
 window.openDownloadTaskInspector = (taskId, track) => void openDownloadTaskSearch(taskId, track);
+// The downloads list's search on a failed row (static/downloads.js) asks first.
+window.openLibraryTaskSearch = openLibraryTaskSearch;
 mountAddToPlaylistHost();
 void bootstrapApp();
