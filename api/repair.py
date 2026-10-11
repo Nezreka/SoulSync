@@ -307,8 +307,9 @@ def repair_finding_reopen(finding_id):
 
 @bp.route('/api/repair/findings/reopen-all', methods=['POST'])
 def repair_findings_reopen_all():
-    """Bulk reopen resolved/dismissed findings, optionally filtered by
-    job_id and/or finding_type. The bulk undo for dismiss."""
+    """Bulk reopen dismissed findings, optionally filtered by
+    job_id and/or finding_type. The bulk undo for dismiss. Only
+    dismissed rows are touched; resolved findings are never reopened."""
     try:
         if _repair_worker() is None:
             return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400

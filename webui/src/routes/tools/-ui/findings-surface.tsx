@@ -934,10 +934,10 @@ export function FindingsSurface({
   const reopenGroup = useCallback(
     async (group: FindingGroup, info: FindingTypeInfo | undefined) => {
       const label = info?.label || group.finding_type.replace(/_/g, ' ');
-      const total = (group.dismissed || 0) + (group.resolved || 0);
+      const total = group.dismissed || 0;
       const confirmed = await window.showConfirmDialog?.({
         title: `Reopen all ${label}`,
-        message: `Reopen ${total.toLocaleString()} dismissed and resolved ${label.toLowerCase()} findings? They will show as pending again.`,
+        message: `Reopen ${total.toLocaleString()} dismissed ${label.toLowerCase()} findings? They will show as pending again.`,
         confirmText: 'Reopen all',
         destructive: false,
       });
@@ -949,8 +949,8 @@ export function FindingsSurface({
           count > 0 ? 'success' : 'info',
         );
         refreshAll();
-      } catch {
-        toast('Error reopening findings', 'error');
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'Error reopening findings', 'error');
       }
     },
     [refreshAll],

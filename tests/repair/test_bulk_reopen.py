@@ -76,17 +76,19 @@ def _count_filtered(db_path, finding_type, status):
 def test_bulk_reopen_all(worker_with_findings):
     worker, db_path = worker_with_findings
     count = worker.reopen_findings_bulk()
-    # 3 dismissed + 2 resolved + 1 dismissed other = 6 (pending untouched)
-    assert count == 6
-    assert _count_status(db_path, 'pending') == 7
+    # 3 dismissed BPM + 1 dismissed other = 4 (resolved and pending untouched)
+    assert count == 4
+    assert _count_status(db_path, 'pending') == 5  # 1 original + 4 reopened
+    assert _count_status(db_path, 'resolved') == 2  # untouched
 
 
 def test_bulk_reopen_filtered_by_type(worker_with_findings):
     worker, db_path = worker_with_findings
     count = worker.reopen_findings_bulk(finding_type='missing_bpm')
-    # 3 dismissed + 2 resolved BPM = 5
-    assert count == 5
+    # 3 dismissed BPM only (resolved untouched)
+    assert count == 3
     assert _count_filtered(db_path, 'other_type', 'dismissed') == 1  # untouched
+    assert _count_status(db_path, 'resolved') == 2  # untouched
 
 
 def test_bulk_reopen_filtered_by_job(worker_with_findings):
@@ -95,8 +97,41 @@ def test_bulk_reopen_filtered_by_job(worker_with_findings):
     assert count == 1
 
 
-def test_bulk_reopen_empty_filters_reopens_all(worker_with_findings):
-    """Empty filters = reopen everything (the 'nuke' case is intentional)."""
+def test_bulk_reopen_empty_filters_reopens_all_dismissed(worker_with_findings):
+    """Empty filters = reopen all dismissed (resolved never touched)."""
     worker, db_path = worker_with_findings
     count = worker.reopen_findings_bulk(job_id=None, finding_type=None)
-    assert count == 6
+    assert count == 4
+
+
+def test_bulk_reopen_empty_string_filter_refused(worker_with_findings):
+    """Empty string filters are refused, not treated as unfiltered."""
+    worker, db_path = worker_with_findings
+    assert worker.reopen_findings_bulk(finding_type="") == 0
+    assert worker.reopen_findings_bulk(job_id="") == 0
+    # Nothing changed
+    assert _count_status(db_path, 'dismissed') == 4
+
+
+def test_bulk_reopen_resets_user_action_and_resolved_at(worker_with_findings):
+    """Reopened rows have user_action and resolved_at cleared."""
+    import sqlite3
+    worker, db_path = worker_with_findings
+    # Set user_action on a dismissed row first
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE repair_findings SET user_action = 'dismissed by test' WHERE status = 'dismissed' LIMIT 1"
+    )
+    conn.commit()
+    conn.close()
+
+    worker.reopen_findings_bulk()
+
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute(
+        "SELECT user_action, resolved_at FROM repair_findings WHERE status = 'pending'"
+    ).fetchall()
+    conn.close()
+    for user_action, resolved_at in rows:
+        assert user_action is None
+        assert resolved_at is None
