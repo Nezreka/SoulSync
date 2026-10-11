@@ -305,6 +305,22 @@ def repair_finding_reopen(finding_id):
         logger.error(f"Error reopening finding {finding_id}: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/reopen-all', methods=['POST'])
+def repair_findings_reopen_all():
+    """Bulk reopen resolved/dismissed findings, optionally filtered by
+    job_id and/or finding_type. The bulk undo for dismiss."""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        data = request.get_json(silent=True) or {}
+        job_id = data.get('job_id')
+        finding_type = data.get('finding_type')
+        count = _repair_worker().reopen_findings_bulk(job_id=job_id, finding_type=finding_type)
+        return jsonify({'success': True, 'reopened': count}), 200
+    except Exception as e:
+        logger.error(f"Error bulk reopening findings: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/finding-types', methods=['GET'])
 def repair_finding_types():
     """The finding-type catalog: label, verb, fixable, destructive, job_ids.

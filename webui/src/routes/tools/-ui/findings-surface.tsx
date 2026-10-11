@@ -55,6 +55,7 @@ import {
   fetchRepairFindings,
   fixFinding,
   reopenFinding,
+  reopenFindingsBulk,
   startBulkFix,
   stopBulkFix,
 } from '../-tools.api';
@@ -928,6 +929,33 @@ export function FindingsSurface({
     [refreshAll],
   );
 
+  /** Reopen all dismissed/resolved findings of one type — the bulk undo for
+   *  dismiss. */
+  const reopenGroup = useCallback(
+    async (group: FindingGroup, info: FindingTypeInfo | undefined) => {
+      const label = info?.label || group.finding_type.replace(/_/g, ' ');
+      const total = (group.dismissed || 0) + (group.resolved || 0);
+      const confirmed = await window.showConfirmDialog?.({
+        title: `Reopen all ${label}`,
+        message: `Reopen ${total.toLocaleString()} dismissed ${label.toLowerCase()} findings? They will show as pending again.`,
+        confirmText: 'Reopen all',
+        destructive: false,
+      });
+      if (!confirmed) return;
+      try {
+        const count = await reopenFindingsBulk(undefined, group.finding_type);
+        toast(
+          count > 0 ? `Reopened ${count.toLocaleString()} findings` : 'No findings to reopen',
+          count > 0 ? 'success' : 'info',
+        );
+        refreshAll();
+      } catch {
+        toast('Error reopening findings', 'error');
+      }
+    },
+    [refreshAll],
+  );
+
   const safeCount = useMemo(() => safeFixablePending(groups, typeInfo), [groups, typeInfo]);
 
   /** Every safe type in one run. The backend drops destructive types itself
@@ -1470,6 +1498,7 @@ export function FindingsSurface({
           onToggleOpen={toggleOpenGroup}
           onFixGroup={(group, info) => void fixGroup(group, info)}
           onDismissGroup={(group, info) => void dismissGroup(group, info)}
+          onReopenGroup={(group, info) => void reopenGroup(group, info)}
           busy={Boolean(bulkRun?.running)}
         >
           {findingList}

@@ -1769,6 +1769,39 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
+        """Reopen all resolved/dismissed findings, optionally filtered.
+
+        The bulk undo for dismiss — e.g. reopening 10k+ dismissed BPM
+        findings at once. Returns the number of findings reopened.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            query = """
+                UPDATE repair_findings
+                SET status = 'pending', user_action = NULL, resolved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status IN ('resolved', 'dismissed')
+            """
+            params = []
+            if job_id:
+                query += " AND job_id = ?"
+                params.append(job_id)
+            if finding_type:
+                query += " AND finding_type = ?"
+                params.append(finding_type)
+            cursor.execute(query, params)
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error("Error bulk reopening findings: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def library_visibility_preflight(self, sample_size: int = 200) -> tuple:
         """Can this process actually SEE the library the catalogue describes?
 
@@ -3784,12 +3817,20 @@ class RepairWorker:
             msg += ' + refreshed cover.jpg'
         return {'success': True, 'action': 'library_retag', 'message': msg, **res}
 
-    def _write_bpm_tag(self, file_path, bpm):
+    def _write_bpm_tag(self, file_path, bpm, bpm_source=None):
         """put an applied bpm into the file too. it only ever reached the
-        database, so players and media servers never saw it. the deezer
-        "BPM" tag setting turns this off. returns a note for the message."""
-        if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
-            return ' (BPM tags are off in settings, file not changed)'
+        database, so players and media servers never saw it. returns a note
+        for the message.
+
+        the deezer.tags.bpm setting gates deezer-sourced bpm writes only.
+        locally-analyzed bpm always writes — the backfill is an explicit
+        user action to fix bpm.
+        """
+        # Deezer-sourced BPM respects the deezer.tags.bpm setting.
+        # Locally-analyzed BPM always writes (explicit user action).
+        if bpm_source == 'deezer':
+            if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+                return ' (BPM tags are off in settings, file not changed)'
         try:
             bpm = float(bpm)
         except (TypeError, ValueError):
@@ -3866,7 +3907,8 @@ class RepairWorker:
             if applied:
                 message = f'Applied metadata: {", ".join(applied)}'
                 if 'bpm' in updates:
-                    message += self._write_bpm_tag(file_path, updates['bpm'])
+                    bpm_source = details.get('bpm_source') if isinstance(details, dict) else None
+                    message += self._write_bpm_tag(file_path, updates['bpm'], bpm_source)
                 return {'success': True, 'action': 'applied_metadata', 'message': message}
             return {'success': False, 'error': 'No applicable metadata fields to update'}
         finally:
