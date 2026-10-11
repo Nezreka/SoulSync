@@ -12,7 +12,10 @@ from core.settings import config_manager
 from core.downloads import decisions as _decisions
 from core.downloads.decisions import format_duration as _fmt_dur
 from core.downloads.soulseek_identity import match_track
-from core.imports.file_integrity import resolve_duration_tolerance
+from core.imports.file_integrity import (
+    _LONGER_VERSION_TOLERANCE_S,
+    resolve_duration_tolerance,
+)
 # One definition of "could this release satisfy the profile", shared with the
 # album-bundle picker. It lived here and the picker used the probed-file rule
 # instead, so the same release passed per-track and was refused as an album.
@@ -207,21 +210,35 @@ def filter_soundcloud_previews(results, expected_track):
 
 
 def _duration_tolerance_seconds(expected_duration_ms):
+    """``(tolerance_seconds, user_pinned)`` for the strict duration check.
+
+    The auto default is 3s (5s for tracks over 10 minutes); a configured
+    ``post_processing.duration_tolerance_seconds`` overrides it. The flag
+    mirrors file_integrity's rule: a user-pinned tolerance is honoured
+    symmetrically, while the auto default grants extra room on the longer
+    side (see ``_duration_mismatch_exceeds_integrity_tolerance``).
+    """
     override = resolve_duration_tolerance(
         config_manager.get('post_processing.duration_tolerance_seconds', 0)
     )
     if override is not None:
-        return override
+        return override, True
     expected_seconds = expected_duration_ms / 1000.0
-    return 5.0 if expected_seconds > 600.0 else 3.0
+    return (5.0 if expected_seconds > 600.0 else 3.0), False
 
 
 def _duration_mismatch_exceeds_integrity_tolerance(expected_duration_ms, candidate_duration_ms):
     if not expected_duration_ms or not candidate_duration_ms:
         return False
-    tolerance = _duration_tolerance_seconds(expected_duration_ms)
-    drift = abs((candidate_duration_ms / 1000.0) - (expected_duration_ms / 1000.0))
-    return drift > tolerance
+    tolerance, user_pinned = _duration_tolerance_seconds(expected_duration_ms)
+    expected_secs = expected_duration_ms / 1000.0
+    cand_secs = candidate_duration_ms / 1000.0
+    if cand_secs > expected_secs and not user_pinned:
+        # Longer side on the auto default: post-download integrity grants the
+        # 15s longer-version allowance (#937) — a candidate the import would
+        # accept must not die in the pre-download strict check (#1640).
+        tolerance = max(tolerance, _LONGER_VERSION_TOLERANCE_S)
+    return abs(cand_secs - expected_secs) > tolerance
 
 
 # Version / alternate-recording markers — a candidate carrying one of these
@@ -243,6 +260,49 @@ def _has_version_kw(text, kw) -> bool:
     # WORD-boundary match — a plain substring check penalized "Staying Alive"
     # for containing 'live' and "Undercover" for containing 'cover'.
     return bool(re.search(r'(?<!\w)' + re.escape(kw) + r'(?!\w)', text or ''))
+
+
+def _count_version_kw(text, kw) -> int:
+    """Raw word-boundary occurrence count of a version keyword."""
+    return len(re.findall(r'(?<!\w)' + re.escape(kw) + r'(?!\w)', text or ''))
+
+
+# Separators that end the core title and open a version qualifier:
+# "Song - Live", "Song: Acoustic", "Song – Live at Wembley".
+_VERSION_MARKER_SEPARATORS = '-–—:|/'
+
+
+def _has_version_marker(text, kw) -> bool:
+    """A version keyword that actually QUALIFIES the title.
+
+    ``_has_version_kw`` answers "does the word appear anywhere", which treats
+    a canonical title like "Live Again" as if it were asking for a live
+    recording (#1640). A keyword only marks a version when it sits where
+    version qualifiers live:
+    - inside a parenthesized / bracketed group: "Song (Live)",
+      "Song [Acoustic]", "Song (Sped Up)"
+    - right after a title/qualifier separator: "Song - Live",
+      "Song: Acoustic", "Song – Live at Wembley"
+    "Live Again", "Live and Let Die" and "Saturday Night Live" have neither,
+    so they don't flip ``expected_is_version`` — while "Track (Live)" and
+    "Track - Live" still do. Used for the EXPECTED side only; the candidate
+    side keeps the raw word-boundary check so producer-tag / chaff protection
+    ("Drake Type Beat", nightcore, covers) is unchanged.
+    """
+    lowered = (text or '').lower()
+    if not lowered or not kw:
+        return False
+    for match in re.finditer(r'(?<!\w)' + re.escape(kw) + r'(?!\w)', lowered):
+        head, tail = lowered[:match.start()], lowered[match.end():]
+        # Inside parens/brackets: an opener before the match whose closer
+        # comes after it, with no closer in between.
+        if (re.search(r'[\(\[\{][^\)\]\}]*$', head)
+                and re.match(r'[^\(\[\{]*[\)\]\}]', tail)):
+            return True
+        # Right after a separator: the match is the qualifier.
+        if re.search(r'[' + re.escape(_VERSION_MARKER_SEPARATORS) + r']\s*$', head):
+            return True
+    return False
 
 
 # Words a legitimate YouTube upload adds around the real title — never
@@ -463,7 +523,11 @@ def _score_streaming_candidates(results, spotify_track, why=None):
     # Detect if the expected track is a specific version (live, remix, acoustic, etc.)
     expected_title_lower = (expected_title or '').lower()
     _version_keywords = _VERSION_KEYWORDS
-    expected_is_version = any(_has_version_kw(expected_title_lower, kw)
+    # A keyword only marks the EXPECTED track as a version when it qualifies
+    # the title (qualifying position — parens or after a separator), not when
+    # it's part of the canonical title itself (#1640: "Live Again",
+    # "Saturday Night Live" are not live-recording requests).
+    expected_is_version = any(_has_version_marker(expected_title_lower, kw)
                               for kw in _version_keywords)
 
     scored = []
@@ -562,15 +626,42 @@ def _score_streaming_candidates(results, spotify_track, why=None):
         if not expected_is_version:
             # Expecting original — penalize versions
             for kw in _version_keywords:
-                if _has_version_kw(r_title_lower, kw) and not _has_version_kw(expected_title_lower, kw):
+                # A candidate that MARKS the version (qualifying position) is a
+                # different recording even when the expected title contains the
+                # same word canonically (#1640: "Live Again" vs
+                # "Live Again (Live)" — the raw word check below can't see it
+                # because the expected title has the word too). The raw word
+                # check stays for chaff that never qualifies ("Drake Type Beat").
+                # (expected_is_version=False already means the expected title
+                # has no qualifying marker, so no expected-side check needed.)
+                #
+                # The marker arm additionally requires the candidate to carry
+                # MORE occurrences than the expected title: an unparsed artist
+                # prefix ahead of a separator ("HALO: Live Again" on
+                # SoundCloud, "|" on YouTube) puts the canonical word after a
+                # separator without making it a version qualifier.
+                if ((_has_version_marker(r_title_lower, kw)
+                        and _count_version_kw(r_title_lower, kw)
+                        > _count_version_kw(expected_title_lower, kw))
+                        or (_has_version_kw(r_title_lower, kw)
+                            and not _has_version_kw(expected_title_lower, kw))):
                     confidence *= 0.4  # Heavy penalty
                     is_wrong_version = True
                     version_detail = f"{kw} version, asked for the original"
                     break
         else:
-            # Expecting specific version — penalize results that don't have it
+            # Expecting specific version — penalize results that don't have
+            # it. A raw word-boundary check alone lets the studio recording
+            # through when the expected title carries the keyword canonically
+            # ("Live Again" vs the requested "Live Again (Live)"): compare
+            # occurrence counts instead, so the candidate must carry at
+            # least as many marks of the requested version as the expected
+            # title. (Candidate count 0 is always < expected count >= 1, so
+            # the old "not present at all" case is subsumed.)
             for kw in _version_keywords:
-                if _has_version_kw(expected_title_lower, kw) and not _has_version_kw(r_title_lower, kw):
+                if (_has_version_kw(expected_title_lower, kw)
+                        and _count_version_kw(r_title_lower, kw)
+                        < _count_version_kw(expected_title_lower, kw)):
                     confidence *= 0.5
                     is_wrong_version = True
                     version_detail = f"asked for the {kw} version, this isn't marked {kw}"

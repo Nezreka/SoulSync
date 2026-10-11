@@ -621,6 +621,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         quality_targets, fallback_enabled = profile_quality_targets(quality_profile_id)
         picked = pick_best_album_release(
             candidates, _guess_quality_from_title, album_name=album_name,
+            artist_name=artist_name,
             allowed_formats=allowed_formats,
             quality_targets=quality_targets,
             fallback_enabled=fallback_enabled,
