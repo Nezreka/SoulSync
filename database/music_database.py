@@ -11268,14 +11268,14 @@ class MusicDatabase:
             if ids:
                 scope, params = self._current_scope_sql('t.owner_profile_id')
                 source = ' AND t.server_source = ?' if server_source else ''
-                cursor.execute(f"""
-                    SELECT t.*, a.name AS artist_name, al.title AS album_title
-                    FROM tracks t JOIN artists a ON a.id = t.artist_id
-                    JOIN albums al ON al.id = t.album_id
-                    WHERE ({' OR '.join('t.' + column + ' = ? COLLATE NOCASE' for column, _ in ids)})
-                      AND {scope} {source} LIMIT 100
-                """, [value for _, value in ids] + params + ([server_source] if server_source else []))
-                rows.extend(dict(row) for row in cursor.fetchall())
+                for column, value in ids:
+                    cursor.execute(f"""
+                        SELECT t.*, a.name AS artist_name, al.title AS album_title
+                        FROM tracks t JOIN artists a ON a.id = t.artist_id
+                        JOIN albums al ON al.id = t.album_id
+                        WHERE t.{column} = ? COLLATE NOCASE AND {scope} {source} LIMIT 100
+                    """, [value] + params + ([server_source] if server_source else []))
+                    rows.extend(dict(row) for row in cursor.fetchall())
             for artist in artists:
                 rows.extend(dict(row) for row in self._search_track_rows(
                     cursor, title, artist, 100, server_source))

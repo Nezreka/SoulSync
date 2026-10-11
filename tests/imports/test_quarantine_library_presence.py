@@ -227,3 +227,22 @@ def test_failed_library_boundary_lookup_reports_unknown(env, monkeypatch):
         return connect()
     monkeypatch.setattr(env.db, '_get_connection', fail_once)
     assert entries(env)[0]['library_status'] == 'unknown'
+
+
+def test_recording_identifier_lookups_do_not_scan_the_catalogue(env, monkeypatch):
+    candidate(env)
+    with env.db._get_connection() as conn:
+        conn.executemany("INSERT INTO tracks(album_id,artist_id,title,server_source) VALUES(1,1,?,'soulsync')", ((f'Unowned {i}',) for i in range(2000)))
+    connect = env.db._get_connection
+    steps = 0
+    def counted_connection():
+        conn = connect()
+        def progress():
+            nonlocal steps
+            steps += 1
+            return 0
+        conn.set_progress_handler(progress, 100)
+        return conn
+    monkeypatch.setattr(env.db, '_get_connection', counted_connection)
+    assert not env.db.get_quarantine_library_candidates('Missing', [], {'spotify': 'absent', 'isrc': 'ABSENT'})
+    assert steps < 20
