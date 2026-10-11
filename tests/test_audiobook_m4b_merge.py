@@ -64,16 +64,20 @@ def _fake_run_factory(durations=None, codec="mp3", make_output=True,
             target = Path(cmd[-1]).name
             if any("stream=codec_name" in a for a in cmd):
                 import json as _json
-                stdout = _json.dumps({"streams": [{
-                    "codec_name": codec,
-                    "sample_rate": sample_rate,
-                    "channels": int(channels),
-                    "profile": profile,
-                }]})
-            elif "chapter" in cmd:
-                stdout = "".join(f"chapter|{i}\n" for i in range(chapter_count))
+                stdout = _json.dumps({
+                    "streams": [{
+                        "codec_name": codec,
+                        "sample_rate": sample_rate,
+                        "channels": int(channels),
+                        "profile": profile,
+                    }],
+                    "format": {"duration": durations.get(target, "10.0")},
+                })
+            elif any("chapter" in a for a in cmd):
+                # chapter=id: one integer per line, like real ffprobe.
+                stdout = "".join(f"{i}\n" for i in range(chapter_count))
             else:
-                stdout = durations.get(target, "10.0") + "\n"
+                raise AssertionError(f"unexpected ffprobe call in test: {cmd}")
             return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
         if binary == "ffmpeg":
             if make_output:
@@ -182,7 +186,7 @@ def test_success_reencodes_deletes_sources_and_returns_the_merge(tmp_path, monke
     files = _two_files(tmp_path)
     _resolved(monkeypatch)
     # Inputs probe at 10s each; the merged file must report their sum.
-    fake_run = _fake_run_factory(durations={"The Final Empire.m4b": "20.0"})
+    fake_run = _fake_run_factory(durations={".The Final Empire.m4b.partial": "20.0"})
     monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
     with _enabled():
         result = merge_book_files(tmp_path, files, BOOK)
@@ -210,7 +214,7 @@ def test_all_aac_mp4_inputs_are_stream_copied(tmp_path, monkeypatch):
     files = [str(first), str(second)]
     _resolved(monkeypatch)
     fake_run = _fake_run_factory(codec="aac",
-                                 durations={"The Final Empire.m4b": "20.0"})
+                                 durations={".The Final Empire.m4b.partial": "20.0"})
     monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
     with _enabled():
         result = merge_book_files(tmp_path, files, BOOK)
@@ -226,7 +230,7 @@ def test_verify_failure_deletes_the_partial_and_keeps_originals(tmp_path, monkey
     _resolved(monkeypatch)
     # The inputs probe at 10s each but the "merged" file claims 9999s, so
     # verification must fail: the partial goes, the originals stay.
-    fake_run = _fake_run_factory(durations={"The Final Empire.m4b": "9999.0"})
+    fake_run = _fake_run_factory(durations={".The Final Empire.m4b.partial": "9999.0"})
     monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
     with _enabled():
         result = merge_book_files(tmp_path, files, BOOK)
@@ -241,9 +245,19 @@ def test_failed_ffmpeg_keeps_everything(tmp_path, monkeypatch):
     _resolved(monkeypatch)
 
     def failing_run(cmd, **kwargs):
+        import json as _json
         binary = Path(cmd[0]).name
         if binary == "ffprobe":
-            return subprocess.CompletedProcess(cmd, 0, stdout="10.0\n", stderr="")
+            target = Path(cmd[-1]).name
+            if "stream=codec_name" in " ".join(cmd):
+                stdout = _json.dumps({
+                    "streams": [{"codec_name": "mp3", "sample_rate": "44100",
+                                 "channels": 2, "profile": "unknown"}],
+                    "format": {"duration": "10.0"},
+                })
+            else:
+                stdout = "0\n1\n"
+            return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="encode boom")
 
     monkeypatch.setattr(m4b_merge.subprocess, "run", failing_run)
@@ -258,7 +272,7 @@ def test_sidecars_are_never_deleted(tmp_path, monkeypatch):
     cover = tmp_path / "cover.jpg"
     cover.write_bytes(b"fake-cover")
     _resolved(monkeypatch)
-    fake_run = _fake_run_factory(durations={"The Final Empire.m4b": "20.0"})
+    fake_run = _fake_run_factory(durations={".The Final Empire.m4b.partial": "20.0"})
     monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
     with _enabled():
         result = merge_book_files(tmp_path, files, BOOK)
@@ -425,7 +439,7 @@ def _make_aac(path, freq, sample_rate):
 
 def _real_chapter_count(path):
     out = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "chapter",
+        ["ffprobe", "-v", "error", "-show_entries", "chapter=id",
          "-of", "csv=p=0", str(path)],
         check=True, capture_output=True, text=True,
     )
@@ -506,6 +520,7 @@ def test_failed_encode_removes_the_partial(tmp_path, monkeypatch):
         assert merge_book_files(tmp_path, files, BOOK) == files
     assert all(Path(f).exists() for f in files)
     assert list(tmp_path.glob("*.m4b")) == []
+    assert list(tmp_path.glob(".*.m4b.partial")) == []
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg on PATH")
@@ -575,3 +590,39 @@ def test_organize_sweeps_stray_partial_on_retry(tmp_path):
     assert sweep_calls[0][0] == str(tmp_path)
     assert set(sweep_calls[0][1]) == {written, already}
     assert tagged["files"] == [written]
+
+
+def test_stale_partial_temp_is_cleaned_at_merge_start(tmp_path, monkeypatch):
+    """A hard-killed encode leaves .<Title>.m4b.partial behind; the next merge
+    removes it before starting — it is ours, hidden, and clearly marked."""
+    files = _two_files(tmp_path)
+    stale = tmp_path / ".The Final Empire.m4b.partial"
+    stale.write_bytes(b"crash leftover")
+    _resolved(monkeypatch)
+    fake_run = _fake_run_factory(
+        durations={".The Final Empire.m4b.partial": "20.0"})
+    monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
+    with _enabled():
+        result = merge_book_files(tmp_path, files, BOOK)
+
+    assert len(result) == 1 and Path(result[0]).suffix == ".m4b"
+    assert not stale.exists()
+    assert list(tmp_path.glob(".*.m4b.partial")) == []
+    # The encode really went to the temp file, then renamed into place.
+    ffmpeg_cmds = [c for c in fake_run.seen if Path(c[0]).name == "ffmpeg"]
+    assert ffmpeg_cmds[0][-1].endswith(".m4b.partial")
+    assert Path(result[0]).is_file()
+
+
+def test_successful_merge_leaves_no_partial_temp(tmp_path, monkeypatch):
+    files = _two_files(tmp_path)
+    _resolved(monkeypatch)
+    fake_run = _fake_run_factory(
+        durations={".The Final Empire.m4b.partial": "20.0"})
+    monkeypatch.setattr(m4b_merge.subprocess, "run", fake_run)
+    with _enabled():
+        result = merge_book_files(tmp_path, files, BOOK)
+
+    assert len(result) == 1
+    assert list(tmp_path.glob(".*.m4b.partial")) == []
+    assert list(tmp_path.glob("*.m4b")) == [Path(result[0])]

@@ -17,10 +17,12 @@ What this does, when ``audiobooks.merge_m4b`` is on:
     would otherwise play back at the wrong speed — is re-encoded to AAC
     128k, so the output is always a proper .m4b and never mp3 wearing an
     .m4b extension.
-  - Verifies the result (exists, non-empty, duration within 2% of the inputs),
-    then deletes ONLY the source audio files. Sidecars and the folder stay;
-    the post-processor then tags the single file exactly as it would have
-    tagged the folder.
+  - Verifies the result (exists, non-empty, duration within 2% of the inputs,
+    one chapter per input), then deletes ONLY the source audio files. The
+    encode goes to a hidden temp file in the same folder and is renamed into
+    place only after verification, so media-server watchers never see a
+    half-written .m4b. Sidecars and the folder stay; the post-processor then
+    tags the single file exactly as it would have tagged the folder.
 
 Fail-open everywhere: the switch off, one file, no ffmpeg, an unprobable
 file, a failed encode, or a failed verify all log and hand the original file
@@ -97,50 +99,48 @@ def _probe(path: Path, ffprobe: str) -> Optional[Tuple[float, str, str, str, str
     """(duration_seconds, codec_name, sample_rate, channels, profile) for the
     first audio stream, or None when the file will not do.
 
+    One ffprobe call returns both the stream parameters and the container
+    duration as JSON, parsed by field name: ffprobe's csv output prints
+    fields in schema order regardless of the requested order, so positional
+    csv parsing would silently mislabel sample_rate/profile/channels.
+
     ``-select_streams a:0`` means a file with no audio stream yields an empty
-    codec line, which counts as a probe failure — merging a cover.jpg that
-    slipped into the file list would silently drop it otherwise. The extra
-    stream parameters exist for the stream-copy gate: the concat demuxer with
-    ``-c copy`` needs uniform codec parameters across inputs, and two AAC
+    ``streams`` list, which counts as a probe failure — merging a cover.jpg
+    that slipped into the file list would silently drop it otherwise. The
+    extra stream parameters exist for the stream-copy gate: the concat demuxer
+    with ``-c copy`` needs uniform codec parameters across inputs, and two AAC
     files at different sample rates (or LC vs HE-AAC) would otherwise merge
     into a file that plays later chapters at the wrong speed.
-
-    Parsed from ``-of json`` by field name: ffprobe's csv output prints fields
-    in schema order regardless of the requested order, so positional csv
-    parsing would silently mislabel sample_rate/profile/channels.
     """
     try:
-        stream = subprocess.run(
+        probed = subprocess.run(
             [ffprobe, "-v", "error", "-select_streams", "a:0",
-             "-show_entries", "stream=codec_name,sample_rate,channels,profile",
+             "-show_entries",
+             "stream=codec_name,sample_rate,channels,profile:format=duration",
              "-of", "json", str(path)],
-            capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
-        )
-        duration = subprocess.run(
-            [ffprobe, "-v", "error",
-             "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(path)],
             capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("Could not probe %s: %s", path.name, exc)
         return None
-    if stream.returncode != 0 or duration.returncode != 0:
+    if probed.returncode != 0:
         logger.warning("ffprobe failed on %s", path.name)
         return None
     try:
-        streams = json.loads(stream.stdout).get("streams") or []
+        payload = json.loads(probed.stdout)
+        streams = payload.get("streams") or []
         first = streams[0] if streams else {}
+        duration_raw = (payload.get("format") or {}).get("duration")
     except (ValueError, TypeError, AttributeError, KeyError, IndexError):
-        logger.warning("ffprobe gave unreadable stream data for %s", path.name)
+        logger.warning("ffprobe gave unreadable data for %s", path.name)
         return None
     codec_name = str(first.get("codec_name") or "")
     sample_rate = str(first.get("sample_rate") or "")
     channels = str(first.get("channels") or "")
     profile = str(first.get("profile") or "")
     try:
-        seconds = float(duration.stdout.strip())
-    except ValueError:
+        seconds = float(duration_raw)
+    except (TypeError, ValueError):
         logger.warning("ffprobe gave no duration for %s", path.name)
         return None
     if not codec_name or seconds <= 0:
@@ -305,7 +305,9 @@ def _verify_output(output: Path, ffprobe: str, expected_seconds: float,
         return False
     try:
         chapters = subprocess.run(
-            [ffprobe, "-v", "error", "-show_entries", "chapter",
+            # chapter=id only: one integer per line, immune to multi-line
+            # titles or tag formatting in the chapter metadata.
+            [ffprobe, "-v", "error", "-show_entries", "chapter=id",
              "-of", "csv=p=0", str(output)],
             capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
         )
@@ -363,6 +365,11 @@ def merge_book_files(folder: Any, files: Any, book: Any) -> List[str]:
                         target.name, len(ordered))
             return originals
 
+        # Stale temp files from a crashed encode are ours — hidden, clearly
+        # marked, never a real book — so unlike the sweep's rename-aside,
+        # these are safe to remove outright.
+        for stale in target.glob(".*.m4b.partial"):
+            _remove_quietly(stale)
         # A crashed encode strands a partial .m4b with no usable moov atom.
         # Move those aside (never delete) before deciding the folder already
         # holds a finished book.
@@ -412,6 +419,13 @@ def merge_book_files(folder: Any, files: Any, book: Any) -> List[str]:
             chapters.append((start_ms, cursor_ms, chapter_title(path, index)))
 
         output = _output_path(target, book if isinstance(book, dict) else {})
+        # Encode to a hidden temp file in the same folder and rename it into
+        # place only after verification: a mid-encode .m4b sitting in the
+        # library would be picked up by media-server watchers (Audiobookshelf,
+        # Plex) before the moov atom exists, and a hard kill would strand it
+        # past the point the except handlers below can clean up. Same
+        # directory keeps the final rename atomic.
+        tmp_output = output.with_name(f".{output.name}.partial")
 
         with tempfile.TemporaryDirectory(prefix="soulsync-m4b-") as tmp:
             tmpdir = Path(tmp)
@@ -432,7 +446,10 @@ def merge_book_files(folder: Any, files: Any, book: Any) -> List[str]:
                    "-map", "0:a:0", "-map_metadata", "1",
                    *codec_args,
                    "-movflags", "+faststart",
-                   str(output)]
+                   # The temp file's .partial suffix gives ffmpeg no usable
+                   # extension, so name the muxer explicitly.
+                   "-f", "mp4",
+                   str(tmp_output)]
             logger.info("Merging %d files into %s (%s)",
                         len(probed), output.name,
                         "stream copy" if copy_ok else "AAC re-encode")
@@ -441,19 +458,26 @@ def merge_book_files(folder: Any, files: Any, book: Any) -> List[str]:
                     cmd, capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT)
             except (OSError, subprocess.SubprocessError) as exc:
                 logger.warning("ffmpeg would not run for %s: %s", target.name, exc)
-                _remove_quietly(output)
+                _remove_quietly(tmp_output)
                 return originals
             if result.returncode != 0:
                 stderr = result.stderr or ""
                 logger.warning("ffmpeg merge failed for %s: %s",
                                target.name, stderr[-500:])
-                _remove_quietly(output)
+                _remove_quietly(tmp_output)
                 return originals
 
-        if not _verify_output(output, ffprobe, total_seconds, len(probed)):
+        if not _verify_output(tmp_output, ffprobe, total_seconds, len(probed)):
             logger.warning("Merged file failed verification for %s; removing it",
                            target.name)
-            _remove_quietly(output)
+            _remove_quietly(tmp_output)
+            return originals
+
+        try:
+            tmp_output.replace(output)
+        except OSError as exc:
+            logger.warning("Could not finalize %s: %s", output.name, exc)
+            _remove_quietly(tmp_output)
             return originals
 
         # The merge is verified — only now do the sources go. Each unlink is
