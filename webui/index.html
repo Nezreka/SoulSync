@@ -7964,6 +7964,23 @@
 
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
+                                                        <input type="checkbox" id="audiobook-merge-m4b">
+                                                        <span>Merge multi-file books into one M4B on import</span>
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <small class="settings-hint setting-help-body" hidden>Off by
+                                                        default: when a book arrives as many files, combine them into
+                                                        a single <code>.m4b</code> with one chapter marker per file
+                                                        during import. Needs <code>ffmpeg</code> on the server
+                                                        (the Docker image ships it). The originals are only removed
+                                                        after the merged file verifies, so a failed merge never
+                                                        loses the book.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
                                                         <input type="checkbox" id="audiobook-remove-owned-from-wishlist">
                                                         <span>Remove books from the wishlist once they're in the library</span>
                                                     </label>
