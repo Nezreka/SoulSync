@@ -11,8 +11,10 @@ from __future__ import annotations
 import pytest
 
 from core.library2.grab_context import (
+    album_grab_tracks,
     build_lib2_import_pipeline_fields,
     build_lib2_track_info,
+    match_album_grab_file,
     names_lib2_entity,
     resolve_lib2_grab_context,
 )
@@ -147,7 +149,45 @@ def test_import_pipeline_fields_fall_back_to_request_title_for_album_scope():
     assert fields["is_simple_download"] is False
     assert fields["artist"] == {"name": "Real Artist"}
     assert fields["track_info"]["name"] == "Track From Listing"
-    assert fields["clean_search"] == {}
+    # No track to hold the file to, but it must be by the album's artist...
+    assert fields["track_info"]["artists"] == [{"name": "Real Artist"}]
+    assert fields["clean_search"] == {"clean_artist": "Real Artist"}
+    # ...unless the album is credited to various artists.
+    various = build_lib2_import_pipeline_fields(
+        request_data, {**lib2_context, "artist_name": "Various Artists"})
+    assert various["track_info"]["artists"] == [{"name": "ignored"}]
+    assert various["clean_search"] == {}
+
+
+def test_album_grab_file_matches_the_track_and_version_it_names():
+    def track(track_id, title, number):
+        return {"track_id": track_id, "track_title": title, "track_number": number}
+
+    tracks = [track(2, "Footsteps of Doom", 1), track(3, "Into the Night - Acoustic ver.", 2),
+              track(13, "Into the Night", 12)]
+
+    def matched(title, number=None):
+        found = match_album_grab_file(tracks, {"title": title, "track_number": number})
+        return found and found["track_id"]
+
+    assert matched("Into the Night") == 13
+    assert matched("Into the Night - Acoustic ver.") == 3
+    assert matched("Into the Night (Acoustic Version)") == 3
+    assert matched("Footsteps Of Doom", 1) == 2
+    assert matched("Something Else Entirely") is None
+    assert matched("") is None
+    twins = [track(1, "Intro", 1), track(2, "Intro", 7)]
+    assert match_album_grab_file(twins, {"title": "Intro"}) is None
+    assert match_album_grab_file(twins, {"title": "Intro", "track_number": 7})["track_id"] == 2
+
+
+def test_album_grab_tracks_are_track_scoped_contexts(db):
+    _state, album_ctx = resolve_lib2_grab_context(db, {"lib2_album_id": db.ids["album"]})
+    _state, track_ctx = resolve_lib2_grab_context(db, {"lib2_track_id": db.ids["track"]})
+
+    assert album_grab_tracks(db, album_ctx) == [track_ctx]
+    assert album_grab_tracks(db, track_ctx) == []
+    assert album_grab_tracks(db, None) == []
 
 
 def test_import_pipeline_fields_empty_without_lib2_context():

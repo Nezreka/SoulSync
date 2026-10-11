@@ -14,7 +14,7 @@ processing can link the finished file to the exact lib2 row (see
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -149,6 +149,13 @@ def build_lib2_import_pipeline_fields(
         # version must not fail on the catalogue length instead.
         if lib2_context.get("duration_ms") and not data.get("skip_acoustid"):
             track_info["duration_ms"] = lib2_context["duration_ms"]
+    else:
+        from core.imports.compilation import is_various_artists_name
+        if not is_various_artists_name(lib2_context["artist_name"]):
+            # A file of an album grab that names none of the album's tracks:
+            # no title to hold it to, but it must still be by the album artist.
+            track_info["artists"] = [{"name": lib2_context["artist_name"]}]
+            clean = {"clean_artist": lib2_context["artist_name"]}
     if lib2_context.get("track_number") is not None:
         track_info["track_number"] = lib2_context["track_number"]
     if lib2_context.get("disc_number") is not None:
@@ -165,6 +172,86 @@ def build_lib2_import_pipeline_fields(
         "track_info": track_info,
         "clean_search": clean,
     }
+
+
+def _track_contexts(conn, where: str, params) -> List[Dict[str, Any]]:
+    """Track-scoped grab contexts for the tracks ``where`` selects.
+
+    The entity IS the ground truth -- a manual grab targeting a known lib2
+    track routes through the full import pipeline using these, not whatever
+    the browser happened to send.
+    """
+    rows = conn.execute(
+        "SELECT t.id, t.album_id, t.title, t.duration, t.track_number, t.disc_number, "
+        "al.title AS album_title, ar.name AS artist_name "
+        "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+        "JOIN lib2_artists ar ON ar.id = al.primary_artist_id WHERE " + where,
+        params,
+    ).fetchall()
+    credits: Dict[int, List[str]] = {}
+    if rows:
+        marks = ",".join("?" for _ in rows)
+        for track_id, name in conn.execute(
+                f"SELECT ta.track_id, ar.name FROM lib2_track_artists ta "
+                f"JOIN lib2_artists ar ON ar.id = ta.artist_id "
+                f"WHERE ta.track_id IN ({marks}) ORDER BY ta.track_id, ta.position",
+                [row["id"] for row in rows]):
+            credits.setdefault(track_id, []).append(name)
+    return [{
+        "track_id": row["id"],
+        "album_id": row["album_id"],
+        **_profile_fields(conn, "tracks", row["id"]),
+        "artist_name": row["artist_name"],
+        "album_name": row["album_title"],
+        "track_title": row["title"],
+        "track_number": row["track_number"],
+        "disc_number": row["disc_number"],
+        "track_artists": credits.get(row["id"]) or [row["artist_name"]],
+        "duration_ms": row["duration"],
+    } for row in rows]
+
+
+def album_grab_tracks(db, lib2_context: Optional[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+    """The library tracks of an album-scoped grab, each as the track-scoped
+    context one downloaded file of the release is matched to."""
+    if not lib2_context or lib2_context.get("track_id") is not None \
+            or lib2_context.get("album_id") is None:
+        return []
+    conn = db._get_connection()
+    try:
+        return _track_contexts(conn, "t.album_id=?", (int(lib2_context["album_id"]),))
+    except (sqlite3.Error, LookupError, ValueError) as e:
+        logger.debug("album grab tracklist unavailable: %s", e)
+        return []
+    finally:
+        conn.close()
+
+
+def match_album_grab_file(tracks, data: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """The library track one file of an album grab is for: best title, then
+    the same version, the exact spelling and the track number break ties --
+    the Final Season OST has "Into the Night" and "Into the Night - Acoustic
+    ver.". None when the file names no track, or two equally well."""
+    from core.matching.audio_verification import (
+        TITLE_MATCH_THRESHOLD, _detect_title_version, similarity)
+
+    title = str(data.get("title") or "").strip()
+    if not title or not tracks:
+        return None
+    version = _detect_title_version(title)
+    number = str(data.get("track_number") or "").strip()
+
+    def score(track):
+        return (similarity(title, track["track_title"]),
+                _detect_title_version(track["track_title"]) == version,
+                track["track_title"].strip().casefold() == title.casefold(),
+                bool(number) and str(track.get("track_number") or "") == number)
+
+    ranked = sorted(tracks, key=score, reverse=True)
+    best = score(ranked[0])
+    if best[0] < TITLE_MATCH_THRESHOLD or (len(ranked) > 1 and score(ranked[1]) == best):
+        return None
+    return ranked[0]
 
 
 def resolve_lib2_grab_context(
@@ -194,40 +281,12 @@ def resolve_lib2_grab_context(
     conn = db._get_connection()
     try:
         if track_id is not None:
-            row = conn.execute(
-                "SELECT t.id, t.album_id, t.title, t.duration, "
-                "t.track_number, t.disc_number, al.title AS album_title, "
-                "ar.name AS artist_name "
-                "FROM lib2_tracks t "
-                "JOIN lib2_albums al ON al.id = t.album_id "
-                "JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-                "WHERE t.id=?",
-                (track_id,),
-            ).fetchone()
-            if row is None:
+            found = _track_contexts(conn, "t.id=?", (track_id,))
+            if not found:
                 return ("invalid", None)
-            if album_id is not None and row["album_id"] != album_id:
+            if album_id is not None and found[0]["album_id"] != album_id:
                 return ("invalid", None)
-            credits = [r[0] for r in conn.execute(
-                "SELECT ar.name FROM lib2_track_artists ta "
-                "JOIN lib2_artists ar ON ar.id = ta.artist_id "
-                "WHERE ta.track_id = ? ORDER BY ta.position", (track_id,))]
-            return ("ok", {
-                "track_id": row["id"],
-                "album_id": row["album_id"],
-                **_profile_fields(conn, "tracks", row["id"]),
-                # The entity IS the ground truth — a manual grab targeting a
-                # known lib2 track/album routes through the full import
-                # pipeline (not the metadata-free "simple download" shortcut)
-                # using these, not whatever the browser happened to send.
-                "artist_name": row["artist_name"],
-                "album_name": row["album_title"],
-                "track_title": row["title"],
-                "track_number": row["track_number"],
-                "disc_number": row["disc_number"],
-                "track_artists": credits or [row["artist_name"]],
-                "duration_ms": row["duration"],
-            })
+            return ("ok", found[0])
         row = conn.execute(
             "SELECT al.id, al.title AS album_title, "
             "ar.name AS artist_name "
@@ -255,8 +314,10 @@ def resolve_lib2_grab_context(
 
 
 __all__ = [
+    "album_grab_tracks",
     "build_lib2_import_pipeline_fields",
     "build_lib2_track_info",
+    "match_album_grab_file",
     "names_lib2_entity",
     "resolve_lib2_grab_context",
 ]

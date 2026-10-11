@@ -7152,8 +7152,10 @@ def start_download():
         # quality profile are resolved server-side. A named-but-invalid
         # entity fails the grab instead of degrading to a context-free one.
         from core.library2.grab_context import (
+            album_grab_tracks,
             build_lib2_import_pipeline_fields,
             build_lib2_track_info,
+            match_album_grab_file,
             names_lib2_entity,
             profile_may_grab,
             resolve_lib2_grab_context,
@@ -7299,6 +7301,10 @@ def start_download():
 
             started_downloads = 0
             failed_downloads = 0
+            # Each file is checked against the album track it is (AcoustID,
+            # length) and links to exactly that row; see match_album_grab_file.
+            # A torrent/usenet release maps its files to tracks on import.
+            _album_tracks = album_grab_tracks(get_database(), _lib2_ctx)
             for track_data, _acq_markers in _prepared_album_tracks:
                 try:
                     username = track_data.get('username')
@@ -7325,8 +7331,11 @@ def start_download():
                         # everything else falls back to the metadata-free
                         # simple-download shortcut (transfer to /Transfer),
                         # unchanged for grabs with no library target.
+                        _file_ctx = (_pinned_batch.is_pinnable(username)
+                                     and match_album_grab_file(_album_tracks, track_data)) or _lib2_ctx
                         _pipeline_fields = build_lib2_import_pipeline_fields(
-                            track_data, _lib2_ctx, album_name=data.get('album_name'),
+                            dict(track_data, skip_acoustid=data.get('skip_acoustid')),
+                            _file_ctx, album_name=data.get('album_name'),
                         )
                         context_key = _make_context_key(username, filename)
                         _download_context = {
@@ -7338,6 +7347,7 @@ def start_download():
                                 'artist': track_data.get('artist', 'Unknown'),
                                 'quality': track_data.get('quality', 'Unknown'),
                                 'is_simple_download': _pipeline_fields.get('is_simple_download', True),
+                                **_pipeline_fields.get('clean_search', {}),
                             },
                             'artist': _pipeline_fields.get('artist'),
                             'album': _pipeline_fields.get('album'),
@@ -7345,11 +7355,11 @@ def start_download():
                             'spotify_album': None,
                             'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
                                 track_data,
-                                _lib2_ctx,
+                                _file_ctx,
                                 album_name=data.get('album_name'),
                             ),
                             '_skip_quarantine_check': _album_skip_checks or None,
-                            'lib2_entity': _lib2_ctx,
+                            'lib2_entity': _file_ctx,
                             '_acquisition_grab_download_id': (
                                 _acq_markers or {}).get('download_id'),
                         }
@@ -7505,8 +7515,12 @@ def start_download():
                 # quarantine gate, docs §69.2) — everything else falls back
                 # to the metadata-free simple-download shortcut (transfer to
                 # /Transfer), unchanged for grabs with no library target.
+                # A track result picked in an album-scoped search is held to
+                # the album track it names, like each file of an album grab.
+                _file_ctx = (_pinned_batch.is_pinnable(username) and match_album_grab_file(
+                    album_grab_tracks(get_database(), _lib2_ctx), data)) or _lib2_ctx
                 _pipeline_fields = build_lib2_import_pipeline_fields(
-                    data, _lib2_ctx, album_name=data.get('album_name'),
+                    data, _file_ctx, album_name=data.get('album_name'),
                 )
                 _download_context = {
                     'search_result': {
@@ -7525,11 +7539,11 @@ def start_download():
                     'spotify_album': None,
                     'track_info': _pipeline_fields.get('track_info') or build_lib2_track_info(
                         data,
-                        _lib2_ctx,
+                        _file_ctx,
                         album_name=data.get('album_name'),
                     ),
                     '_skip_quarantine_check': _skip_checks or None,
-                    'lib2_entity': _lib2_ctx,
+                    'lib2_entity': _file_ctx,
                     '_acquisition_grab_download_id': (
                         _acq_markers or {}).get('download_id'),
                 }

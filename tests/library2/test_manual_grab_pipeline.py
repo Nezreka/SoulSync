@@ -245,13 +245,9 @@ def test_manual_grab_with_lib2_entity_routes_through_full_pipeline(
     assert file_row["path"] == str(organized_final_path)
 
 
-def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
-    tmp_path, monkeypatch, legacy_db, manual_grab_target
-):
-    """Production 2026-10-11: Interactive Search on Sergio Valentino's "Lost
-    Forever", the user clicked Travis Scott's "LOST FOREVER". AcoustID was
-    asked whether the file is what the clicked card claims -- it was -- and
-    the wrong song was filed under the library track as verified."""
+def _verify_grab_as_mismatch(tmp_path, monkeypatch, request_data, lib2_ctx):
+    """Run a grab's file through the pipeline with an AcoustID that rejects it;
+    returns what AcoustID was asked to expect and what got quarantined."""
     from enum import Enum
 
     class _Result(Enum):
@@ -269,13 +265,6 @@ def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
             asked.append((title, artist))
             return _Result.FAIL, "Audio mismatch"
 
-    monkeypatch.setattr("database.music_database.get_database", lambda: legacy_db)
-    request_data = {
-        "result_type": "track", "username": "hifi", "filename": "1994279688||Someone Else - HOTLINE",
-        "size": 30_000_000, "title": "HOTLINE", "artist": "Someone Else", "quality": "flac",
-        "lib2_track_id": manual_grab_target,
-    }
-    _state, lib2_ctx = resolve_lib2_grab_context(legacy_db, request_data)
     fields = build_lib2_import_pipeline_fields(request_data, lib2_ctx)
     context = {
         "search_result": {
@@ -291,7 +280,7 @@ def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
     source_path.write_bytes(b"audio-bytes")
     transfer_root = tmp_path / "Transfer"
     transfer_root.mkdir()
-    runtime_state.matched_downloads_context["ctx-wrong-song"] = context
+    runtime_state.matched_downloads_context["ctx-grab"] = context
     _patch_common(monkeypatch, transfer_root)
     sys.modules["core.acoustid_verification"].AcoustIDVerification = _Verifier
     sys.modules["core.acoustid_verification"].VerificationResult = _Result
@@ -301,13 +290,54 @@ def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
     runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=lambda *a, **kw: None,
                                     web_scan_manager=None, repair_worker=None)
 
-    import_pipeline.post_process_matched_download("ctx-wrong-song", context, str(source_path), runtime)
+    import_pipeline.post_process_matched_download("ctx-grab", context, str(source_path), runtime)
+    return asked, quarantined == [str(source_path)]
+
+
+def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
+    tmp_path, monkeypatch, legacy_db, manual_grab_target
+):
+    """Production 2026-10-11: Interactive Search on Sergio Valentino's "Lost
+    Forever", the user clicked Travis Scott's "LOST FOREVER". AcoustID was
+    asked whether the file is what the clicked card claims -- it was -- and
+    the wrong song was filed under the library track as verified."""
+    monkeypatch.setattr("database.music_database.get_database", lambda: legacy_db)
+    request_data = {
+        "result_type": "track", "username": "hifi", "filename": "1994279688||Someone Else - HOTLINE",
+        "size": 30_000_000, "title": "HOTLINE", "artist": "Someone Else", "quality": "flac",
+        "lib2_track_id": manual_grab_target,
+    }
+    _state, lib2_ctx = resolve_lib2_grab_context(legacy_db, request_data)
+
+    asked, quarantined = _verify_grab_as_mismatch(tmp_path, monkeypatch, request_data, lib2_ctx)
 
     assert asked == [("Hotline Bling", "Drake")]
-    assert quarantined == [str(source_path)]
+    assert quarantined
     with closing(legacy_db._get_connection()) as conn:
         assert conn.execute("SELECT COUNT(*) FROM lib2_track_files WHERE track_id=?",
                             (manual_grab_target,)).fetchone()[0] == 0
+
+
+def test_album_grab_file_is_verified_against_its_album_track(
+    tmp_path, monkeypatch, legacy_db, manual_grab_target
+):
+    """Album Interactive Search: each file of the picked folder is held to the
+    library track it names (and links to that row), not to its own card."""
+    from core.library2.grab_context import album_grab_tracks, match_album_grab_file
+
+    monkeypatch.setattr("database.music_database.get_database", lambda: legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                (manual_grab_target,)).fetchone()[0]
+    _state, album_ctx = resolve_lib2_grab_context(legacy_db, {"lib2_album_id": album_id})
+    track_data = {"username": "peer", "filename": "peer\\Views\\02 Hotline Bling.flac",
+                  "title": "Hotline Bling", "artist": "Somebody Else", "track_number": 2}
+
+    file_ctx = match_album_grab_file(album_grab_tracks(legacy_db, album_ctx), track_data)
+
+    assert file_ctx["track_id"] == manual_grab_target
+    asked, quarantined = _verify_grab_as_mismatch(tmp_path, monkeypatch, track_data, file_ctx)
+    assert asked == [("Hotline Bling", "Drake")] and quarantined
 
 
 def test_the_lost_forever_file_fails_against_the_library_track():
