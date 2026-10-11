@@ -104,6 +104,16 @@ export function bindWindowWebRouter(router: AnyRouter) {
       }
 
       let href: `/${string}` = route.path;
+      // A query the caller wants appended (e.g. the downloads page's
+      // ?media=video) — the manifest only carries paths.
+      if (options?.query) {
+        const params = new URLSearchParams();
+        for (const [key, value] of Object.entries(options.query)) {
+          if (value !== undefined && value !== null) params.set(key, String(value));
+        }
+        const qs = params.toString();
+        if (qs) href = `${href}?${qs}` as `/${string}`;
+      }
       if (pageId === 'artist-detail' && options?.artistId) {
         const source = options.artistSource ? String(options.artistSource) : 'library';
         href =

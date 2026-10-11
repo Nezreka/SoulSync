@@ -369,7 +369,12 @@ export function AudiobookReleasesModal({ asin, title, onClose }: AudiobookReleas
             {message}
             {/* A grab with no way to go and watch it is a dead end. */}
             {grabbed && (
-              <Link to="/active-downloads" className={styles.modalMessageLink} onClick={onClose}>
+              <Link
+                to="/active-downloads"
+                search={{ media: 'music' }}
+                className={styles.modalMessageLink}
+                onClick={onClose}
+              >
                 View downloads
               </Link>
             )}
