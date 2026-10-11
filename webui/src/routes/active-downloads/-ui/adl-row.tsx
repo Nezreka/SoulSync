@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react';
 
+import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
+
 import type { AdlDownload, AdlTaskDetail } from '../-adl.types';
 
 import { fetchTaskDetail } from '../-adl.api';
@@ -371,6 +373,35 @@ export function AdlRow({
             <path d="M5 12h14" />
             <path d="m13 6 6 6-6 6" />
             <path d="M5 5v14" />
+          </svg>
+        </button>
+      ) : null}
+      {cls === 'failed' && !dl.is_persistent_history && !onRowAudit ? (
+        <button
+          type="button"
+          className="adl-row-next"
+          title="Interactive Search — pick a source yourself"
+          aria-label="Interactive Search"
+          onClick={(event) => {
+            event.stopPropagation();
+            void openDownloadTaskSearch(dl.task_id, {
+              name: dl.title,
+              artist: dl.artist,
+              album: dl.album,
+            });
+          }}
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" />
           </svg>
         </button>
       ) : null}

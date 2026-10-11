@@ -1,11 +1,17 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { openDownloadTaskSearch } from '@/routes/library/-ui/interactive-search-host';
+
 import type { AdlDownload } from '../-adl.types';
 
 import { AdlHeader } from './adl-header';
 import { BatchFilterBanner } from './adl-list';
 import { AdlRow } from './adl-row';
+
+vi.mock('@/routes/library/-ui/interactive-search-host', () => ({
+  openDownloadTaskSearch: vi.fn(),
+}));
 
 afterEach(cleanup);
 
@@ -34,6 +40,20 @@ const row = (over: Partial<AdlDownload> = {}): AdlDownload =>
   }) as AdlDownload;
 
 describe('AdlRow', () => {
+  it('offers Interactive Search on a failed live row only', () => {
+    const { container, rerender } = render(<AdlRow dl={row({ status: 'not_found' })} />);
+    fireEvent.click(container.querySelector('[aria-label="Interactive Search"]') as HTMLElement);
+    expect(openDownloadTaskSearch).toHaveBeenCalledWith('t1', {
+      name: 'Xtal',
+      artist: 'Aphex Twin',
+      album: 'SAW',
+    });
+    rerender(<AdlRow dl={row({ status: 'failed', is_persistent_history: true })} />);
+    expect(container.querySelector('[aria-label="Interactive Search"]')).toBeNull();
+    rerender(<AdlRow dl={row()} />);
+    expect(container.querySelector('[aria-label="Interactive Search"]')).toBeNull();
+  });
+
   it('renders title, meta and the status class', () => {
     const { container } = render(<AdlRow dl={row()} />);
     const el = container.querySelector('.adl-row') as HTMLElement;

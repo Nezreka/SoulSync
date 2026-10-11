@@ -2255,11 +2255,19 @@ function lib2EntityFields(entity?: Lib2EntityRef): Record<string, number> {
   };
 }
 
+/** The library song or release an entity search is for, with everyone on it. */
+export interface SourceSearchTarget {
+  title?: string | null;
+  album?: string | null;
+  artists: string[];
+}
+
 export interface SourceSearchResponse {
   results: SourceSearchResult[];
   /** What the server searched for: the text given, or for a library entity
-   *  without one, its track and its release. */
+   *  without one, the queries an automatic download would ask. */
   queries: string[];
+  target?: SourceSearchTarget;
 }
 
 /** Search one source. With no query a library entity is searched for by the
@@ -2273,6 +2281,7 @@ export async function searchSources(
   const payload = await readJson<{
     results?: SourceSearchResult[];
     queries?: string[];
+    target?: SourceSearchTarget;
     error?: string;
   }>(
     apiClient.post('search', {
@@ -2285,7 +2294,11 @@ export async function searchSources(
     }),
   );
   if (payload.error) throw new Error(payload.error);
-  return { results: payload.results ?? [], queries: payload.queries ?? (query ? [query] : []) };
+  return {
+    results: payload.results ?? [],
+    queries: payload.queries ?? (query ? [query] : []),
+    ...(payload.target ? { target: payload.target } : {}),
+  };
 }
 
 export interface DownloadSearchSource {

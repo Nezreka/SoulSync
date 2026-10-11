@@ -2332,43 +2332,20 @@ button.statusWarn:disabled {
   font-weight: 600;
 }
 
-.filteredToggleCell,
 .filteredEmpty {
-  padding: 6px 10px;
+  padding: 8px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.filteredEmpty {
   color: rgba(255, 255, 255, 0.45);
   font-size: 12px;
 }
 
-.filteredToggle {
+/* The filter reasons sit at the right end of the toggles row. */
+.filteredChips {
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  width: 100%;
-  padding: 4px 0;
-  border: 0;
-  background: none;
-  color: rgba(255, 255, 255, 0.7);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.filteredToggle:hover {
-  color: #fff;
-}
-
-.filteredSummary {
-  overflow: hidden;
-  color: rgba(255, 255, 255, 0.4);
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .searchOptions {

@@ -354,7 +354,7 @@ describe('library v2 interactive grab', () => {
     expect(searches.slice(1).sort()).toEqual(['soulseek', 'soundcloud', 'youtube']);
   });
 
-  it('keeps what the download checks passed over behind one row', async () => {
+  it('keeps what the download checks passed over behind filter chips', async () => {
     const hit = (title: string, decision?: object) => ({
       result_type: 'track',
       username: 'hifi',
@@ -371,7 +371,8 @@ describe('library v2 interactive grab', () => {
       ),
       http.post('/api/search', () =>
         HttpResponse.json({
-          queries: ['Topic Kernkraft 400 (A Better Day)'],
+          queries: ['Topic Kernkraft 400 (A Better Day)', 'Kernkraft 400 (A Better Day)'],
+          target: { title: 'Kernkraft 400 (A Better Day)', artists: ['Topic', 'A7S'] },
           results: [
             hit('Kernkraft 400 (A Better Day)', { accepted: true, code: 'accepted' }),
             hit('Kernkraft 400 (Sped Up)', {
@@ -404,16 +405,21 @@ describe('library v2 interactive grab', () => {
 
     expect(await screen.findByText('Kernkraft 400 (A Better Day)')).toBeInTheDocument();
     expect(
-      screen.getByText('Searching for “Topic Kernkraft 400 (A Better Day)”'),
+      screen.getByText('Searching for “Kernkraft 400 (A Better Day)” by Topic, A7S · 2 searches'),
     ).toBeInTheDocument();
     expect(screen.queryByText('Kernkraft 400 (Sped Up)')).not.toBeInTheDocument();
-    const toggle = screen.getByRole('button', { name: /Show 2 filtered/ });
-    expect(toggle).toHaveTextContent('1 wrong version · 1 wrong artist');
+    expect(screen.getByRole('button', { name: 'All filtered · 2' })).toBeInTheDocument();
 
-    fireEvent.click(toggle);
+    // one reason at a time...
+    fireEvent.click(screen.getByRole('button', { name: 'wrong version · 1' }));
     expect(screen.getByText('Kernkraft 400 (Sped Up)')).toBeInTheDocument();
     expect(screen.getByText('version: sped up')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Hide 2 filtered/ })).toBeInTheDocument();
+    expect(screen.queryByText('Kernkraft 400 (cover)')).not.toBeInTheDocument();
+    // ...or all of them
+    fireEvent.click(screen.getByRole('button', { name: 'All filtered · 2' }));
+    expect(screen.getByText('Kernkraft 400 (cover)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'All filtered · 2' }));
+    expect(screen.queryByText('Kernkraft 400 (Sped Up)')).not.toBeInTheDocument();
   });
 
   it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {

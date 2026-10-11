@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
-import { decisionPill, rejectionSummary } from '@/features/downloads/decisions';
+import { decisionLabel, decisionPill } from '@/features/downloads/decisions';
 
 import type {
   LibraryV2QualityProfile,
@@ -25,6 +25,7 @@ import {
   type Lib2EntityRef,
   type LibraryV2HistoryEntry,
   type SourceSearchResult,
+  type SourceSearchTarget,
 } from '../-library-v2.api';
 import styles from './library-v2-page.module.css';
 
@@ -149,6 +150,11 @@ function resultTitle(r: SourceSearchResult): string {
   if (rawRelease) return rawRelease;
   if (r.result_type === 'album') return r.album_title || baseName(r.album_path ?? '') || '—';
   return r.title ?? baseName(r.filename);
+}
+
+/** The reason a filtered hit is grouped under (one chip per code). */
+function rejectedCode(r: SourceSearchResult): string {
+  return r.decision?.code ?? 'unexplained';
 }
 
 /** Why the download pipeline passed this hit over: "wrong artist", "version: remix". */
@@ -485,7 +491,9 @@ export function InteractiveSearchModal({
   // its release); only an artist-wide search still sends text.
   const entityScoped = Boolean(entity?.trackId || entity?.albumId);
   const [searchedQueries, setSearchedQueries] = useState<string[]>([]);
-  const [showFiltered, setShowFiltered] = useState(false);
+  const [searchTarget, setSearchTarget] = useState<SourceSearchTarget | null>(null);
+  // The filtered reasons whose hits are shown anyway (chips on the right).
+  const [shownCodes, setShownCodes] = useState<Set<string>>(new Set());
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
@@ -542,17 +550,17 @@ export function InteractiveSearchModal({
     [sorted, cutoffOnly, effectiveProfile],
   );
   const rejected = useMemo(() => sorted.filter((r) => r.decision?.accepted === false), [sorted]);
-  const rejectedSummary = useMemo(() => {
+  // Why hits were filtered, most common first: one chip per reason.
+  const rejectionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rejected) {
-      const code = r.decision?.code ?? 'unexplained';
+      const code = rejectedCode(r);
       counts[code] = (counts[code] ?? 0) + 1;
     }
-    return rejectionSummary(
-      Object.fromEntries(Object.entries(counts).sort(([, a], [, b]) => b - a)),
-    );
+    return Object.entries(counts).sort(([, a], [, b]) => b - a);
   }, [rejected]);
-  const visible = showFiltered ? [...filtered, ...rejected] : filtered;
+  const shownRejected = rejected.filter((r) => shownCodes.has(rejectedCode(r)));
+  const visible = [...filtered, ...shownRejected];
   const progressItems = useMemo(() => Object.entries(sourceProgress), [sourceProgress]);
   const showPeers =
     columns.peers &&
@@ -633,7 +641,7 @@ export function InteractiveSearchModal({
       setError('Nothing to search for — this entity has no usable title.');
       return;
     }
-    setShowFiltered(false);
+    setShownCodes(new Set());
     const sources = [...activeSources];
     const targets =
       sources.length > 0 ? sources : [{ name: '__current__', display_name: 'Current source' }];
@@ -660,7 +668,11 @@ export function InteractiveSearchModal({
       targets.map(async (source) => {
         const sourceStartedAt = Date.now();
         try {
-          const { results: sourceResults, queries } = await searchSources(
+          const {
+            results: sourceResults,
+            queries,
+            target,
+          } = await searchSources(
             q,
             source.name === '__current__' ? undefined : source.name,
             entity,
@@ -668,6 +680,7 @@ export function InteractiveSearchModal({
           merged.push(...sourceResults);
           if (runSequence !== runSequenceRef.current) return;
           if (queries.length > 0) setSearchedQueries(queries);
+          if (target) setSearchTarget(target);
           if (sourceResults.length > 0) {
             setResults((current) => [...current, ...sourceResults]);
           }
@@ -849,10 +862,17 @@ export function InteractiveSearchModal({
       className={`${styles.modal} ${styles.modalWide} ${styles.modalFramed}`}
     >
       <DialogHeader title="Interactive Search" closeLabel="Close interactive search" compact>
-        <span className={styles.searchHeaderMeta}>
-          {searchedQueries.length > 0
-            ? `Searching for ${searchedQueries.map((q) => `“${q}”`).join(' and ')}`
-            : 'Search sources and compare results before downloading.'}
+        <span
+          className={styles.searchHeaderMeta}
+          title={searchedQueries.length > 1 ? searchedQueries.join('\n') : undefined}
+        >
+          {searchTarget
+            ? `Searching for “${searchTarget.title ?? searchTarget.album ?? ''}” by ${searchTarget.artists.join(', ')}${
+                searchedQueries.length > 1 ? ` · ${searchedQueries.length} searches` : ''
+              }`
+            : searchedQueries.length > 0
+              ? `Searching for ${searchedQueries.map((q) => `“${q}”`).join(' and ')}`
+              : 'Search sources and compare results before downloading.'}
         </span>
       </DialogHeader>
       <div className={styles.searchModalBody}>
@@ -948,6 +968,41 @@ export function InteractiveSearchModal({
               <span className={styles.toggleSwitch} aria-hidden="true" />
               Only show results meeting cutoff
             </label>
+          ) : null}
+          {rejectionCounts.length > 0 ? (
+            <div className={styles.filteredChips} role="group" aria-label="Filtered results">
+              <button
+                type="button"
+                className={styles.sourceChip}
+                aria-pressed={shownCodes.size === rejectionCounts.length}
+                onClick={() =>
+                  setShownCodes(
+                    shownCodes.size === rejectionCounts.length
+                      ? new Set()
+                      : new Set(rejectionCounts.map(([code]) => code)),
+                  )
+                }
+              >
+                All filtered · {rejected.length}
+              </button>
+              {rejectionCounts.map(([code, count]) => (
+                <button
+                  key={code}
+                  type="button"
+                  className={styles.sourceChip}
+                  aria-pressed={shownCodes.has(code)}
+                  onClick={() =>
+                    setShownCodes((current) => {
+                      const next = new Set(current);
+                      if (!next.delete(code)) next.add(code);
+                      return next;
+                    })
+                  }
+                >
+                  {decisionLabel(code)} · {count}
+                </button>
+              ))}
+            </div>
           ) : null}
         </div>
 
@@ -1064,29 +1119,14 @@ export function InteractiveSearchModal({
                 </thead>
                 <tbody>
                   {filtered.map((r, i) => renderRow(r, i))}
-                  {filtered.length === 0 ? (
+                  {filtered.length === 0 && shownRejected.length === 0 ? (
                     <tr>
                       <td colSpan={columnCount} className={styles.filteredEmpty}>
-                        Nothing here passed the download checks.
+                        Nothing here passed the download checks — the filters on the right show why.
                       </td>
                     </tr>
                   ) : null}
-                  {rejected.length > 0 ? (
-                    <tr>
-                      <td colSpan={columnCount} className={styles.filteredToggleCell}>
-                        <button
-                          type="button"
-                          className={styles.filteredToggle}
-                          aria-expanded={showFiltered}
-                          onClick={() => setShowFiltered((on) => !on)}
-                        >
-                          {showFiltered ? 'Hide' : 'Show'} {rejected.length} filtered
-                          <span className={styles.filteredSummary}>{rejectedSummary}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  ) : null}
-                  {showFiltered ? rejected.map((r, i) => renderRow(r, i)) : null}
+                  {shownRejected.map((r, i) => renderRow(r, i))}
                 </tbody>
               </table>
             </>
