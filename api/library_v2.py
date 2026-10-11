@@ -2998,7 +2998,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.monitor_rules import (
                 PROVENANCE_CASCADE,
                 PROVENANCE_USER,
-                explicit_track_rules_for_album,
                 record_rule,
                 record_rules,
             )
@@ -3007,36 +3006,18 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                    "tracks": "track"}[entity], entity_scope_id,
                             monitored, PROVENANCE_USER, profile_id=_intent_profile())
             track_ids: List[int] = []
-            preserved_track_ids: List[int] = []
             if entity == "albums":
-                # P1-14: an album toggle is a cascade — it re-projects only
-                # tracks WITHOUT an explicit per-track choice. A track the
-                # user deliberately (un)monitored keeps its state; re-deciding
-                # it takes another direct action on the track itself.
-                explicit = explicit_track_rules_for_album(conn, eid,
-                                                          profile_id=_intent_profile())
-                all_ids = [r["id"] for r in conn.execute(
+                # (Un)monitoring a release sets every track of it, also one the
+                # user (un)monitored by hand before: kept per-track choices left
+                # an album "monitored" whose tracks a Wishlist clear had turned
+                # off, and no album click could switch them back on. A hand
+                # change after this is a user_explicit rule again.
+                track_ids = [r["id"] for r in conn.execute(
                     "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,))]
-                preserved_track_ids = [t for t in all_ids
-                                       if t in explicit and explicit[t] != monitored]
-                track_ids = [t for t in all_ids if t not in preserved_track_ids]
-                if shared_intent and preserved_track_ids:
-                    keep = ",".join("?" for _ in preserved_track_ids)
-                    cur.execute(
-                        f"UPDATE lib2_tracks SET monitored=? "
-                        f"WHERE album_id=? AND id NOT IN ({keep})",
-                        (1 if monitored else 0, eid, *preserved_track_ids))
-                elif shared_intent:
+                if shared_intent:
                     cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
                                 (1 if monitored else 0, eid))
-                # The re-projected tracks carry the cascade as their own rule
-                # so the wanted projection sees the current per-track intent.
-                # EVERY explicitly-ruled track keeps its user_explicit rule —
-                # also when its value happens to match the cascade; a
-                # deliberate choice must never be downgraded to 'cascade'.
-                record_rules(conn, "track",
-                             [t for t in track_ids if t not in explicit],
-                             monitored, PROVENANCE_CASCADE,
+                record_rules(conn, "track", track_ids, monitored, PROVENANCE_CASCADE,
                              profile_id=_intent_profile())
             elif entity == "tracks":
                 track_ids = [eid]
@@ -3061,14 +3042,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         conn, artist_scope_id, monitored, profile_id=_intent_profile()
                     ))
             elif track_ids:
-                # Only the track-level toggle is a direct user action on that
-                # track; an album toggle is a cascade and must respect a
-                # per-track ignore (user cancelled that download on purpose).
+                # A track or release click is the user asking for exactly these
+                # tracks, so it lifts a Wishlist ignore entry as well; scheduled
+                # jobs and profile assignments still respect it.
                 outbox_ids = enqueue_projected_tracks(
                     conn,
                     track_ids,
                     profile_id=_intent_profile(),
-                    user_initiated=(entity == "tracks"),
+                    user_initiated=True,
                 )
             conn.commit()
             mirrored = mirror_pending = 0
@@ -3080,8 +3061,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()[0]
                 mirror_pending = len(outbox_ids) - mirrored
         return jsonify({"success": True, "monitored": monitored,
-                        "mirrored": mirrored, "mirror_pending": mirror_pending,
-                        "preserved_tracks": len(preserved_track_ids)})
+                        "mirrored": mirrored, "mirror_pending": mirror_pending})
 
     @_route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
     def lib2_set_quality_profile(entity, eid):
@@ -3647,7 +3627,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         from core.library2.monitor_rules import (
                             PROVENANCE_CASCADE,
                             PROVENANCE_USER,
-                            explicit_track_rules_for_album,
                             record_rule,
                             record_rules,
                         )
@@ -3662,22 +3641,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         # Re-monitoring skips consolidated-away duplicates (the
                         # user just moved their file to the other variant) —
                         # both for the flag AND the wishlist mirror; unmonitoring
-                        # always applies to every track.
+                        # always applies to every track. Hand-set tracks follow
+                        # the release, as in the single-release toggle.
                         if monitored:
-                            candidate_track_ids = [r["id"] for r in conn.execute(
+                            track_ids = [r["id"] for r in conn.execute(
                                 f"SELECT id FROM lib2_tracks WHERE album_id=? "
                                 f"AND {_NOT_CONSOLIDATED_SQL}", (album_id,))]
                         else:
-                            candidate_track_ids = _bulk_track_ids_for_albums(
-                                conn, [album_id]
-                            )
-                        explicit = explicit_track_rules_for_album(
-                            conn, album_id, profile_id=active_profile
-                        )
-                        track_ids = [
-                            track_id for track_id in candidate_track_ids
-                            if track_id not in explicit
-                        ]
+                            track_ids = _bulk_track_ids_for_albums(conn, [album_id])
                         if track_ids:
                             marks = ",".join("?" for _ in track_ids)
                             if _shared_intent():
@@ -3709,6 +3680,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 conn,
                                 track_ids,
                                 profile_id=active_profile,
+                                user_initiated=True,
                             )
                     _job_registry.update(
                         job_id,

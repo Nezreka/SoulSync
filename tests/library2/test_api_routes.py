@@ -1404,11 +1404,10 @@ def test_monitor_album_mirrors_with_active_profile(api):
     assert all(a["quality_profile_id"] == 1 for a in db.wishlist_adds)
 
 
-def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
-    """Audit P1-11: only the DIRECT track-level toggle may clear a user's
-    wishlist-ignore (user_initiated=True). An album toggle is a cascade over
-    tracks the user may have deliberately cancelled — it must respect the
-    ignore-list, as must scheduled jobs and profile assignments."""
+def test_track_and_release_clicks_lift_the_ignore_profile_assignment_does_not(api):
+    """Audit P1-11: a user's click on a track or a release asks for exactly
+    those tracks and may clear a Wishlist ignore (user_initiated=True); the
+    profile assignment and scheduled jobs must respect the ignore-list."""
     client, db, ids = api
     resp = client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
                        json={"monitored": True}).get_json()
@@ -1419,7 +1418,7 @@ def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
     resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
                        json={"monitored": True}).get_json()
     assert resp["success"] is True
-    assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
+    assert db.wishlist_adds and all(a["user_initiated"] for a in db.wishlist_adds)
 
     db.wishlist_adds.clear()
     resp = client.post(
@@ -1430,51 +1429,58 @@ def test_track_toggle_is_user_initiated_album_toggle_is_not(api):
     assert db.wishlist_adds and not any(a["user_initiated"] for a in db.wishlist_adds)
 
 
-def test_album_unmonitor_preserves_explicit_track_intent(api):
-    """Audit P1-14: an album toggle is a cascade — it must not destroy a
-    deliberate per-track choice. A track the user explicitly monitored stays
-    monitored (and is NOT withdrawn from the wishlist) when its album is
-    unmonitored; rule-less siblings follow the cascade."""
+def test_album_toggle_sets_every_track_also_hand_set_ones(api):
+    """A release (un)monitor sets all its tracks -- a toggle per track would
+    flip exactly the hand-set ones. Production: a Wishlist clear had turned
+    an album's tracks off one by one, and no album click switched them back."""
     client, db, ids = api
-    # Direct user action on the track: explicit intent.
+
+    def track_state():
+        with _conn(db) as conn:
+            return (conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
+                                 (ids["ep_track"],)).fetchone()[0],
+                    conn.execute("SELECT wanted FROM lib2_wanted_tracks WHERE track_id=?",
+                                 (ids["ep_track"],)).fetchone()[0])
+
     assert client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
-                       json={"monitored": True}).get_json()["success"] is True
-    # Album ON then OFF — the cascade projects the sibling-less album; the
-    # explicit track must survive the OFF.
+                       json={"monitored": False}).get_json()["success"] is True
     assert client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
                        json={"monitored": True}).get_json()["success"] is True
+    assert track_state() == (1, 1)
+
+    # By hand inside a monitored release: only that track changes...
+    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor", json={"monitored": False})
+    assert track_state() == (0, 0)
+    # ...and unmonitoring the release keeps it off instead of flipping it back.
     db.wishlist_removes.clear()
-    resp = client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
-                       json={"monitored": False}).get_json()
-    assert resp["success"] is True
-    assert resp["preserved_tracks"] == 1
-    with _conn(db) as conn:
-        assert conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
-                            (ids["ep"],)).fetchone()[0] == 0
-        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
-                            (ids["ep_track"],)).fetchone()[0] == 1
-    assert all(r["id"] != "sp-t2" for r in db.wishlist_removes), (
-        "the explicitly monitored track must not be withdrawn from the wishlist")
+    assert client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                       json={"monitored": False}).get_json()["success"] is True
+    assert track_state() == (0, 0)
+
+    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor", json={"monitored": True})
+    db.wishlist_removes.clear()
+    client.post(f"/api/library/v2/albums/{ids['ep']}/monitor", json={"monitored": False})
+    assert track_state() == (0, 0)
+    assert any(r["id"] == "sp-t2" for r in db.wishlist_removes)
 
 
 def test_album_cascade_still_projects_ruleless_tracks(api):
-    """Without explicit per-track intent the album toggle behaves exactly as
-    before: every child follows the cascade."""
+    """Without per-track intent every child follows the album toggle."""
     client, db, ids = api
     assert client.post(f"/api/library/v2/albums/{ids['views']}/monitor",
-                       json={"monitored": True}).get_json()["preserved_tracks"] == 0
+                       json={"monitored": True}).get_json()["success"] is True
     with _conn(db) as conn:
         assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                             (ids["album_track"],)).fetchone()[0] == 1
     resp = client.post(f"/api/library/v2/albums/{ids['views']}/monitor",
                        json={"monitored": False}).get_json()
-    assert resp["preserved_tracks"] == 0
+    assert resp["success"] is True
     with _conn(db) as conn:
         assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                             (ids["album_track"],)).fetchone()[0] == 0
 
 
-def test_bulk_monitor_updates_rules_projection_and_preserves_explicit_tracks(api):
+def test_bulk_monitor_updates_rules_projection_and_sets_hand_set_tracks(api):
     import time
 
     client, db, ids = api
@@ -1518,7 +1524,7 @@ def test_bulk_monitor_updates_rules_projection_and_preserves_explicit_tracks(api
             "SELECT COUNT(*) FROM lib2_monitor_rules "
             "WHERE entity_type='album' AND provenance='user_explicit'"
         ).fetchone()[0]
-    assert dict(explicit) == {"wanted": 1, "reason": "track_explicit"}
+    assert dict(explicit) == {"wanted": 0, "reason": "track_rule:cascade"}
     assert dict(cascaded) == {"wanted": 0, "reason": "track_rule:cascade"}
     assert album_rules == 3
 
@@ -1646,9 +1652,9 @@ def test_bulk_monitor_rejects_invalid_album_allowlist(api):
 
 def test_monitor_actions_record_provenance(api):
     client, db, ids = api
-    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
-                json={"monitored": True})
     client.post(f"/api/library/v2/albums/{ids['ep']}/monitor",
+                json={"monitored": True})
+    client.post(f"/api/library/v2/tracks/{ids['ep_track']}/monitor",
                 json={"monitored": True})
     client.post(f"/api/library/v2/artists/{ids['artist']}/monitor",
                 json={"monitored": True})

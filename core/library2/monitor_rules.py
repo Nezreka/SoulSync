@@ -10,9 +10,8 @@ chose this" from "an import copied a flag" (P1-13).
 ``lib2_monitor_rules`` records the intent per (entity, profile):
 
 - ``user_explicit`` — a direct user action on exactly that entity. Survives
-  album/artist cascades in both directions: a cascade only re-projects rows
-  WITHOUT an explicit rule; re-deciding an explicit row takes another direct
-  action on it.
+  the automatic cascades (profile-assign auto-monitor, new releases); a
+  release (un)monitor by the user sets every track of it and replaces it.
 - ``cascade``       — a bulk action projected onto the row (album toggle,
   profile-assign auto-monitor). Freely overwritten by later actions.
 - ``new_release``   — auto-monitored by the discography "monitor new items"
@@ -235,20 +234,6 @@ def record_rules(conn, entity_type: str, entity_ids: Iterable[int],
                     profile_id=profile_id)
 
 
-def explicit_track_rules_for_album(conn, album_id: int,
-                                   *, profile_id: int = 1) -> Dict[int, bool]:
-    """track_id -> explicitly chosen monitored value, for one album's tracks."""
-    return {
-        r[0]: bool(r[1]) for r in conn.execute(
-            """SELECT r.entity_id, r.monitored
-                 FROM lib2_monitor_rules r
-                 JOIN lib2_tracks t ON t.id = r.entity_id
-                WHERE r.entity_type='track' AND r.provenance=?
-                  AND r.profile_id=? AND t.album_id=?""",
-            (PROVENANCE_USER, int(profile_id), int(album_id)))
-    }
-
-
 def explicitly_unmonitored_track_ids(conn, track_ids: List[int],
                                      *, profile_id: int = 1) -> set:
     """Which of the given tracks the user explicitly set to unmonitored."""
@@ -310,7 +295,6 @@ __all__ = [
     "PROVENANCE_NEW_RELEASE",
     "PROVENANCE_USER",
     "PROVENANCE_WISHLIST",
-    "explicit_track_rules_for_album",
     "explicitly_unmonitored_track_ids",
     "prune_orphaned_rules",
     "project_entity_monitor_rules",

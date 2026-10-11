@@ -13,7 +13,6 @@ from core.library2.monitor_rules import (
     PROVENANCE_FILE,
     PROVENANCE_LEGACY,
     PROVENANCE_USER,
-    explicit_track_rules_for_album,
     explicitly_unmonitored_track_ids,
     prune_orphaned_rules,
     record_rule,
@@ -72,7 +71,6 @@ def test_explicit_lookups(imported_conn):
     row = conn.execute(
         "SELECT id, album_id FROM lib2_tracks LIMIT 1").fetchone()
     record_rule(conn, "track", row["id"], False, PROVENANCE_USER)
-    assert explicit_track_rules_for_album(conn, row["album_id"]) == {row["id"]: False}
     assert explicitly_unmonitored_track_ids(conn, [row["id"]]) == {row["id"]}
     # Cascade/legacy rules are not explicit intent.
     other = conn.execute(
