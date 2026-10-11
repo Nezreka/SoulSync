@@ -136,6 +136,19 @@ def build_lib2_import_pipeline_fields(
         return {}
 
     track_info["name"] = title
+    clean = {}
+    if lib2_context.get("track_title"):
+        # The grab is FOR this track, so the identity checks (AcoustID, the
+        # integrity length) test the file against it -- not against the card
+        # the user clicked, which a wrong song always matches: Travis Scott's
+        # "LOST FOREVER" verified as itself and was filed as Sergio Valentino's.
+        artists = lib2_context.get("track_artists") or [lib2_context["artist_name"]]
+        track_info["artists"] = [{"name": name} for name in artists]
+        clean = {"clean_title": title, "clean_artist": artists[0]}
+        # AcoustID switched off means "take this file": a deliberately other
+        # version must not fail on the catalogue length instead.
+        if lib2_context.get("duration_ms") and not data.get("skip_acoustid"):
+            track_info["duration_ms"] = lib2_context["duration_ms"]
     if lib2_context.get("track_number") is not None:
         track_info["track_number"] = lib2_context["track_number"]
     if lib2_context.get("disc_number") is not None:
@@ -150,6 +163,7 @@ def build_lib2_import_pipeline_fields(
         "artist": {"name": lib2_context["artist_name"]},
         "album": {"name": str(album_title)} if album_title else {},
         "track_info": track_info,
+        "clean_search": clean,
     }
 
 
@@ -181,7 +195,7 @@ def resolve_lib2_grab_context(
     try:
         if track_id is not None:
             row = conn.execute(
-                "SELECT t.id, t.album_id, t.title, "
+                "SELECT t.id, t.album_id, t.title, t.duration, "
                 "t.track_number, t.disc_number, al.title AS album_title, "
                 "ar.name AS artist_name "
                 "FROM lib2_tracks t "
@@ -194,6 +208,10 @@ def resolve_lib2_grab_context(
                 return ("invalid", None)
             if album_id is not None and row["album_id"] != album_id:
                 return ("invalid", None)
+            credits = [r[0] for r in conn.execute(
+                "SELECT ar.name FROM lib2_track_artists ta "
+                "JOIN lib2_artists ar ON ar.id = ta.artist_id "
+                "WHERE ta.track_id = ? ORDER BY ta.position", (track_id,))]
             return ("ok", {
                 "track_id": row["id"],
                 "album_id": row["album_id"],
@@ -207,6 +225,8 @@ def resolve_lib2_grab_context(
                 "track_title": row["title"],
                 "track_number": row["track_number"],
                 "disc_number": row["disc_number"],
+                "track_artists": credits or [row["artist_name"]],
+                "duration_ms": row["duration"],
             })
         row = conn.execute(
             "SELECT al.id, al.title AS album_title, "

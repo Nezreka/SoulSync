@@ -110,6 +110,28 @@ def test_import_pipeline_fields_ground_metadata_in_the_resolved_entity():
     assert fields["track_info"]["album"] == {"name": "Real Album"}
 
 
+def test_track_grab_checks_the_file_against_the_library_track():
+    """Lost Forever: a wrong song picked in Interactive Search verified against
+    its own card. The identity checks must expect the library track instead."""
+    request_data = {"title": "LOST FOREVER", "artist": "toravisu・sukotto, Westside Gunn",
+                    "duration_ms": 163_000}
+    lib2_context = {
+        "track_id": 3, "album_id": 2, "artist_name": "Sergio Valentino",
+        "album_name": "Lost Forever", "track_title": "Lost Forever",
+        "track_artists": ["Sergio Valentino", "Guest"], "duration_ms": 112_735,
+    }
+
+    fields = build_lib2_import_pipeline_fields(request_data, lib2_context)
+
+    assert fields["track_info"]["artists"] == [{"name": "Sergio Valentino"}, {"name": "Guest"}]
+    assert fields["track_info"]["duration_ms"] == 112_735
+    assert fields["clean_search"] == {"clean_title": "Lost Forever",
+                                      "clean_artist": "Sergio Valentino"}
+
+    forced = build_lib2_import_pipeline_fields({**request_data, "skip_acoustid": True}, lib2_context)
+    assert forced["track_info"]["duration_ms"] == 163_000
+
+
 def test_import_pipeline_fields_fall_back_to_request_title_for_album_scope():
     """An album-scoped grab's lib2_context has no per-track title (only one
     context is resolved for the whole album) — each track's own request
@@ -125,6 +147,7 @@ def test_import_pipeline_fields_fall_back_to_request_title_for_album_scope():
     assert fields["is_simple_download"] is False
     assert fields["artist"] == {"name": "Real Artist"}
     assert fields["track_info"]["name"] == "Track From Listing"
+    assert fields["clean_search"] == {}
 
 
 def test_import_pipeline_fields_empty_without_lib2_context():
@@ -144,6 +167,7 @@ def test_track_resolves_with_own_profile(db):
         "quality_profile_explicit": True,
         "artist_name": "A", "album_name": "Alb", "track_title": "T",
         "track_number": 1, "disc_number": 1,
+        "track_artists": ["A"], "duration_ms": None,
     }
 
 

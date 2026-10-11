@@ -245,6 +245,83 @@ def test_manual_grab_with_lib2_entity_routes_through_full_pipeline(
     assert file_row["path"] == str(organized_final_path)
 
 
+def test_manual_grab_of_a_wrong_song_is_verified_against_the_library_track(
+    tmp_path, monkeypatch, legacy_db, manual_grab_target
+):
+    """Production 2026-10-11: Interactive Search on Sergio Valentino's "Lost
+    Forever", the user clicked Travis Scott's "LOST FOREVER". AcoustID was
+    asked whether the file is what the clicked card claims -- it was -- and
+    the wrong song was filed under the library track as verified."""
+    from enum import Enum
+
+    class _Result(Enum):
+        PASS = "pass"
+        FAIL = "fail"
+        SKIP = "skip"
+
+    asked = []
+
+    class _Verifier:
+        def quick_check_available(self):
+            return True, "ok"
+
+        def verify_audio_file(self, _path, title, artist, _context=None):
+            asked.append((title, artist))
+            return _Result.FAIL, "Audio mismatch"
+
+    monkeypatch.setattr("database.music_database.get_database", lambda: legacy_db)
+    request_data = {
+        "result_type": "track", "username": "hifi", "filename": "1994279688||Someone Else - HOTLINE",
+        "size": 30_000_000, "title": "HOTLINE", "artist": "Someone Else", "quality": "flac",
+        "lib2_track_id": manual_grab_target,
+    }
+    _state, lib2_ctx = resolve_lib2_grab_context(legacy_db, request_data)
+    fields = build_lib2_import_pipeline_fields(request_data, lib2_ctx)
+    context = {
+        "search_result": {
+            "username": request_data["username"], "filename": request_data["filename"],
+            "title": request_data["title"], "artist": request_data["artist"],
+            "is_simple_download": False, **fields["clean_search"],
+        },
+        "artist": fields["artist"], "album": fields["album"],
+        "track_info": fields["track_info"], "_skip_quarantine_check": None,
+        "lib2_entity": lib2_ctx,
+    }
+    source_path = tmp_path / "downloaded.flac"
+    source_path.write_bytes(b"audio-bytes")
+    transfer_root = tmp_path / "Transfer"
+    transfer_root.mkdir()
+    runtime_state.matched_downloads_context["ctx-wrong-song"] = context
+    _patch_common(monkeypatch, transfer_root)
+    sys.modules["core.acoustid_verification"].AcoustIDVerification = _Verifier
+    sys.modules["core.acoustid_verification"].VerificationResult = _Result
+    quarantined = []
+    monkeypatch.setattr(import_pipeline, "move_to_quarantine",
+                        lambda path, *_a, **_kw: quarantined.append(path) or path)
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=lambda *a, **kw: None,
+                                    web_scan_manager=None, repair_worker=None)
+
+    import_pipeline.post_process_matched_download("ctx-wrong-song", context, str(source_path), runtime)
+
+    assert asked == [("Hotline Bling", "Drake")]
+    assert quarantined == [str(source_path)]
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_track_files WHERE track_id=?",
+                            (manual_grab_target,)).fetchone()[0] == 0
+
+
+def test_the_lost_forever_file_fails_against_the_library_track():
+    """The recordings AcoustID returned for the wrong file, judged against the
+    track the user actually asked for."""
+    from core.matching.audio_verification import Decision, evaluate
+
+    outcome = evaluate("Lost Forever", "Sergio Valentino",
+                       [{"title": "LOST FOREVER", "artist": "Travis Scott feat. Westside Gunn"}],
+                       fingerprint_score=0.95)
+
+    assert outcome.decision == Decision.FAIL
+
+
 def test_manual_grab_without_lib2_entity_keeps_simple_download_shortcut(
     tmp_path, monkeypatch, legacy_db, imported_conn
 ):

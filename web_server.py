@@ -7517,6 +7517,7 @@ def start_download():
                         'artist': data.get('artist', 'Unknown'),
                         'quality': data.get('quality', 'Unknown'),
                         'is_simple_download': _pipeline_fields.get('is_simple_download', True),
+                        **_pipeline_fields.get('clean_search', {}),
                     },
                     'artist': _pipeline_fields.get('artist'),
                     'album': _pipeline_fields.get('album'),
