@@ -366,13 +366,19 @@ def _check_complete(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
                 f"confirmed as the edition's, so a plausibility floor was "
                 f"used instead of the strict gate"
             )
-    elif (narration is not None and narration["confidence"] == "unknown"
+    elif (narration is not None and narration["confidence"] in ("different", "unknown")
             and not verdict.get("complete") and verdict.get("files")
             and verdict.get("reason")):
         # Held below the plausibility floor: the shortfall is still framed
-        # against the edition's runtime, so say the narration is unconfirmed
-        # rather than implying a definitive measurement.
-        verdict["reason"] = f"{verdict['reason']} (narration unconfirmed)"
+        # against the edition's runtime, so annotate what was actually
+        # checked rather than implying a definitive measurement.
+        if narration["confidence"] == "different":
+            verdict["reason"] = (
+                f"{verdict['reason']} (alternate narration: "
+                f"{narration['detected_narrator']}, below plausibility floor)"
+            )
+        else:
+            verdict["reason"] = f"{verdict['reason']} (narration unconfirmed)"
     if not verdict.get("complete") and not verdict.get("files"):
         from core.audiobook_completeness import has_files_but_no_audio
         verdict["no_audio"] = has_files_but_no_audio(source_path)

@@ -8,10 +8,6 @@ names no narrator, and the files hold ~886 min (the Martin Shaw reading,
 present — about 277 minutes short".
 """
 
-from unittest.mock import patch
-
-import pytest
-
 from core import audiobook_completeness as completeness
 from core import audiobook_download_monitor as monitor
 
@@ -155,6 +151,10 @@ def test_different_narration_below_floor_is_held(monkeypatch, tmp_path):
     )
     assert verdict["complete"] is False
     assert "minutes short" in verdict["reason"]
+    # The hold reason names the alternate narration and the floor, so the
+    # Review page doesn't read as a definitive measurement.
+    assert "alternate narration: Martin Shaw, below plausibility floor" in \
+        verdict["reason"]
 
 
 def test_abbreviated_tag_narrator_still_matches_edition(monkeypatch, tmp_path):
@@ -206,8 +206,7 @@ def test_floor_never_tightens_a_lenient_user_tolerance(monkeypatch, tmp_path):
     assert verdict["complete"] is True
 
 
-def test_folder_name_narrator_counts_like_release_title(monkeypatch, tmp_path):
-    # The download folder's name is checked alongside the release title: a
+def test_folder_name_narrator_counts_like_release_title(monkeypatch, tmp_path):    # The download folder's name is checked alongside the release title: a
     # folder naming the edition's narrator is a confident match, so the hard
     # gate holds the short download.
     folder = tmp_path / "The Silmarillion narrated by Andy Serkis"
@@ -227,6 +226,20 @@ def test_folder_name_narrator_counts_like_release_title(monkeypatch, tmp_path):
         str(folder), _row(release_title="J.R.R. Tolkien - The Silmarillion"))
     assert verdict["complete"] is False
     assert "minutes short" in verdict["reason"]
+
+
+def test_folder_name_does_not_bleed_into_detected_narrator():
+    # The title and folder are checked separately: a folder name must not
+    # get captured as part of a narrator name from the title.
+    from core.audiobook_completeness import narration_confidence
+
+    result = narration_confidence(
+        "/downloads/test_some_junk_folder_name",
+        "The Silmarillion narrated by Martin Shaw",
+        dict(SERKIS_EDITION),
+    )
+    assert result["confidence"] == "different"
+    assert result["detected_narrator"] == "Martin Shaw"
 
 
 def test_below_floor_hold_says_narration_unconfirmed(monkeypatch, tmp_path):
