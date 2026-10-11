@@ -89433,6 +89433,14 @@ body.src-modal-open { overflow: hidden; }
     display: inline-flex;
     opacity: 0.7;
 }
+.verif-presence-icons > .verif-presence-library {
+    opacity: 1;
+    padding: 2px 5px;
+    border: 1px solid rgba(46, 204, 113, 0.55);
+    border-radius: 999px;
+    background: rgba(46, 204, 113, 0.12);
+    color: #2ecc71;
+}
 .verif-presence-icons svg {
     width: 13px;
     height: 13px;

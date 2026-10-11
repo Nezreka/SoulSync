@@ -237,13 +237,15 @@ function quarantineAlbumTitle(entry: AdlQuarantineEntry): string {
     .join(' · ');
 }
 
-/** Small monochrome hints; only actual presence and extra imports add icons. */
+/** Small hints; only actual presence and extra imports add icons. Library
+ *  presence decides what to do with the row, so it carries the verified green. */
 function QuarantinePresenceIcons({ entry }: { entry: AdlQuarantineEntry }) {
   if (entry.library_status !== 'present' && !entry.album_extra) return null;
   return (
     <span className="verif-presence-icons">
       {entry.library_status === 'present' ? (
         <span
+          className="verif-presence-library"
           role="img"
           aria-label={quarantineLibraryTitle(entry)}
           title={quarantineLibraryTitle(entry)}
