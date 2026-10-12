@@ -9,7 +9,6 @@ import sqlite3
 from typing import Any, Dict
 
 from core.settings import config_manager
-from core.library_scope import library_scope_for_profile
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
@@ -482,18 +481,16 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
 
         # #1504: owning user profile for the new rows (from auto-import
         # breadcrumb, download request, etc.). None = shared.
-        # Any profile whose library scope is 'shared' must write NULL — writing
-        # the profile id makes the rows invisible to every shared-scope lookup
-        # (the missing-tracks analysis, the dashboard), which then reports
-        # everything as missing and re-downloads. This covers profile 1 (always
-        # shared), profiles on servers without own-library support, and
-        # non-admin profiles in shared mode.
+        # Profile 1 IS the shared library scope (owner_profile_id IS NULL), so
+        # it must write NULL — writing 1 makes the rows invisible to every
+        # shared-scope lookup (the missing-tracks analysis, the dashboard),
+        # which then reports everything as missing and re-downloads.
         owner_pid = context.get('profile_id')
         try:
             owner_pid = int(owner_pid) if owner_pid else None
         except (TypeError, ValueError):
             owner_pid = None
-        if owner_pid is None or library_scope_for_profile(owner_pid) == 'shared':
+        if owner_pid == 1:
             owner_pid = None
 
         album_ctx = get_import_context_album(context)
