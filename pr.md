@@ -1,76 +1,79 @@
-# soulsync 3.5.3: `dev` → `main`
+# soulsync 3.5.4: `dev` → `main`
 
-make your own playlists, match & import for downloads soulsync didn't start, audiobook format and file layout choices, tidal playlists that load every track, plus a stack of deezer, repair and enrichment fixes. scope: everything on dev since 3.5.2.
+subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge and plex-safe staging, one downloads page for music and video, usenet pulls a track out of an album release, scrobbling leaves the stats toggle alone, plus mirror safety and a stack of library, watchlist and import fixes. scope: everything on dev since 3.5.3.
 
-## my playlists
+## subtitles, minus bazarr
 
-- a my playlists tab next to mirrored and server playlists. make a playlist, add any track from anywhere, remove and drag to reorder. a user playlist works like a mirrored one: identify, sync to your server, auto-sync and download missing all just work.
-- one add to playlist picker for the whole app: search results, library artist rows and top tracks, discover (mixes, stations, genre dive, saved tracks), every download missing row, the now playing view and the mirrored playlist modal. pick a playlist or make one with the song already in it.
-- adding a song that's already there asks first, and it catches likely duplicates, not just exact ones: (Remastered), [2004 Remaster], - Radio Edit, feat. credits, accents and a leading The all count as the same song. the prompt names the copy it matched. still a question, never a block.
-
-## match & import from your download clients
-
-- the clients tab can take a download soulsync didn't send and match it to music, an audiobook or video. the match window guesses the type and search from the release name, searches the right catalogue (your metadata source, tmdb, audible), says whether soulsync can see the files, and the download then imports like any grab.
-- music has no monitor following a client job, so a small watcher waits for the client to finish, copies the audio out (the torrent keeps seeding) and imports the copy through the import page's own album or single import. anything that doesn't match lands on the import page.
-- soulseek downloads soulsync didn't start get match & import too. slskd lists files, a release is a folder, so the match takes every untracked transfer from that peer in that folder.
-- redesigned cards: each one says what it is and what it's doing, with one main action (match & import, or details) and the rest in a menu. an all / soulsync / not in soulsync switch with counts.
-- qbittorrent's "no estimate" eta stopped printing as 2400h left on every seeding torrent. seeding cards show the ratio, and a download with nothing moving says waiting for peers.
+- phase 1: subtitle providers are a real interface now, not one hardcoded fetcher. opensubtitles moved behind it, providers are tried in order like the download sources. a new wanted table tracks every video x language as wanted/have/failed instead of the old fire-once-at-import that lost misses forever. fetching is on by default for new imports, misses are best-effort and retried (#1635).
+- phase 2: a wanted-loop worker retries misses with backoff and a daily provider quota (20/day). hash-first scoring: the file hash wins, then the filename, and weak matches never download. every attempt lands in a history table for the upgrade loop (#1638).
+- phase 3: per-movie and per-show language overrides, set from the detail page, episodes inherit the show's. proper .hi.srt / .forced.srt / .hi.forced.srt names so plex and jellyfin pick them up. the worker upgrades a subtitle it has when a clearly better one shows up, never touching your manual picks. manual search: see the scored candidates, download the one you want, your pick is marked and never auto-replaced. a path traversal hole the review caught is closed, language codes are validated everywhere (#1643).
+- phase 4: whisper, as a last resort and totally optional. pick a model (tiny/base/small, default small at ~486MB), download it once, flip the toggle. the worker transcribes locally only when every network provider misses, burns no quota, and a transcript can never replace a real subtitle (#1644).
 
 ## audiobooks
 
-- allowed formats: six toggles under preferred format. a release in a format you switched off is refused, with the reason. a release whose format can't be told from its title is let through (thanks @curiousmoose24) (#1593).
-- file layout: one file or several, as two switches. only soulseek says how many files a release holds before downloading, so torrents and nzbs with an unknown count are let through (thanks @curiousmoose24).
-- a failed download tries the next release right away instead of waiting out the 6 hour retry, up to 5 in a row per book (thanks @curiousmoose24) (#1588).
-- a soulseek book survives the clean completed downloads automation clearing its finished chapters mid-download. it used to never settle and then fail with every file already on disk (thanks @curiousmoose24) (#1589).
-- type your own search in find releases ("the reckoning part 1 of 2 graphicaudio"), and only that query goes to the indexers.
-- the series strip shows what you own, and "other edition" when you own a different book at the same number (thanks SeadogsBooty on discord).
-- re-grabbing a book whose torrent a client already holds picks it up instead of "the torrent client didn't accept the release", for qbittorrent, transmission, deluge and aria2.
-- settings: audiobooks and podcasts get their own library tabs, and the source dots probe the audiobook chain too, so torrent-only book setups stop showing grey tiles.
+- follow a whole series. a series is a third kind of follow next to author and narrator: follow from the series strip with backfill (every missing volume now, the default) or new books only, and new volumes land on the wishlist on the daily scan. editions collapse to one book per position so a dramatised adaptation doesn't queue a second copy of every volume (#1599).
+- optional m4b merge on import. a book that arrives as many files folds into one .m4b with a chapter marker per file, off by default, in audiobook settings. the originals are only deleted after the merged file verifies, aac copies without re-encoding when the specs match (thanks SeadogsBooty on discord) (#1648).
+- the merge no longer leaves ghosts in plex. the book is built in a hidden staging folder next to the library and revealed with one atomic rename, so plex only ever sees the finished book. docker/nas mounts that can't rename across filesystems copy each file over atomically instead, mounts that can't create the folder stage inside the library. a scan nudge goes out after the import lands, and a folder claimed by a different release is refused before the merge instead of after (thanks SeadogsBooty on discord) (#1664).
+- complete books stop being held for being a different narration than the wishlisted edition. the check confirms the edition's narration first (release and folder titles, then the files' tags); a confidently different complete reading skips the edition's runtime gate, an unidentifiable one gets a loose 0.6x floor instead of the strict check, so samples and truncated downloads still get caught. holds now say which narration and which check applied (thanks SeadogsBooty on discord) (#1647, #1655).
+- clicking audiobooks/podcasts in the sidebar from a detail page goes back to the section home instead of doing nothing (#1648).
 
-## tidal playlists load every track
+## one downloads page
 
-- identify said 100% on a 395 track playlist after finding 364, and the mirror came up short too. the tracks never got loaded: every playlist request asked tidal for the US catalogue, and tidal leaves out anything not licensed in the country you ask for. it now asks for your account's own country. a track in a playlist twice came back once, and videos vanished uncounted. both fixed, and the identify window now says how many entries tidal wouldn't hand over and why. re-running identify also uses the fresh playlist instead of the first run's (#1613).
+- music and video share one downloads page now. a music | video switcher on top of /active-downloads, deep-linkable (?media=video), and the old /video-downloads redirects to the video view. review, history and the clients tab carry over, cards expand the same as before. no backend changes (thanks @c5pie) (#1651).
+- video wishlist drains stop handing every found item to the clients in one run. new "max downloads per run" on both wishlist automations, default 3: once the budget is spent the rest stay wishlisted for the next run, no searches wasted, no attempts recorded, and the slot goes back if a client refuses a grab. per run, per media type; rss and manual grabs aren't capped (thanks @c5pie) (#1650).
 
-## bpm and sample studio
+## usenet finds the album for the song
 
-- bpm backfill finally fills bpm. it stopped at 500 tracks, it never got deezer's bpm because the deezer client only kept it in the raw payload, and on docker or a nas every file's stored path is the media server's view, so local analysis skipped them all without saying anything. it now runs the whole library, reads deezer's bpm, finds the files the way the other repair jobs do, and the log says when a file can't be reached or analyzed (thanks Specialmed on discord).
-- that same deezer fix means downloads get deezer's bpm and isrc tags, which the deezer.tags.bpm and deezer.tags.isrc settings promised and never delivered.
-- sample studio analyzes and draws mp3 and m4a files on installs where ffmpeg isn't on PATH. it ran a bare "ffmpeg" instead of also checking the copy soulsync keeps in tools/, so every lossy track said analysis failed with an empty waveform.
-- sample studio's library panel lists your newest tracks before you search instead of "search failed". it was asking the dashboard's recently added albums route for tracks (thanks Specialmed on discord).
+- usenet (and torrents) can use an album release to satisfy a single-song request. request "money", soulsync finds the dark side of the moon and imports money out of it: scene names parse as release names, and the file's title, artist, version and duration pick the track. if the files can't be told apart safely the import fails instead of guessing (#1604).
+- duplicate releases across indexers take one slot before the candidate limit, keeping the other indexers as sources; quality, editions, years and repacks stay separate (#1604).
+- new per-profile option under settings > quality > album releases: "requested tracks only" stays the default, "also the album's other tracks that pass" keeps the safely matched missing tracks from a download you already made. they keep your profile, library and quality settings and go through the normal import checks; a failed extra track never starts another download (#1604).
 
-## deezer
+## scrobbling
 
-- deezer's worker picks the exact-title album instead of the first result, so "Brave (Original Soundtrack)" and other various artists albums finally match. it looks a track up in its matched album's tracklist before searching by artist, which finds soundtrack songs credited to a label or various artists. album requests share the deezer rate limit and the tracklist is cached (thanks @cremonies) (#1595).
-- typed searches, the library match modal, single-file identify, auto-import and the files search also reach the original song instead of only the reprise and karaoke copies (thanks @cremonies) (#1596, #1600). covers from the exact-title search rank after the plain results, a VA album doesn't guess between same-titled albums, and typing just an artist's name doesn't add a search for songs called that.
-- a deezer song downloaded alone from search came out under its singer as 4/1. it keeps its album's artist and track count now (#1605).
-- deezer downloads get the album's genre. deezer keeps genre on the album, and the tag writer only read the artist's, so every deezer download had none unless musicbrainz or last.fm did (#1607).
-- the spotify enrichment worker stops asking deezer and throwing the answer away (#1592), and rematch finds the original when spotify can't answer (#1601).
+- scrobbling no longer dies with the listening stats toggle. the scrobble flush runs on its own 5-minute cadence, gated only by each service's scrobble setting and credentials; the toggle only controls stats polling like the label says (thanks @cin) (#1654).
+- the web player scrobbles by last.fm's rule now: half the track or 4 minutes, whichever comes first, 30s minimum. 10 seconds still counts as a play for soulsync's own stats. server and import plays are scrobble-eligible on insert, web plays flip eligible at the threshold (thanks @cin) (#1654).
+- scrobble clients stopped reading naive timestamps as system-local; the history stores utc (#1654).
 
-## repair and tagging
+## mirror safety (@splitsec2)
 
-- re-tag paired tracks by track number blindly, so "Coastin'" carrying track number 5 was set to be renamed "Antenna". a title that clearly names a different track wins now and the plan fixes the number instead (#1610).
-- the release year job tells same-titled albums apart. weezer has eight albums called "Weezer", and buddy holly got flagged against the red album. the library's own tracks pick the right one now, or the job reports nothing rather than guess (#1609).
-- redundant singles can't offer to delete the only copy. an album with no stored track count read as 0 tracks, so "Faint" on meteora counted as a single and remove single would have deleted it (#1611).
-- musicbrainz matches a soundtrack track by its own singer, not the album's artist (#1608).
+- a failed spotify playlist fetch no longer refreshes a mirror to empty. any error fetching tracks used to become an empty playlist, which the refresh stored and then deleted the mirror's tracks over, logging "no changes". since february that includes every followed playlist, which spotify answers with 403. a failed fetch now counts as an error and leaves the stored tracks alone, and a 403 logs that spotify only serves playlists you own or collaborate on (thanks @splitsec2) (#1657).
+- posting an empty track list to /api/mirror-playlist no longer wipes a mirror that has tracks. an empty payload is what a failed client-side fetch looks like, so the endpoint 400s; brand-new and already-empty mirrors can still save zero tracks (thanks @splitsec2) (#1659).
 
-## more fixes
+## library and matching
 
-- enrichment workers stopped staying paused with nothing downloading. idle playlists left in memory counted as discovery forever, and a resume from the ui only stuck for 3 of the workers (#1612).
-- with every hifi server down, each track spent about a minute walking the dead pool. hifi now backs off for 30s, doubling to 5 min while it stays dead (#1606).
-- sync & download brings back tracks you removed from the wishlist, and a cached identify shows the push and download buttons again (#1603).
-- single tracks and albums stay off the dashboard's playlist sync card (#1591).
-- video episodes are judged the way sonarr does. episodes failed import against wrong tv runtimes (a placeholder 159 min, a slot length of 85 min for a 43 min show). the runtime now only picks sonarr's sample threshold, movies fail only under half the runtime, and episodes the old rule failed get one more go.
-- auto-import stops filing every release under an artist called "Album" when a singular release-type folder comes back in, and a track you match by hand from the import page keeps its year, so it lands in "[2013] Rise" instead of "Rise". the itunes and discogs albums lost their date on the way to the matcher (thanks SeadogsBooty on discord).
-- the download and mix modals fit a phone.
+- the dashboard's in-library count sees deezer, tidal and qobuz tracks now, not just spotify ids: all four provider id columns, plus a name fallback that matches the per-track artist credit so compilations count. and profile 1's downloads stopped being invisible to the missing-tracks analysis: imports stamped owner_profile_id=1 but profile 1 reads through the shared scope (null), so everything read missing and queued re-downloads. profile 1 writes null now (thanks Spectro) (#1660). a broader scope-check generalization broke a pipeline test and was reverted to the minimal fix (#1662).
+- wishlist batches with no real album id stop poisoning every track's tags. kevin2xk's tracks were filed under a bogus "music"/nickelback album because the batch trusted the first row's album for all of them. the batch album context is checked against each track's own data now, weak name-only buckets go per-track, last.fm/genius lookups use the track artist, and a repair signal flags albums shaped like this one (dup track numbers + a pile of different artists) so existing libraries can be cleaned up (thanks @kevin2xk) (#1620).
+- playlist sync matches again when the candidate pool comes back empty: empty now means "no info" and falls through to the old search path instead of "no match". the pool also catches compilation credits via the per-track artist, and the wishlist step logs when it adds 0 of N instead of dropping everything silently (thanks @zikasak) (#1624).
+- three matching/verification fixes from zikasak's reports: the soulseek scorer vetoes a wrong song that only shares a version qualifier ("damnation flame (orchestral version)" accepted for "crystalline (orchestral version)"); the acoustid verifier handles subtitles wrapped in dashes ("perfect world - blue forest version-") and tilde patterns; a same-title cross-script recording skips instead of failing, so correct files stop landing in quarantine (thanks @zikasak) (#1630).
+- album_release_year findings apply on navidrome libraries now: the handler cast text soul ids to int and every finding 400'd. the id passes through unchanged (thanks @Logan-Selley) (#1634).
+- the album picker stops grabbing tribute albums: the release title needs an artist token and tribute/cover/salute markers are rejected for original wishlist items (a wishlisted tribute still passes). and a track canonically titled "live again" no longer flips the version flag so correct candidates eat the version penalty; the pre-download duration check grants the 15s longer-side allowance the post-download check already gave (thanks @TheJimmerJammer123) (#1641).
 
-## api keys (@splitsec2)
+## watchlist
 
-- both key route sets share one implementation, a request can no longer undo a revoke, one malformed key no longer stops every key after it from matching, X-API-Key is accepted (and allowed in cors), and a lowercase bearer works (#1587, #1597).
+- the scanner only wishlists tracks credited to the watched artist now. watching metallica wishlisted royal blood and st. vincent covers off tribute albums and soundtracks; a track counts when the watched artist is credited (features count). a new "other artists" toggle per artist and globally brings back the old behavior, off by default, and tracks with no artist info still go through so nothing real gets dropped (thanks SeadogsBooty on discord) (#1636).
+- the scan deck stops disappearing a second after it appears. manual scans and the socket feed tracked the live status in two places that never synced; both use the same shared state now, which also fixes cancel on auto-scans (#1645).
+- discover's "based on your listening" row gets the same view all button the artists row has (#1642).
+
+## quarantine and imports (@nick2000713)
+
+- quarantine says when the song already arrived another way: muted icons when the recording is already in your library, or the item was just an extra track an album import brought along. "already in your library" checks the same recording in the right library with a real published file: live/remix versions, conflicting isrcs and deleted copies don't count, and it says unknown instead of guessing (thanks @nick2000713) (#1653).
+- slowed, sped up and nightcore are their own versions now. "devil eyes - slowed" and plain "devil eyes" both counted as original, so the studio cut landed in the library as the slowed track. the scorer rejects the mismatch both ways and the acoustid gate reads the same labels (thanks @nick2000713) (#1653).
+- approving a file from quarantine counts as replace intent. approve re-ran the import and the metadata protection deleted the approved file as redundant at the destination; it gets forced-redownload semantics now, still through the short file guard (thanks @nick2000713) (#1653).
+- discogs dates keep their precision, and a correct full date in the file isn't a mismatch when the provider only knows the year (thanks @nick2000713) (#1653).
+- the backup rotation can't throw away the last real backup anymore. an interrupted backup leaves a 0-byte file, sqlite calls it a healthy empty database, and the rotation protected it as newest. empty files aren't healthy now, and a failed copy removes the file it created (thanks @nick2000713) (#1653).
 
 ## webui (@Thundernerd)
 
-- a global tokens.css design-token sheet. --accent and five other colour vars that were used but never defined now exist, so 53 accent rules that rendered nothing show your accent color. duplicate @keyframes collapsed to one each, and the video download history modal's accent works again (#1598).
-- a serverless visual regression harness: 34 playwright screenshots of the main routes from fixtures, a compare script for css prs, and a non-blocking ci job (#1584).
+- the ui follows your accent instead of hardcoded spotify greens: 184 accent-green literals became var(--accent), and status greens (owned, matched, success, running) became the --success token so they stay green under a purple accent. spotify-brand marks keep their green (thanks @Thundernerd) (#1617).
+- the per-feature palettes collapse onto the global tokens, and 9,656 white-alpha and 4,583 border-radius literals swap onto the token ramp. a dead declaration that would have broken the issues filter dropdowns is fixed first (thanks @Thundernerd) (#1625).
+- a class-reference checker hardens dead-css deletion against string-built class names, then deletes the retired enhanced-search views (652 lines) and the unused wishlist overview modal, artists page and hydrabase rules (1,062 lines). every deletion verified invisible by screenshot compare (thanks @Thundernerd) (#1631, #1649).
+
+## more fixes
+
+- horizontal scrollbars read as slidable now: every horizontal rail gets an edge fade, the main rails get brighter thumbs, accent-tinted designs untouched (#1637).
+- bpm backfill: dismissed findings reopen in bulk with a new "reopen all" on findings groups. deezer lookup failures and "no confident bpm" log at info/warning instead of silent debug, so the log explains skips. and deezer.tags.bpm now only gates deezer-sourced bpm writes: locally analyzed bpm always writes to the file (thanks Specialmed on discord) (#1646).
+- the nav drawer scrolls in landscape on phones: the header compacts under 500px of height and the drawer tracks the visible viewport (thanks @Thibs) (#1661).
+- spotify's https redirect uri requirement is documented for nas/docker: loopback stays http, anything else needs an https proxy in front of soulsync, with the tailscale recipe and a new troubleshooting entry. docs only (thanks @Thibs) (#1663).
 
 ## validation
 
