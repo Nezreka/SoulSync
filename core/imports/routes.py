@@ -637,6 +637,72 @@ def search_sources() -> tuple[Dict[str, Any], int]:
         return {"success": False, "error": str(exc), "sources": []}, 500
 
 
+def _get_import_db(runtime) -> Any:
+    """The music database for library lookups, or None when unavailable.
+
+    Every library pre-check fails open without it (proceed, never skip).
+    """
+    try:
+        from database.music_database import get_database
+        return get_database()
+    except Exception as exc:                                # noqa: BLE001
+        runtime.logger.debug("[Library Check] database unavailable: %s", exc)
+        return None
+
+
+def _annotate_library_status(runtime: ImportRouteRuntime,
+                             payload: Dict[str, Any], source: str,
+                             album_name: str = "") -> Dict[str, Any]:
+    """Attach per-track existing-library decisions to an album-match payload.
+
+    Runs at the matching stage, so the review UI can show what's already
+    owned BEFORE the user imports. The process endpoint re-checks (never
+    trusts the client's copy) — this is presentation, not enforcement.
+    """
+    from core.imports.library_check import check_track_library_status
+
+    matches = payload.get("matches") or []
+    if not payload.get("success") or not matches:
+        return payload
+    db = _get_import_db(runtime)
+    quality_profile = _resolve_gate_profile(runtime)
+    for match in matches:
+        staging_file = match.get("staging_file") or {}
+        track = match.get("track") or {}
+        if not staging_file or not track:
+            match["library_status"] = None
+            continue
+        match["library_status"] = check_track_library_status(
+            db,
+            track=track,
+            staging_file_path=staging_file.get("full_path", ""),
+            match_type=match.get("match_type"),
+            confidence=match.get("confidence", 0) or 0,
+            source_hint=source,
+            album_name=album_name,
+            quality_profile=quality_profile,
+            quiet=True,  # presentation only; enforcement re-checks and logs
+        )
+    return payload
+
+
+def _resolve_gate_profile(runtime: ImportRouteRuntime) -> dict:
+    """Best-effort quality profile for the library-check gate.
+
+    Mirrors what the pipeline will resolve for the replacement arbiter
+    (``load_profile_by_id(runtime.profile_id)``); {} on any failure, in
+    which case the gate falls back to the global ``import.replace_lower_quality``
+    setting — exactly like the pipeline does.
+    """
+    try:
+        from core.quality.selection import load_profile_by_id
+        profile_id = getattr(runtime, "profile_id", None)
+        profile = load_profile_by_id(profile_id)
+        return profile if isinstance(profile, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
     """Match staging files to an album's tracklist."""
     try:
@@ -665,6 +731,9 @@ def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict
             file_paths=filter_file_paths,
             source=source or None,
         )
+        # Existing-library pre-check: annotate each pairing so the review UI
+        # shows what's already owned before anything is imported.
+        payload = _annotate_library_status(runtime, payload, source, album_name)
         return payload, 200
     except Exception as exc:
         runtime.logger.error("Error matching album for import: %s", exc)
@@ -1008,10 +1077,20 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
 
         processed = 0
         errors = []
+        dispositions = []
+        summary = {"imported": 0, "skipped_owned": 0, "upgraded": 0}
         album_name = album.get("name", album.get("album_name", "Unknown Album"))
         artist_name = album.get("artist", album.get("artist_name", "Unknown Artist"))
         album_id = album.get("id", album.get("album_id", ""))
         source = str(album.get("source") or data.get("source") or "").strip().lower()
+
+        from core.imports.library_check import (
+            DECISION_SKIP_OWNED,
+            DECISION_UPGRADE,
+            check_track_library_status,
+        )
+        db = _get_import_db(runtime)
+        gate_profile = _resolve_gate_profile(runtime)
 
         total_discs = max(
             (
@@ -1023,6 +1102,16 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         )
         artist_context = runtime.resolve_album_artist_context(album, source=source)
 
+        def _record_disposition(track_name, file_name, decision, reason):
+            dispositions.append({
+                "track_name": track_name,
+                "file_name": file_name,
+                "decision": decision,
+                "reason": reason,
+            })
+            if decision in summary:
+                summary[decision] += 1
+
         for match in matches:
             staging_file = match.get("staging_file")
             track = match.get("track") or {}
@@ -1032,12 +1121,45 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             file_path, path_error = _validate_import_file(
                 runtime, staging_file.get("full_path", ""),
             )
+            _err_track = (track or {}).get("name", "Unknown Track")
+            _err_file = staging_file.get("filename") or "?"
             if path_error:
-                errors.append(f"{path_error}: {staging_file.get('filename', '?')}")
+                errors.append(f"{path_error}: {_err_file}")
+                _record_disposition(
+                    _err_track, _err_file, "error", f"{path_error}: {_err_file}",
+                )
                 continue
 
             track_name = track.get("name", "Unknown Track")
             track_number = track.get("track_number", 1)
+            file_name = staging_file.get("filename") or os.path.basename(file_path)
+
+            # Existing-library pre-check (enforcement): re-checked here, never
+            # trusting the client's annotated copy. Confident "already owned"
+            # pairings skip the pipeline entirely — no transcoding, tagging or
+            # file moves for tracks the library already has.
+            status = check_track_library_status(
+                db,
+                track=track,
+                staging_file_path=file_path,
+                match_type=match.get("match_type"),
+                confidence=match.get("confidence", 0) or 0,
+                source_hint=source,
+                album_name=album_name,
+                quality_profile=gate_profile,
+            )
+            decision = status["decision"]
+            if decision == DECISION_SKIP_OWNED:
+                runtime.logger.info(
+                    "[Library Check] Skipping %s — %s",
+                    track_name, status["reason"],
+                )
+                _record_disposition(track_name, file_name, "skipped_owned", status["reason"])
+                continue
+            # "upgrade" and everything else proceed; the pipeline's existing
+            # upgrade/replacement logic decides what the better file replaces.
+            gate_decision = decision
+
             context_key = f"import_album_{album_id}_{track_number}_{uuid.uuid4().hex[:8]}"
             context = runtime.build_album_import_context(
                 album,
@@ -1065,16 +1187,23 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                 if reject_reason:
                     errors.append(f"{track_name}: {reject_reason}")
                     runtime.logger.warning("Import rejected: %s — %s", track_name, reject_reason)
+                    _record_disposition(track_name, file_name, "error", reject_reason)
                 else:
                     processed += 1
+                    # The gate's decision stands: an "upgrade" routing that
+                    # processed cleanly counts as upgraded, the rest imported.
+                    final_decision = "upgraded" if gate_decision == DECISION_UPGRADE else "imported"
+                    _record_disposition(track_name, file_name, final_decision, status["reason"])
                     runtime.logger.info("Import processed: %s. %s from %s", track_number, track_name, album_name)
             except Exception as proc_err:
                 err_msg = f"{track_name}: {str(proc_err)}"
                 errors.append(err_msg)
                 runtime.logger.error("Import processing error: %s", err_msg)
+                _record_disposition(track_name, file_name, "error", str(proc_err))
 
         if runtime.add_activity_item:
-            runtime.add_activity_item("", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
+            runtime.add_activity_item("", "Album Imported", _import_summary_text(
+                album_name, artist_name, summary, len(matches)), "Now")
 
         if processed > 0:
             _emit_import_completed(
@@ -1094,10 +1223,26 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         if processed > 0:
             invalidate_staging_scan_cache()
 
-        return {"success": True, "processed": processed, "total": len(matches), "errors": errors}, 200
+        return {"success": True, "processed": processed, "total": len(matches),
+                "errors": errors, "dispositions": dispositions,
+                "summary": summary}, 200
     except Exception as exc:
         runtime.logger.error("Error processing album import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
+
+
+def _import_summary_text(album_name: str, artist_name: str,
+                         summary: Dict[str, int], total: int) -> str:
+    """One-line import result, e.g. "3 imported · 9 already owned · 1 upgraded"."""
+    parts = []
+    if summary.get("imported"):
+        parts.append(f"{summary['imported']} imported")
+    if summary.get("upgraded"):
+        parts.append(f"{summary['upgraded']} upgraded")
+    if summary.get("skipped_owned"):
+        parts.append(f"{summary['skipped_owned']} already owned")
+    detail = " · ".join(parts) if parts else "nothing imported"
+    return f"{album_name} by {artist_name} ({detail})"
 
 
 def search_tracks(runtime: ImportRouteRuntime, query: str, limit: int = 10) -> tuple[Dict[str, Any], int]:

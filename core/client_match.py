@@ -443,10 +443,18 @@ def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runt
                     "error": "None of the files matched that album's tracks."}
         result, status = album_process(runtime, {"album": payload["album"], "matches": matches,
                                                  "source": payload.get("source")})
-        processed = int(result.get("processed") or 0) if isinstance(result, dict) else 0
-        if status >= 400 or not processed:
-            return {"ok": False, "imported": processed,
-                    "error": (result or {}).get("error") or "The import failed."}
+        if status >= 400 or not isinstance(result, dict):
+            return {"ok": False, "imported": 0,
+                    "error": (result or {}).get("error") if isinstance(result, dict) else None
+                             or "The import failed."}
+        processed = int(result.get("processed") or 0)
+        # "Already owned" skips don't increment processed — an album that is
+        # fully owned is a successful no-op, not a failure.
+        summary = result.get("summary") or {}
+        skipped = int(summary.get("skipped_owned") or 0)
+        if not processed and not skipped:
+            return {"ok": False, "imported": 0,
+                    "error": result.get("error") or "The import failed."}
         return {"ok": True, "imported": processed, "error": ""}
 
     # a single: the largest audio file is the track, anything else is extras

@@ -13,6 +13,7 @@ import type {
   ImportAlbumResult,
   ImportInboxFile,
   ImportInboxItem,
+  ImportLibraryStatus,
   ImportPreviewTrack,
   ImportStagingFile,
   ImportTrackResult,
@@ -248,6 +249,11 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
     const name = m.track?.name || m.track?.title || '';
     return name && owned[name]?.owned;
   }).length;
+  // Existing-library pre-check outcomes, from the match payload: what the
+  // import will actually do with each track. Counted over the effective
+  // matches (after manual re-assignments), not the raw payload.
+  const willSkip = effective.filter((m) => m.library_status?.decision === 'skip_owned').length;
+  const willUpgrade = effective.filter((m) => m.library_status?.decision === 'upgrade').length;
 
   // the preview follows the effective matches, so a re-assign re-previews.
   // keyed on the file list so drags that change nothing do not refetch.
@@ -530,6 +536,13 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                   {ownedCount > 0 ? (
                     <> · {ownedCount} already in your library (kept or replaced by quality)</>
                   ) : null}
+                  {willSkip > 0 ? <> · {willSkip} will skip (already owned)</> : null}
+                  {willUpgrade > 0 ? (
+                    <>
+                      {' '}
+                      · {willUpgrade} upgrade{willUpgrade === 1 ? '' : 's'}
+                    </>
+                  ) : null}
                 </span>
                 <Button
                   variant="primary"
@@ -595,6 +608,32 @@ function ReleaseHero({
       </div>
     </div>
   );
+}
+
+/** What the import will do with this track, from the existing-library
+ * pre-check (core/imports/library_check.py). Shown in the review table so
+ * the decision is visible BEFORE anything is imported. */
+function LibraryStatusBadge({ status }: { status: ImportLibraryStatus }) {
+  if (status.decision === 'skip_owned') {
+    return (
+      <span className={styles.inLibrary} title={`${status.reason} — this track will be skipped`}>
+        {' '}
+        will skip · already owned
+      </span>
+    );
+  }
+  if (status.decision === 'upgrade') {
+    return (
+      <span
+        className={styles.inLibrary}
+        title={`${status.reason} — the better file will replace the library copy`}
+      >
+        {' '}
+        upgrade available
+      </span>
+    );
+  }
+  return null;
 }
 
 /** a file whose length is this far off the track's is flagged, not blocked */
@@ -671,6 +710,9 @@ function TrackRow({
               {owned.format ? ` · ${String(owned.format).replace('.', '').toUpperCase()}` : ''}
             </span>
           </>
+        ) : null}
+        {match.library_status && !Object.hasOwn(overrides, index) ? (
+          <LibraryStatusBadge status={match.library_status} />
         ) : null}
       </span>
       <span className={styles.trackLen}>{formatDuration(trackLen)}</span>

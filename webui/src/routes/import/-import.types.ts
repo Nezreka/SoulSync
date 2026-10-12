@@ -272,6 +272,31 @@ export interface ImportAlbumMatch {
   spotify_track?: ImportAlbumTrack | null;
   staging_file?: ImportStagingFile | null;
   confidence: number;
+  /** How the file was paired: 'mbid' | 'isrc' for exact-ID pairings, null for fuzzy. */
+  match_type?: string | null;
+  /** Existing-library pre-check (see core/imports/library_check.py). */
+  library_status?: ImportLibraryStatus | null;
+}
+
+export type ImportLibraryDecision = 'import' | 'skip_owned' | 'upgrade' | 'uncertain';
+
+export interface ImportLibraryStatus {
+  decision: ImportLibraryDecision;
+  reason: string;
+  library_path?: string | null;
+}
+
+export interface ImportTrackDisposition {
+  track_name: string;
+  file_name: string;
+  decision: 'imported' | 'skipped_owned' | 'upgraded' | 'error';
+  reason: string;
+}
+
+export interface ImportDispositionSummary {
+  imported: number;
+  skipped_owned: number;
+  upgraded: number;
 }
 
 export interface ImportAlbumMatchPayload {
@@ -287,6 +312,8 @@ export interface ImportProcessPayload {
   total?: number;
   errors?: string[];
   error?: string;
+  dispositions?: ImportTrackDisposition[];
+  summary?: ImportDispositionSummary;
 }
 
 export interface ImportAutoImportActiveItem {
@@ -392,6 +419,9 @@ export interface ImportQueueEntry {
    * isn't connected (see `is_active_media_server_ready` in core/imports/side_effects.py).
    * The queue item renders a Settings link instead of the plain error list. */
   blockedByMediaServer?: boolean;
+  /** Per-track import outcomes, accumulated as the job runs (see
+   * core/imports/library_check.py for the decision vocabulary). */
+  dispositions?: ImportTrackDisposition[];
 }
 
 export interface ImportAlbumQueueJob {
