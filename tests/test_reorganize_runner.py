@@ -355,6 +355,26 @@ def test_the_plan_comes_from_the_catalogue_not_a_provider(monkeypatch, tmp_path)
     assert captured['preview_fn'] is catalogue_preview_fn
 
 
+def test_the_catalogue_planner_takes_every_argument_the_executor_passes(monkeypatch, tmp_path):
+    """#1504 added ``profile_id`` to the executor's preview call; the catalogue
+    adapter did not take it, so every Rename / Organize failed with a
+    TypeError before a single file moved."""
+    from core.library2.reorganize_bridge import catalogue_preview_fn
+    from core.library_reorganize import reorganize_album_rename_only
+
+    monkeypatch.setattr('core.library2.reorganize_plan.plan_album_reorganize',
+                        lambda *a, **k: {'success': True, 'status': 'planned', 'tracks': []})
+    db = MagicMock()
+
+    summary = reorganize_album_rename_only(
+        album_id='1', db=db, transfer_dir=str(tmp_path),
+        resolve_file_path_fn=lambda p: p, build_final_path_fn=lambda *a, **k: (None, True),
+        preview_fn=catalogue_preview_fn,
+    )
+
+    assert summary['status'] == 'completed'
+
+
 def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
     # Defensive: build_final_path_fn omitted → rename-only can't run, returns setup_failed
     # instead of crashing.

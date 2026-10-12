@@ -85,13 +85,14 @@ def catalogue_preview_fn(
     *, album_id: Any, db: Any, transfer_dir: str,
     resolve_file_path_fn: Any, build_final_path_fn: Any,
     primary_source: Any = None, strict_source: bool = False,
-    metadata_source: str = "api",
+    metadata_source: str = "api", profile_id: Any = None,
 ) -> Dict[str, Any]:
     """``preview_fn`` adapter over the catalogue planner.
 
     Carries the signature the rename executor calls with, and accepts the
     provider arguments only to ignore them: reorganize computes a PATH, and a
-    path needs no metadata source. Keeping the shape means the executor keeps
+    path needs no metadata source. ``profile_id`` (#1504) is ignored too: the
+    runner already plans per library root, with ``transfer_dir`` being it. Keeping the shape means the executor keeps
     acting on exactly what the preview showed, which is the property that made
     the preview trustworthy in the first place (#875).
     """
