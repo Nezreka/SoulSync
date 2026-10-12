@@ -69,6 +69,21 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 3. Trigger a manual **Scan Library** from the **Tools page → Media Server Scan** card (Plex only).
 4. For Navidrome, changes are auto-detected — no scan needed.
 
+## PWA install not offered / Spotify needs HTTPS
+
+Both are browser/platform requirements, not SoulSync bugs:
+
+- **PWA install**: Chrome (and all browsers) only offer "Install app" over **HTTPS** (or localhost). If you access SoulSync via \`http://192.168.x.x:8008\`, the install prompt won't appear. SoulSync ships a valid manifest and service worker — the only blocker is the protocol.
+- **Spotify OAuth**: Spotify's developer dashboard now requires **HTTPS** redirect URIs. A local \`http://\` address won't be accepted.
+
+**Workaround**: Serve SoulSync over HTTPS with a reverse proxy. Tailscale works well:
+
+\`\`\`bash
+sudo docker exec tailscale tailscale serve --bg --https=443 http://127.0.0.1:8008/
+\`\`\`
+
+This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies both the PWA and Spotify requirements. You'll need to be on your tailnet (or have the tunnel active) to reach it.
+
 ## Metadata looks wrong
 
 - Open the artist in the [Enhanced Library Manager](#lib-enhanced) and check the service match chips — a wrong Spotify or MusicBrainz link poisons everything downstream.
