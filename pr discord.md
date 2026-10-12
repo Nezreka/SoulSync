@@ -1,17 +1,13 @@
-**SoulSync 3.5.3 is out** :musical_note:
+**SoulSync 3.5.4 is out** :musical_note:
 
-My Playlists: make your own playlists and add any track from anywhere in the app, search, library, discover, the now playing view. They identify, sync to your server and download missing like mirrored playlists, and adding a song that's already there asks first, even when it's a remaster or radio edit.
+Subtitles grow up to replace Bazarr: providers are pluggable, a wanted loop retries misses with hash-first scoring, per-title language overrides, proper hi/forced naming for Plex and Jellyfin, an upgrade loop, manual search — and optional local Whisper transcription as the last resort. Fetching is on by default for new imports.
 
-The Clients tab can match & import downloads SoulSync didn't start, for music, audiobooks and video, including Soulseek folders. Cards got a redesign with one clear action each.
+Audiobooks: follow a whole series (backfill every volume or new books only), an optional m4b merge on import, and imports are staged so Plex only ever sees the finished book. Complete books stop being held for having a different narration than the wishlisted edition (thanks SeadogsBooty).
 
-Audiobooks: choose allowed formats and one file vs several, a failed download tries the next release right away, and Soulseek books survive slskd clearing finished chapters (thanks @curiousmoose24). You can also type your own release search, and the series strip shows what you own.
+One downloads page for music and video, video wishlist downloads capped per run (thanks @c5pie), and Usenet can pull a requested song out of an album release — with an option to keep the album's other tracks too.
 
-BPM Backfill now fills BPM across the whole library, from Deezer or local analysis, and downloads get Deezer's BPM and ISRC tags. Sample Studio analyzes MP3 and M4A files without ffmpeg on PATH and lists your tracks before you search (thanks Specialmed).
+Scrobbling no longer dies with the listening stats toggle, and the web player scrobbles by Last.fm's rule (thanks @cin). Mirror playlists are safe from empty refreshes and empty payloads (thanks @splitsec2). Quarantine tells you when a song already arrived another way, and slowed/sped-up versions stop landing as the original (thanks @nick2000713).
 
-Tidal playlists load every track: SoulSync asked for the US catalogue, so non-US accounts lost tracks. Duplicates and videos are counted too (#1613).
-
-Deezer matching picks the right album for soundtracks and compilations and reaches the original song from more searches (thanks @cremonies). Deezer downloads keep their album artist and genre.
-
-Also: enrichment workers stop staying paused, a dead HiFi pool stops slowing every track, re-tag and release year repairs stop picking the wrong track or album, video episodes import like Sonarr judges them, API key fixes (thanks @splitsec2), and accent colours that never showed now do (thanks @Thundernerd).
+Also: the UI follows your accent color, dead CSS deleted by the thousand lines (thanks @Thundernerd), the watchlist only wishlists tracks credited to the artist you watch, playlist sync matches again, and a stack of library and import fixes.
 
 Full notes on GitHub.
