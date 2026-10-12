@@ -327,11 +327,6 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
     return deleted
 
 
-def _norm_title(value: Any) -> str:
-    """Casefold + collapse whitespace — a forgiving key for title matching."""
-    return " ".join(str(value or "").split()).casefold()
-
-
 def _unique_untouched_title_match(conn, album_id: int, title: str,
                                   touched_ids: set) -> Optional[int]:
     """A single not-yet-touched local track of this album with the same title.
@@ -354,7 +349,10 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
     wanted), the real row is the one to heal and the redundant placeholder(s)
     are removed.
     """
-    norm = _norm_title(title)
+    # punctuation-blind: "X - 2012 Remaster" and "X (2012 Remaster)" are one
+    # title in two providers' spelling; a missed match inserted a second row
+    from core.library2.importer import release_title_key
+    norm = release_title_key(title)
     if not norm:
         return None
     rows = [
@@ -375,7 +373,7 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
                  FROM lib2_tracks t WHERE t.album_id=?""",
             (album_id,),
         ).fetchall()
-        if _norm_title(r["title"]) == norm and r["id"] not in touched_ids
+        if release_title_key(r["title"]) == norm and r["id"] not in touched_ids
     ]
     if len(rows) == 1:
         return rows[0]["id"]

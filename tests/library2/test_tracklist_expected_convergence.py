@@ -150,3 +150,20 @@ def test_a_persisted_tracklist_completes_the_default_edition(imported_conn):
     assert imported_conn.execute(
         "SELECT track_count, disc_count FROM lib2_release_editions WHERE id=?",
         (default_edition_id(imported_conn, album_id),)).fetchone()[:] == (2, 1)
+
+
+def test_a_punctuation_variant_of_the_title_heals_the_row_instead_of_adding_one(imported_conn):
+    """Bad 25th Anniversary: the single download's row "Smooth Criminal - 2012
+    Remaster" had no number, the tracklist spelled it "Smooth Criminal (2012
+    Remaster)", and the exact-title match missed: a second row appeared at 10."""
+    album_id = _album(imported_conn, expected=None, tracks=0)
+    imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+        "VALUES(?, 'Smooth Criminal - 2012 Remaster', NULL, 1)", (album_id,))
+
+    _persist_tracklist_tracks(
+        imported_conn, album_id, [_entry(10, "Smooth Criminal (2012 Remaster)")], complete=True)
+
+    rows = imported_conn.execute(
+        "SELECT title, track_number FROM lib2_tracks WHERE album_id=?", (album_id,)).fetchall()
+    assert [tuple(r) for r in rows] == [("Smooth Criminal - 2012 Remaster", 10)]
