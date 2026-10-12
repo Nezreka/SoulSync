@@ -192,3 +192,52 @@ def test_import_copy_all_skipped_with_errors_is_not_cleaned(tmp_path):
 
     assert result["ok"] is False  # nothing processed, nothing skipped
     assert folder.exists()  # left for the user to inspect
+
+
+def test_import_copy_partial_skip_discards_only_skipped_copies(tmp_path):
+    """Partial skip: imported tracks proceed, and only the confirmed-
+    duplicate temp copies are removed (so they never reach staging)."""
+    import logging
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from core.client_match import import_copy
+
+    folder = tmp_path / "copy-tmp"
+    folder.mkdir()
+    (folder / "new.mp3").write_bytes(b"new")
+    (folder / "dupe.mp3").write_bytes(b"dupe")
+
+    match = {"id": "album-1", "name": "Test Album", "artist": "A", "source": "deezer"}
+    files = [str(folder / "new.mp3"), str(folder / "dupe.mp3")]
+    runtime = SimpleNamespace(logger=logging.getLogger("test"))
+
+    fake_result = {
+        "success": True,
+        "processed": 1,
+        "total": 2,
+        "errors": [],
+        "dispositions": [
+            {"track_name": "New", "file_name": "new.mp3",
+             "decision": "imported", "reason": "not in library"},
+            {"track_name": "Dupe", "file_name": "dupe.mp3",
+             "decision": "skipped_owned", "reason": "already owned"},
+        ],
+        "summary": {"imported": 1, "skipped_owned": 1, "upgraded": 0},
+    }
+
+    with patch("core.imports.album.build_album_import_match_payload") as build, \
+         patch("core.imports.routes.album_process",
+               return_value=(fake_result, 200)):
+        build.return_value = {
+            "success": True,
+            "album": {"id": "album-1", "name": "Test Album"},
+            "source": "deezer",
+            "matches": [{"staging_file": {"full_path": f}} for f in files],
+        }
+        result = import_copy("album", match, str(folder), files, runtime)
+
+    assert result["ok"] is True
+    assert result["imported"] == 1
+    assert not (folder / "dupe.mp3").exists()  # duplicate copy discarded
+    assert (folder / "new.mp3").exists()  # (post-processor owns this in prod)

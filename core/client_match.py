@@ -454,6 +454,18 @@ def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runt
         skipped = int(summary.get("skipped_owned") or 0)
         errors_list = result.get("errors") or []
         total = len(matches)
+        # Discard the temp copies of confirmed duplicates so they don't
+        # land in the manual staging inbox just to be skipped again.
+        # (Originals remain in the download folder; these are working
+        # copies.) Applies to partial skips too, not just all-skipped.
+        for disp in result.get("dispositions") or []:
+            if disp.get("decision") == "skipped_owned":
+                temp_file = os.path.join(folder, disp.get("file_name") or "")
+                if os.path.isfile(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except OSError:
+                        pass
         if processed == 0 and skipped == total and total > 0 and not errors_list:
             # Every track was a confirmed duplicate: the temp copies are
             # redundant (originals remain in the download folder). Remove
@@ -470,8 +482,14 @@ def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runt
             except Exception as exc:  # noqa: BLE001 - temp cleanup is best-effort
                 runtime.logger.debug("[Import] temp folder cleanup failed: %s", exc)
         if not processed and not skipped:
-            return {"ok": False, "imported": 0,
-                    "error": result.get("error") or "The import failed."}
+            # result["error"] is only set on top-level failures; per-track
+            # failures live in result["errors"] — surface the real reason.
+            err_msg = (
+                result.get("error")
+                or (errors_list[0] if errors_list else None)
+                or "The import failed."
+            )
+            return {"ok": False, "imported": 0, "error": err_msg}
         return {"ok": True, "imported": processed, "error": ""}
 
     # a single: the largest audio file is the track, anything else is extras

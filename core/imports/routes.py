@@ -1163,6 +1163,11 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                     track_name, status["reason"],
                 )
                 _record_disposition(track_name, file_name, "skipped_owned", status["reason"])
+                # Deliberately NOT unlinking the staging file: on the manual
+                # import page these are the user's own files — the pre-check
+                # never deletes user data. Skipped files stay in staging
+                # until the user removes them. (Automated client copies are
+                # working copies and ARE discarded — see client_match.)
                 continue
             # "upgrade" and everything else proceed; the pipeline's existing
             # upgrade/replacement logic decides what the better file replaces.

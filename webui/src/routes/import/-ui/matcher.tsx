@@ -699,21 +699,39 @@ function TrackRow({
       <span className={styles.trackNum}>{info.displayTrackNumber}</span>
       <span className={styles.trackName} title={info.name}>
         {info.name}
-        {owned?.owned && !(match.library_status && !Object.hasOwn(overrides, index)) ? (
-          <>
-            {' '}
-            <span
-              className={styles.inLibrary}
-              title={owned.file_path ? `In your library: ${owned.file_path}` : 'In your library'}
-            >
-              in library
-              {owned.format ? ` · ${String(owned.format).replace('.', '').toUpperCase()}` : ''}
-            </span>
-          </>
-        ) : null}
-        {match.library_status && !Object.hasOwn(overrides, index) ? (
-          <LibraryStatusBadge status={match.library_status} />
-        ) : null}
+        {(() => {
+          // The gate badge replaces the generic "in library" badge only when
+          // it actually renders (skip/upgrade decisions); for import
+          // decisions the gate renders nothing, so keep the owned badge.
+          const gateBadge =
+            match.library_status &&
+            (match.library_status.decision === 'skip_owned' ||
+              match.library_status.decision === 'upgrade') &&
+            !Object.hasOwn(overrides, index);
+          return (
+            <>
+              {owned?.owned && !gateBadge ? (
+                <>
+                  {' '}
+                  <span
+                    className={styles.inLibrary}
+                    title={
+                      owned.file_path ? `In your library: ${owned.file_path}` : 'In your library'
+                    }
+                  >
+                    in library
+                    {owned.format
+                      ? ` · ${String(owned.format).replace('.', '').toUpperCase()}`
+                      : ''}
+                  </span>
+                </>
+              ) : null}
+              {gateBadge && match.library_status ? (
+                <LibraryStatusBadge status={match.library_status} />
+              ) : null}
+            </>
+          );
+        })()}
       </span>
       <span className={styles.trackLen}>{formatDuration(trackLen)}</span>
       <span className={styles.trackFile}>
