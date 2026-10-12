@@ -25220,12 +25220,15 @@ class MusicDatabase:
                                                 WHERE ti.spotify_track_id = mpt.source_track_id
                                                    OR ti.deezer_id = mpt.source_track_id
                                                    OR ti.tidal_id = mpt.source_track_id
-                                                   OR ti.qobuz_id = mpt.source_track_id))
+                                                   OR ti.qobuz_id = mpt.source_track_id
+                                                   OR ti.itunes_track_id = mpt.source_track_id))
                                    -- The name join stays exact (case-sensitive):
                                    -- COLLATE NOCASE would defeat idx_artists_name /
                                    -- idx_tracks_title (~18s vs ~6ms on a 300k-track
                                    -- library). The track_artist OR covers
                                    -- compilations filed under Various Artists.
+                                   -- File-import tracks (file:{digest} ids) never
+                                   -- id-match; the name join is their path.
                                    OR EXISTS (SELECT 1 FROM artists a
                                               JOIN tracks t ON t.artist_id = a.id
                                               WHERE (a.name = mpt.artist_name
@@ -25336,11 +25339,12 @@ class MusicDatabase:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
                 # In-library, id-first like the batched variant: source id
-                # against the provider id columns (spotify/deezer/tidal/qobuz),
-                # OR the case-sensitive name join (COLLATE NOCASE would defeat
-                # idx_artists_name / idx_tracks_title — ~18s vs ~6ms on a
+                # against the provider id columns (spotify/deezer/tidal/qobuz/
+                # itunes), OR the case-sensitive name join (COLLATE NOCASE would
+                # defeat idx_artists_name / idx_tracks_title — ~18s vs ~6ms on a
                 # 300k-track library). The track_artist OR covers compilations
-                # filed under Various Artists.
+                # filed under Various Artists. File-import tracks (file:{digest}
+                # ids) never id-match; the name join is their path.
                 try:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
@@ -25352,7 +25356,8 @@ class MusicDatabase:
                                          WHERE ti.spotify_track_id = mpt.source_track_id
                                             OR ti.deezer_id = mpt.source_track_id
                                             OR ti.tidal_id = mpt.source_track_id
-                                            OR ti.qobuz_id = mpt.source_track_id))
+                                            OR ti.qobuz_id = mpt.source_track_id
+                                            OR ti.itunes_track_id = mpt.source_track_id))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
                                        WHERE (a.name = mpt.artist_name
