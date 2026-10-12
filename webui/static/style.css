@@ -73088,14 +73088,6 @@ body.max-performance .dash-card::after {
 }
 
 /* Legacy lane markup retired — keep an inert reference. */
-.dash-card--quick-actions-legacy {
-    overflow: hidden;
-}
-
-.dash-card--quick-actions-legacy .dash-card__body {
-    min-height: 128px;
-}
-
 .dashboard-action-grid {
     position: relative;
     display: grid;
