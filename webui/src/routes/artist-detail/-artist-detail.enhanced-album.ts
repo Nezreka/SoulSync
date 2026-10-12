@@ -496,7 +496,9 @@ export function getAlbumCanonicalSource(
   album: EnhancedAlbum,
 ): { source: string; id: string } | null {
   // Prefer the explicitly pinned canonical release when available.
-  const pinnedSource = String(album.canonical_source || '').trim().toLowerCase();
+  const pinnedSource = String(album.canonical_source || '')
+    .trim()
+    .toLowerCase();
   const pinnedId = String(album.canonical_album_id || '').trim();
 
   if (pinnedSource && pinnedId) {
