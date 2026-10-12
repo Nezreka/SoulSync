@@ -18,9 +18,13 @@ reading the same list and one of them losing its track.
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import re
+import shutil
 import threading
+import time
 import unicodedata
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -40,6 +44,13 @@ NO_UPSTREAM_SOURCES = ('file', 'beatport', USER_PLAYLIST_SOURCE)
 PIPELINE_SKIPPED_SOURCES = ('file', 'beatport')
 
 MAX_NAME_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 1000
+MAX_COVER_URL_LENGTH = 2000
+
+# uploaded covers are re-encoded to a square webp, like profile avatars:
+# nothing but pixels is kept (no metadata, no svg, no scripts).
+COVER_MAX_BYTES = 3 * 1024 * 1024
+COVER_SIDE = 640
 
 _edit_lock = threading.Lock()
 
@@ -136,13 +147,25 @@ def _stored_tracks(db: Any, playlist_id: int) -> List[Dict[str, Any]]:
     return out
 
 
-def _write(db: Any, playlist: Dict[str, Any], tracks: List[Dict[str, Any]]) -> None:
+def _write(
+    db: Any,
+    playlist: Dict[str, Any],
+    tracks: List[Dict[str, Any]],
+    *,
+    image_url: Optional[str] = None,
+    description: Optional[str] = None,
+) -> None:
+    # the mirror upsert keeps the row's image_url / description when these are
+    # not passed, so a cover or description set on the playlist survives every
+    # add, remove and reorder. duplicate_playlist passes them for the new row.
     saved = db.mirror_playlist(
         source=USER_PLAYLIST_SOURCE,
         source_playlist_id=playlist['source_playlist_id'],
         name=playlist['name'],
         tracks=tracks,
         profile_id=int(playlist.get('profile_id') or 1),
+        image_url=image_url,
+        description=description,
     )
     if saved is None:
         raise RuntimeError('could not save the playlist')
@@ -239,3 +262,159 @@ def reorder_tracks(db: Any, playlist: Dict[str, Any], order: Iterable[Any]) -> N
         if sorted(positions) != list(range(1, len(current) + 1)):
             raise UserPlaylistError('The playlist changed, reload it and try again')
         _write(db, playlist, [current[p - 1] for p in positions])
+
+
+# ── cover, description, duplicate ─────────────────────────────────────────
+
+
+def cover_dir(base_dir: Optional[str] = None) -> str:
+    """where uploaded playlist covers live. the env var is the docker escape
+    hatch; base_dir is soulsync's data dir in production."""
+    d = os.environ.get("SOULSYNC_PLAYLIST_COVER_DIR")
+    if not d:
+        d = os.path.join(str(base_dir) if base_dir else ".", "storage", "playlist_covers")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def cover_path(playlist_id: int, base_dir: Optional[str] = None) -> str:
+    # fixed name, no user input in the path: nothing to traverse.
+    return os.path.join(cover_dir(base_dir), f"user-{int(playlist_id)}.webp")
+
+
+def cover_url(playlist_id: int) -> str:
+    # cache-buster so a re-uploaded cover shows up without a hard refresh.
+    return f"/api/user-playlists/{int(playlist_id)}/cover?v={int(time.time())}"
+
+
+def _encode_cover(raw: bytes) -> bytes:
+    from PIL import Image, ImageOps
+    try:
+        img = Image.open(io.BytesIO(raw))
+        img.verify()
+        img = Image.open(io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+        img = ImageOps.fit(img.convert("RGBA"), (COVER_SIDE, COVER_SIDE), method=Image.LANCZOS)
+        out = io.BytesIO()
+        img.save(out, "WEBP", quality=88)
+        return out.getvalue()
+    except Exception:
+        raise UserPlaylistError("That file isn't an image we can read") from None
+
+
+def set_cover_upload(db: Any, playlist: Dict[str, Any], file_storage: Any,
+                     *, base_dir: Optional[str] = None) -> str:
+    """multipart upload -> square webp on disk, row points at the serve endpoint."""
+    raw = file_storage.read(COVER_MAX_BYTES + 1)
+    if len(raw) > COVER_MAX_BYTES:
+        raise UserPlaylistError("That image is over 3 MB")
+    if not raw:
+        raise UserPlaylistError("No image")
+    data = _encode_cover(raw)
+    path = cover_path(playlist['id'], base_dir)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+    url = cover_url(playlist['id'])
+    if not db.set_mirrored_playlist_image_url(
+        playlist['id'], url, profile_id=playlist.get('profile_id'),
+    ):
+        raise RuntimeError('could not save the cover')
+    return url
+
+
+def set_cover_url(db: Any, playlist: Dict[str, Any], url: Any) -> str:
+    """point the cover at a remote image. http(s) only: nothing local, nothing
+    scriptable, and the <img> tag was never going to load it anyway."""
+    cleaned = str(url or '').strip()
+    if len(cleaned) > MAX_COVER_URL_LENGTH:
+        raise UserPlaylistError('That URL is too long')
+    if not cleaned.startswith(('http://', 'https://')):
+        raise UserPlaylistError('Cover needs an http(s) image URL')
+    if not db.set_mirrored_playlist_image_url(
+        playlist['id'], cleaned, profile_id=playlist.get('profile_id'),
+    ):
+        raise RuntimeError('could not save the cover')
+    return cleaned
+
+
+def set_cover_from_track(db: Any, playlist: Dict[str, Any], position: Any) -> str:
+    """borrow a track's artwork for the cover. position is 1-based, as the
+    detail payload numbers them."""
+    try:
+        pos = int(position)
+    except (TypeError, ValueError):
+        raise UserPlaylistError('Pick a track from the playlist') from None
+    tracks = _stored_tracks(db, playlist['id'])
+    if not 1 <= pos <= len(tracks):
+        raise UserPlaylistError('Pick a track from the playlist')
+    art = tracks[pos - 1].get('image_url')
+    if not art:
+        raise UserPlaylistError('That track has no artwork')
+    if not db.set_mirrored_playlist_image_url(
+        playlist['id'], art, profile_id=playlist.get('profile_id'),
+    ):
+        raise RuntimeError('could not save the cover')
+    return art
+
+
+def clear_cover(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:
+    """back to no cover: the views fall back to track art. the uploaded file,
+    if there ever was one, is deleted best-effort."""
+    try:
+        os.remove(cover_path(playlist['id'], base_dir))
+    except OSError:
+        pass
+    if not db.set_mirrored_playlist_image_url(
+        playlist['id'], None, profile_id=playlist.get('profile_id'),
+    ):
+        raise RuntimeError('could not clear the cover')
+
+
+def set_description(db: Any, playlist: Dict[str, Any], description: Any) -> str:
+    """one short blurb on the playlist. blank clears it."""
+    cleaned = re.sub(r'\n{3,}', '\n\n', str(description or '').strip())[:MAX_DESCRIPTION_LENGTH]
+    if not db.set_mirrored_playlist_description(
+        playlist['id'], cleaned or None, profile_id=playlist.get('profile_id'),
+    ):
+        raise RuntimeError('could not save the description')
+    return cleaned
+
+
+def duplicate_playlist(db: Any, playlist: Dict[str, Any], name: Any = None,
+                       *, base_dir: Optional[str] = None) -> Dict[str, Any]:
+    """a full copy under a new id: tracks (with their identify matches),
+    cover and description. the copy is independent from here on."""
+    if name is not None:
+        new_name = clean_name(name)
+    else:
+        new_name = str(playlist.get('name') or 'Playlist')
+        if not new_name.endswith(' (copy)'):
+            new_name = f"{new_name} (copy)"
+        new_name = ' '.join(new_name.split())[:MAX_NAME_LENGTH]
+    with _edit_lock:
+        new_id = create_playlist(db, int(playlist.get('profile_id') or 1), new_name)
+        new_playlist = db.get_mirrored_playlist(new_id, profile_id=playlist.get('profile_id'))
+        if not new_playlist:
+            raise RuntimeError('could not copy the playlist')
+        # an uploaded cover points at the old playlist's serve endpoint, so
+        # the copy gets its own file; a remote URL or track art is just copied.
+        src_image = playlist.get('image_url')
+        new_image_url = src_image
+        old_prefix = f"/api/user-playlists/{int(playlist['id'])}/cover"
+        if src_image and src_image.startswith(old_prefix):
+            src_file = cover_path(playlist['id'], base_dir)
+            if os.path.isfile(src_file):
+                shutil.copyfile(src_file, cover_path(new_id, base_dir))
+                new_image_url = cover_url(new_id)
+            else:
+                new_image_url = None  # file's gone; don't point the copy at a 404
+        _write(
+            db, new_playlist, _stored_tracks(db, playlist['id']),
+            image_url=new_image_url,
+            description=playlist.get('description'),
+        )
+    logger.info("duplicated user playlist '%s' (%s) -> '%s' (%s)",
+                playlist.get('name'), playlist['id'], new_name, new_id)
+    return {'id': int(new_id), 'name': new_name}

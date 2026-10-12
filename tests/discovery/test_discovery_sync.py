@@ -920,3 +920,81 @@ def test_jellyfin_cover_goes_to_the_profiles_own_user(patched_db, monkeypatch):
                      playlist_image_url='https://img/j.png', deps=deps,
                      sync_mode='replace')  # reconcile (now the default) never pushes covers
     assert jf2.image_calls == [('PJF', 'https://img/j.png')] and jf2.views == []
+
+
+# ---------------------------------------------------------------------------
+# User-playlist covers ride the sync
+# ---------------------------------------------------------------------------
+
+def _user_playlist_db(monkeypatch, source='soulsync'):
+    class _DB:
+        def get_mirrored_playlist(self, playlist_id, profile_id=None):
+            return {'id': playlist_id, 'source': source}
+
+    monkeypatch.setattr('database.music_database.get_database', lambda: _DB())
+
+
+def test_sync_is_user_playlist_helper(monkeypatch):
+    _user_playlist_db(monkeypatch, source='soulsync')
+    assert ds._sync_is_user_playlist(9, 1) is True
+
+
+def test_sync_is_user_playlist_helper_false_for_sources(monkeypatch):
+    _user_playlist_db(monkeypatch, source='spotify')
+    assert ds._sync_is_user_playlist(9, 1) is False
+
+
+def test_sync_is_user_playlist_helper_survives_bad_ids(monkeypatch):
+    _user_playlist_db(monkeypatch)
+    assert ds._sync_is_user_playlist('pImg', 1) is False  # not an int mirror id
+    assert ds._sync_is_user_playlist(None, 1) is False
+
+
+def test_user_playlist_cover_pushes_despite_existing_server_playlist(monkeypatch, patched_db):
+    """A user playlist's cover is the owner's choice, not a source poster: it
+    pushes even when the server playlist already exists (#993's guard is for
+    source covers)."""
+    _user_playlist_db(monkeypatch)
+    nd = _FakeNavidrome(existing=('Mine',))
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('7', 'Mine', [_track()],
+                     playlist_image_url='https://img/mine.jpg', deps=deps, sync_mode='replace')
+
+    assert nd.image_calls == [('Mine', 'https://img/mine.jpg')]
+
+
+def test_user_playlist_cover_pushes_in_reconcile_mode(monkeypatch, patched_db):
+    """Reconcile/append preserve SOURCE covers (#792/#811) but a user
+    playlist's own cover still syncs — it's the user's edit, not the source's."""
+    _user_playlist_db(monkeypatch)
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('7', 'Mine', [_track()],
+                     playlist_image_url='https://img/mine.jpg', deps=deps, sync_mode='reconcile')
+
+    assert nd.image_calls == [('Mine', 'https://img/mine.jpg')]
+
+
+def test_user_playlist_uploaded_cover_resolves_to_absolute_url(monkeypatch, patched_db):
+    """An uploaded cover is a path on this server (\"/api/user-playlists/<id>/\n    cover\"): the sync resolves it against the web bind port so the media-\n    server clients can fetch it."""
+    _user_playlist_db(monkeypatch)
+    monkeypatch.setenv('SOULSYNC_WEB_BIND_PORT', '8008')
+    nd = _FakeNavidrome()
+    cfg = _FakeConfig(server='navidrome')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, navidrome=nd, config=cfg)
+
+    ds.run_sync_task('7', 'Mine', [_track()],
+                     playlist_image_url='/api/user-playlists/7/cover?v=123', deps=deps,
+                     sync_mode='replace')
+
+    assert nd.image_calls == [('Mine', 'http://127.0.0.1:8008/api/user-playlists/7/cover')]

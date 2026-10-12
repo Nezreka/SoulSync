@@ -5,7 +5,9 @@ another profile's playlist being reachable by id, refresh trying to pull a
 playlist that has no upstream, and the pipeline refusing to run one.
 """
 
+import io
 import json
+import os
 
 import pytest
 from flask import Flask, g
@@ -287,3 +289,224 @@ def test_a_synced_mirror_cannot_be_edited_as_a_user_playlist(mdb, monkeypatch):
     c = _client(mdb, monkeypatch)
     assert c.post(f"/api/user-playlists/{mirror}/tracks", json={"tracks": [_song("y")]}).status_code == 404
     assert _titles(mdb, mirror) == ["x"]
+
+
+# ── cover / description / duplicate ──────────────────────────────────────
+
+
+def _png(color=(200, 30, 30), size=(100, 80)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _owned(db, profile_id=1):
+    pid = up.create_playlist(db, profile_id, "Mix")
+    return db.get_mirrored_playlist(pid, profile_id=profile_id)
+
+
+def _client_with_covers(db, monkeypatch, tmp_path, **kw):
+    import types
+
+    import api.user_playlists as mod
+
+    c = _client(db, monkeypatch, **kw)
+    monkeypatch.setattr(mod, "config_manager", types.SimpleNamespace(base_dir=str(tmp_path)))
+    return c
+
+
+def test_cover_url_round_trip(mdb):
+    pl = _owned(mdb)
+    url = up.set_cover_url(mdb, pl, "https://img/x.jpg")
+    assert url == "https://img/x.jpg"
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"] == url
+
+
+def test_cover_url_rejects_non_http(mdb):
+    pl = _owned(mdb)
+    for bad in ("ftp://x/y.jpg", "javascript:alert(1)", "/etc/passwd", "", "   "):
+        with pytest.raises(up.UserPlaylistError):
+            up.set_cover_url(mdb, pl, bad)
+
+
+def test_cover_from_track_borrows_art(mdb):
+    pl = _owned(mdb)
+    up.add_tracks(mdb, pl, [_song("One", image_url="https://img/one.jpg"), _song("Two")])
+    art = up.set_cover_from_track(mdb, pl, 1)
+    assert art == "https://img/one.jpg"
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"] == art
+    with pytest.raises(up.UserPlaylistError):  # track two has no art
+        up.set_cover_from_track(mdb, pl, 2)
+    with pytest.raises(up.UserPlaylistError):  # out of range
+        up.set_cover_from_track(mdb, pl, 9)
+
+
+def test_cover_survives_track_edits(mdb):
+    pl = _owned(mdb)
+    up.add_tracks(mdb, pl, [_song("One"), _song("Two")])
+    up.set_cover_url(mdb, pl, "https://img/x.jpg")
+    up.add_tracks(mdb, pl, [_song("Three")])
+    up.reorder_tracks(mdb, pl, [3, 2, 1])
+    up.remove_track(mdb, pl, 1)
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"] == "https://img/x.jpg"
+
+
+def test_clear_cover(mdb, tmp_path):
+    pl = _owned(mdb)
+    up.set_cover_url(mdb, pl, "https://img/x.jpg")
+    up.clear_cover(mdb, pl, base_dir=str(tmp_path))
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"] is None
+
+
+def test_description_round_trip_and_clear(mdb):
+    pl = _owned(mdb)
+    assert up.set_description(mdb, pl, "  road trip, no skips  ") == "road trip, no skips"
+    assert mdb.get_mirrored_playlist(pl["id"])["description"] == "road trip, no skips"
+    assert up.set_description(mdb, pl, "   ") == ""
+    assert mdb.get_mirrored_playlist(pl["id"])["description"] is None
+    assert len(up.set_description(mdb, pl, "x" * 2000)) == up.MAX_DESCRIPTION_LENGTH
+
+
+def test_upload_cover_reencodes_to_webp(mdb, tmp_path):
+    from PIL import Image
+
+    pl = _owned(mdb)
+    url = up.set_cover_upload(mdb, pl, io.BytesIO(_png()), base_dir=str(tmp_path))
+    with Image.open(up.cover_path(pl["id"], str(tmp_path))) as img:
+        assert img.format == "WEBP"
+        assert img.size == (up.COVER_SIDE, up.COVER_SIDE)
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"] == url
+    assert url.startswith(f"/api/user-playlists/{pl['id']}/cover?v=")
+
+
+def test_upload_rejects_non_image_and_oversize(mdb, tmp_path):
+    pl = _owned(mdb)
+    with pytest.raises(up.UserPlaylistError):
+        up.set_cover_upload(mdb, pl, io.BytesIO(b"not an image"), base_dir=str(tmp_path))
+    with pytest.raises(up.UserPlaylistError):
+        up.set_cover_upload(
+            mdb, pl, io.BytesIO(b"x" * (up.COVER_MAX_BYTES + 1)), base_dir=str(tmp_path)
+        )
+    assert not os.path.exists(up.cover_path(pl["id"], str(tmp_path)))
+
+
+def test_duplicate_copies_tracks_cover_and_description(mdb, tmp_path):
+    pl = _owned(mdb)
+    up.add_tracks(mdb, pl, [_song("One", image_url="https://img/one.jpg"), _song("Two")])
+    up.set_cover_upload(mdb, pl, io.BytesIO(_png()), base_dir=str(tmp_path))
+    up.set_description(mdb, pl, "no skips")
+    pl = mdb.get_mirrored_playlist(pl["id"], profile_id=1)
+
+    copy = up.duplicate_playlist(mdb, pl, base_dir=str(tmp_path))
+    assert copy["name"] == "Mix (copy)"
+    assert copy["id"] != pl["id"]
+    assert _titles(mdb, copy["id"]) == ["One", "Two"]
+    row = mdb.get_mirrored_playlist(copy["id"])
+    assert row["description"] == "no skips"
+    # the copy got its own cover file, not a pointer at the original's
+    assert row["image_url"].startswith(f"/api/user-playlists/{copy['id']}/cover?v=")
+    assert os.path.isfile(up.cover_path(copy["id"], str(tmp_path)))
+    assert mdb.get_mirrored_playlist(pl["id"])["image_url"].startswith(
+        f"/api/user-playlists/{pl['id']}/cover?v="
+    )
+
+
+def test_duplicate_copies_a_remote_cover_url(mdb):
+    pl = _owned(mdb)
+    up.set_cover_url(mdb, pl, "https://img/x.jpg")
+    pl = mdb.get_mirrored_playlist(pl["id"], profile_id=1)
+    copy = up.duplicate_playlist(mdb, pl, name="V2")
+    assert copy["name"] == "V2"
+    assert mdb.get_mirrored_playlist(copy["id"])["image_url"] == "https://img/x.jpg"
+
+
+def test_duplicate_blank_name_is_refused(mdb):
+    with pytest.raises(up.UserPlaylistError):
+        up.duplicate_playlist(mdb, _owned(mdb), name="  ")
+
+
+def test_description_patch_endpoint(mdb, monkeypatch):
+    c = _client(mdb, monkeypatch)
+    pid = c.post("/api/user-playlists", json={"name": "Mix"}).get_json()["id"]
+    resp = c.patch(f"/api/user-playlists/{pid}", json={"description": "no skips"})
+    assert resp.get_json()["description"] == "no skips"
+    assert mdb.get_mirrored_playlist(pid)["description"] == "no skips"
+    assert c.patch(f"/api/user-playlists/{pid}", json={}).status_code == 400
+
+
+def test_cover_endpoints(mdb, monkeypatch, tmp_path):
+    c = _client_with_covers(mdb, monkeypatch, tmp_path)
+    pid = c.post("/api/user-playlists", json={"name": "Mix"}).get_json()["id"]
+
+    r = c.put(f"/api/user-playlists/{pid}/cover", json={"image_url": "https://img/x.jpg"})
+    assert r.get_json()["image_url"] == "https://img/x.jpg"
+
+    assert c.delete(f"/api/user-playlists/{pid}/cover").status_code == 200
+    assert mdb.get_mirrored_playlist(pid)["image_url"] is None
+
+    assert c.put(f"/api/user-playlists/{pid}/cover", json={"image_url": "ftp://x"}).status_code == 400
+    assert c.put(f"/api/user-playlists/{pid}/cover", json={"from_track": 1}).status_code == 400
+    assert c.put(f"/api/user-playlists/{pid}/cover", json={}).status_code == 400
+
+    r = c.post(
+        f"/api/user-playlists/{pid}/cover",
+        data={"file": (io.BytesIO(_png()), "cover.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200, r.data
+    assert r.get_json()["image_url"].startswith(f"/api/user-playlists/{pid}/cover?v=")
+
+    r = c.get(f"/api/user-playlists/{pid}/cover")
+    assert r.status_code == 200
+    assert r.content_type == "image/webp"
+
+    r = c.post(
+        f"/api/user-playlists/{pid}/cover",
+        data={"file": (io.BytesIO(b"nope"), "x.txt")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 400
+
+
+def test_cover_from_track_endpoint(mdb, monkeypatch, tmp_path):
+    c = _client_with_covers(mdb, monkeypatch, tmp_path)
+    pid = c.post(
+        "/api/user-playlists",
+        json={"name": "Mix", "tracks": [_song("One", image_url="https://img/one.jpg")]},
+    ).get_json()["id"]
+    r = c.put(f"/api/user-playlists/{pid}/cover", json={"from_track": 1})
+    assert r.get_json()["image_url"] == "https://img/one.jpg"
+
+
+def test_duplicate_endpoint(mdb, monkeypatch, tmp_path):
+    c = _client_with_covers(mdb, monkeypatch, tmp_path)
+    pid = c.post(
+        "/api/user-playlists", json={"name": "Mix", "tracks": [_song("One")]}
+    ).get_json()["id"]
+    c.patch(f"/api/user-playlists/{pid}", json={"description": "d"})
+    body = c.post(f"/api/user-playlists/{pid}/duplicate", json={}).get_json()
+    assert body["name"] == "Mix (copy)"
+    assert _titles(mdb, body["id"]) == ["One"]
+    assert mdb.get_mirrored_playlist(body["id"])["description"] == "d"
+    listed = c.get("/api/user-playlists").get_json()["playlists"]
+    assert {p["id"] for p in listed} == {pid, body["id"]}
+
+
+def test_new_routes_are_404_for_foreign_playlists(mdb, monkeypatch, tmp_path):
+    theirs = up.create_playlist(mdb, 3, "Theirs")
+    c = _client_with_covers(mdb, monkeypatch, tmp_path, profile_id=1, is_admin=True)
+    assert c.patch(f"/api/user-playlists/{theirs}", json={"description": "x"}).status_code == 404
+    assert c.post(f"/api/user-playlists/{theirs}/duplicate", json={}).status_code == 404
+    assert c.put(f"/api/user-playlists/{theirs}/cover", json={"image_url": "https://img/x.jpg"}).status_code == 404
+    assert c.delete(f"/api/user-playlists/{theirs}/cover").status_code == 404
+    assert c.get(f"/api/user-playlists/{theirs}/cover").status_code == 404
+    assert (
+        c.post(
+            f"/api/user-playlists/{theirs}/cover",
+            data={"file": (io.BytesIO(_png()), "c.png")},
+            content_type="multipart/form-data",
+        ).status_code
+        == 404
+    )
+    assert mdb.get_mirrored_playlist(theirs)["image_url"] is None

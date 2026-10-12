@@ -2,9 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   addToUserPlaylist,
+  clearPlaylistCover,
   createUserPlaylist,
+  duplicateUserPlaylist,
   isUserPlaylist,
   movedOrder,
+  setPlaylistCoverFromTrack,
+  setPlaylistCoverUrl,
+  setPlaylistDescription,
+  uploadPlaylistCover,
 } from './user-playlists';
 
 afterEach(() => {
@@ -56,5 +62,67 @@ describe('the requests', () => {
       vi.fn(async () => new Response('<html>502</html>', { status: 502 })),
     );
     await expect(createUserPlaylist('x')).rejects.toThrow('Request failed (502)');
+  });
+});
+
+describe('playlist meta', () => {
+  function okFetch(body: unknown) {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('saves the description with PATCH', async () => {
+    const fetchMock = okFetch({ success: true, description: 'no skips' });
+    await expect(setPlaylistDescription(7, 'no skips')).resolves.toEqual({
+      success: true,
+      description: 'no skips',
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/user-playlists/7');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ description: 'no skips' });
+  });
+
+  it('duplicates with and without a name', async () => {
+    const fetchMock = okFetch({ success: true, id: 9, name: 'Mix (copy)' });
+    await duplicateUserPlaylist(4);
+    let [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({});
+    await duplicateUserPlaylist(4, 'V2');
+    const [dupUrl, dupInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(dupInit.body as string)).toEqual({ name: 'V2' });
+    expect(dupUrl).toBe('/api/user-playlists/4/duplicate');
+  });
+
+  it('sets the cover from a url or a track position', async () => {
+    const fetchMock = okFetch({ success: true, image_url: 'https://img/x.jpg' });
+    await setPlaylistCoverUrl(4, 'https://img/x.jpg');
+    let [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/user-playlists/4/cover');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({ image_url: 'https://img/x.jpg' });
+    await setPlaylistCoverFromTrack(4, 2);
+    [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ from_track: 2 });
+  });
+
+  it('clears the cover with DELETE', async () => {
+    const fetchMock = okFetch({ success: true });
+    await clearPlaylistCover(4);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/user-playlists/4/cover');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('uploads the file as multipart form data', async () => {
+    const fetchMock = okFetch({ success: true, image_url: '/api/user-playlists/4/cover?v=1' });
+    const file = new File(['bytes'], 'cover.png', { type: 'image/png' });
+    await uploadPlaylistCover(4, file);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/user-playlists/4/cover');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+    expect((init.body as FormData).get('file')).toBe(file);
   });
 });

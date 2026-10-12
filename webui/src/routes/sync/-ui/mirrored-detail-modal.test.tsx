@@ -19,6 +19,7 @@ function renderModal(data: Parameters<typeof MirroredDetailModal>[0]['data'], on
     onEditSource: vi.fn(),
     onRunPipeline: vi.fn(),
     onDiscover: vi.fn(),
+    onRefresh: vi.fn(),
     ...on,
   };
   render(<MirroredDetailModal playlistId={3} data={data} now={NOW} {...handlers} />);
@@ -93,6 +94,7 @@ describe('MirroredDetailModal', () => {
         onEditSource={vi.fn()}
         onRunPipeline={vi.fn()}
         onDiscover={vi.fn()}
+        onRefresh={vi.fn()}
       />,
     );
     expect(document.querySelector('.mm-cover-empty')).toBeNull();
@@ -255,5 +257,59 @@ describe('MirroredDetailModal — add to playlist', () => {
     );
     expect(screen.getByLabelText('Add One to a playlist')).toBeInTheDocument();
     expect(screen.getByLabelText('Remove One from this playlist')).toBeInTheDocument();
+  });
+});
+
+describe('MirroredDetailModal — user playlist meta', () => {
+  const own = {
+    name: 'Mine',
+    source: 'soulsync',
+    tracks: [{ position: 1, track_name: 'One', artist_name: 'A', image_url: 'https://img/a.jpg' }],
+  };
+
+  it('your own playlist gets a change-cover button and a description prompt', () => {
+    renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
+    expect(screen.getByRole('button', { name: 'Change cover' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add a description' })).toBeInTheDocument();
+  });
+
+  it('a synced mirror gets neither', () => {
+    renderModal({ name: 'Theirs', source: 'spotify', tracks: [] });
+    expect(screen.queryByRole('button', { name: 'Change cover' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add a description' })).toBeNull();
+  });
+
+  it('an existing description shows with an edit affordance', () => {
+    renderModal(
+      { ...own, description: 'road trip, no skips' },
+      { onRemoveTrack: vi.fn(), onReorder: vi.fn() },
+    );
+    expect(screen.getByText('road trip, no skips')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit description' })).toBeInTheDocument();
+  });
+
+  it('a mirror shows the source description read-only', () => {
+    renderModal({ name: 'Theirs', source: 'spotify', description: 'from spotify', tracks: [] });
+    expect(screen.getByText('from spotify')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit description' })).toBeNull();
+  });
+
+  it('the cover menu offers upload, track art, url and remove', () => {
+    renderModal(
+      { ...own, image_url: 'https://img/cover.jpg' },
+      { onRemoveTrack: vi.fn(), onReorder: vi.fn() },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Change cover' }));
+    expect(screen.getByText('Upload a photo…')).toBeInTheDocument();
+    expect(screen.getByText('From this playlist')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('https://…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove cover' })).toBeInTheDocument();
+  });
+
+  it('duplicate calls through and the tab opens the copy', () => {
+    const onDuplicate = vi.fn(async () => {});
+    renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn(), onDuplicate });
+    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    expect(onDuplicate).toHaveBeenCalledTimes(1);
   });
 });
