@@ -121,6 +121,20 @@ describe('library route (live)', () => {
     });
   }, 30_000);
 
+  // Artists, Albums and Wanted each render their own header; one without the
+  // `library-header` padding or with an empty subtitle moved the tabs and the
+  // search box on every switch.
+  it('keeps the same header in every section', async () => {
+    for (const section of ['artists', 'albums', 'wanted']) {
+      const { unmount } = renderRoute([`/library?section=${section}`]);
+      const title = await screen.findByRole('heading', { name: 'Library' }, { timeout: 10_000 });
+      const header = title.closest('header');
+      expect(header?.classList.contains('library-header')).toBe(true);
+      expect(header?.querySelector('p')?.textContent).not.toBe('');
+      unmount();
+    }
+  }, 30_000);
+
   it('is owned by React', () => {
     expect(getShellRouteByPageId('library')?.kind).toBe('react');
   });

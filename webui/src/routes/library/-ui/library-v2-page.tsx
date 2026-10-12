@@ -4816,7 +4816,9 @@ function AlbumIndexView() {
         <div>
           <h1 className={styles.title}>Library</h1>
           <p className={styles.subtitle}>
-            {pagination ? `${pagination.total_count} ${filtered ? 'matches' : 'albums'}` : ''}
+            {pagination
+              ? `${pagination.total_count} ${filtered ? 'matches' : 'albums'}`
+              : 'Albums across all artists'}
           </p>
         </div>
       </header>
@@ -5119,7 +5121,7 @@ function WantedIndexView() {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
+      <header className={`${styles.header} library-header`}>
         <div>
           <h1 className={styles.title}>Library</h1>
           <p className={styles.subtitle}>
@@ -5140,6 +5142,7 @@ function WantedIndexView() {
       ) : null}
 
       <div className={styles.toolbar}>
+        <LibraryScopePicker />
         <LibrarySectionTabs />
         <div className={styles.viewToggle} aria-label="Wanted kind">
           {LIBRARY_V2_WANTED_KINDS.map((kind) => (

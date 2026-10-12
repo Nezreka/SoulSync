@@ -69,9 +69,12 @@
 }
 
 /* --- toolbar --- */
+/* Artists, Albums and Wanted each render their own toolbar; the min-height is
+   the select's, so the section tabs sit on the same line in all three. */
 .toolbar {
   display: flex;
   gap: 12px;
+  min-height: 38px;
   margin-bottom: 18px;
   flex-wrap: wrap;
   align-items: center;
