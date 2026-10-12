@@ -1320,49 +1320,9 @@ def _missing_track_placeholder(track_number: int, *, disc_number: int = 1,
     }
 
 
-def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
-    """Album/single detail: header + track table with per-track status."""
-    al = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()
-    if al is None:
-        return None
-    album_effective, album_overrides = project_metadata(
-        conn,
-        entity_type="release_group",
-        entity_id=al["id"],
-        provider_fields=dict(al),
-    )
-    album_profile = _quality_profile_assignment(conn, "albums", al["id"])
-    qp = conn.execute(
-        "SELECT * FROM quality_profiles WHERE id = ?", (album_profile["id"],)
-    ).fetchone()
-    artist = conn.execute(
-        "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
-    ).fetchone()
-    track_rows = conn.execute(
-        f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
-             FROM lib2_tracks t
-             LEFT JOIN lib2_wanted_tracks w
-                    ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
-            WHERE t.album_id = ?
-            ORDER BY t.disc_number, t.track_number, t.id""",
-        (album_id,),
-    ).fetchall()
-    album_for_tracks = album_effective
-    album_for_tracks["quality_profile_id"] = album_profile["id"]
-    album_for_tracks["quality_profile_source"] = album_profile["source"]
-    album_for_tracks["quality_profile_source_id"] = album_profile["source_id"]
-    if artist:
-        artist_effective, _artist_overrides = project_metadata(
-            conn,
-            entity_type="artist",
-            entity_id=artist["id"],
-            provider_fields=dict(artist),
-        )
-        album_for_tracks["primary_artist_name"] = artist_effective["name"]
-        album_for_tracks["primary_artist_id"] = artist["id"]
-    tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
-    present_count = sum(1 for t in tracks if t["file_status"] != "missing")
-
+def _apply_quality_verdicts(conn, tracks: List[Dict[str, Any]]) -> int:
+    """Set meets_profile / upgrade_candidate / quality_issue on serialized
+    tracks; returns how many have an upgrade available."""
     # Evaluate each present file against its effective Track→Album→Artist→
     # Global profile.  A track override must affect both the profile shown in
     # the row and its upgrade badge; evaluating the entire album against the
@@ -1406,6 +1366,53 @@ def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
             t["meets_profile"] = None
             t["upgrade_candidate"] = False
             t["quality_issue"] = None
+    return upgrades_available
+
+
+def get_album(conn, album_id: int) -> Optional[Dict[str, Any]]:
+    """Album/single detail: header + track table with per-track status."""
+    al = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()
+    if al is None:
+        return None
+    album_effective, album_overrides = project_metadata(
+        conn,
+        entity_type="release_group",
+        entity_id=al["id"],
+        provider_fields=dict(al),
+    )
+    album_profile = _quality_profile_assignment(conn, "albums", al["id"])
+    qp = conn.execute(
+        "SELECT * FROM quality_profiles WHERE id = ?", (album_profile["id"],)
+    ).fetchone()
+    artist = conn.execute(
+        "SELECT id, name FROM lib2_artists WHERE id = ?", (al["primary_artist_id"],)
+    ).fetchone()
+    track_rows = conn.execute(
+        f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
+             FROM lib2_tracks t
+             LEFT JOIN lib2_wanted_tracks w
+                    ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
+            WHERE t.album_id = ?
+            ORDER BY t.disc_number, t.track_number, t.id""",
+        (album_id,),
+    ).fetchall()
+    album_for_tracks = album_effective
+    album_for_tracks["quality_profile_id"] = album_profile["id"]
+    album_for_tracks["quality_profile_source"] = album_profile["source"]
+    album_for_tracks["quality_profile_source_id"] = album_profile["source_id"]
+    if artist:
+        artist_effective, _artist_overrides = project_metadata(
+            conn,
+            entity_type="artist",
+            entity_id=artist["id"],
+            provider_fields=dict(artist),
+        )
+        album_for_tracks["primary_artist_name"] = artist_effective["name"]
+        album_for_tracks["primary_artist_id"] = artist["id"]
+    tracks = _serialize_tracks(conn, track_rows, album_for_tracks)
+    present_count = sum(1 for t in tracks if t["file_status"] != "missing")
+
+    upgrades_available = _apply_quality_verdicts(conn, tracks)
 
     # Lidarr keeps expected missing recordings visible in the track table. When
     # we only know the album's expected size, expose those slots as missing rows
@@ -1548,5 +1555,39 @@ def list_quality_profiles(conn) -> List[Dict[str, Any]]:
     return [_quality_profile_dict(row) for row in rows if row is not None]
 
 
+def track_versions(conn, track_id: int) -> Optional[List[Dict[str, Any]]]:
+    """Every file of a track, each serialized as the track itself with that
+    file in it -- quality, checks, tags and profile verdict per version, for
+    the rows a "2 versions" label expands into. Primary first."""
+    t = conn.execute(
+        f"""SELECT t.*, COALESCE(w.wanted, {monitored_sql("track", "t")}) AS effective_wanted
+             FROM lib2_tracks t
+             LEFT JOIN lib2_wanted_tracks w
+                    ON w.track_id=t.id AND w.profile_id={intent_profile_id()}
+            WHERE t.id = ?""",
+        (track_id,),
+    ).fetchone()
+    if t is None:
+        return None
+    album = None
+    al = conn.execute("SELECT * FROM lib2_albums WHERE id = ?", (t["album_id"],)).fetchone()
+    if al:
+        album, _overrides = project_metadata(
+            conn, entity_type="release_group", entity_id=al["id"], provider_fields=dict(al))
+        profile = _quality_profile_assignment(conn, "albums", al["id"])
+        album.update(quality_profile_id=profile["id"], quality_profile_source=profile["source"],
+                     quality_profile_source_id=profile["source_id"])
+    rows = conn.execute(
+        f"SELECT * FROM lib2_track_files WHERE track_id=? "
+        f"AND COALESCE(file_state,'active')<>'deleted'{owner_clause(column='owner_profile_id')} "
+        f"ORDER BY {primary_order()}",
+        (int(track_id),),
+    ).fetchall()
+    versions = [_serialize_track(conn, t, album, file_row=dict(row), linked_from=None)
+                for row in rows]
+    _apply_quality_verdicts(conn, versions)
+    return versions
+
+
 __all__ = ["legacy_api_artists_page", "list_artists", "list_artist_track_files",
-           "get_artist", "get_album", "get_track", "list_quality_profiles"]
+           "get_artist", "get_album", "get_track", "track_versions", "list_quality_profiles"]

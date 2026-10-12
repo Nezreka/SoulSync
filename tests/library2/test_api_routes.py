@@ -2244,6 +2244,58 @@ def test_track_file_primary_endpoint_persists_manual_choice(api):
     assert sum(row["is_primary"] for row in rows) == 1
 
 
+def _add_mp3_version(db, ids):
+    with _conn(db) as conn:
+        file_id = conn.execute(
+            """INSERT INTO lib2_track_files(track_id, path, format, bitrate)
+               VALUES(?, '/m/one-dance.mp3', 'mp3', 320)""",
+            (ids["album_track"],),
+        ).lastrowid
+        conn.commit()
+    return file_id
+
+
+def test_track_versions_serialize_each_file_as_the_track(api):
+    """The rows "2 versions" expands into: one per file, primary first, each
+    carrying its own file, checks and profile verdict."""
+    client, db, ids = api
+    mp3_id = _add_mp3_version(db, ids)
+
+    body = client.get(f"/api/library/v2/tracks/{ids['album_track']}/versions").get_json()
+
+    versions = body["versions"]
+    assert [v["id"] for v in versions] == [ids["album_track"]] * 2
+    assert versions[0]["file"]["is_primary"] is True
+    assert versions[1]["file"]["file_id"] == mp3_id
+    assert versions[1]["file"]["format"] == "mp3"
+    assert all("meets_profile" in v for v in versions)
+    assert client.get("/api/library/v2/tracks/999999/versions").status_code == 404
+
+
+def test_file_tags_read_and_edit_the_named_version(api, monkeypatch):
+    client, db, ids = api
+    mp3_id = _add_mp3_version(db, ids)
+    read, written = [], []
+    import core.library.file_tags as file_tags
+    monkeypatch.setattr(file_tags, "read_embedded_tags",
+                        lambda path: read.append(path) or {"available": False})
+    monkeypatch.setattr(file_tags, "write_embedded_tag",
+                        lambda path, key, value: written.append(path) or {"success": True})
+    track = ids["album_track"]
+
+    client.get(f"/api/library/v2/tracks/{track}/file-tags?file_id={mp3_id}")
+    client.post(f"/api/library/v2/tracks/{track}/file-tags/edit",
+                json={"key": "title", "value": "x", "file_id": mp3_id})
+
+    assert read[0].endswith("one-dance.mp3") and written[0].endswith("one-dance.mp3")
+    # another track's file is not this track's version
+    other = client.get(f"/api/library/v2/tracks/{ids['ep_track']}/file-tags?file_id={mp3_id}")
+    assert other.get_json()["available"] is False
+    assert client.get(f"/api/library/v2/tracks/{track}/file-tags?file_id=x").status_code == 400
+    assert client.post(f"/api/library/v2/tracks/{track}/file-tags/edit",
+                       json={"key": "title", "file_id": "1"}).status_code == 400
+
+
 def test_file_delete_preview_and_delete_accept_a_file_ids_selection(
         api, tmp_path, monkeypatch):
     """C2 bulk-delete: a caller-selected subset of an artist's files goes

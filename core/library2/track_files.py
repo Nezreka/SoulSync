@@ -116,6 +116,20 @@ def primary_file_row(conn, track_id: int, *, scoped: bool = False) -> Optional[D
     return dict(row) if row else None
 
 
+def track_file_row(conn, track_id: int, file_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    """One file of a track: ``file_id`` when a version row names one, the
+    scoped primary otherwise. Another track's or library's file is None."""
+    if file_id is None:
+        return primary_file_row(conn, track_id, scoped=True)
+    from core.library2.sql_util import owner_clause
+    row = conn.execute(
+        f"SELECT * FROM lib2_track_files WHERE id=? AND track_id=? "
+        f"AND COALESCE(file_state,'active')<>'deleted'{owner_clause(column='owner_profile_id')}",
+        (int(file_id), int(track_id)),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 #: Ids per `IN (...)` list. SQLite's default SQLITE_MAX_VARIABLE_NUMBER has been
 #: 32,766 since 3.32, and a stock `python:3.x` Docker image ships that default --
 #: so one bind variable per track hard-errored (`too many SQL variables`, HTTP

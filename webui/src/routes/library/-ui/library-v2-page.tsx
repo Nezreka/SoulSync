@@ -52,6 +52,7 @@ import {
   fillLibraryV2TagGaps,
   fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackLyrics,
+  fetchLibraryV2TrackVersions,
   LIBRARY_V2_ALBUM_TYPES,
   LIBRARY_V2_QUERY_KEY,
   libraryScopesQueryOptions,
@@ -9948,23 +9949,7 @@ export function TrackMetadataGapsCell({
   );
 }
 
-function TrackRow({
-  track,
-  albumTitle,
-  entityBase,
-  matchServices,
-  profileName,
-  columns,
-  columnOrder,
-  columnWidths,
-  responsiveColumnWidths,
-  showAllProviders,
-  editViaTitle,
-  selected,
-  onToggleSelect,
-  onAction,
-  queueStatus,
-}: {
+type TrackRowProps = {
   track: LibraryV2Track;
   albumTitle: string;
   entityBase: Lib2EntityRef;
@@ -9982,7 +9967,40 @@ function TrackRow({
   onAction: ActionHandler;
   /** §73/I6: this track's live queue-status entry, if any is in flight. */
   queueStatus?: LibraryV2QueueStatusEntry;
-}) {
+  /** One file of the track, shown as the track itself (a "N versions" row). */
+  version?: boolean;
+};
+
+/** Columns that describe the recording, not a file: blank on a version row. */
+const TRACK_LEVEL_COLUMNS = new Set<keyof LibraryV2TrackTableColumns>([
+  'disc',
+  'artists',
+  'duration',
+  'bpm',
+  'match',
+  'media_server',
+]);
+
+function TrackRow(props: TrackRowProps) {
+  const {
+    track,
+    albumTitle,
+    entityBase,
+    matchServices,
+    profileName,
+    columns,
+    columnOrder,
+    columnWidths,
+    responsiveColumnWidths,
+    showAllProviders,
+    editViaTitle,
+    selected,
+    onToggleSelect,
+    onAction,
+    queueStatus,
+    version = false,
+  } = props;
+  const [showVersions, setShowVersions] = useState(false);
   const missing = track.file_status === 'missing';
   const label = track.title ?? `Track ${track.track_number ?? '?'}`;
   const entity: Lib2EntityRef = {
@@ -10000,6 +10018,16 @@ function TrackRow({
 
   const renderBodyCell = (key: keyof LibraryV2TrackTableColumns) => {
     if (!columns[key]) return null;
+    if (version && TRACK_LEVEL_COLUMNS.has(key)) {
+      return <td data-column={key} key={key} style={widthStyle(key)} />;
+    }
+    if (version && key === 'title') {
+      return (
+        <td data-column="title" key="title" style={widthStyle('title')}>
+          <TrackVersionLabel track={track} />
+        </td>
+      );
+    }
     switch (key) {
       case 'title':
         return (
@@ -10025,7 +10053,19 @@ function TrackRow({
               )}
               <InlineFileStatus status={track.file_status} linkedFrom={track.linked_from} />
               {(track.file_count ?? 0) > 1 ? (
-                <span className={styles.fileVersionCount}>{track.file_count} versions</span>
+                <button
+                  type="button"
+                  className={`${styles.fileVersionCount} ${styles.fileVersionToggle}`}
+                  aria-expanded={showVersions}
+                  title={
+                    showVersions
+                      ? 'Hide the versions'
+                      : 'Show every file of this track — play, check, edit or delete each one'
+                  }
+                  onClick={() => setShowVersions((open) => !open)}
+                >
+                  {track.file_count} versions {showVersions ? '▴' : '▾'}
+                </button>
               ) : null}
               <QueueStatusBadge status={queueStatus} />
             </span>
@@ -10275,63 +10315,176 @@ function TrackRow({
     }
   };
 
-  return (
-    <tr className={missing ? styles.missingRow : styles.staticRow}>
-      <td className={styles.colCheckbox}>
-        {onToggleSelect ? (
-          <input
-            type="checkbox"
-            checked={selected}
-            aria-label={`Select ${label}`}
-            onChange={onToggleSelect}
-          />
-        ) : null}
-      </td>
-      <td className={styles.colMonitor}>
-        <MonitorToggle
-          entity="tracks"
-          id={track.id}
-          monitored={track.monitored}
-          albumId={entityBase.albumId}
-          trackNumber={track.track_number ?? undefined}
-          discNumber={track.disc_number ?? undefined}
-          title={track.title ?? undefined}
-        />
-      </td>
-      <td className={styles.colNum}>{track.track_number ?? '—'}</td>
-      {columnOrder.map(renderBodyCell)}
-      <td className={styles.trackActions}>
-        <IconActionButton
-          icon="automatic"
-          title="Automatic Search — search missing/upgradable for this track"
-          requiresWish
-          disabled={!track.id}
-          onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
-        />
-        <IconActionButton
-          icon="interactive"
-          title="Interactive Search — pick the source yourself"
-          requiresWish
-          disabled={!track.id}
-          onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
-        />
-        <AddToPlaylistButton
-          track={playlistTrack(track, albumTitle)}
-          className={styles.iconAction}
-        />
-        {track.id ? (
+  if (version) {
+    return (
+      <tr className={styles.versionRow}>
+        <td className={styles.colCheckbox} />
+        <td className={styles.colMonitor} />
+        <td className={styles.colNum} />
+        {columnOrder.map(renderBodyCell)}
+        <td className={styles.trackActions}>
+          {entityBase.albumId && track.file ? (
+            <TrackFileDeleteButton
+              albumId={entityBase.albumId}
+              fileId={track.file.file_id}
+              compact
+              onDone={() => undefined}
+            />
+          ) : null}
           <TrackDetailButton
             track={track}
+            fileId={track.file?.file_id}
             albumId={entityBase.albumId}
             albumTitle={albumTitle}
             openTab={detailTab}
             onOpenTab={setDetailTab}
             onClose={() => setDetailTab(null)}
-            showButton={!editViaTitle}
           />
-        ) : null}
-      </td>
-    </tr>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <>
+      <tr className={missing ? styles.missingRow : styles.staticRow}>
+        <td className={styles.colCheckbox}>
+          {onToggleSelect ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              aria-label={`Select ${label}`}
+              onChange={onToggleSelect}
+            />
+          ) : null}
+        </td>
+        <td className={styles.colMonitor}>
+          <MonitorToggle
+            entity="tracks"
+            id={track.id}
+            monitored={track.monitored}
+            albumId={entityBase.albumId}
+            trackNumber={track.track_number ?? undefined}
+            discNumber={track.disc_number ?? undefined}
+            title={track.title ?? undefined}
+          />
+        </td>
+        <td className={styles.colNum}>{track.track_number ?? '—'}</td>
+        {columnOrder.map(renderBodyCell)}
+        <td className={styles.trackActions}>
+          <IconActionButton
+            icon="automatic"
+            title="Automatic Search — search missing/upgradable for this track"
+            requiresWish
+            disabled={!track.id}
+            onClick={() => onAction(`Search: ${label} (${albumTitle})`, entity)}
+          />
+          <IconActionButton
+            icon="interactive"
+            title="Interactive Search — pick the source yourself"
+            requiresWish
+            disabled={!track.id}
+            onClick={() => onAction(`Interactive Search: ${label} (${albumTitle})`, entity)}
+          />
+          <AddToPlaylistButton
+            track={playlistTrack(track, albumTitle)}
+            className={styles.iconAction}
+          />
+          {track.id ? (
+            <TrackDetailButton
+              track={track}
+              albumId={entityBase.albumId}
+              albumTitle={albumTitle}
+              openTab={detailTab}
+              onOpenTab={setDetailTab}
+              onClose={() => setDetailTab(null)}
+              showButton={!editViaTitle}
+            />
+          ) : null}
+        </td>
+      </tr>
+      {showVersions && track.id ? <TrackVersionRows rowProps={props} /> : null}
+    </>
+  );
+}
+
+/** The rows a track's "N versions" label expands into: every file shown as
+ *  the track itself, so each can be played, checked, edited or deleted. */
+function TrackVersionRows({ rowProps }: { rowProps: TrackRowProps }) {
+  const trackId = rowProps.track.id as number;
+  const query = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-versions', trackId],
+    queryFn: () => fetchLibraryV2TrackVersions(trackId),
+  });
+  if (!query.data) {
+    const span = rowProps.columnOrder.filter((key) => rowProps.columns[key]).length + 4;
+    return (
+      <tr className={styles.versionRow}>
+        <td colSpan={span}>
+          {query.isError ? (
+            <QueryFailure
+              error={query.error}
+              fallback="Could not load the versions."
+              retry={() => void query.refetch()}
+            />
+          ) : (
+            <span className={styles.inlineLoading}>Loading versions…</span>
+          )}
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <>
+      {query.data.map((file, i) => (
+        <TrackRow
+          key={file.file?.file_id ?? i}
+          {...rowProps}
+          track={file}
+          version
+          selected={false}
+          onToggleSelect={undefined}
+        />
+      ))}
+    </>
+  );
+}
+
+/** A version row's title: what the file is to the track, and the switch. */
+function TrackVersionLabel({ track }: { track: LibraryV2Track }) {
+  const queryClient = useQueryClient();
+  const canWrite = useLibraryV2CanWrite();
+  const file = track.file;
+  const primary = useMutation({
+    mutationFn: () => setLibraryV2PrimaryTrackFile(track.id as number, file?.file_id as number),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY }),
+    onError: (error) =>
+      window.showToast?.(mutationErrorMessage(error, 'Primary file could not be changed'), 'error'),
+  });
+  if (!file) return null;
+  return (
+    <span className={styles.fileVersionBadges}>
+      <span className={styles.fileRoleBadge} data-role={file.file_role ?? 'master'}>
+        {file.file_role ?? 'master'}
+      </span>
+      {file.is_primary ? (
+        <span className={styles.filePrimaryBadge}>
+          {file.primary_manual ? 'primary · manual' : 'primary'}
+        </span>
+      ) : file.file_state === 'active' ? (
+        <button
+          type="button"
+          className={styles.fileMakePrimary}
+          data-requires-write=""
+          disabled={!canWrite || primary.isPending}
+          title="Use this file for playback, the quality profile and the track editor"
+          onClick={() => primary.mutate()}
+        >
+          Make primary
+        </button>
+      ) : null}
+      <InlineFileStatus status={track.file_status} />
+    </span>
   );
 }
 
@@ -10792,6 +10945,7 @@ function AlbumQueuePill({ rollup }: { rollup: LibraryV2QueueStatusAlbum | undefi
  *  modal instead of opening a second one. */
 function TrackDetailButton({
   track,
+  fileId,
   albumId,
   albumTitle,
   openTab,
@@ -10800,6 +10954,8 @@ function TrackDetailButton({
   showButton = true,
 }: {
   track: LibraryV2Track;
+  /** A version row's file: the editor reads and writes that file's tags. */
+  fileId?: number;
   albumId?: number;
   albumTitle: string;
   openTab: TrackDetailTab | null;
@@ -10821,6 +10977,7 @@ function TrackDetailButton({
         <TrackDetailModal
           key={openTab}
           track={track}
+          fileId={fileId}
           albumId={albumId}
           albumTitle={albumTitle}
           initialTab={openTab}
@@ -10842,12 +10999,14 @@ const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
 
 function TrackDetailModal({
   track,
+  fileId,
   albumId,
   albumTitle,
   initialTab = 'overview',
   onClose,
 }: {
   track: LibraryV2Track;
+  fileId?: number;
   albumId?: number;
   albumTitle: string;
   initialTab?: TrackDetailTab;
@@ -10858,12 +11017,14 @@ function TrackDetailModal({
   // Tags + Lyrics share one live file read; fetch once, lazily, on first visit
   // to either tab (avoids a mutagen file read for every track detail open).
   const fileTagsQuery = useQuery(
-    libraryV2TrackFileTagsQueryOptions(trackId, tab === 'tags' || tab === 'lyrics'),
+    libraryV2TrackFileTagsQueryOptions(trackId, tab === 'tags' || tab === 'lyrics', fileId),
   );
+  const versionNote =
+    fileId != null ? ` · ${(track.file?.format ?? '').toUpperCase() || 'this'} version` : '';
   return (
     <ModalShell
       title={`Edit Track — ${track.title ?? albumTitle}`}
-      description={`${track.artists.map((artist) => artist.name).join(', ')} · ${albumTitle}`}
+      description={`${track.artists.map((artist) => artist.name).join(', ')} · ${albumTitle}${versionNote}`}
       className={styles.metadataEditorDialog}
       detail
       onClose={onClose}
@@ -10902,6 +11063,7 @@ function TrackDetailModal({
         {tab === 'overview' ? (
           <TrackOverviewPanel
             track={track}
+            fileId={fileId}
             albumId={albumId}
             albumTitle={albumTitle}
             onClose={onClose}
@@ -10919,7 +11081,7 @@ function TrackDetailModal({
             </section>
             <section>
               <h4 className={styles.fileTagGroupTitle}>File tags — in the file now</h4>
-              <TrackTagsPanel query={fileTagsQuery} trackId={trackId} />
+              <TrackTagsPanel query={fileTagsQuery} trackId={trackId} fileId={fileId} />
             </section>
           </div>
         ) : null}
@@ -11237,7 +11399,15 @@ export function groupFileTags(tags: Record<string, string>): GroupedFileTags {
   return buckets;
 }
 
-function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: number }) {
+function TrackTagsPanel({
+  query,
+  trackId,
+  fileId,
+}: {
+  query: FileTagsQuery;
+  trackId: number;
+  fileId?: number;
+}) {
   const queryClient = useQueryClient();
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
@@ -11248,7 +11418,7 @@ function TrackTagsPanel({ query, trackId }: { query: FileTagsQuery; trackId: num
 
   const editMutation = useMutation({
     mutationFn: ({ key, value }: { key: string; value: string }) =>
-      editTrackFileTag(trackId, key, value),
+      editTrackFileTag(trackId, key, value, fileId),
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId],
@@ -11695,19 +11865,21 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
  *  from and removing its file. The full timeline stays in the History tab. */
 function TrackOverviewPanel({
   track,
+  fileId,
   albumId,
   albumTitle,
   onClose,
   onShowHistory,
 }: {
   track: LibraryV2Track;
+  fileId?: number;
   albumId?: number;
   albumTitle: string;
   onClose: () => void;
   onShowHistory: () => void;
 }) {
   const trackId = track.id as number;
-  const fileId = track.file?.file_id;
+  const deleteFileId = track.file?.file_id;
   return (
     <div className={styles.trackOverview}>
       <section className={styles.fileTagGroup}>
@@ -11718,9 +11890,10 @@ function TrackOverviewPanel({
             trackTitle={track.title ?? albumTitle}
             trackArtist={track.artists.map((a) => a.name).join(', ')}
             file={track.file}
+            fileId={fileId}
             actions={
-              albumId && fileId ? (
-                <TrackFileDeleteButton albumId={albumId} fileId={fileId} onDone={onClose} />
+              albumId && deleteFileId ? (
+                <TrackFileDeleteButton albumId={albumId} fileId={deleteFileId} onDone={onClose} />
               ) : null
             }
           />
@@ -11755,23 +11928,35 @@ function TrackOverviewPanel({
 function TrackFileDeleteButton({
   albumId,
   fileId,
+  compact = false,
   onDone,
 }: {
   albumId: number;
   fileId: number;
+  /** A version row's icon instead of the Overview's labelled button. */
+  compact?: boolean;
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   return (
     <>
-      <ActionButton
-        icon="delete"
-        tone="danger"
-        label="Delete File…"
-        title="Remove this track's file from the library, or from disk too"
-        onClick={() => setConfirming(true)}
-      />
+      {compact ? (
+        <IconActionButton
+          icon="delete"
+          tone="danger"
+          title="Delete this version — from the library, or from disk too"
+          onClick={() => setConfirming(true)}
+        />
+      ) : (
+        <ActionButton
+          icon="delete"
+          tone="danger"
+          label="Delete File…"
+          title="Remove this track's file from the library, or from disk too"
+          onClick={() => setConfirming(true)}
+        />
+      )}
       {confirming ? (
         <UnifiedFileRemovalDialog
           entity="albums"
@@ -11841,16 +12026,19 @@ export function TrackInfoPanel({
   trackTitle,
   trackArtist,
   file,
+  fileId,
   actions,
 }: {
   trackId: number;
   trackTitle: string;
   trackArtist: string;
   file: LibraryV2TrackFile | null | undefined;
+  /** A version row's file, for its own check-skip history. */
+  fileId?: number;
   /** Shown beside "Blacklist This Source" (the Overview's Delete File). */
   actions?: ReactNode;
 }) {
-  const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
+  const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true, fileId));
   const rows = query.data?.downloads ?? [];
   const manualSkips = query.data?.manual_skips ?? [];
   const dl = rows[0];

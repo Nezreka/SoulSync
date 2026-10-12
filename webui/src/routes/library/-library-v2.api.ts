@@ -436,9 +436,10 @@ export interface LibraryV2TrackSourceInfo {
  *  "Source Info" popover parity, extended with the §18.3 lifecycle log). */
 export async function fetchLibraryV2TrackSourceInfo(
   trackId: number,
+  fileId?: number,
 ): Promise<LibraryV2TrackSourceInfo> {
   const payload = await lib2Json<SourceInfoResponse>(
-    apiClient.get(`library/v2/tracks/${trackId}/source-info`),
+    apiClient.get(`library/v2/tracks/${trackId}/source-info`, fileSearch(fileId)),
     'Failed to load source info',
   );
   return { downloads: payload.downloads ?? [], manual_skips: payload.manual_skips ?? [] };
@@ -1131,6 +1132,16 @@ export async function fetchLibraryV2ArtistPlaybackFiles(
       has_next: false,
     },
   };
+}
+
+/** Every file of a track, each as the track with that file in it (primary
+ *  first) — the rows its "N versions" label expands into. */
+export async function fetchLibraryV2TrackVersions(trackId: number): Promise<LibraryV2Track[]> {
+  const payload = await lib2Json<Ok & { versions?: LibraryV2Track[] }>(
+    apiClient.get(`library/v2/tracks/${trackId}/versions`),
+    'Failed to load versions',
+  );
+  return payload.versions ?? [];
 }
 
 export async function setLibraryV2PrimaryTrackFile(trackId: number, fileId: number): Promise<void> {
@@ -2009,10 +2020,14 @@ export function libraryV2AlbumMatchStatusQueryOptions(albumId: number) {
   });
 }
 
-export function libraryV2TrackSourceInfoQueryOptions(trackId: number, enabled: boolean) {
+export function libraryV2TrackSourceInfoQueryOptions(
+  trackId: number,
+  enabled: boolean,
+  fileId?: number,
+) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-source-info', trackId],
-    queryFn: () => fetchLibraryV2TrackSourceInfo(trackId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-source-info', trackId, fileId ?? null],
+    queryFn: () => fetchLibraryV2TrackSourceInfo(trackId, fileId),
     enabled: enabled && trackId > 0,
     staleTime: 30_000,
   });
@@ -2023,27 +2038,44 @@ interface FileTagsResponse extends LibraryV2FileTags {
   error?: string;
 }
 
+/** A version row names its file; without one the track's primary is meant. */
+function fileSearch(fileId?: number) {
+  return fileId == null ? undefined : { searchParams: { file_id: String(fileId) } };
+}
+
 /** Live embedded tags + lyrics read straight from the file (§18.1). */
-export async function fetchLibraryV2TrackFileTags(trackId: number): Promise<LibraryV2FileTags> {
+export async function fetchLibraryV2TrackFileTags(
+  trackId: number,
+  fileId?: number,
+): Promise<LibraryV2FileTags> {
   return lib2Json<FileTagsResponse>(
-    apiClient.get(`library/v2/tracks/${trackId}/file-tags`),
+    apiClient.get(`library/v2/tracks/${trackId}/file-tags`, fileSearch(fileId)),
     'Failed to read file tags',
   );
 }
 
-export async function editTrackFileTag(trackId: number, key: string, value: string): Promise<void> {
+export async function editTrackFileTag(
+  trackId: number,
+  key: string,
+  value: string,
+  fileId?: number,
+): Promise<void> {
   await lib2Json(
     apiClient.post(`library/v2/tracks/${trackId}/file-tags/edit`, {
-      json: { key, value },
+      json: fileId == null ? { key, value } : { key, value, file_id: fileId },
     }),
     'Failed to edit tag',
   );
 }
 
-export function libraryV2TrackFileTagsQueryOptions(trackId: number, enabled: boolean) {
+export function libraryV2TrackFileTagsQueryOptions(
+  trackId: number,
+  enabled: boolean,
+  fileId?: number,
+) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId],
-    queryFn: () => fetchLibraryV2TrackFileTags(trackId),
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-file-tags', trackId, fileId ?? null],
+    queryFn: () => fetchLibraryV2TrackFileTags(trackId, fileId),
     enabled: enabled && trackId > 0,
     staleTime: 30_000,
   });

@@ -472,6 +472,78 @@ describe('library v2 album track table', () => {
     );
   });
 
+  it('expands "2 versions" into one row per file, each played, edited or deleted alone', async () => {
+    const flac = trackFile({ file_id: 70, is_primary: true });
+    const mp3 = trackFile({ file_id: 71, path: '/music/checked.mp3', format: 'mp3', bitrate: 320 });
+    const primaryCalls: string[] = [];
+    const tagReads: string[] = [];
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({
+          success: true,
+          album: album([{ ...track({ file: flac }), file_count: 2 }]),
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Lossless' }] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: { columns: { quality: true } } },
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+      http.get('/api/library/v2/tracks/7/versions', () =>
+        HttpResponse.json({
+          success: true,
+          versions: [track({ file: flac }), track({ file: mp3 })],
+        }),
+      ),
+      http.post('/api/library/v2/tracks/7/files/:fileId/primary', ({ params }) => {
+        primaryCalls.push(String(params.fileId));
+        return HttpResponse.json({ success: true });
+      }),
+      http.get('/api/library/v2/tracks/7/file-tags', ({ request }) => {
+        tagReads.push(new URL(request.url).searchParams.get('file_id') ?? 'primary');
+        return HttpResponse.json({ success: true, available: true, tags: { title: 'x' } });
+      }),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const toggle = await screen.findByRole('button', { name: /2 versions/ });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByText('primary')).toBeInTheDocument();
+    const mp3Row = screen.getByRole('button', { name: 'Make primary' }).closest('tr');
+    expect(mp3Row).toHaveTextContent(/MP3/);
+    expect(
+      within(mp3Row as HTMLElement).getByRole('button', { name: /Delete this version/ }),
+    ).toBeEnabled();
+
+    fireEvent.click(within(mp3Row as HTMLElement).getByRole('button', { name: /^Edit track/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent(/MP3 version/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Metadata & Tags' }));
+    await waitFor(() => expect(tagReads).toEqual(['71']));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Close/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Make primary' }));
+    await waitFor(() => expect(primaryCalls).toEqual(['71']));
+  });
+
   it('shows the quality profile in its own column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

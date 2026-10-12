@@ -6602,3 +6602,47 @@ textarea.searchInput {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* A track's "N versions" label opens one row per file under it. */
+.fileVersionToggle {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.fileVersionToggle:hover,
+.fileVersionToggle[aria-expanded='true'] {
+  color: #fff;
+  background: rgba(var(--accent-rgb), 0.28);
+}
+
+.versionRow td {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.versionRow td[data-column='title'] {
+  padding-left: 22px;
+  box-shadow: inset 2px 0 0 rgba(var(--accent-rgb), 0.55);
+}
+
+.fileMakePrimary {
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 7px;
+  padding: 1px 7px;
+  background: transparent;
+  color: rgb(52, 211, 153);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fileMakePrimary:hover:not(:disabled) {
+  background: rgba(16, 185, 129, 0.16);
+}
+
+.fileMakePrimary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

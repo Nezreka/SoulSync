@@ -2135,15 +2135,29 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail("Track not found", 404)
         return jsonify({"success": True, "track": data})
 
+    @_route("/api/library/v2/tracks/<int:track_id>/versions")
+    def lib2_track_versions(track_id):
+        """The rows a track's "N versions" label expands into: every file of
+        the track, each serialized as the track with that file in it."""
+        from core.library2 import queries as Q
+        with closing(_conn()) as conn:
+            versions = Q.track_versions(conn, track_id)
+        if versions is None:
+            return _fail("Track not found", 404)
+        return jsonify({"success": True, "versions": versions})
+
     @_route("/api/library/v2/tracks/<int:track_id>/source-info")
     def lib2_track_source_info(track_id):
         """Download provenance for a track (legacy 'Source Info' popover parity)."""
         from core.library2.source_info import track_source_info
         from core.library2.manual_skips import skip_history_for_path
-        from core.library2.track_files import primary_file_row
+        from core.library2.track_files import track_file_row
+        file_id = request.args.get("file_id")
+        if file_id is not None and not file_id.isdigit():
+            return _fail("file_id must be an integer")
         with closing(_conn()) as conn:
             downloads = track_source_info(conn, track_id)
-            file_row = primary_file_row(conn, track_id, scoped=True)
+            file_row = track_file_row(conn, track_id, int(file_id) if file_id else None)
             manual_skips = skip_history_for_path(conn, file_row["path"]) if file_row else []
         return jsonify({"success": True, "downloads": downloads, "manual_skips": manual_skips})
 
@@ -2157,9 +2171,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         and doesn't surface lyrics or the full tag set).
         """
         from core.library2.paths import resolve_lib2_path
-        from core.library2.track_files import primary_file_row
+        from core.library2.track_files import track_file_row
+        file_id = request.args.get("file_id")
+        if file_id is not None and not file_id.isdigit():
+            return _fail("file_id must be an integer")
         with closing(_conn()) as conn:
-            file_row = primary_file_row(conn, track_id, scoped=True)
+            file_row = track_file_row(conn, track_id, int(file_id) if file_id else None)
         if not file_row or not file_row.get("path"):
             return jsonify({"success": True, "available": False, "reason": "No file on this track."})
         abs_path = resolve_lib2_path(file_row["path"])
@@ -2188,10 +2205,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         elif value is not None:
             value = value.strip()
 
+        file_id = body.get("file_id")
+        if file_id is not None and (isinstance(file_id, bool) or not isinstance(file_id, int)):
+            return _fail("'file_id' must be an integer")
+
         from core.library2.paths import resolve_lib2_path
-        from core.library2.track_files import primary_file_row
+        from core.library2.track_files import track_file_row
         with closing(_conn()) as conn:
-            file_row = primary_file_row(conn, track_id, scoped=True)
+            file_row = track_file_row(conn, track_id, file_id)
         if not file_row or not file_row.get("path"):
             return _fail("No file on this track.")
         abs_path = resolve_lib2_path(file_row["path"])
