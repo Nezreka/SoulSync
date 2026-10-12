@@ -398,6 +398,80 @@ describe('library v2 album track table', () => {
     },
   );
 
+  it('opens the track editor on an overview with source, profile and recent activity', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/42', () =>
+        HttpResponse.json({ success: true, album: album([track({ file: trackFile() })]) }),
+      ),
+      http.get('/api/library/v2/albums/42/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/quality-profiles', () =>
+        HttpResponse.json({ success: true, profiles: [{ id: 1, name: 'Lossless' }] }),
+      ),
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: { edit_via_title: true } },
+        }),
+      ),
+      http.get('/api/library/v2/albums/42/queue-status', () =>
+        HttpResponse.json({ tracks: {}, albums: {} }),
+      ),
+      http.get('/api/library/v2/tracks/7/source-info', () =>
+        HttpResponse.json({
+          success: true,
+          downloads: [
+            { source_service: 'soulseek', source_username: 'fairlight', source_filename: 'a.flac' },
+          ],
+          manual_skips: [],
+        }),
+      ),
+      http.get('/api/library/v2/tracks/7/history', () =>
+        HttpResponse.json({
+          success: true,
+          history: [3, 2, 1].map((day) => ({
+            date: `2026-10-1${day}T10:00:00`,
+            event_type: 'search',
+            category: 'search',
+            title: 'Search failed',
+            detail: null,
+            source: null,
+          })),
+        }),
+      ),
+    );
+
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value>
+          <AlbumTrackTable albumId={42} onAction={vi.fn()} />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Track Seven' }));
+    const dialog = await screen.findByRole('dialog');
+    const tabs = within(dialog)
+      .getAllByRole('button', { pressed: undefined })
+      .filter((button) => button.hasAttribute('aria-pressed'))
+      .map((button) => button.textContent);
+    expect(tabs).toEqual(['Overview', 'History', 'Metadata & Tags', 'Lyrics']);
+    expect(within(dialog).getByRole('button', { name: 'Overview' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(await within(dialog).findByText('fairlight')).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: /Blacklist This Source/ }),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /Delete File/ })).toBeEnabled();
+    expect(await within(dialog).findByText('Lossless')).toBeInTheDocument();
+    expect((await within(dialog).findByText('Search failed')).parentElement).toHaveTextContent(
+      /Search failed\s*3×\s*last 2026-10-13 10:00/,
+    );
+  });
+
   it('shows the quality profile in its own column', async () => {
     server.use(
       http.get('/api/library/v2/albums/42', () =>

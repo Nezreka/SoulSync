@@ -41,3 +41,33 @@ export function historySubject(entry: LibraryV2HistoryEntry): string {
         : '—')
   );
 }
+
+export interface RecentHistoryLine {
+  label: string;
+  status: string | null;
+  category: string;
+  count: number;
+  /** Date of the newest event in the run (entries arrive newest first). */
+  last: string | null;
+}
+
+/** The Overview's short history: a run of the same event reads as one line
+ *  ("Search failed 10× · last …"), and only the newest lines are kept. */
+export function summarizeRecentHistory(
+  entries: LibraryV2HistoryEntry[],
+  limit = 6,
+): RecentHistoryLine[] {
+  const lines: RecentHistoryLine[] = [];
+  for (const entry of entries) {
+    const label = entry.title || entry.event_type;
+    const status = entry.status ?? null;
+    const previous = lines.at(-1);
+    if (previous && previous.label === label && previous.status === status) {
+      previous.count += 1;
+      continue;
+    }
+    if (lines.length === limit) break;
+    lines.push({ label, status, category: entry.category, count: 1, last: entry.date });
+  }
+  return lines;
+}

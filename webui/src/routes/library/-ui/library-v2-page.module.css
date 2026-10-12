@@ -1237,7 +1237,7 @@ button.featureTag:disabled {
 }
 
 .trackTable td.colPlay {
-  /* 48px responsive floor = 12px left inset + 28px button + 8px right
+  /* 48px responsive floor = 12px left inset + 24px button + 8px right
    * breathing room. Clipping with the generic cell padding produced a stray
    * ellipsis immediately after the play icon. */
   padding-right: 8px;
@@ -1295,7 +1295,8 @@ button.featureTag:disabled {
   justify-content: center;
 }
 
-.trackTable .trackActions .iconAction {
+.trackTable .trackActions .iconAction,
+.trackTable .colPlay .iconAction {
   width: 24px;
   height: 24px;
 }
@@ -6386,6 +6387,23 @@ textarea.searchInput {
 .editHalf {
   grid-column: span 2;
 }
+/* Metadata & Tags tab: the library's values as two short rows above the file's tags. */
+.metadataEditCompact {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 10px;
+}
+.metadataEditCompact > .editFull,
+.metadataEditCompact > .editHalf {
+  grid-column: span 2;
+}
+.metadataEditCompact > .modalActions {
+  grid-column: span 2;
+  align-self: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0;
+}
 @media (max-width: 700px) {
   .metadataEditGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6516,4 +6534,68 @@ textarea.searchInput {
 
 .releasesEmptyAction:hover {
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* Track editor Overview: source on the left, profile + recent activity right. */
+.trackOverview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.trackOverviewSide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.trackOverviewBody {
+  padding: 8px 12px 12px;
+}
+
+.trackOverviewBody .modalActions {
+  margin-top: 12px;
+}
+
+.recentActivityRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.recentActivityRow + .linkButton,
+.sourceInfoBody > .linkButton {
+  align-self: flex-start;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+
+.trackTagsTab {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.trackTagsTab > section {
+  min-width: 0;
+}
+
+.trackTagsTab > section > .fileTagGroupTitle {
+  padding-left: 0;
+  border-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .trackOverview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .metadataEditCompact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

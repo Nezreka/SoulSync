@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import type { LibraryV2HistoryEntry } from '../-library-v2.api';
 
-import { groupHistoryEvents, historyOutcomeSummary, historySubject } from './history-groups';
+import {
+  groupHistoryEvents,
+  historyOutcomeSummary,
+  historySubject,
+  summarizeRecentHistory,
+} from './history-groups';
 
 const event: LibraryV2HistoryEntry = {
   date: '2026-09-05T18:42:03',
@@ -57,4 +62,27 @@ it('keeps different jobs and current verdicts separate from recorded results', (
       { ...event, job_id: 'job-b', status_basis: 'current_file' },
     ]),
   ).toHaveLength(3);
+});
+
+describe('recent history summary', () => {
+  it('folds a repeated event into one line with its count and latest date', () => {
+    const failed = { ...event, title: 'Search failed', status: 'failed' };
+    const entries = [
+      { ...failed, date: '2026-10-12T10:00:00' },
+      { ...failed, date: '2026-10-11T10:00:00' },
+      { ...failed, date: '2026-10-10T10:00:00' },
+      { ...event, title: 'Downloaded', date: '2026-10-09T10:00:00' },
+      { ...failed, date: '2026-10-08T10:00:00' },
+    ];
+    expect(summarizeRecentHistory(entries)).toEqual([
+      expect.objectContaining({ label: 'Search failed', count: 3, last: '2026-10-12T10:00:00' }),
+      expect.objectContaining({ label: 'Downloaded', count: 1 }),
+      expect.objectContaining({ label: 'Search failed', count: 1 }),
+    ]);
+  });
+
+  it('keeps only the newest lines', () => {
+    const entries = ['A', 'B', 'C', 'D'].map((title) => ({ ...event, title }));
+    expect(summarizeRecentHistory(entries, 2).map((line) => line.label)).toEqual(['A', 'B']);
+  });
 });

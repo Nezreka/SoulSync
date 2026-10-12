@@ -153,7 +153,7 @@ import {
 import { ExportArtistsModal } from './export-modal';
 import { FilePathCellBody } from './file-path-cell';
 import { HistoryEventList } from './history-event-list';
-import { groupHistoryEvents } from './history-groups';
+import { groupHistoryEvents, summarizeRecentHistory } from './history-groups';
 import { InteractiveSearchModal } from './interactive-search';
 import styles from './library-v2-page.module.css';
 import { QualityProfilePicker } from './quality-profile-modal';
@@ -10009,8 +10009,8 @@ function TrackRow({
                 <button
                   type="button"
                   className={`${styles.linkButton} ${styles.titleEditLink} ${missing ? styles.muted : ''}`}
-                  title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
-                  onClick={() => setDetailTab('metadata')}
+                  title="Edit track — overview, metadata & tags, lyrics and history"
+                  onClick={() => setDetailTab('overview')}
                 >
                   {label}
                 </button>
@@ -10316,6 +10316,7 @@ function TrackRow({
         {track.id ? (
           <TrackDetailButton
             track={track}
+            albumId={entityBase.albumId}
             albumTitle={albumTitle}
             openTab={detailTab}
             onOpenTab={setDetailTab}
@@ -10779,12 +10780,13 @@ function AlbumQueuePill({ rollup }: { rollup: LibraryV2QueueStatusAlbum | undefi
   );
 }
 
-/** Per-track details behind one button: Quality profile (the default tab — the most common reason
- *  to open this), Metadata edit, and Info (source/download history). Keeps the row from getting an
- *  icon per action. ``openTab``/``onOpenTab`` are lifted to the row so the LR badge (B3) can jump
- *  straight to the Lyrics tab of the SAME modal instead of opening a second one. */
+/** Per-track details behind one button, opening on the Overview (source, quality profile,
+ *  recent activity). Keeps the row from getting an icon per action. ``openTab``/``onOpenTab``
+ *  are lifted to the row so the LR badge (B3) can jump straight to the Lyrics tab of the SAME
+ *  modal instead of opening a second one. */
 function TrackDetailButton({
   track,
+  albumId,
   albumTitle,
   openTab,
   onOpenTab,
@@ -10792,6 +10794,7 @@ function TrackDetailButton({
   showButton = true,
 }: {
   track: LibraryV2Track;
+  albumId?: number;
   albumTitle: string;
   openTab: TrackDetailTab | null;
   onOpenTab: (tab: TrackDetailTab) => void;
@@ -10804,14 +10807,15 @@ function TrackDetailButton({
       {showButton ? (
         <IconActionButton
           icon="edit"
-          title="Edit track — quality profile, metadata, tags, lyrics and pipeline info"
-          onClick={() => onOpenTab('metadata')}
+          title="Edit track — overview, metadata & tags, lyrics and history"
+          onClick={() => onOpenTab('overview')}
         />
       ) : null}
       {openTab ? (
         <TrackDetailModal
           key={openTab}
           track={track}
+          albumId={albumId}
           albumTitle={albumTitle}
           initialTab={openTab}
           onClose={onClose}
@@ -10821,24 +10825,24 @@ function TrackDetailButton({
   );
 }
 
-type TrackDetailTab = 'quality' | 'metadata' | 'tags' | 'lyrics' | 'info' | 'history';
+type TrackDetailTab = 'overview' | 'history' | 'tags' | 'lyrics';
 
 const TRACK_DETAIL_TAB_LABELS: Record<TrackDetailTab, string> = {
-  quality: 'Quality',
-  metadata: 'Metadata',
-  tags: 'Tags',
-  lyrics: 'Lyrics',
-  info: 'Info',
+  overview: 'Overview',
   history: 'History',
+  tags: 'Metadata & Tags',
+  lyrics: 'Lyrics',
 };
 
 function TrackDetailModal({
   track,
+  albumId,
   albumTitle,
-  initialTab = 'metadata',
+  initialTab = 'overview',
   onClose,
 }: {
   track: LibraryV2Track;
+  albumId?: number;
   albumTitle: string;
   initialTab?: TrackDetailTab;
   onClose: () => void;
@@ -10859,7 +10863,7 @@ function TrackDetailModal({
       onClose={onClose}
     >
       <div className={styles.detailTabs}>
-        {(['metadata', 'quality', 'tags', 'lyrics', 'info', 'history'] as const).map((t) => (
+        {(['overview', 'history', 'tags', 'lyrics'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -10889,28 +10893,31 @@ function TrackDetailModal({
         </button>
       </div>
       <div className={styles.tabBody}>
-        {tab === 'quality' ? (
-          <QualityProfilePicker
-            entity="tracks"
-            id={trackId}
-            currentProfileId={track.quality_profile_id}
-            currentProfileSource={track.quality_profile_source}
-            currentProfileExplicit={track.quality_profile_explicit}
-            onSaved={onClose}
-          />
-        ) : null}
-        {tab === 'metadata' ? <TrackMetadataForm track={track} onSaved={onClose} /> : null}
-        {tab === 'tags' ? <TrackTagsPanel query={fileTagsQuery} trackId={trackId} /> : null}
-        {tab === 'lyrics' ? <TrackLyricsPanel query={fileTagsQuery} /> : null}
-        {tab === 'info' ? (
-          <TrackInfoPanel
-            trackId={trackId}
-            trackTitle={track.title ?? albumTitle}
-            trackArtist={track.artists.map((a) => a.name).join(', ')}
-            file={track.file}
+        {tab === 'overview' ? (
+          <TrackOverviewPanel
+            track={track}
+            albumId={albumId}
+            albumTitle={albumTitle}
+            onClose={onClose}
+            onShowHistory={() => setTab('history')}
           />
         ) : null}
         {tab === 'history' ? <TrackHistoryPanel trackId={trackId} /> : null}
+        {tab === 'tags' ? (
+          <div className={styles.trackTagsTab}>
+            {/* the library's values are what a retag writes; the file's are
+                what is in it now -- one page, so the two can be compared */}
+            <section>
+              <h4 className={styles.fileTagGroupTitle}>Library metadata — written into the file</h4>
+              <TrackMetadataForm track={track} onSaved={onClose} />
+            </section>
+            <section>
+              <h4 className={styles.fileTagGroupTitle}>File tags — in the file now</h4>
+              <TrackTagsPanel query={fileTagsQuery} trackId={trackId} />
+            </section>
+          </div>
+        ) : null}
+        {tab === 'lyrics' ? <TrackLyricsPanel query={fileTagsQuery} /> : null}
       </div>
     </ModalShell>
   );
@@ -10956,7 +10963,7 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
   ].filter((field) => field in overrides);
 
   return (
-    <div className={styles.metadataEditGrid}>
+    <div className={`${styles.metadataEditGrid} ${styles.metadataEditCompact}`}>
       <EditInput
         id="lib2-track-title"
         label="Title"
@@ -11017,6 +11024,7 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
       />
       {error ? <div className={styles.searchError}>{error}</div> : null}
       <div className={styles.modalActions}>
+        {track.id && track.file ? <TrackWriteTagsButton trackId={track.id} /> : null}
         {resettable.length > 0 ? (
           <button
             type="button"
@@ -11036,7 +11044,6 @@ function TrackMetadataForm({ track, onSaved }: { track: LibraryV2Track; onSaved:
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>
-      {track.id && track.file ? <TrackWriteTagsButton trackId={track.id} /> : null}
     </div>
   );
 }
@@ -11058,7 +11065,10 @@ function TrackWriteTagsButton({ trackId }: { trackId: number }) {
     onError: (err) => setMessage(mutationErrorMessage(err, 'Write failed')),
   });
   return (
-    <div className={styles.formDivider}>
+    <>
+      {message ? (
+        <span className={mutation.isError ? styles.sourceInfoError : styles.muted}>{message}</span>
+      ) : null}
       <ActionButton
         icon="retag"
         label={mutation.isPending ? 'Writing…' : 'Write Tags to File'}
@@ -11066,10 +11076,7 @@ function TrackWriteTagsButton({ trackId }: { trackId: number }) {
         busy={mutation.isPending}
         onClick={() => mutation.mutate()}
       />
-      {message ? (
-        <span className={mutation.isError ? styles.sourceInfoError : styles.muted}>{message}</span>
-      ) : null}
-    </div>
+    </>
   );
 }
 
@@ -11676,19 +11683,166 @@ export function TrackPipelineTimeline({ trackId }: { trackId: number }) {
   );
 }
 
-/** Info tab: Check summary + the currently active download source (with
- *  blacklist). Past provenance and pipeline events live in the History tab
- *  (`TrackHistoryPanel`) instead — this tab is about what's true right now. */
+/** The track editor's landing page: what is true right now (file, source,
+ *  quality profile) and the last few things that happened to it, with the
+ *  two actions people open a track for -- blacklisting the source it came
+ *  from and removing its file. The full timeline stays in the History tab. */
+function TrackOverviewPanel({
+  track,
+  albumId,
+  albumTitle,
+  onClose,
+  onShowHistory,
+}: {
+  track: LibraryV2Track;
+  albumId?: number;
+  albumTitle: string;
+  onClose: () => void;
+  onShowHistory: () => void;
+}) {
+  const trackId = track.id as number;
+  const fileId = track.file?.file_id;
+  return (
+    <div className={styles.trackOverview}>
+      <section className={styles.fileTagGroup}>
+        <h4 className={styles.fileTagGroupTitle}>File &amp; source</h4>
+        <div className={styles.trackOverviewBody}>
+          <TrackInfoPanel
+            trackId={trackId}
+            trackTitle={track.title ?? albumTitle}
+            trackArtist={track.artists.map((a) => a.name).join(', ')}
+            file={track.file}
+            actions={
+              albumId && fileId ? (
+                <TrackFileDeleteButton albumId={albumId} fileId={fileId} onDone={onClose} />
+              ) : null
+            }
+          />
+        </div>
+      </section>
+      <div className={styles.trackOverviewSide}>
+        <section className={styles.fileTagGroup}>
+          <h4 className={styles.fileTagGroupTitle}>Quality profile</h4>
+          <div className={styles.trackOverviewBody}>
+            <QualityProfilePicker
+              entity="tracks"
+              id={trackId}
+              currentProfileId={track.quality_profile_id}
+              currentProfileSource={track.quality_profile_source}
+              currentProfileExplicit={track.quality_profile_explicit}
+              onSaved={onClose}
+            />
+          </div>
+        </section>
+        <section className={styles.fileTagGroup}>
+          <h4 className={styles.fileTagGroupTitle}>Recent activity</h4>
+          <div className={styles.trackOverviewBody}>
+            <TrackRecentActivity trackId={trackId} onShowAll={onShowHistory} />
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/** The same two-mode dialog as the track table's "Delete files…", for this one file. */
+function TrackFileDeleteButton({
+  albumId,
+  fileId,
+  onDone,
+}: {
+  albumId: number;
+  fileId: number;
+  onDone: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <>
+      <ActionButton
+        icon="delete"
+        tone="danger"
+        label="Delete File…"
+        title="Remove this track's file from the library, or from disk too"
+        onClick={() => setConfirming(true)}
+      />
+      {confirming ? (
+        <UnifiedFileRemovalDialog
+          entity="albums"
+          eid={albumId}
+          fileIds={[fileId]}
+          onDone={() => {
+            setConfirming(false);
+            void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+            onDone();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/** Newest first, a run of one event folded into a line ("Search failed 10×"). */
+function TrackRecentActivity({ trackId, onShowAll }: { trackId: number; onShowAll: () => void }) {
+  const query = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'track-history', trackId],
+    queryFn: () => fetchLibraryV2TrackHistory(trackId),
+  });
+  if (query.isLoading) return <div className={styles.inlineLoading}>Loading history…</div>;
+  if (query.isError) {
+    return (
+      <QueryFailure
+        error={query.error}
+        fallback="Could not load history."
+        retry={() => void query.refetch()}
+      />
+    );
+  }
+  const lines = summarizeRecentHistory(query.data ?? []);
+  if (lines.length === 0) return <p className={styles.muted}>Nothing recorded yet.</p>;
+  return (
+    <div className={styles.sourceInfoBody}>
+      {lines.map((line, i) => (
+        <div key={i} className={styles.recentActivityRow}>
+          <span className={styles.sourceBadge} data-tone={line.category}>
+            {line.label}
+          </span>
+          {line.status ? (
+            <span className={styles.pipelineStatus} data-status={line.status}>
+              {line.status.replaceAll('_', ' ')}
+            </span>
+          ) : null}
+          {line.count > 1 ? <strong>{line.count}×</strong> : null}
+          <span className={styles.muted}>
+            {line.count > 1 ? 'last ' : ''}
+            {line.last ? line.last.slice(0, 16).replace('T', ' ') : '—'}
+          </span>
+        </div>
+      ))}
+      <button type="button" className={styles.linkButton} onClick={onShowAll}>
+        Full history →
+      </button>
+    </div>
+  );
+}
+
+/** Overview, "File & source": Check summary + the currently active download
+ *  source (with blacklist). Past provenance and pipeline events live in the
+ *  History tab (`TrackHistoryPanel`) -- this is about what's true right now. */
 export function TrackInfoPanel({
   trackId,
   trackTitle,
   trackArtist,
   file,
+  actions,
 }: {
   trackId: number;
   trackTitle: string;
   trackArtist: string;
   file: LibraryV2TrackFile | null | undefined;
+  /** Shown beside "Blacklist This Source" (the Overview's Delete File). */
+  actions?: ReactNode;
 }) {
   const query = useQuery(libraryV2TrackSourceInfoQueryOptions(trackId, true));
   const rows = query.data?.downloads ?? [];
@@ -11705,12 +11859,31 @@ export function TrackInfoPanel({
   });
 
   const lifecycle = <TrackLifecycleSection file={file} manualSkips={manualSkips} />;
+  const canBlacklist = Boolean(dl?.source_username && dl?.source_filename);
+  const actionRow =
+    canBlacklist || actions ? (
+      <div className={styles.modalActions}>
+        {actions}
+        {canBlacklist ? (
+          <ActionButton
+            icon="delete"
+            tone="danger"
+            busy={blacklist.isPending}
+            disabled={blacklist.isSuccess}
+            label={blacklist.isSuccess ? 'Blacklisted' : 'Blacklist This Source'}
+            title="Skip this source in future downloads"
+            onClick={() => blacklist.mutate()}
+          />
+        ) : null}
+      </div>
+    ) : null;
 
   if (query.isLoading) {
     return (
       <>
         {lifecycle}
         <div className={styles.inlineLoading}>Loading source info…</div>
+        {actionRow}
       </>
     );
   }
@@ -11723,6 +11896,7 @@ export function TrackInfoPanel({
           fallback="Could not load download source data."
           retry={() => void query.refetch()}
         />
+        {actionRow}
       </>
     );
   }
@@ -11733,6 +11907,7 @@ export function TrackInfoPanel({
         <p>
           No download source data for this track yet. Source tracking starts with new downloads.
         </p>
+        {actionRow}
       </>
     );
   }
@@ -11762,19 +11937,7 @@ export function TrackInfoPanel({
       {dl.status && dl.status !== 'completed' ? (
         <SourceInfoRow label="Status" value={dl.status} danger />
       ) : null}
-      {dl.source_username && dl.source_filename ? (
-        <div className={styles.modalActions}>
-          <ActionButton
-            icon="delete"
-            tone="danger"
-            busy={blacklist.isPending}
-            disabled={blacklist.isSuccess}
-            label={blacklist.isSuccess ? 'Blacklisted' : 'Blacklist This Source'}
-            title="Skip this source in future downloads"
-            onClick={() => blacklist.mutate()}
-          />
-        </div>
-      ) : null}
+      {actionRow}
       {blacklist.isError ? (
         <p className={styles.sourceInfoError} role="alert">
           {mutationErrorMessage(blacklist.error, 'Failed to blacklist source')}
