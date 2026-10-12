@@ -449,9 +449,11 @@ def sync_edition_facts(cursor: Any, album_ids: Optional[Any] = None) -> int:
             (edition["id"], edition["release_group_id"])).rowcount
         count = _edition_track_count(album) or edition["track_count"]
         slots, numbered, discs = cursor.execute(
-            "SELECT COUNT(*), COUNT(track_number), MAX(COALESCE(disc_number,1)) FROM lib2_release_tracks"
-            " WHERE release_edition_id=?", (edition["id"],)).fetchone()
-        disc_count = discs if count and slots == numbered == count else edition["disc_count"]
+            "SELECT COUNT(*), COUNT(track_number),"
+            " MAX(CASE WHEN track_number IS NOT NULL THEN COALESCE(disc_number,1) END)"
+            " FROM lib2_release_tracks WHERE release_edition_id=?", (edition["id"],)).fetchone()
+        # an unnumbered extra row (an earlier single's copy) is no slot
+        disc_count = discs if count and numbered and count in (slots, numbered) else edition["disc_count"]
         if (count, disc_count) != (edition["track_count"], edition["disc_count"]):
             cursor.execute(
                 "UPDATE lib2_release_editions SET track_count=?, disc_count=?, signature=?,"

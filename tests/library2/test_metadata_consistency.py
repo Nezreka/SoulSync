@@ -233,6 +233,26 @@ def test_retag_fixes_separate_total_and_verifies_it(library):
         assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
 
 
+@pytest.mark.parametrize('edition_count', [13, 14])
+def test_an_unnumbered_extra_row_is_not_a_slot(library, edition_count):
+    """Bad 25th Anniversary: a second "Smooth Criminal" (an earlier single
+    download, no position) sat on the edition. Its 25 rows against 24 tracks
+    made every total "unknown", and while the count was 25 disc 1 got
+    "12 tracks" written instead of 11."""
+    from core.library2.editions import sync_edition_facts
+    db, _, _ = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("INSERT INTO lib2_tracks(id,album_id,title,track_number,disc_number) VALUES(14,1,'Track 7',NULL,1)")
+        conn.execute("INSERT INTO lib2_recordings(id,title) VALUES(14,'Track 7')")
+        conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id,track_number,disc_number) VALUES(1,14,14,NULL,1)')
+        conn.execute('UPDATE lib2_release_editions SET track_count=?, disc_count=NULL, is_default=1', (edition_count,))
+        conn.execute('UPDATE lib2_albums SET expected_track_count=?', (edition_count,))
+        sync_edition_facts(conn.cursor(), [1])
+        assert conn.execute('SELECT disc_count FROM lib2_release_editions WHERE id=1').fetchone()[0] == 1
+    checks = json.loads(observe(library)['tags_json'])['_validation']['checks']
+    assert (checks['total_tracks'], checks['total_discs']) == ('correct', 'correct')
+
+
 def test_a_known_total_missing_from_the_file_is_written(library):
     """What the catalogue knows goes into the file: a missing total was only
     "not checked", and the retag never filled it."""

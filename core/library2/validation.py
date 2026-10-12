@@ -49,11 +49,15 @@ def edition_reference(conn, track_id, data, *, rows=None, has_edition=None, look
         data.update(track_number=row['track_number'], disc_number=row['disc_number'],
                     total_discs=row['disc_count'], edition_status='correct', edition_id=row['release_edition_id'])
         if not lookup_only:
+            # A row without a position (a second copy from an earlier single
+            # download) is no slot: complete when the count matches every row
+            # or every numbered one, and only numbered rows make a disc's total.
             counts = conn.execute(
-                "SELECT COUNT(*), SUM(CASE WHEN disc_number=? THEN 1 ELSE 0 END) "
-                "FROM lib2_release_tracks WHERE release_edition_id=?", (row['disc_number'], row['release_edition_id']),
+                "SELECT COUNT(*), COUNT(track_number), SUM(CASE WHEN disc_number=? AND track_number IS NOT NULL "
+                "THEN 1 ELSE 0 END) FROM lib2_release_tracks WHERE release_edition_id=?",
+                (row['disc_number'], row['release_edition_id']),
             ).fetchone()
-            data['track_count'] = counts[1] if row['track_count'] and counts[0] == row['track_count'] else None
+            data['track_count'] = counts[2] if row['track_count'] in (counts[0], counts[1]) and row['track_count'] else None
         if row['title_override']:
             data['title'] = row['title_override']
         if row['edition_title']:
