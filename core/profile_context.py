@@ -194,10 +194,12 @@ def admin_or_api_key(view_fn):
     """
     import functools
 
+    admin_fn = admin_only(view_fn)
+
     @functools.wraps(view_fn)
     def wrapper(*args, **kwargs):
         from api.auth import apply_api_key_request_context
         if apply_api_key_request_context():
             return view_fn(*args, **kwargs)
-        return admin_only(view_fn)(*args, **kwargs)
+        return admin_fn(*args, **kwargs)
     return wrapper
