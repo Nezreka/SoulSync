@@ -4334,6 +4334,8 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if repair_worker and hasattr(repair_worker, 'refresh_acoustid_config'):
+                repair_worker.refresh_acoustid_config()
             if 'spotify' in new_settings:
                 publish_spotify_status(
                     connected=False,

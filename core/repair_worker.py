@@ -539,6 +539,14 @@ class RepairWorker:
                 logger.error("Failed to initialize AcoustIDClient: %s", e)
         return self._acoustid_client
 
+    def refresh_acoustid_config(self):
+        """Refresh AcoustID client configuration after settings update."""
+        if self._acoustid_client is not None:
+            try:
+                self._acoustid_client.refresh_config()
+            except Exception as e:
+                logger.debug("Failed to refresh AcoustID client config: %s", e)
+
     @property
     def metadata_cache(self):
         if self._metadata_cache is None:

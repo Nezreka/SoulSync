@@ -3768,14 +3768,14 @@
                                                     </div>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>API Key:</label>
+                                                    <label>Application API Key:</label>
                                                     <input type="password" id="acoustid-api-key"
-                                                        placeholder="AcoustID API Key">
+                                                        placeholder="AcoustID Application API Key">
                                                 </div>
                                                 <div class="callback-info">
-                                                    <div class="callback-help">Get your free API key from <a
+                                                    <div class="callback-help">Requires an <strong>Application API key</strong> (not your user account key) &mdash; register a free application at <a
                                                             href="https://acoustid.org/new-application" target="_blank"
-                                                            style="color: #ba55d3;">AcoustID Applications</a></div>
+                                                            style="color: #ba55d3;">acoustid.org/new-application</a></div>
                                                     <div class="callback-help"
                                                         style="opacity: 0.7; font-size: 0.85em; margin-top: 4px;">
                                                         The fpcalc fingerprint tool is automatically downloaded if
@@ -3783,9 +3783,11 @@
                                                         Failed verifications move files to Quarantine folder.
                                                     </div>
                                                 </div>
-                                                <button class="test-button" onclick="clearQuarantine()"
-                                                    style="margin-top: 10px; background: rgba(255,82,82,0.15); border-color: rgba(255,82,82,0.3); color: #ff5252;">Clear
-                                                    Quarantine</button>
+                                                <div class="form-actions" style="margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                                    <button class="test-button" onclick="testConnection('acoustid')">Test Connection</button>
+                                                    <button class="test-button" onclick="clearQuarantine()"
+                                                        style="background: rgba(255,82,82,0.15); border-color: rgba(255,82,82,0.3); color: #ff5252;">Clear Quarantine</button>
+                                                </div>
                                             </div>
                                         </div>
 

@@ -6790,6 +6790,11 @@ async function authorizeLastfmScrobbling() {
 
 async function testConnection(service) {
     try {
+        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+            clearTimeout(settingsAutoSaveTimer);
+            settingsAutoSaveTimer = null;
+            if (typeof saveSettings === 'function') await saveSettings(true);
+        }
         showLoadingOverlay(`Testing ${service} connection...`);
 
         const response = await fetch(API.testConnection, {
