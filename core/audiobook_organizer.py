@@ -362,22 +362,27 @@ _STAGING_MAX_AGE_SECONDS = 24 * 3600
 
 
 def staging_base(library_root: str) -> Optional[Path]:
-    """Where staged book folders live: a sibling of the library root.
+    """Where staged book folders live: next to the library root.
 
     Outside the library (so Plex/Audiobookshelf/Jellyfin never watch it)
-    and hidden (belt and suspenders). Returns None when it cannot be set
-    up — the caller then files directly into the library, exactly like
+    and hidden (belt and suspenders). Docker top-level mounts (library at
+    /audiobooks) with a non-root container user cannot create directories
+    under / — then it falls back to inside the library root, which SoulSync
+    can always write; dot-prefixed folders are skipped by media-server
+    scanners, so it stays invisible there too. Returns None when neither
+    works — the caller then files directly into the library, exactly like
     before.
     """
-    try:
-        base = Path(library_root).expanduser().resolve().parent / STAGING_DIR_NAME
-        base.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        logger.warning("Could not set up audiobook staging next to %s: %s",
-                       library_root, exc)
-        return None
-    _sweep_stale_staging(base)
-    return base
+    lib = Path(library_root).expanduser().resolve()
+    for base in (lib.parent / STAGING_DIR_NAME, lib / STAGING_DIR_NAME):
+        try:
+            base.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        _sweep_stale_staging(base)
+        return base
+    logger.warning("Could not set up audiobook staging for %s", library_root)
+    return None
 
 
 def _sweep_stale_staging(base: Path) -> None:
@@ -389,7 +394,9 @@ def _sweep_stale_staging(base: Path) -> None:
         return
     for entry in entries:
         try:
-            if not entry.is_dir():
+            # Only touch dirs this module creates (tempfile.mkdtemp
+            # prefix="book-"): never sweep anything else that wandered in.
+            if not entry.is_dir() or not entry.name.startswith("book-"):
                 continue
             age = now - entry.stat().st_mtime
         except OSError:
@@ -438,6 +445,11 @@ def reveal_staged_book(staged_book: Path, stage_root: Path,
     except (OSError, ValueError) as exc:
         return {"ok": False, "path": "", "files": [],
                 "error": f"Staged book is not under the staging root: {exc}"}
+    if not rel.parts:
+        # staged_book IS the staging root — revealing it would try to
+        # replace the library root itself.
+        return {"ok": False, "path": "", "files": [],
+                "error": "Staged book cannot be the staging root itself"}
     dest = Path(library_root).expanduser() / rel
 
     if not staged_book.is_dir():

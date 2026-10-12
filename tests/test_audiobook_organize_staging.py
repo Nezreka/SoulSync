@@ -19,6 +19,7 @@ import pytest
 
 from core.audiobook_download_monitor import _nudge_media_server_scan, _organize
 from core.audiobook_organizer import (
+    _sweep_stale_staging,
     new_staging_dir,
     reveal_staged_book,
     staging_base,
@@ -91,6 +92,57 @@ def test_staging_base_returns_none_when_it_cannot_be_created(tmp_path, monkeypat
 
     monkeypatch.setattr(Path, "mkdir", boom)
     assert staging_base(str(lib)) is None
+
+
+def test_staging_base_falls_back_inside_library_root(tmp_path, monkeypatch):
+    """Docker top-level mount (/audiobooks) as a non-root user: creating the
+    sibling under / raises PermissionError, so staging falls back to inside
+    the library root (dot-prefixed: scanners skip it)."""
+    lib = tmp_path / "audiobooks"
+    lib.mkdir()
+    sibling = tmp_path / ".soulsync-audiobook-staging"
+    real_mkdir = Path.mkdir
+
+    def boom(self, *args, **kwargs):
+        if self == sibling:
+            raise PermissionError("read-only /")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    base = staging_base(str(lib))
+    assert base == lib / ".soulsync-audiobook-staging"
+    assert base.is_dir()
+
+
+def test_sweep_only_removes_book_prefixed_dirs(tmp_path):
+    base = tmp_path / ".soulsync-audiobook-staging"
+    base.mkdir()
+    keep = base / "user-notes"
+    keep.mkdir()
+    stale = base / "book-abc123"
+    stale.mkdir()
+    ancient = time.time() - 25 * 3600
+    os.utime(keep, (ancient, ancient))
+    os.utime(stale, (ancient, ancient))
+
+    _sweep_stale_staging(base)
+
+    assert keep.is_dir()
+    assert not stale.exists()
+
+
+def test_reveal_refuses_when_staged_book_is_the_stage_root(tmp_path):
+    lib = tmp_path / "audiobooks"
+    lib.mkdir()
+    base = staging_base(str(lib))
+    staged = new_staging_dir(base)
+
+    result = reveal_staged_book(staged, staged, str(lib), release_id="r1")
+
+    assert result["ok"] is False
+    assert result["path"] == ""
+    assert "staging root" in result["error"]
+    assert list(lib.iterdir()) == []  # the library root itself is untouched
 
 
 def test_reveal_copies_across_filesystems(tmp_path):
