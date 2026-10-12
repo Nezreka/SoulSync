@@ -4947,8 +4947,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          for f in writable_file_rows(conn, eid)]
                 findings = {f['id']: f for file in files for f in linked_findings(conn, file)}
             safe_types = {'library_retag', 'track_number_mismatch', 'missing_cover_art', 'missing_lyrics', 'missing_replaygain', 'metadata_gap'}
-            missing = any(state == 'missing' for file in files
-                          for state in ((_coerce_tags(file.get('tags_json')).get('_validation') or {}).get('checks') or {}).values())
+            # A tag 'not_required' is absent from file AND catalogue: exactly
+            # what the provider re-query is for (artwork's means a setting).
+            missing = any(state == 'missing' or (state == 'not_required' and key not in ('cover', 'artwork_sidecar'))
+                          for file in files
+                          for key, state in ((_coerce_tags(file.get('tags_json')).get('_validation') or {}).get('checks') or {}).items())
             return [f for f in findings.values() if f['finding_type'] in safe_types], missing
 
         def _enrich_album():

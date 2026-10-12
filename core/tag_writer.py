@@ -514,8 +514,11 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
         # the writer preserves the file's value, so show it as no-change.
+        # A genre borrowed from the artist only fills an empty tag, never
+        # replaces the file's own (same hold-back, same preview).
         protected = False
-        if changed and guard_placeholder_overwrite(db_val, file_val) is None:
+        if changed and (guard_placeholder_overwrite(db_val, file_val) is None
+                        or (db_key == 'genres' and file_str and db_data.get('genres_from_artist'))):
             changed = False
             protected = True
 

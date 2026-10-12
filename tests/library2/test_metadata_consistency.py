@@ -86,6 +86,34 @@ def test_cached_art_is_not_a_database_image(library, monkeypatch):
     assert json.loads(observe(library)['tags_json'])['_validation']['checks']['artwork_database'] == 'missing'
 
 
+def test_a_tag_neither_file_nor_catalogue_has_is_not_an_issue(library):
+    """A finding promises a fix. With no catalogue genre the retag has nothing
+    to write, so the "genre: missing" finding failed its re-check forever."""
+    db, path, _ = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]'")
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,file_path,title,details_json) "
+                     "VALUES('library_retag','library_retag','track','lib2:7',?,'Metadata issues',?)",
+                     (str(path), json.dumps({'validation': {'checks': {'genre': 'missing'}}, 'required_fields': ['genre']})))
+    row = observe(library, {**read_tag_snapshot(str(path)), 'genre': None})
+    assert json.loads(row['tags_json'])['_validation']['checks']['genre'] == 'not_required'
+    with closing(db._get_connection()) as conn:
+        assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
+
+
+def test_an_album_without_genres_fills_an_empty_tag_from_its_artist(library):
+    """The import's genre order (artist first): the retag fills an empty tag
+    the same way, but never overwrites a file's own genre with the artist's."""
+    db, path, _ = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]'")
+        conn.execute("""UPDATE lib2_artists SET genres='["Synthwave","Retro","Outrun"]'""")
+    assert json.loads(observe(library)['tags_json'])['_validation']['checks']['genre'] == 'unknown'
+    validation = json.loads(observe(library, {**read_tag_snapshot(str(path)), 'genre': None})['tags_json'])['_validation']
+    assert validation['checks']['genre'] == 'missing'
+    assert validation['reference']['genres'] == ['Synthwave', 'Retro']
+
+
 def test_import_uses_native_edition_and_reads_final_file(library, monkeypatch):
     from core.library2.validation import import_reference, refresh_imported_metadata, metadata_states
     db, path, _ = library
@@ -459,6 +487,25 @@ def test_metadata_click_dispatches_persisted_finding_to_the_worker(library, monk
     response = app.test_client().post('/api/library/v2/tracks/7/fill-tag-gaps')
     assert response.status_code == 200
     assert fixed == [1]
+
+
+def test_metadata_click_still_asks_providers_for_a_tag_nobody_has(library, monkeypatch):
+    """No catalogue genre is no finding any more, but it is still the gap the
+    click's provider re-query exists for, even beside a fixable finding."""
+    from flask import Flask
+    from api.library_v2 import register_library_v2_routes
+    db, path, cfg = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]'")
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 3, 'genre': None})
+    asked = []
+    monkeypatch.setattr('core.library2.catalogue_refresh.fill_album_metadata_gaps', lambda _c, album_id: asked.append(album_id))
+    worker = SimpleNamespace(fix_finding=lambda fid: {'success': True})
+    app = Flask(__name__)
+    register_library_v2_routes(app, get_database=lambda: db, config_get=cfg.get, config_manager=cfg, repair_worker_getter=lambda: worker)
+    monkeypatch.setattr('threading.Thread', lambda target, **_kw: SimpleNamespace(start=target))
+    assert app.test_client().post('/api/library/v2/tracks/7/fill-tag-gaps').status_code == 200
+    assert asked == [1]
 
 
 def test_retag_tool_persists_and_rechecks_without_writing_files(library):

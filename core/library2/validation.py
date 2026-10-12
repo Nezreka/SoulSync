@@ -141,7 +141,10 @@ def validate_tags(conn, file_id, tags, config):
         key = 'albumartist' if diff['file_key'] == 'album_artist' else diff['file_key']
         if key not in EXPECTED_TAGS or key == 'cover':
             continue
-        checks[key] = ('missing' if not diff['file_value'] else 'unknown' if not diff['db_value'] or diff.get('protected')
+        # Empty in the file AND the catalogue: a retag has nothing to write, so
+        # "missing" would raise a finding whose fix can only fail its re-check.
+        checks[key] = ('not_required' if not diff['file_value'] and not diff['db_value']
+                       else 'missing' if not diff['file_value'] else 'unknown' if not diff['db_value'] or diff.get('protected')
                        else 'mismatch' if diff['changed'] else 'correct')
     for key, expected in (('total_tracks', data.get('track_count')), ('total_discs', data.get('total_discs'))):
         actual = tags.get(key)

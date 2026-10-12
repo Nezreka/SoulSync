@@ -3656,6 +3656,14 @@ class RepairWorker:
         if native_track_id is None:
             return {'success': False,
                     'error': 'No Library v2 track associated with this finding'}
+        if file_path:
+            from core.library2.paths import missing_path_root_is_healthy
+            resolved, _ = self._resolve_finding_path(entity_id, file_path)
+            if not os.path.exists(resolved) and missing_path_root_is_healthy(resolved, self._config_manager):
+                # stale=True: the reviewed file is gone, so `fix_finding`
+                # retires the row instead of failing it on every retry (#1143).
+                return {'success': False, 'stale': True,
+                        'error': f'File no longer on disk: {os.path.basename(file_path)}'}
         validation = details.get('validation') or {}
         from core.library2 import retag
         options = retag.retag_options(details['retag_options']) if details.get('retag_options') is not None else None

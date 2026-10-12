@@ -176,7 +176,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
                    al.expected_track_count, al.track_count,
                    al.image_url AS album_image_url,
                    al.primary_artist_id AS album_artist_id,
-                   ar.name AS album_artist_name,
+                   ar.name AS album_artist_name, ar.genres AS album_artist_genres,
                    (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                        AND COALESCE(tf.file_state,'active')
@@ -353,6 +353,10 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
                 manual[key] = data.get(key)
                 data[key] = overrides[field].value
     manual.update(_apply_overrides(conn, row, data))
+    if not data["genres"] and _genres_list(row["album_artist_genres"]):
+        # The import's order (artist genres, then album, core/metadata/source.py):
+        # an album with none fills an EMPTY tag from its artist (build_tag_diff).
+        data.update(genres=_genres_list(row["album_artist_genres"])[:2], genres_from_artist=True)
     data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2

@@ -304,6 +304,19 @@ def test_approved_finding_applies_stored_fill_missing_and_cover_skip(native_audi
     assert File(n.path)['albumartist'] == ['Drake']
 
 
+def test_a_finding_about_a_deleted_file_is_retired_not_left_failing(native_audio):
+    """#1143 for retag: the reviewed file was deleted, so no retry can succeed."""
+    import os
+    n = native_audio
+    os.remove(n.path)
+    n.conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE id=?", (n.file_id,))
+    n.conn.commit()
+    worker = object.__new__(RepairWorker)
+    worker.db, worker._config_manager, worker.transfer_folder = n.db, n.cfg, None
+    result = worker._fix_library_retag('track', f'lib2:{n.track}', n.path, {'validation': {'file_id': n.file_id}})
+    assert result['stale'] and not result['success'], result
+
+
 def test_failed_sibling_save_keeps_retag_apply_failed(native_audio, tmp_path, monkeypatch):
     n = native_audio
     other = tmp_path / 'sibling.opus'
