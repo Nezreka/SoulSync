@@ -267,19 +267,20 @@ def reorder_tracks(db: Any, playlist: Dict[str, Any], order: Iterable[Any]) -> N
 # ── cover, description, duplicate ─────────────────────────────────────────
 
 
-def cover_dir(base_dir: Optional[str] = None) -> str:
+def cover_dir(base_dir: Optional[str] = None, *, mkdir: bool = True) -> str:
     """where uploaded playlist covers live. the env var is the docker escape
     hatch; base_dir is soulsync's data dir in production."""
     d = os.environ.get("SOULSYNC_PLAYLIST_COVER_DIR")
     if not d:
         d = os.path.join(str(base_dir) if base_dir else ".", "storage", "playlist_covers")
-    os.makedirs(d, exist_ok=True)
+    if mkdir:
+        os.makedirs(d, exist_ok=True)
     return d
 
 
-def cover_path(playlist_id: int, base_dir: Optional[str] = None) -> str:
+def cover_path(playlist_id: int, base_dir: Optional[str] = None, *, mkdir: bool = True) -> str:
     # fixed name, no user input in the path: nothing to traverse.
-    return os.path.join(cover_dir(base_dir), f"user-{int(playlist_id)}.webp")
+    return os.path.join(cover_dir(base_dir, mkdir=mkdir), f"user-{int(playlist_id)}.webp")
 
 
 def cover_url(playlist_id: int) -> str:
@@ -357,6 +358,15 @@ def set_cover_from_track(db: Any, playlist: Dict[str, Any], position: Any) -> st
     ):
         raise RuntimeError('could not save the cover')
     return art
+
+
+def remove_cover_file(playlist_id: int, base_dir: Optional[str] = None) -> None:
+    """best-effort delete of an uploaded cover file. only user playlists ever
+    have one, so after any mirror delete this is a no-op for the rest."""
+    try:
+        os.remove(cover_path(playlist_id, base_dir))
+    except OSError:
+        pass
 
 
 def clear_cover(db: Any, playlist: Dict[str, Any], *, base_dir: Optional[str] = None) -> None:

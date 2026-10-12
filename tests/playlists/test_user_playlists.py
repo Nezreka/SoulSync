@@ -510,3 +510,49 @@ def test_new_routes_are_404_for_foreign_playlists(mdb, monkeypatch, tmp_path):
         == 404
     )
     assert mdb.get_mirrored_playlist(theirs)["image_url"] is None
+
+
+def test_cover_get_is_not_profile_scoped(mdb, monkeypatch, tmp_path):
+    # profile 3 uploads a cover; profile 1 — what the sync's cookieless fetch
+    # resolves to — can still read it back for the media server.
+    owner = _client_with_covers(mdb, monkeypatch, tmp_path, profile_id=3)
+    pid = owner.post("/api/user-playlists", json={"name": "Theirs"}).get_json()["id"]
+    r = owner.post(
+        f"/api/user-playlists/{pid}/cover",
+        data={"file": (io.BytesIO(_png()), "c.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    reader = _client_with_covers(mdb, monkeypatch, tmp_path, profile_id=1, is_admin=True)
+    r = reader.get(f"/api/user-playlists/{pid}/cover")
+    assert r.status_code == 200
+    assert r.content_type == "image/webp"
+    # a non-user mirror still reads as missing
+    mirror = mdb.mirror_playlist(source="spotify", source_playlist_id="sp", name="M",
+                                 tracks=[], profile_id=1)
+    assert reader.get(f"/api/user-playlists/{mirror}/cover").status_code == 404
+
+
+def test_deleting_the_playlist_removes_its_cover_file(mdb, monkeypatch, tmp_path):
+    # the cover upload lives under the user-playlist api; deletion rides the
+    # mirrored route, like the ui does — the file must not be orphaned.
+    import api.mirrored_playlists as mpl
+
+    c = _client_with_covers(mdb, monkeypatch, tmp_path)
+    pid = c.post("/api/user-playlists", json={"name": "Mix"}).get_json()["id"]
+    r = c.post(
+        f"/api/user-playlists/{pid}/cover",
+        data={"file": (io.BytesIO(_png()), "c.png")},
+        content_type="multipart/form-data",
+    )
+    assert r.status_code == 200
+    assert os.path.isfile(up.cover_path(pid, str(tmp_path)))
+
+    monkeypatch.setattr(mpl, "get_database", lambda: mdb)
+    monkeypatch.setattr(mpl, "_cover_base_dir", lambda: str(tmp_path))
+    app = Flask(__name__)
+    app.register_blueprint(mpl.create_blueprint())
+    dc = app.test_client()
+    assert dc.delete(f"/api/mirrored-playlists/{pid}").status_code == 200
+    assert not os.path.exists(up.cover_path(pid, str(tmp_path)))
+    assert mdb.get_mirrored_playlist(pid) is None

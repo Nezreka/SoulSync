@@ -5,7 +5,7 @@
  * -sync.mirrored.test.ts.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { MirroredDetailModal } from './mirrored-detail-modal';
@@ -306,10 +306,14 @@ describe('MirroredDetailModal — user playlist meta', () => {
     expect(screen.getByRole('button', { name: 'Remove cover' })).toBeInTheDocument();
   });
 
-  it('duplicate calls through and the tab opens the copy', () => {
+  it('duplicate calls through and the tab opens the copy', async () => {
     const onDuplicate = vi.fn(async () => {});
     renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn(), onDuplicate });
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
-    expect(onDuplicate).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onDuplicate).toHaveBeenCalledTimes(1));
+    // flush the busy-state reset that lands after the promise resolves
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Duplicate' })).toHaveTextContent('Duplicate'),
+    );
   });
 });

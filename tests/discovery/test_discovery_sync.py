@@ -96,6 +96,7 @@ class _FakeConfig:
 class _FakePlex:
     def __init__(self, existing=()):
         self.image_calls = []
+        self.local_paths = []
         # Names the test declares already present on the server (#993 existence
         # probe). Anything not listed reads as a brand-new playlist.
         self._existing = {n.lower() for n in existing}
@@ -103,8 +104,9 @@ class _FakePlex:
     def get_playlist_by_name(self, name):
         return object() if name.lower() in self._existing else None
 
-    def set_playlist_image(self, name, url):
+    def set_playlist_image(self, name, url, local_path=None):
         self.image_calls.append((name, url))
+        self.local_paths.append(local_path)
         return True
 
 
@@ -998,3 +1000,59 @@ def test_user_playlist_uploaded_cover_resolves_to_absolute_url(monkeypatch, patc
                      sync_mode='replace')
 
     assert nd.image_calls == [('Mine', 'http://127.0.0.1:8008/api/user-playlists/7/cover')]
+
+
+def test_sync_with_no_cover_url_does_not_crash(patched_db):
+    """A NULL image_url on the row arrives as None (dict.get default doesn't
+    fire): the sync must finish normally, not die on AttributeError."""
+    plex = _FakePlex()
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=5)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    states = {}
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg, sync_states=states)
+
+    ds.run_sync_task('pNoImg', 'PNoImg', [_track()],
+                     playlist_image_url=None, deps=deps, sync_mode='replace')
+
+    assert states['pNoImg']['status'] == 'finished'
+    assert plex.image_calls == []
+
+
+def test_plex_gets_local_filepath_for_uploaded_cover(monkeypatch, patched_db, tmp_path):
+    """Plex downloads the poster URL itself, so a 127.0.0.1 URL breaks when
+    Plex runs in another container. A SoulSync-local cover goes by file path."""
+    _user_playlist_db(monkeypatch)
+    monkeypatch.setenv('SOULSYNC_PLAYLIST_COVER_DIR', str(tmp_path))
+    cover = tmp_path / 'user-7.webp'
+    cover.write_bytes(b'fake-webp')
+    plex = _FakePlex()
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
+
+    ds.run_sync_task('7', 'Mine', [_track()],
+                     playlist_image_url='/api/user-playlists/7/cover?v=1', deps=deps,
+                     sync_mode='replace')
+
+    assert plex.image_calls == [('Mine', 'http://127.0.0.1:8008/api/user-playlists/7/cover')]
+    assert plex.local_paths == [str(cover)]
+
+
+def test_plex_falls_back_to_url_when_no_local_cover_file(monkeypatch, patched_db, tmp_path):
+    """No file on disk (remote URL cover, or file deleted): plain URL push."""
+    _user_playlist_db(monkeypatch)
+    monkeypatch.setenv('SOULSYNC_PLAYLIST_COVER_DIR', str(tmp_path))
+    plex = _FakePlex()
+    cfg = _FakeConfig(server='plex')
+    result = _FakeSyncResult(synced_tracks=4)
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, plex=plex, config=cfg)
+
+    ds.run_sync_task('7', 'Mine', [_track()],
+                     playlist_image_url='https://img/mine.jpg', deps=deps,
+                     sync_mode='replace')
+
+    assert plex.image_calls == [('Mine', 'https://img/mine.jpg')]
+    assert plex.local_paths == [None]

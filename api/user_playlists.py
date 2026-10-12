@@ -245,10 +245,15 @@ def clear_user_playlist_cover(playlist_id):
 
 @bp.route('/api/user-playlists/<int:playlist_id>/cover', methods=['GET'])
 def get_user_playlist_cover(playlist_id):
+    # Reads are NOT owner-scoped: the media-server sync fetches this URL with
+    # no session (and Plex fetches it server-side), so get_current_profile_id()
+    # would fall back to the admin and 404 every non-admin playlist's cover.
+    # Same posture as the avatar endpoint: the file serves, everything else
+    # about the playlist stays behind the profile gate.
     try:
         database = get_database()
-        playlist = _own_user_playlist(database, playlist_id)
-        if not playlist:
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not up.is_user_playlist(playlist):
             return _not_found()
         path = up.cover_path(playlist_id, _cover_base_dir())
         if not os.path.isfile(path):

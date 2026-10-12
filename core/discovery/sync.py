@@ -663,9 +663,27 @@ def run_sync_task(
         # the common case; a server on another box degrades to today's
         # best-effort False.
         _push_image_url = playlist_image_url
-        if _push_image_url.startswith('/'):
+        # the row's image_url is NULL for a cover-less playlist, and .get()
+        # hands that None straight through — guard it, or every such sync
+        # dies here on AttributeError.
+        _cover_local_path = None
+        if _push_image_url and _push_image_url.startswith('/'):
             _port = int(os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008'))
             _push_image_url = f"http://127.0.0.1:{_port}{_push_image_url.split('?')[0]}"
+            # a SoulSync-local cover also exists as a file: Plex fetches URLs
+            # itself, so 127.0.0.1 breaks when it runs in another container —
+            # hand Plex the file instead (mkdir=False: this is a probe).
+            if playlist_image_url.startswith('/api/user-playlists/'):
+                try:
+                    from core.playlists import user_playlists as _up
+                    _cm = deps.config_manager
+                    _base = getattr(_cm, 'base_dir', None) if _cm else None
+                    _cand = _up.cover_path(int(playlist_id), str(_base) if _base else None,
+                                           mkdir=False)
+                    if os.path.isfile(_cand):
+                        _cover_local_path = _cand
+                except Exception:
+                    _cover_local_path = None
         # Modes that edit a playlist in place (reconcile #792, append #811) must NOT
         # push the source image, and neither does a sync of a playlist that already
         # exists (#993) — either re-clobbers a user's custom poster. The source cover
@@ -683,7 +701,8 @@ def run_sync_task(
                 if active_server == 'plex' and _engine and _engine.client('plex'):
                     from services.sync_service import plex_client_for_profile
                     _px = plex_client_for_profile(profile_id, _engine.client('plex'))
-                    ok = _px.set_playlist_image(playlist_name, _push_image_url)
+                    ok = _px.set_playlist_image(playlist_name, _push_image_url,
+                                                local_path=_cover_local_path)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
                     from services.sync_service import jellyfin_client_for_profile

@@ -21,6 +21,7 @@ from api.source_playlists import (
     youtube_playlist_states,
 )
 from core.api_validation import parse_strict_bool, parse_strict_int
+from core.playlists import user_playlists as _up
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
 
@@ -45,6 +46,13 @@ def configure(**deps):
         if name not in g:
             raise KeyError(f"mirrored_playlists.configure: unknown dep {name!r}")
         g[name] = value
+
+
+def _cover_base_dir():
+    # uploaded user-playlist covers; deleted with the playlist so orphaned
+    # webp files don't accumulate in storage.
+    base = getattr(config_manager, "base_dir", None) if config_manager else None
+    return str(base) if base else None
 
 
 bp = Blueprint('mirrored_playlists', __name__)
@@ -694,6 +702,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     try:
         database = get_database()
         if database.delete_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id()):
+            _up.remove_cover_file(playlist_id, _cover_base_dir())
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
@@ -725,6 +734,7 @@ def batch_delete_mirrored_playlists_endpoint():
         deleted, not_deleted = [], []
         for pid in dict.fromkeys(ids):
             if database.delete_mirrored_playlist(pid, profile_id=scope):
+                _up.remove_cover_file(pid, _cover_base_dir())
                 deleted.append(pid)
             else:
                 not_deleted.append(pid)
