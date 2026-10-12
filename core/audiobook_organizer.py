@@ -42,9 +42,13 @@ half-moved book can never lose chapters.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
+import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -337,6 +341,179 @@ def organize_download(
 
     return {"ok": True, "path": str(destination), "files": written,
             "skipped": skipped, "error": ""}
+
+
+# Staging: build the book where media servers can't see it, then reveal it.
+#
+# The music side cures partial-file visibility with atomic_copy_to_staging
+# (copy to a temp name, rename into place). A book folder needs the same
+# guarantee at the folder level: the M4B merge deletes its source chapters
+# after folding them, so filing sources into the watched library first lets
+# Plex ingest files that then vanish. Staging the whole folder and revealing
+# it in one atomic operation means scanners only ever see complete books.
+
+STAGING_DIR_NAME = ".soulsync-audiobook-staging"
+
+# Staging dirs orphaned by a crashed import are swept lazily. Imports run
+# sequentially in the download monitor's tick and a merge is time-bounded
+# (the ffmpeg timeout), so a live staging dir is never 24h old; anything
+# older is a crash leftover.
+_STAGING_MAX_AGE_SECONDS = 24 * 3600
+
+
+def staging_base(library_root: str) -> Optional[Path]:
+    """Where staged book folders live: a sibling of the library root.
+
+    Outside the library (so Plex/Audiobookshelf/Jellyfin never watch it)
+    and hidden (belt and suspenders). Returns None when it cannot be set
+    up — the caller then files directly into the library, exactly like
+    before.
+    """
+    try:
+        base = Path(library_root).expanduser().resolve().parent / STAGING_DIR_NAME
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Could not set up audiobook staging next to %s: %s",
+                       library_root, exc)
+        return None
+    _sweep_stale_staging(base)
+    return base
+
+
+def _sweep_stale_staging(base: Path) -> None:
+    """Best-effort removal of staging dirs orphaned by a crashed import."""
+    now = time.time()
+    try:
+        entries = list(base.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        try:
+            if not entry.is_dir():
+                continue
+            age = now - entry.stat().st_mtime
+        except OSError:
+            continue
+        if age < _STAGING_MAX_AGE_SECONDS:
+            continue
+        try:
+            shutil.rmtree(entry, ignore_errors=True)
+            logger.info("Swept stale audiobook staging dir %s", entry.name)
+        except OSError:
+            pass
+
+
+def new_staging_dir(base: Path) -> Optional[Path]:
+    """A fresh, uniquely-named staging dir for one import attempt."""
+    try:
+        return Path(tempfile.mkdtemp(prefix="book-", dir=str(base)))
+    except OSError as exc:
+        logger.warning("Could not create audiobook staging dir in %s: %s",
+                       base, exc)
+        return None
+
+
+def reveal_staged_book(staged_book: Path, stage_root: Path,
+                       library_root: str, release_id: str = "") -> Dict[str, Any]:
+    """Move a staged book folder into the real library, Plex-clean.
+
+    ``staged_book`` is the book folder organize_download built under
+    ``stage_root``; it lands at the same relative location under
+    ``library_root``. When the destination does not exist yet the whole
+    folder is renamed in one atomic operation — media servers see the
+    complete book appear at once. Otherwise (destination exists, or the
+    rename crosses filesystems as with Docker -v / NAS mounts) files move
+    over one by one, each appearing atomically: a rename where possible,
+    otherwise a copy to a temp name inside the destination plus rename —
+    the music side's atomic_copy_to_staging shape. Either way scanners never
+    see a half-written file, and never see source files that are about to be
+    deleted (the M4B case that started this).
+
+    The one-book-one-release rule is enforced against the REAL destination:
+    a different release already living there refuses the reveal, with the
+    same message organizing into it would have produced.
+    """
+    try:
+        rel = staged_book.resolve().relative_to(stage_root.resolve())
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "path": "", "files": [],
+                "error": f"Staged book is not under the staging root: {exc}"}
+    dest = Path(library_root).expanduser() / rel
+
+    if not staged_book.is_dir():
+        return {"ok": False, "path": "", "files": [],
+                "error": f"Staged book folder is missing: {staged_book}"}
+
+    if release_id and not folder_accepts_release(dest, release_id):
+        claimed = read_release_marker(dest)
+        return {
+            "ok": False, "path": "", "files": [],
+            "error": (f"{dest.name} was already filled from a different release "
+                      f"({claimed}). Mixing two editions would interleave narrators."),
+        }
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"ok": False, "path": "", "files": [],
+                "error": f"Could not create {dest.parent}: {exc}"}
+
+    try:
+        # The fast path: one atomic rename, the book appears whole.
+        os.replace(staged_book, dest)
+    except OSError:
+        # Destination exists, or the rename crosses filesystems — move file
+        # by file, each appearing atomically.
+        error = _reveal_files(staged_book, dest)
+        if error:
+            return {"ok": False, "path": "", "files": [], "error": error}
+
+    try:
+        files = sorted(str(p) for p in dest.rglob("*") if p.is_file())
+    except OSError as exc:
+        return {"ok": False, "path": str(dest), "files": [],
+                "error": f"Book revealed but could not be listed: {exc}"}
+    return {"ok": True, "path": str(dest), "files": files, "error": ""}
+
+
+def _reveal_files(staged_book: Path, dest: Path) -> Optional[str]:
+    """Move every file from ``staged_book`` into ``dest``, each atomic.
+
+    Rename where possible; on EXDEV (Docker -v / NAS mounts: staging and
+    library on different filesystems) copy to a temp name inside ``dest``
+    and rename into place, then drop the staged source. Returns None on
+    success, or an error string — the first failure aborts, and a retry
+    overwrites the partial arrivals idempotently.
+    """
+    try:
+        sources = sorted(p for p in staged_book.rglob("*") if p.is_file())
+    except OSError as exc:
+        return f"Could not walk staged book: {exc}"
+    for src in sources:
+        target = dest / src.relative_to(staged_book)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return f"Could not create {target.parent}: {exc}"
+        try:
+            os.replace(src, target)
+            continue
+        except OSError as exc:
+            if exc.errno != errno.EXDEV:
+                return f"Could not reveal {src.name}: {exc}"
+        # Cross-filesystem: the music side's staging shape — copy to a temp
+        # name (invisible: no media extension) then swap it into place.
+        tmp = target.with_name(f"{target.name}.tmp.{uuid.uuid4().hex[:8]}")
+        try:
+            shutil.copy2(src, tmp)
+            os.replace(tmp, target)
+            src.unlink()
+        except OSError as exc:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            return f"Could not reveal {src.name}: {exc}"
+    return None
 
 
 def _copy_sidecars(source: Path, destination: Path) -> None:

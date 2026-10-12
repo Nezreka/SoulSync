@@ -17,6 +17,7 @@ Nothing here touches the music batches, worker pool, wishlist or database.
 from __future__ import annotations
 
 import asyncio
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -426,9 +427,62 @@ def _book_for(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    """True when ``path`` lives under ``root`` (symlinks resolved)."""
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _nudge_media_server_scan() -> None:
+    """Best-effort: tell the active media server a book just landed.
+
+    Plex's filesystem watcher usually notices the reveal on its own; this
+    covers scheduled-scan setups so nobody has to rescan by hand. Uses the
+    default section, same as the web UI's Scan Library button. Never raises.
+    """
+    try:
+        from core.media_server.engine import get_media_server_engine
+        client = get_media_server_engine().active_client()
+        if client is None or not client.is_connected():
+            return
+        client.trigger_library_scan()
+        logger.info("Requested a media-server library scan for the new audiobook")
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Media-server scan nudge failed: %s", exc)
+
+
+def _request_scan_nudge() -> None:
+    """Fire-and-forget wrapper: a slow or unreachable media server must never
+    stall the import tick (is_connected can block retrying a dead server)."""
+    threading.Thread(target=_nudge_media_server_scan, daemon=True).start()
+
+
 def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    """File a finished download into the audiobook library."""
-    from core.audiobook_organizer import configured_template, library_root, organize_download
+    """File a finished download into the audiobook library.
+
+    The book is built in a staging folder outside the media-server-watched
+    library and revealed when it is complete — the folder-level version of
+    the music side's atomic_copy_to_staging. The reveal is one atomic folder
+    rename (per-file, each appearing atomically, when the destination
+    already exists or the rename crosses filesystems). Without
+    this, the M4B merge's file-then-delete sequence lets Plex ingest chapter
+    files that vanish moments later, leaving ghost entries until a manual
+    rescan.
+    """
+    from core.audiobook_organizer import (
+        configured_template,
+        folder_accepts_release,
+        library_root,
+        new_staging_dir,
+        organize_download,
+        read_release_marker,
+        render_audiobook_path,
+        reveal_staged_book,
+        staging_base,
+    )
 
     book = _book_for(row)
 
@@ -439,54 +493,110 @@ def _organize(source_path: str, row: Dict[str, Any]) -> Dict[str, Any]:
         logger.debug("Could not read the renumber setting, defaulting on: %s", exc)
         renumber = True
 
-    result = organize_download(
-        source_path, book, library_root(),
-        template=configured_template(), renumber=renumber,
-        # Claims the folder for this release so a retry or an "any narrator"
-        # fallback can never interleave two readings into one book.
-        release_id=str(row.get("release_title") or row.get("download_id") or ""),
-    )
+    lib_root = library_root()
+    # Claims the folder for this release so a retry or an "any narrator"
+    # fallback can never interleave two readings into one book.
+    release_id = str(row.get("release_title") or row.get("download_id") or "")
 
-    # Tags, cover and sidecars, after the files are safely in place. Guarded
-    # separately and never allowed to fail the import: the book is already in
-    # the library by now, and a badly labelled book beats a lost one.
-    if result.get("ok") and result.get("path"):
-        # Optional: fold a multi-file book into one chaptered .m4b before
-        # tagging. merge_book_files never raises and returns the original
-        # list on any skip or failure, so the book is never worse off for the
-        # attempt — the guard below is belt and suspenders.
-        files = result.get("files") or []
-        if result.get("skipped"):
-            # A retry that found some chapters already filed: `files` holds
-            # only the remainder, and merging that subset would fold a
-            # partial book and strand the rest as loose files.
-            logger.info("Skipping the M4B merge for %s: %d file(s) already filed",
-                        result.get("path"), len(result["skipped"]))
-            # A crash mid-encode can still have stranded a partial .m4b here.
-            # The merge itself is skipped, but move the unplayable strand
-            # aside (never delete) so it is neither ingested nor squatting
-            # the name a future merge wants.
-            try:
-                from core.audiobook_m4b_merge import merge_enabled, sweep_unverifiable_m4b
-                if merge_enabled():
-                    sweep_unverifiable_m4b(
-                        result["path"], files + list(result.get("skipped") or []))
-            except Exception as exc:                        # noqa: BLE001
-                logger.warning("M4B sweep failed for %s: %s", result.get("path"), exc)
-        else:
-            try:
-                from core.audiobook_m4b_merge import merge_book_files
-                files = merge_book_files(result["path"], files, book)
-            except Exception as exc:                        # noqa: BLE001
-                logger.warning("M4B merge step failed for %s: %s", result.get("path"), exc)
-                files = result.get("files") or []
-        try:
-            from core.audiobook_post_processor import post_process_book
-            post_process_book(result["path"], book, files or None)
-        except Exception as exc:                            # noqa: BLE001
-            logger.warning("Post-processing %s failed: %s", result.get("path"), exc)
+    template = configured_template()
+    if release_id:
+        # Fail fast: the one-book-one-release rule is checked against the
+        # REAL destination before anything is copied or merged — the reveal
+        # re-checks, but a refused reveal after a 20-minute merge is a
+        # wasted evening.
+        real_dest = Path(lib_root).expanduser().joinpath(
+            *render_audiobook_path(template, book))
+        if not folder_accepts_release(real_dest, release_id):
+            claimed = read_release_marker(real_dest)
+            return {"ok": False, "path": "", "files": [], "skipped": [],
+                    "error": (f"{real_dest.name} was already filled from a different release "
+                              f"({claimed}). Mixing two editions would interleave narrators.")}
 
-    return result
+    # Staging lives next to the library, invisible to media servers. If it
+    # cannot be set up, file directly into the library — today's behavior,
+    # never worse.
+    stage_root = None
+    file_root = lib_root
+    base = staging_base(lib_root)
+    if base is not None:
+        stage_root = new_staging_dir(base)
+        if stage_root is not None:
+            file_root = str(stage_root)
+
+    try:
+        result = organize_download(
+            source_path, book, file_root,
+            template=template, renumber=renumber,
+            release_id=release_id,
+        )
+
+        # Tags, cover and sidecars, after the files are safely in place.
+        # Guarded separately and never allowed to fail the import: a badly
+        # labelled book beats a lost one.
+        if result.get("ok") and result.get("path"):
+            # Optional: fold a multi-file book into one chaptered .m4b before
+            # tagging. merge_book_files never raises and returns the original
+            # list on any skip or failure, so the book is never worse off for the
+            # attempt — the guard below is belt and suspenders.
+            files = result.get("files") or []
+            if result.get("skipped"):
+                # A retry that found some chapters already filed: `files` holds
+                # only the remainder, and merging that subset would fold a
+                # partial book and strand the rest as loose files.
+                logger.info("Skipping the M4B merge for %s: %d file(s) already filed",
+                            result.get("path"), len(result["skipped"]))
+                # A crash mid-encode can still have stranded a partial .m4b here.
+                # The merge itself is skipped, but move the unplayable strand
+                # aside (never delete) so it is neither ingested nor squatting
+                # the name a future merge wants.
+                try:
+                    from core.audiobook_m4b_merge import merge_enabled, sweep_unverifiable_m4b
+                    if merge_enabled():
+                        sweep_unverifiable_m4b(
+                            result["path"], files + list(result.get("skipped") or []))
+                except Exception as exc:                        # noqa: BLE001
+                    logger.warning("M4B sweep failed for %s: %s", result.get("path"), exc)
+            else:
+                try:
+                    from core.audiobook_m4b_merge import merge_book_files
+                    files = merge_book_files(result["path"], files, book)
+                except Exception as exc:                        # noqa: BLE001
+                    logger.warning("M4B merge step failed for %s: %s", result.get("path"), exc)
+                    files = result.get("files") or []
+            try:
+                from core.audiobook_post_processor import post_process_book
+                post_process_book(result["path"], book, files or None)
+            except Exception as exc:                            # noqa: BLE001
+                logger.warning("Post-processing %s failed: %s", result.get("path"), exc)
+
+        if stage_root is not None and result.get("ok") and result.get("path"):
+            staged_path = Path(result["path"])
+            if _is_within(staged_path, stage_root):
+                revealed = reveal_staged_book(
+                    staged_path, stage_root, lib_root, release_id=release_id,
+                )
+                if not revealed.get("ok"):
+                    logger.warning("Revealing %s into the library failed: %s",
+                                   result.get("path"), revealed.get("error"))
+                    return {"ok": False, "path": "", "files": [],
+                            "skipped": result.get("skipped") or [],
+                            "error": revealed.get("error") or "Could not move the book into the library"}
+                result = {"ok": True, "path": revealed["path"], "files": revealed["files"],
+                          "skipped": result.get("skipped") or [], "error": ""}
+            else:
+                # organize_download filed outside the staging root (a test
+                # double, or a future code path that bypasses staging): there
+                # is nothing to reveal, return the result untouched.
+                logger.debug("Organized path %s is not under staging; skipping reveal",
+                             result["path"])
+        if result.get("ok") and result.get("path"):
+            # The library changed — book revealed or filed directly. Nudge
+            # the media server so it shows up without a manual rescan.
+            _request_scan_nudge()
+        return result
+    finally:
+        if stage_root is not None:
+            shutil.rmtree(stage_root, ignore_errors=True)
 
 
 def tick(db: Any = None) -> Dict[str, int]:
