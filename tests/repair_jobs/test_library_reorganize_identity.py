@@ -178,3 +178,30 @@ def test_a_missing_track_id_is_an_error_not_a_wrong_link(
 
     assert findings == []
     assert result.errors == 1
+
+
+def test_a_finding_carries_the_names_the_album_grouped_list_needs(
+        reorg_db, tmp_path, monkeypatch):
+    """The Tools list groups findings by artist + album; without the names
+    the job reported 48 findings and the list showed none."""
+    _stub_preview(monkeypatch, tmp_path)
+    findings = []
+    LibraryReorganizeJob().scan(_ctx(reorg_db, findings))
+
+    assert {k: findings[0]['details'][k] for k in ('artist', 'album')} == {
+        'artist': 'Artist', 'album': 'Album'}
+
+
+def test_an_album_whose_only_file_was_deleted_is_not_an_error(
+        reorg_db, tmp_path, monkeypatch):
+    """Reported as "1 errors": the bridge rejected an album whose one file had
+    been deleted ("No tracks found for this album")."""
+    conn = row_conn(reorg_db.database_path)
+    conn.execute("UPDATE lib2_track_files SET file_state='deleted'")
+    conn.commit()
+    conn.close()
+    _stub_preview(monkeypatch, tmp_path)
+
+    result = LibraryReorganizeJob().scan(_ctx(reorg_db, []))
+
+    assert (result.scanned, result.errors) == (0, 0)

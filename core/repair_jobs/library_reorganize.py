@@ -68,6 +68,7 @@ class LibraryReorganizeJob(RepairJob):
                         SELECT 1 FROM lib2_tracks t
                         JOIN lib2_track_files f ON f.track_id=t.id
                         WHERE t.album_id=al.id
+                          AND COALESCE(f.file_state,'active') NOT IN ('deleted','missing_confirmed')
                     )
                     ORDER BY al.id"""
             ).fetchall()
@@ -178,6 +179,9 @@ class LibraryReorganizeJob(RepairJob):
                         title=f"Would move: {os.path.basename(current_path) or track.get('title', '')}",
                         description=f"From: {current_path or '?'}\nTo: {new_path or '?'}",
                         details={
+                            # the Tools list groups by these two
+                            "artist": album["artist_name"],
+                            "album": album["title"],
                             "from": current_path,
                             "to": new_path,
                             "from_abs": track.get("current_path_abs") or "",
