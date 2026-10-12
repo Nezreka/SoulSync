@@ -67,11 +67,13 @@ function getStatusBadgeClass(status: AudiobookWishlistStatus): string {
   }
 }
 
+const RING_CIRCUMFERENCE = 2 * Math.PI * 26;
+
 /**
  * The audiobooks half of the wishlist page.
  *
- * Designed with a premium aesthetic featuring:
- * - Glassmorphic command hero with live automation status
+ * Shares the music tab's premier (wlp-*) design system:
+ * - Same hero, stats, triage banner and command bar as music
  * - Interactive status chips with glowing indicator dots
  * - Dual view modes: Gallery Grid & Bookshelf List
  * - 3D book cover depth with spine sheen and hover elevation
@@ -79,8 +81,10 @@ function getStatusBadgeClass(status: AudiobookWishlistStatus): string {
  */
 export function WishlistAudiobooks({
   onCountChange,
+  onClearAll,
 }: {
   onCountChange?: (count: number) => void;
+  onClearAll?: () => void;
 } = {}) {
   const [items, setItems] = useState<AudiobookWishlistEntry[]>([]);
   const [counts, setCounts] = useState<AudiobookWishlistCounts | null>(null);
@@ -208,82 +212,119 @@ export function WishlistAudiobooks({
   };
 
   const backoffHours = Math.round((worker?.retry_after_seconds ?? 0) / 3600);
+  const failedCount = counts?.failed ?? 0;
 
   return (
     <div className={styles.panel}>
-      {/* ── Glassmorphic Command Hero ───────────────────────────────────── */}
-      <section className={styles.heroBanner}>
-        <div className={styles.heroContent}>
-          <div className={styles.heroTagline}>
-            <span className={styles.heroPill}>
-              <span className={styles.heroPulseDot} />
-              Automation Active
-            </span>
-            <span className={styles.heroTitle}>
-              {worker?.automation_name ?? 'Auto-Process Audiobook Wishlist'}
-            </span>
+      {/* ── Hero — same wlp markup as the music tab ─────────────────────── */}
+      <header className="wlp-hero">
+        <div className="wlp-hero-top">
+          <div>
+            <div className="wlp-eyebrow">Audiobooks</div>
+            <h1 className="wlp-title">Wishlist</h1>
+            <p className="wlp-sub">
+              {backoffHours > 0
+                ? `Every book you're hunting down. The automation searches your indexers on a schedule — each title waits ${backoffHours} hours between attempts so indexers don't rate-limit you. Customise frequency anytime on the Automations page.`
+                : "Every book you're hunting down. The automation searches your indexers on a schedule, around the clock. Customise frequency anytime on the Automations page."}
+            </p>
           </div>
-
-          <p className={styles.heroDesc}>
-            Searches indexers on a schedule
-            {backoffHours > 0 &&
-              ` — each title waits ${backoffHours} hours between attempts to prevent rate-limiting`}
-            . Customise frequency anytime on the Automations page.
-          </p>
-
-          {counts && (
-            <div className={styles.heroStats}>
-              <div className={styles.heroStatItem}>
-                <span className={styles.heroStatVal}>{counts.total}</span>
-                <span className={styles.heroStatLabel}>Total</span>
-              </div>
-              <div className={styles.heroStatItem}>
-                <span className={styles.heroStatVal}>{counts.wanted ?? 0}</span>
-                <span className={styles.heroStatLabel}>Looking</span>
-              </div>
-              <div className={styles.heroStatItem}>
-                <span className={styles.heroStatVal}>
-                  {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
-                </span>
-                <span className={styles.heroStatLabel}>In Flight</span>
-              </div>
-              <div className={styles.heroStatItem}>
-                <span className={styles.heroStatVal}>{counts.done ?? 0}</span>
-                <span className={styles.heroStatLabel}>In Library</span>
-              </div>
+          <div className="wlp-nextrun">
+            <div className="wlp-ring" aria-hidden="true">
+              <svg viewBox="0 0 64 64">
+                <circle className="wlp-ring-bg" cx="32" cy="32" r="26" />
+                <circle
+                  className={`wlp-ring-fg${searching ? ' is-live' : ''}`}
+                  cx="32"
+                  cy="32"
+                  r="26"
+                  strokeDasharray={`${RING_CIRCUMFERENCE * 0.22} ${RING_CIRCUMFERENCE}`}
+                  strokeDashoffset={0}
+                />
+              </svg>
+              <span className="wlp-ring-center">{searching ? '⟳' : '🎧'}</span>
             </div>
-          )}
+            <div className="wlp-nextrun-meta">
+              <span className="wlp-nextrun-label">
+                {worker?.automation_name ?? 'Auto-Process Audiobook Wishlist'}
+              </span>
+              <span className="wlp-nextrun-time">{searching ? 'Searching…' : 'Active'}</span>
+              <span className="wlp-cycle-badge">
+                {worker ? `Batch of ${worker.batch_size} per pass` : 'On a schedule'}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div className={styles.heroActions}>
-          <button
-            type="button"
-            className={styles.searchNow}
-            onClick={() => void searchNow()}
-            disabled={searching}
-            aria-label="Search now"
-          >
-            {searching ? (
-              <>
-                <span className={styles.searchNowSpinner} />
-                Searching…
-              </>
-            ) : (
-              <>⚡ Search now</>
+        {counts && counts.total > 0 && (
+          <div className="wlp-stats">
+            <div className="wlp-stat">
+              <span className="wlp-stat-value">{counts.total}</span>
+              <span className="wlp-stat-label">Wanted</span>
+            </div>
+            <div className="wlp-stat">
+              <span className="wlp-stat-value">{counts.wanted ?? 0}</span>
+              <span className="wlp-stat-label">Looking</span>
+            </div>
+            <div className="wlp-stat">
+              <span className="wlp-stat-value">
+                {(counts.searching ?? 0) + (counts.grabbed ?? 0)}
+              </span>
+              <span className="wlp-stat-label">In Flight</span>
+            </div>
+            <div className="wlp-stat">
+              <span className="wlp-stat-value">{counts.done ?? 0}</span>
+              <span className="wlp-stat-label">In Library</span>
+            </div>
+            {failedCount > 0 && (
+              <div className="wlp-stat">
+                <span className="wlp-stat-value wlp-stat-value--warn">{failedCount}</span>
+                <span className="wlp-stat-label">Not Found Yet</span>
+              </div>
             )}
-          </button>
+          </div>
+        )}
+      </header>
+
+      {failedCount > 0 && (
+        <div className="wlp-triage" role="alert">
+          <span className="wlp-triage-icon" aria-hidden="true">
+            ⚠
+          </span>
+          <span className="wlp-triage-text">
+            <strong>
+              {failedCount} {failedCount === 1 ? 'title' : 'titles'} not found yet.
+            </strong>{' '}
+            The automation keeps looking on its schedule — run a pass now, or review what&apos;s
+            stuck.
+          </span>
+          <div className="wlp-triage-actions">
+            <button
+              type="button"
+              className="wlp-btn wlp-btn--sm wlp-btn--primary"
+              disabled={searching}
+              onClick={() => void searchNow()}
+            >
+              ⚡ Search now
+            </button>
+            <button
+              type="button"
+              className="wlp-btn wlp-btn--sm"
+              onClick={() => setFilter('failed')}
+            >
+              Review
+            </button>
+          </div>
         </div>
-      </section>
+      )}
 
       {notice && <p className={styles.notice}>{notice}</p>}
 
-      {/* ── Interactive Toolbar ────────────────────────────────────────── */}
-      <div className={styles.toolbar}>
-        <div className={styles.searchBar}>
-          <span className={styles.searchIcon}>🔍</span>
+      {/* ── Command bar — same wlp markup as the music tab ──────────────── */}
+      <div className="wlp-cmdbar">
+        <div className={`wlp-search ${styles.cmdSearch}`}>
           <input
             type="text"
-            className={styles.searchInput}
+            className={styles.cmdInput}
             placeholder="Filter by title, author, narrator, or series…"
             aria-label="Filter audiobook wishlist"
             value={query}
@@ -302,57 +343,81 @@ export function WishlistAudiobooks({
           )}
         </div>
 
-        <div className={styles.controlsRow}>
-          {counts && counts.total > 0 && (
-            <nav className={styles.filters} aria-label="Filter by status">
-              {FILTERS.map((entry) => {
-                const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
-                if (entry.key !== 'all' && total === 0) return null;
-                const isSelected = filter === entry.key;
-                return (
-                  <button
-                    key={entry.key}
-                    type="button"
-                    className={`${styles.filter} ${isSelected ? styles.filterOn : ''}`}
-                    onClick={() => setFilter(entry.key)}
-                  >
-                    <span className={`${styles.filterDot} ${entry.dotClass || ''}`} />
-                    {entry.label}
-                    <span className={styles.filterCount}>{total}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          )}
+        {counts && counts.total > 0 && (
+          <nav aria-label="Filter by status" className={styles.chipNav}>
+            {FILTERS.map((entry) => {
+              const total = entry.key === 'all' ? counts.total : (counts[entry.key] ?? 0);
+              if (entry.key !== 'all' && total === 0) return null;
+              const isSelected = filter === entry.key;
+              return (
+                <button
+                  key={entry.key}
+                  type="button"
+                  className={`wlp-chip${isSelected ? ' active' : ''}`}
+                  onClick={() => setFilter(entry.key)}
+                >
+                  <span className={`${styles.filterDot} ${entry.dotClass || ''}`} />
+                  {entry.label}
+                  <span className="wlp-count">{total}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
-          {/* View Mode Switcher */}
-          <div className={styles.viewSwitch} role="group" aria-label="View mode">
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${viewMode === 'grid' ? styles.viewBtnActive : ''}`}
-              onClick={() => handleSetViewMode('grid')}
-              title="Poster Gallery View"
-            >
-              ⊞ Grid
-            </button>
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${viewMode === 'shelf' ? styles.viewBtnActive : ''}`}
-              onClick={() => handleSetViewMode('shelf')}
-              title="Detailed Shelf View"
-            >
-              ☰ Shelf
-            </button>
-          </div>
+        <div className="wlp-segmented" role="tablist" aria-label="View mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'grid'}
+            onClick={() => handleSetViewMode('grid')}
+            title="Poster Gallery View"
+          >
+            ⊞ Grid
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'shelf'}
+            onClick={() => handleSetViewMode('shelf')}
+            title="Detailed Shelf View"
+          >
+            ☰ Shelf
+          </button>
         </div>
+
+        {onClearAll && (
+          <button type="button" className="wlp-btn wlp-btn--danger" onClick={onClearAll}>
+            Clear All
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="wlp-btn wlp-btn--primary"
+          aria-label="Search now"
+          disabled={searching}
+          onClick={() => void searchNow()}
+        >
+          {searching ? (
+            <>
+              <span className={styles.searchNowSpinner} />
+              Searching…
+            </>
+          ) : (
+            <>⚡ Search now</>
+          )}
+        </button>
       </div>
 
       {/* ── Content Presentation ───────────────────────────────────────── */}
       {loading ? (
         <div className={styles.skeleton} aria-hidden="true" />
       ) : shown.length === 0 ? (
-        <div className={styles.empty}>
-          <div className={styles.emptyIcon}>🎧</div>
+        <div className="wlp-empty">
+          <div className="wlp-empty-icon" aria-hidden="true">
+            🎧
+          </div>
           <h3>
             {items.length === 0
               ? 'No audiobooks wanted yet'
@@ -368,11 +433,11 @@ export function WishlistAudiobooks({
                 : 'Try selecting a different status filter above.'}
           </p>
           {items.length === 0 ? (
-            <Link to="/audiobooks" className={styles.browseLink}>
+            <Link to="/audiobooks" className="wlp-btn wlp-btn--primary">
               Browse audiobooks
             </Link>
           ) : query ? (
-            <button type="button" className={styles.browseLink} onClick={() => setQuery('')}>
+            <button type="button" className="wlp-btn wlp-btn--primary" onClick={() => setQuery('')}>
               Clear filter
             </button>
           ) : null}

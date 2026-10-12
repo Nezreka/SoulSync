@@ -62,7 +62,6 @@ export function WishlistPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
 
-  const [audiobookCount, setAudiobookCount] = useState<number | null>(null);
   const [abReloadKey, setAbReloadKey] = useState(0);
 
   // Only one orb open at a time, matching the vanilla accordion which cleared
@@ -298,7 +297,6 @@ export function WishlistPage() {
     const ok = await clearAudiobookWishlist();
     if (ok) {
       window.showToast?.('Audiobook wishlist cleared', 'success');
-      setAudiobookCount(0);
       setAbReloadKey((k) => k + 1);
     } else {
       window.showToast?.('Failed to clear wishlist', 'error');
@@ -334,36 +332,11 @@ export function WishlistPage() {
 
       {media === 'audiobooks' ? (
         <>
-          {/* Audiobooks keep their existing presentation — this overhaul is
-              the music side. Same header and actions as before; only the
-              shared tab strip above is new. */}
-          <div className="wishlist-page-header">
-            <div className="wishlist-page-header-left">
-              <h2 className="wishlist-page-title">
-                <span className="wishlist-page-title-icon">⭐</span>
-                Wishlist
-              </h2>
-              <div className="wishlist-page-meta">
-                <span className="wishlist-page-count">
-                  {audiobookCount !== null
-                    ? `${audiobookCount} ${audiobookCount === 1 ? 'audiobook' : 'audiobooks'}`
-                    : ''}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="wishlist-page-actions">
-            <button
-              className="btn btn--danger"
-              type="button"
-              onClick={() => void onClearAudiobooks()}
-            >
-              Clear All
-            </button>
-          </div>
-
-          <WishlistAudiobooks key={abReloadKey} onCountChange={setAudiobookCount} />
+          {/* Audiobooks share the music side's premier presentation — the
+              same wlp hero, stats, triage and command bar — so the two tabs
+              read as one page. Only the shared tab strip above is page-level;
+              the rest of the panel lives in WishlistAudiobooks. */}
+          <WishlistAudiobooks key={abReloadKey} onClearAll={() => void onClearAudiobooks()} />
         </>
       ) : (
         <>
