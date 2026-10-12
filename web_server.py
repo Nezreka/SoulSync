@@ -20951,6 +20951,33 @@ def mirror_playlist_endpoint():
 
         database = get_database()
         profile_id = get_current_profile_id()
+
+        # #1656: refuse to REPLACE a non-empty mirror with an empty track
+        # list. An empty payload is what a failed client-side fetch looks
+        # like, and storing it deletes every track the mirror had — the
+        # #990 guard only refuses a non-empty list of blank tracks, so an
+        # empty list sailed straight through with success:true. A brand-new
+        # mirror (or one that is already empty) may still be saved with zero
+        # tracks — a genuinely empty upstream playlist is legal.
+        if not tracks:
+            existing = database.get_mirrored_playlist_by_source(
+                source, str(source_playlist_id), profile_id
+            )
+            if existing and (existing.get('track_count') or 0) > 0:
+                # NB: include success:false — the callers check
+                # res.success === false strictly, and readJson doesn't throw
+                # on a 400, so a bare {"error": ...} would fall through to
+                # the success branch in the UI.
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Refusing to replace non-empty mirror '{name}' with an empty "
+                        f"track list — the payload looks like a failed fetch. If the "
+                        f"upstream playlist is genuinely empty, delete the mirror and "
+                        f"re-mirror it."
+                    ),
+                }), 400
+
         quality_profile_id = data.get('quality_profile_id')
         if quality_profile_id is not None:
             try:
