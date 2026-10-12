@@ -8,7 +8,7 @@ Three top-level lists:
   event triggers (track_downloaded, batch_complete, etc.), signal_received,
   webhook_received.
 - `ACTIONS` — DO blocks: process_wishlist, scan_library, etc.
-- `NOTIFICATIONS` — THEN blocks: discord/pushbullet/telegram/webhook,
+- `NOTIFICATIONS` — THEN blocks: discord/pushbullet/telegram/ntfy/gotify/webhook,
   plus fire_signal and run_script then-actions.
 
 Each block carries an optional ``scope`` tag so the SAME definitions can
@@ -571,6 +571,10 @@ NOTIFICATIONS: list[dict] = [
      "variables": ["time", "name", "run_count", "status"]},
     {"type": "telegram", "label": "Telegram", "icon": "message", "scope": "both", "description": "Send a Telegram message", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
+    {"type": "ntfy", "label": "ntfy", "icon": "push", "scope": "both", "description": "Publish to an ntfy topic", "available": True,
+     "variables": ["time", "name", "run_count", "status"]},
+    {"type": "gotify", "label": "Gotify", "icon": "push", "scope": "both", "description": "Send a message to your Gotify server", "available": True,
+     "variables": ["time", "name", "run_count", "status"]},
     {"type": "webhook", "label": "Webhook (POST)", "icon": "globe", "scope": "both", "description": "Send a POST request to any URL", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
     # Signal fire action
@@ -610,7 +614,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     # Exact-ish first: these would otherwise be caught by a keyword below.
     ("Timing", ("schedule", "daily_time", "weekly_time", "monthly_time", "app_started")),
     ("External", ("signal_received", "webhook_received", "fire_signal")),
-    ("Notify", ("discord_webhook", "pushbullet", "telegram", "webhook", "notify_only")),
+    ("Notify", ("discord_webhook", "pushbullet", "telegram", "ntfy", "gotify", "webhook", "notify_only")),
     ("Advanced", ("run_script",)),
     # Then keywords, most specific first.
     ("Maintenance", ("repair", "duplicate", "quality", "cleanup", "clean_", "_clean",
