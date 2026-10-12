@@ -121,9 +121,10 @@
     <!-- Sidebar weather: time/temp/condition line, forecast popover, particle
          scene. Additive — only #sidebar-weather-* selectors inside. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='sidebar-weather.css', v=static_v) }}">
-    <!-- Global horizontal scrollbars: visible/grabbable webkit styling plus
-         the .hscroll-fade edge-fade utility. Linked last so these win
-         equal-specificity ties with component sheets. -->
+    <!-- Global scrollbars: visible/grabbable horizontal webkit styling, the
+         .hscroll-fade edge-fade utility, and the general fading-scrollbar
+         rules. Linked last so these win equal-specificity ties with
+         component sheets. -->
     <link rel="stylesheet" href="{{ url_for('static', filename='scrollbars.css', v=static_v) }}">
     <style id="soulsync-initial-appearance">
         :root {
@@ -12387,6 +12388,10 @@
     <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
          so all frameworks share one wire request per identical GET burst. -->
     <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
+    <!-- scrollbar-fade: toggles .is-scrolling on whatever element is scrolling
+         so scrollbars.css section 4 can brighten/fade thumbs. Standalone,
+         dependency-free, safe to load before every other module. -->
+    <script src="{{ url_for('static', filename='scrollbar-fade.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     {{ vite_assets('body')|safe }}
     <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
