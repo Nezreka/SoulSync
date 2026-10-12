@@ -4688,7 +4688,7 @@ Both answer \`{"success": true, "updated": <n>}\`.
 
 ## Notifications, scripts, blocks
 
-- \`POST /api/automations/test-notify\` sends a real test message through a notification channel: \`{"type": "discord_webhook", "config": {...}}\`. \`type\` must be one of \`discord_webhook\`, \`pushbullet\`, \`telegram\`, \`webhook\`; \`config\` carries that channel's settings and the test goes out with sample run variables filled in.
+- \`POST /api/automations/test-notify\` sends a real test message through a notification channel: \`{"type": "discord_webhook", "config": {...}}\`. \`type\` must be one of \`discord_webhook\`, \`pushbullet\`, \`telegram\`, \`ntfy\`, \`gotify\`, \`webhook\`; \`config\` carries that channel's settings and the test goes out with sample run variables filled in.
 - \`GET /api/scripts\` lists the configured scripts directory as \`{name, extension, size}\` entries — the options the run-script action block offers. Recognized: \`.sh\` \`.py\` \`.bat\` \`.ps1\` \`.rb\` \`.pl\` \`.js\`, plus any executable file.
 - \`GET /api/automations/blocks\` returns the music-scope builder catalog — \`{triggers, actions, notifications, category_order}\` plus \`known_signals\`, every signal name the engine can trigger on. The automation builder renders its palette from this endpoint.
 
