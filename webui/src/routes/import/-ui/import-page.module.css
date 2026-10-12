@@ -1077,6 +1077,108 @@
   color: rgb(var(--accent-light-rgb));
 }
 
+.jobDetailToggle {
+  margin-top: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--accent-light-rgb));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.jobDetailToggle:hover {
+  text-decoration: underline;
+}
+
+.jobDetailList {
+  margin-top: 6px;
+  border-top: 1px solid var(--white-a10);
+  padding-top: 6px;
+}
+
+.jobDetailFilters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.jobDetailFilter {
+  padding: 2px 10px;
+  border: 1px solid var(--white-a15);
+  border-radius: 999px;
+  background: none;
+  color: var(--white-a70);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.jobDetailFilter.active {
+  border-color: rgb(var(--accent-rgb));
+  color: rgb(var(--accent-light-rgb));
+}
+
+.jobDetailList ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jobDetailRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+
+.jobDetailBadge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  border: 1px solid var(--white-a15);
+  color: var(--white-a70);
+}
+
+.badge_imported {
+  border-color: rgba(var(--success-rgb), 0.4);
+  color: var(--success);
+}
+
+.badge_skipped_owned {
+  border-color: var(--white-a25);
+  color: var(--white-a50);
+}
+
+.badge_upgraded {
+  border-color: rgb(var(--accent-rgb));
+  color: rgb(var(--accent-light-rgb));
+}
+
+.badge_error {
+  border-color: rgba(var(--danger-rgb), 0.4);
+  color: var(--danger-light);
+}
+
+.jobDetailTrack {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobDetailFile {
+  margin-left: auto;
+  flex: none;
+  color: var(--white-a40);
+  font-size: 11px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .jobSide {
   display: flex;
   flex-direction: column;

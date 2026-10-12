@@ -66,7 +66,24 @@ export function getEffectiveAlbumMatches(
       const override = overrides[index];
       if (override === -1) return [];
       const stagingFile = stagingFiles[override];
-      return stagingFile ? [{ ...match, staging_file: stagingFile, confidence: 1 }] : [];
+      // A manual re-assignment pairs a different file: the library_status was
+      // computed for the original file, so drop it rather than show a stale
+      // badge. match_type described the ORIGINAL pairing's provenance — a
+      // human pairing is not an exact-ID proof, so null it too (the backend
+      // gate only skips on exact-ID pairings; a stale 'mbid' would let a
+      // manually-paired file be wrongly skipped as "already owned").
+      // The backend re-checks the actual file at process time.
+      return stagingFile
+        ? [
+            {
+              ...match,
+              staging_file: stagingFile,
+              confidence: 0,
+              match_type: null,
+              library_status: null,
+            },
+          ]
+        : [];
     }
     return match.staging_file ? [match] : [];
   });

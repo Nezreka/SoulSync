@@ -476,6 +476,23 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
         "processed": 1,
         "total": 2,
         "errors": ["File not found: missing.flac"],
+        # existing-library pre-check: per-track dispositions + summary.
+        "dispositions": [
+            {
+                "track_name": "Good Track",
+                "file_name": "good.flac",
+                "decision": "imported",
+                "reason": "paired by fuzzy scoring (no match type) — "
+                          "cannot prove identity, proceeding",
+            },
+            {
+                "track_name": "Missing Track",
+                "file_name": "missing.flac",
+                "decision": "error",
+                "reason": "File not found: missing.flac",
+            },
+        ],
+        "summary": {"imported": 1, "skipped_owned": 0, "upgraded": 0},
     }
     assert len(processed_contexts) == 1
     key, context, path = processed_contexts[0]
@@ -487,7 +504,7 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
     # explicit user match — quality profile has no veto (#1017)
     assert context["_skip_quarantine_check"] == ["quality", "bit_depth"]
     assert path == str(good_file)
-    assert activity == [("", "Album Imported", "Album by Artist (1/2 tracks)", "Now")]
+    assert activity == [("", "Album Imported", "Album by Artist (1 imported)", "Now")]
     assert refresh_calls == ["refresh"]
     assert automation.events == [
         (

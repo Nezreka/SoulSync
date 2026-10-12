@@ -410,6 +410,11 @@ def build_album_import_match_payload(
                 "track": track,
                 "staging_file": staging_by_path.get(hit["file"]) if hit else None,
                 "confidence": round(hit["confidence"], 2) if hit else 0,
+                # How the file was paired: 'mbid' | 'isrc' for exact-ID
+                # pairings, None for fuzzy scoring. The existing-library
+                # pre-check only trusts exact-ID pairings (see
+                # core/imports/library_check.py).
+                "match_type": (hit.get("match_type") if hit else None),
             }
         )
 
