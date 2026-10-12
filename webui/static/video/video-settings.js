@@ -1442,7 +1442,7 @@
         var m = subchainMeta(id);
         var name = escapeHtml(m.name);
         return '<button type="button" class="dlchain-tile" draggable="true" data-src="' + id + '" '
-            + 'onclick="subchainAdd(\'' + id + '\')" title="Add ' + name + ' to the chain">'
+            + 'data-action="add" title="Add ' + name + ' to the chain">'
             + '<span class="dlchain-tile-art"><span class="emoji-icon">' + m.emoji + '</span></span>'
             + '<span class="dlchain-tile-name">' + name + '</span></button>';
     }
@@ -1462,12 +1462,12 @@
         if (!locked) {
             html += '<span class="dlchain-step-move">'
                 + '<button type="button" class="dlchain-move" title="Move ' + name + ' up" aria-label="Move ' + name + ' up"'
-                + (position === 1 ? ' disabled' : '') + ' onclick="subchainMove(\'' + id + '\', -1)">&#9650;</button>'
+                + (position === 1 ? ' disabled' : '') + ' data-action="up">&#9650;</button>'
                 + '<button type="button" class="dlchain-move" title="Move ' + name + ' down" aria-label="Move ' + name + ' down"'
-                + (position === total ? ' disabled' : '') + ' onclick="subchainMove(\'' + id + '\', 1)">&#9660;</button>'
+                + (position === total ? ' disabled' : '') + ' data-action="down">&#9660;</button>'
                 + '</span>'
                 + '<button type="button" class="dlchain-btn" title="Remove ' + name + ' from the chain" '
-                + 'aria-label="Remove ' + name + ' from the chain" onclick="subchainRemove(\'' + id + '\')">&times;</button>';
+                + 'aria-label="Remove ' + name + ' from the chain" data-action="remove">&times;</button>';
         }
         return html + '</div>';
     }
@@ -1501,6 +1501,7 @@
                 : order.length === 1 ? 'single provider' : 'nothing selected';
         }
         _subchainWireDrag();
+        _subchainWireClicks();
     }
     function _subchainCommit() {
         renderSubchain();
@@ -1510,7 +1511,6 @@
     function subchainAdd(id) {
         if (_subchainOrder.indexOf(id) === -1) { _subchainOrder.push(id); _subchainCommit(); }
     }
-    window.subchainAdd = subchainAdd;
     function subchainMove(id, delta) {
         var i = _subchainOrder.indexOf(id);
         var j = i + delta;
@@ -1518,7 +1518,6 @@
         var t = _subchainOrder[i]; _subchainOrder[i] = _subchainOrder[j]; _subchainOrder[j] = t;
         _subchainCommit();
     }
-    window.subchainMove = subchainMove;
     function subchainRemove(id) {
         // An empty chain means no subtitles can ever be found, with nothing
         // on screen saying why — same guard as the download chain.
@@ -1529,7 +1528,30 @@
         _subchainOrder = _subchainOrder.filter(function (x) { return x !== id; });
         _subchainCommit();
     }
-    window.subchainRemove = subchainRemove;
+    // Clicks are delegated from the widget container — this module stays
+    // isolated (no globals exported), so the buttons carry data-action and
+    // the provider id rides on the closest [data-src] ancestor. Attached
+    // once: renderSubchain only rewrites the pool/list innerHTML, never the
+    // container itself.
+    var _subchainClicksWired = false;
+    function _subchainWireClicks() {
+        if (_subchainClicksWired) return;
+        var widget = document.getElementById('subchain-widget');
+        if (!widget) return;
+        _subchainClicksWired = true;
+        widget.addEventListener('click', function (e) {
+            var btn = e.target && e.target.closest ? e.target.closest('[data-action]') : null;
+            if (!btn || !widget.contains(btn)) return;
+            var holder = btn.closest('[data-src]');
+            var id = holder ? holder.dataset.src : null;
+            if (!id) return;
+            var action = btn.getAttribute('data-action');
+            if (action === 'add') subchainAdd(id);
+            else if (action === 'up') subchainMove(id, -1);
+            else if (action === 'down') subchainMove(id, 1);
+            else if (action === 'remove') subchainRemove(id);
+        });
+    }
     function _subchainWireDrag() {
         var pool = document.getElementById('subchain-pool');
         var list = document.getElementById('subchain-list');
