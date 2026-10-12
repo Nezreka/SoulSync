@@ -4246,25 +4246,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 10px;
 }
 
-/* Subtitles provider chain: read-only ordered list of subtitle sources */
-.vo-provider-order {
-    margin: 6px 0 4px;
-    padding-left: 22px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 13px;
-}
-
 /* Whisper local transcription: model picker + download button + progress */
 .vo-whisper-row {
     display: flex;
     gap: 8px;
     align-items: center;
     margin: 6px 0 4px;
-}
-.vo-whisper-row select {
-    max-width: 220px;
 }
 .vo-whisper-progress {
     height: 8px;
@@ -4279,6 +4266,22 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border-radius: 4px;
     background: rgb(var(--accent-rgb));
     transition: width 0.3s ease;
+}
+
+/* Subtitle advanced tuning knobs: compact grid of number inputs */
+.vo-sub-adv-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 12px;
+    margin-top: 6px;
+}
+.vo-sub-adv-grid label {
+    display: block;
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+.vo-sub-adv-grid input[type="number"] {
+    width: 100%;
 }
 
 .post-processing-grid {

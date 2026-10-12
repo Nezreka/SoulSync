@@ -9,7 +9,10 @@ from typing import Any, Callable
 
 from ..scoring import DEFAULT_MIN_SCORE
 from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .embedded import EmbeddedProvider
 from .opensubtitles import OpenSubtitlesProvider
+from .subdl import SubDLProvider
+from .subsource import SubSourceProvider
 from .whisper import WhisperProvider
 
 __all__ = ["get_providers", "fetch_subtitle", "fetch_subtitle_detailed",
@@ -32,6 +35,9 @@ def get_providers() -> dict[str, SubtitleProvider]:
     """
     return {
         "opensubtitles": OpenSubtitlesProvider(),
+        "subdl": SubDLProvider(),
+        "subsource": SubSourceProvider(),
+        "embedded": EmbeddedProvider(),
         "whisper": WhisperProvider(),
     }
 
@@ -188,7 +194,8 @@ def rank_candidates(query: SubtitleQuery, provider_order: list[str],
 def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
                             get_setting: Callable[[str, Any], Any],
                             on_download: Callable[[str], None] | None = None,
-                            skip_background: bool = False
+                            skip_background: bool = False,
+                            quota_check: Callable[[str], bool] | None = None,
                             ) -> tuple[str | None, str | None, SubtitleCandidate | None, float]:
     """(text, provider_id, candidate, score) for the best above-threshold candidate.
 
@@ -210,6 +217,14 @@ def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
     the chain: the import hook uses it so a minutes-long transcription never
     stalls the download monitor — the wanted-loop worker runs those providers
     instead (its call uses the default False).
+
+    ``quota_check`` is an optional ``(provider_id) -> bool``: when given, a
+    provider whose check returns False is skipped entirely (none of its
+    candidates are downloaded). Quota-exempt providers (local — embedded,
+    Whisper) are never checked. Without it the chain trusts the caller to
+    have gated quota beforehand, which is wrong once several network
+    providers share one chain: an exhausted OpenSubtitles must not keep
+    downloading just because SubDL still has room.
     """
     min_score = _gate(get_setting, query)
     best_miss: tuple[float, str | None, Any] = (0.0, None, None)  # score, pid, candidate
@@ -223,6 +238,16 @@ def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
         if miss_score > best_miss[0]:
             best_miss = (miss_score, pid, miss_cand)
         for score, candidate in ordered:
+            # Per-provider quota: an exhausted provider yields no downloads,
+            # even when a later provider in the chain still has room. Exempt
+            # (local) providers are never gated. A broken check reads as
+            # "has quota" — accounting never blocks a fetch.
+            if quota_check is not None and not provider_is_quota_exempt(pid):
+                try:
+                    if not quota_check(pid):
+                        break  # out of quota: next provider, not next candidate
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 text = provider.download(candidate)
             except Exception:  # noqa: BLE001

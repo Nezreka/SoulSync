@@ -88,7 +88,7 @@ def test_query_and_candidate_carry_hi_forced():
 # ── registry ─────────────────────────────────────────────────────────────────
 def test_registry_returns_the_registered_providers():
     providers = get_providers()
-    assert set(providers) == {"opensubtitles", "whisper"}
+    assert set(providers) == {"opensubtitles", "subdl", "subsource", "embedded", "whisper"}
     assert list(providers)[-1] == "whisper"  # local transcription is always last
     p = providers["opensubtitles"]
     assert isinstance(p, SubtitleProvider)

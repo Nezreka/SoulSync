@@ -33,6 +33,11 @@ class SubtitleQuery:
     file_path: str | None = None  # absolute path to the video file itself.
     # Providers that need the media (Whisper local transcription) use this;
     # network providers ignore it.
+    hi_forced_pref: str = "off"  # "off" | "prefer_hi" | "prefer_forced".
+    # The global ``subtitle_hi_forced`` setting, threaded through by callers
+    # that know the setting (worker, manual search). Scoring treats it as a
+    # pure tiebreak — never a filter. Defaults to "off" so queries built
+    # without it (the import hook) behave exactly as before.
 
 
 @dataclass

@@ -278,6 +278,63 @@ def test_on_download_fires_per_successful_download(monkeypatch):
     assert burns == ["multi"]
 
 
+def test_quota_check_skips_exhausted_provider(monkeypatch):
+    """A provider whose quota_check returns False downloads nothing, even when
+    a later provider in the chain still has room. Exempt providers are never
+    checked."""
+    import core.video.subtitles.providers as pkg
+    from core.video.subtitles.providers import fetch_subtitle_detailed
+    from core.video.subtitles.providers.base import SubtitleQuery
+
+    class First(SubtitleProvider):
+        id = "first"
+        display_name = "First"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r1")]
+
+        def download(self, candidate):
+            return "srt-first"
+
+    class Second(SubtitleProvider):
+        id = "second"
+        display_name = "Second"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r2")]
+
+        def download(self, candidate):
+            return "srt-second"
+
+    monkeypatch.setattr(pkg, "get_providers",
+                        lambda: {"first": First(), "second": Second()})
+    q = SubtitleQuery(identity={}, language="en",
+                      filename="Movie.2024.1080p.WEB-GROUP.mkv")
+    # "first" is exhausted → skipped; "second" still has room → wins.
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["first", "second"], lambda k, d=None: 0.0,
+        quota_check=lambda p: p != "first")
+    assert text == "srt-second" and pid == "second"
+    # No quota_check → old behavior: first provider wins.
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["first", "second"], lambda k, d=None: 0.0)
+    assert text == "srt-first" and pid == "first"
+
+
 # ── Phase 3: per-item language override enforcement in the fetch path ──────
 
 def _movie_row(db, movie_id=42):

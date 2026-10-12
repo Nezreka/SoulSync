@@ -614,18 +614,21 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": "",
             "fanart_api_key": "", "opensubtitles_api_key": "", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "", "subsource_api_key": "",
             "ryd_enabled": True, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
                           "fanart_api_key": "fa", "opensubtitles_api_key": "os",
+                          "subdl_api_key": "sdl", "subsource_api_key": "sso",
                           "ryd_enabled": False, "sponsorblock_enabled": True,
                           "billboard_autoplay": False, "watch_region": "gb"})
         assert client.get("/api/video/enrichment/config").get_json() == {
             "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
             "fanart_api_key": "fa", "opensubtitles_api_key": "os", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "sdl", "subsource_api_key": "sso",
             "ryd_enabled": False, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": False, "watch_region": "GB"}
