@@ -79,13 +79,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 26;
  * - 3D book cover depth with spine sheen and hover elevation
  * - Narrator lock toggles and series badges
  */
-export function WishlistAudiobooks({
-  onCountChange,
-  onClearAll,
-}: {
-  onCountChange?: (count: number) => void;
-  onClearAll?: () => void;
-} = {}) {
+export function WishlistAudiobooks({ onClearAll }: { onClearAll?: () => void } = {}) {
   const [items, setItems] = useState<AudiobookWishlistEntry[]>([]);
   const [counts, setCounts] = useState<AudiobookWishlistCounts | null>(null);
   const [worker, setWorker] = useState<AudiobookWishlistSummary | null>(null);
@@ -121,8 +115,7 @@ export function WishlistAudiobooks({
     setCounts(view.counts);
     setWorker(view.worker);
     setLoading(false);
-    onCountChange?.(view.counts?.total ?? view.items.length);
-  }, [onCountChange]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -304,7 +297,14 @@ export function WishlistAudiobooks({
               disabled={searching}
               onClick={() => void searchNow()}
             >
-              ⚡ Search now
+              {searching ? (
+                <>
+                  <span className={styles.searchNowSpinner} />
+                  Searching…
+                </>
+              ) : (
+                <>⚡ Search now</>
+              )}
             </button>
             <button
               type="button"
