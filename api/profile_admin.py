@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from flask import Blueprint, jsonify, request, send_file, session
 
 from core.permissions import may_manage_profile
-from core.profile_context import admin_only, get_current_profile_id
+from core.profile_context import admin_only, admin_or_api_key, get_current_profile_id
 from core.security.rate_limit import TargetedLimiter
 from utils.logging_config import get_logger
 
@@ -161,7 +161,7 @@ def _clean_preset(raw):
 
 
 @bp.route("/api/profiles/invites", methods=["GET"])
-@admin_only
+@admin_or_api_key
 def list_invites():
     now = _now_sql()
     rows = get_database().list_profile_invites()
@@ -172,7 +172,7 @@ def list_invites():
 
 
 @bp.route("/api/profiles/invites", methods=["POST"])
-@admin_only
+@admin_or_api_key
 def create_invite():
     """{preset, note?, expires_hours?} -> {token, path}. the token is shown
     once; only its hash is stored."""
@@ -194,7 +194,7 @@ def create_invite():
 
 
 @bp.route("/api/profiles/invites/<int:invite_id>", methods=["DELETE"])
-@admin_only
+@admin_or_api_key
 def revoke_invite(invite_id):
     ok = get_database().revoke_profile_invite(invite_id)
     if ok:
