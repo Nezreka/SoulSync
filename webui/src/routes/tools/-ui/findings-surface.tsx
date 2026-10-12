@@ -906,6 +906,10 @@ export function FindingsSurface({
   );
 
   const safeCount = useMemo(() => safeFixablePending(groups, typeInfo), [groups, typeInfo]);
+  const maintenanceGroups = useMemo(
+    () => groups.filter((group) => !group.finding_type.startsWith('reconciliation_')),
+    [groups],
+  );
 
   /** Every safe type in one run. The backend drops destructive types itself
    *  (`safe_only`), so this cannot become "fix everything" through drift. */
@@ -1253,7 +1257,7 @@ export function FindingsSurface({
   return (
     <>
       <HealthHero
-        groups={groups}
+        groups={maintenanceGroups}
         typeInfo={typeInfo}
         trackCount={trackCount}
         runs={runs}
@@ -1602,6 +1606,12 @@ function FindingCard({
           <input
             type="checkbox"
             checked={selected}
+            disabled={finding.job_id === 'library_reconciliation'}
+            title={
+              finding.job_id === 'library_reconciliation'
+                ? 'Use the album plan for this finding'
+                : undefined
+            }
             onChange={(event) => onToggleSelect(finding.id, event.target.checked)}
           />
         </div>
@@ -1637,9 +1647,17 @@ function FindingCard({
         </div>
         {/* This wrapper swallows clicks so the row toggle doesn't undo them. */}
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
+          {finding.job_id === 'library_reconciliation' && finding.review_case_key ? (
+            <a
+              className="repair-finding-btn fix"
+              href={`/review?mode=review&case=${encodeURIComponent(finding.review_case_key)}`}
+            >
+              Review album plan
+            </a>
+          ) : null}
           {finding.status === 'pending' ? (
             <>
-              {fixLabel ? (
+              {finding.job_id !== 'library_reconciliation' && fixLabel ? (
                 <button
                   className="repair-finding-btn fix"
                   type="button"
@@ -1664,14 +1682,16 @@ function FindingCard({
                   {fixing ? '...' : fixLabel}
                 </button>
               ) : null}
-              <button
-                className="repair-finding-btn dismiss"
-                type="button"
-                title="Dismiss — never show this finding again"
-                onClick={() => void onDismiss(finding.id)}
-              >
-                &times;
-              </button>
+              {finding.job_id !== 'library_reconciliation' ? (
+                <button
+                  className="repair-finding-btn dismiss"
+                  type="button"
+                  title="Dismiss — never show this finding again"
+                  onClick={() => void onDismiss(finding.id)}
+                >
+                  &times;
+                </button>
+              ) : null}
             </>
           ) : (
             // Dismiss is permanent by design. Offering it freely is only fair

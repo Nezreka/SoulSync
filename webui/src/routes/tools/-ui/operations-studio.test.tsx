@@ -171,7 +171,7 @@ describe('OperationsStudio (Simple Mode)', () => {
     }
   });
 
-  it('renders the Smart Action Triage Center with its 3 authority buckets', async () => {
+  it('renders maintenance actions separately from album review', async () => {
     render(
       <OperationsStudio
         jobs={testJobs}
@@ -183,17 +183,50 @@ describe('OperationsStudio (Simple Mode)', () => {
       />,
     );
 
-    expect(screen.getByText('Smart Action Triage')).not.toBeNull();
-    expect(screen.getByText('Zero-Risk Auto-Fixes')).not.toBeNull();
-    expect(screen.getByText('Curator Recommendations')).not.toBeNull();
-    expect(screen.getByText('Quarantine & Review')).not.toBeNull();
+    expect(screen.getByText('Maintenance actions')).not.toBeNull();
+    expect(screen.getByText('Ready fixes')).not.toBeNull();
+    expect(screen.getByText('Other suggestions')).not.toBeNull();
+    expect(screen.getByText('File decisions')).not.toBeNull();
 
     // Verify counts populated from mockFindingGroups
     await waitFor(() => {
       expect(screen.getByText('42 Ready')).not.toBeNull();
       expect(screen.getByText('8 Suggestions')).not.toBeNull();
-      expect(screen.getByText('⚠️ 3 In Quarantine')).not.toBeNull();
+      expect(screen.getByText('3 Pending')).not.toBeNull();
     });
+  });
+
+  it('does not count album review findings as generic suggestions', async () => {
+    routes({
+      '/api/repair/findings/groups': {
+        groups: [
+          ...mockFindingGroups,
+          {
+            finding_type: 'reconciliation_metadata',
+            pending: 46,
+            resolved: 0,
+            dismissed: 0,
+            total: 46,
+            severity_max: 'warning',
+            job_ids: ['library_reconciliation'],
+          },
+        ],
+      },
+    });
+
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText('8 Suggestions')).not.toBeNull());
+    expect(screen.queryByText('54 Suggestions')).toBeNull();
   });
 
   it('triggers safe bulk fix when "Apply All Safe Fixes" is clicked', async () => {
@@ -214,10 +247,10 @@ describe('OperationsStudio (Simple Mode)', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getAllByText('⚡ Apply All 42 Safe Fixes').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Apply 42 ready fixes').length).toBeGreaterThan(0);
     });
 
-    const safeBtns = screen.getAllByText('⚡ Apply All 42 Safe Fixes');
+    const safeBtns = screen.getAllByText('Apply 42 ready fixes');
     fireEvent.click(safeBtns[0]);
 
     await waitFor(() => {
@@ -278,7 +311,7 @@ describe('OperationsStudio (Simple Mode)', () => {
     fireEvent.click(screen.getByText('Review Suggestions ➔'));
     expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'info' });
 
-    fireEvent.click(screen.getByText('🛡️ Inspect Quarantine ➔'));
+    fireEvent.click(screen.getByText('Review file findings ➔'));
     expect(onShowFindings).toHaveBeenCalledWith('', { severity: 'error' });
   });
 

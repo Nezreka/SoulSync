@@ -1,16 +1,12 @@
 /**
- * Operations Studio — The Premier Outcome-Driven Operations Workstation.
+ * Operations Studio — the dashboard for maintenance jobs outside album review.
  *
  * Designed for everyday collectors and audiophiles who want immaculate libraries
  * without micromanaging 30 individual backend cron daemons.
  *
  * Features:
- * 1. Executive Library Health & Telemetry Hero
- * 2. Smart Action Triage Center (Safe 1-Click Auto-Fixes vs. Quarantine Staging)
- * 3. Live Scanning Mission Control HUD with real-time telemetry
- * 4. 1-Click Playbooks (Full Tune-Up, Audio Integrity Sweep, Metadata Polish, Media Enrichment)
- * 5. The 4 Strategic Pillars with direct resolution actions
- * 6. Visual Album Spotlight Grid with Luxury Vinyl Record disc sleeves & Album Inspection Tray.
+ * Keeps the existing maintenance jobs, playbooks, and album inspection tools
+ * available alongside the dedicated album review workflow.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -189,7 +185,6 @@ export interface OperationsStudioProps {
   jobs: RepairJob[] | null;
   progress: Record<string, RepairJobProgress>;
   runs: RepairJobRun[];
-  trackCount?: number | null;
   onChanged: () => void;
   onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
   onSwitchToAdvanced: (category?: string) => void;
@@ -199,7 +194,6 @@ export function OperationsStudio({
   jobs,
   progress,
   runs: _runs,
-  trackCount,
   onChanged,
   onShowFindings,
   onSwitchToAdvanced,
@@ -281,6 +275,9 @@ export function OperationsStudio({
     let quarantine = 0;
 
     for (const g of groups) {
+      // Album reconciliation is counted by album in Review Queue. Counting its
+      // track findings here again makes the same work appear in two buckets.
+      if (g.finding_type.startsWith('reconciliation_')) continue;
       const count = g.pending ?? (g as any).count ?? 0;
       if (count <= 0) continue;
 
@@ -302,14 +299,6 @@ export function OperationsStudio({
 
     return { safeCount: safe, suggestionCount: suggestions, quarantineCount: quarantine };
   }, [groups, catalog]);
-
-  // Executive Health Score
-  const healthScore = useMemo(() => {
-    const total = trackCount || 1000;
-    const totalPending = groups.reduce((acc, g) => acc + (g.pending ?? (g as any).count ?? 0), 0);
-    if (totalPending === 0) return 100;
-    return Math.max(0, Math.min(100, Math.round(((total - totalPending) / total) * 100)));
-  }, [groups, trackCount]);
 
   // Active running job for Live Mission Control HUD
   const activeRunningJob = useMemo(() => {
@@ -438,51 +427,16 @@ export function OperationsStudio({
 
   return (
     <div className="operations-studio">
-      {/* ── Executive Library Health Hero ─────────────────────────────────── */}
-      <div className="operations-executive-hero">
-        <div className="operations-exec-metric">
-          <div className="operations-exec-score">
-            <span className="operations-exec-num">{healthScore}%</span>
-            <span className="operations-exec-status">
-              {safeCount === 0 && quarantineCount === 0 ? 'Pristine' : 'Tune-Up Ready'}
-            </span>
-          </div>
-          <div className="operations-exec-detail">
-            <div className="operations-exec-title">
-              {trackCount ? `${trackCount.toLocaleString()} Tracks Verified` : 'Library Telemetry'}
-            </div>
-            <div className="operations-exec-sub">
-              {safeCount > 0
-                ? `${safeCount} one-click enrichments ready · `
-                : 'All tags & lyrics aligned · '}
-              {quarantineCount > 0
-                ? `${quarantineCount} files in quarantine review`
-                : 'Zero audio defects'}
-            </div>
-          </div>
-        </div>
-
-        {safeCount > 0 && !bulkStatus?.running ? (
-          <button
-            type="button"
-            className="operations-exec-cta"
-            onClick={() => void handleApplyAllSafeFixes()}
-          >
-            ⚡ Apply All {safeCount} Safe Fixes
-          </button>
-        ) : null}
-      </div>
-
-      {/* ── Autonomous Authority & Triage Center ────────────────────────── */}
+      {/* ── Maintenance actions outside album review ─────────────────────── */}
       <div className="operations-triage-section">
         <div className="operations-triage-header">
           <div className="operations-triage-title-group">
-            <span className="operations-triage-badge">Autonomous Curation</span>
-            <h5 className="operations-triage-title">Smart Action Triage</h5>
+            <span className="operations-triage-badge">Other tools</span>
+            <h5 className="operations-triage-title">Maintenance actions</h5>
           </div>
           <p className="operations-triage-sub">
-            Prioritized by authority and data safety. Apply zero-risk enrichments instantly or
-            review quarantined file changes.
+            Findings from the specialized scans below. Album decisions are handled in Album review
+            above.
           </p>
         </div>
 
@@ -491,11 +445,9 @@ export function OperationsStudio({
           <div className="operations-triage-card safe">
             <div className="operations-triage-top">
               <span className="operations-triage-icon">⚡</span>
-              <span className="operations-triage-count-pill safe">
-                {safeCount > 0 ? `${safeCount} Ready` : 'All Clean'}
-              </span>
+              <span className="operations-triage-count-pill safe">{safeCount} Ready</span>
             </div>
-            <h6 className="operations-triage-heading">Zero-Risk Auto-Fixes</h6>
+            <h6 className="operations-triage-heading">Ready fixes</h6>
             <p className="operations-triage-desc">
               Missing synced lyrics, high-res vinyl covers, ReplayGain loudness normalization, and
               tag alignment.
@@ -509,7 +461,7 @@ export function OperationsStudio({
               >
                 {bulkStatus?.running
                   ? `Applying Fixes (${bulkStatus.done || 0}/${bulkStatus.total || safeCount})…`
-                  : `⚡ Apply All ${safeCount} Safe Fixes`}
+                  : `Apply ${safeCount} ready fixes`}
               </button>
             </div>
           </div>
@@ -519,12 +471,12 @@ export function OperationsStudio({
             <div className="operations-triage-top">
               <span className="operations-triage-icon">💡</span>
               <span className="operations-triage-count-pill suggestions">
-                {suggestionCount > 0 ? `${suggestionCount} Suggestions` : 'Optimal'}
+                {suggestionCount > 0 ? `${suggestionCount} Suggestions` : 'None pending'}
               </span>
             </div>
-            <h6 className="operations-triage-heading">Curator Recommendations</h6>
+            <h6 className="operations-triage-heading">Other suggestions</h6>
             <p className="operations-triage-desc">
-              Collaboration artist splits, canonical release alignment, and discography gaps.
+              Findings from tools that need a closer look before changing anything.
             </p>
             <div className="operations-triage-action-row">
               <button
@@ -543,10 +495,10 @@ export function OperationsStudio({
             <div className="operations-triage-top">
               <span className="operations-triage-icon">🛡️</span>
               <span className="operations-triage-count-pill quarantine">
-                {quarantineCount > 0 ? `⚠️ ${quarantineCount} In Quarantine` : '0 Critical'}
+                {quarantineCount > 0 ? `${quarantineCount} Pending` : 'None pending'}
               </span>
             </div>
-            <h6 className="operations-triage-heading">Quarantine &amp; Review</h6>
+            <h6 className="operations-triage-heading">File decisions</h6>
             <p className="operations-triage-desc">
               Corrupt audio files, duplicate recordings, orphan audio files, and short preview
               clips.
@@ -558,7 +510,7 @@ export function OperationsStudio({
                 disabled={quarantineCount === 0}
                 onClick={() => onShowFindings('', { severity: 'error' })}
               >
-                🛡️ Inspect Quarantine ➔
+                Review file findings ➔
               </button>
             </div>
           </div>
@@ -810,17 +762,16 @@ export function OperationsStudio({
       </div>
 
       {/* ── Releases Needing Attention (Album Spotlight Grid) ─────────────── */}
-      <div className="operations-spotlight-section">
-        <div className="operations-spotlight-header">
+      <details className="operations-spotlight-section">
+        <summary className="operations-spotlight-header">
           <div className="operations-spotlight-title-group">
             <span className="operations-spotlight-badge">Album Spotlight</span>
-            <h5 className="operations-spotlight-title">Releases Needing Attention</h5>
+            <h5 className="operations-spotlight-title">Browse findings by album</h5>
           </div>
           <p className="operations-spotlight-sub">
-            Curated visual overview of albums flagged for audio quality defects, missing artwork, or
-            tag alignment.
+            Inspect individual findings from specialized scans. Use Album review for release plans.
           </p>
-        </div>
+        </summary>
 
         {selectedAlbum ? (
           <AlbumInspectionTray
@@ -858,7 +809,7 @@ export function OperationsStudio({
           selectedGroupKey={selectedAlbum?.key}
           onOpen={(group) => setSelectedAlbum(group)}
         />
-      </div>
+      </details>
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}
       {/* a finding with no track behind it (a fake-lossless FILE finding) has no

@@ -146,6 +146,7 @@ FINDING_TYPE_META = {
 # see whether it still hangs together. A job missing from here lands in the
 # trailing bucket, which is visible rather than silent.
 JOB_CATEGORY_ORDER = [
+    'Album review',
     'Files & storage',
     'Audio quality',
     'Tags & metadata',
@@ -172,7 +173,7 @@ JOB_CATEGORIES = {
     'audio_corruption_detector': 'Audio quality',
     'fake_lossless_detector': 'Audio quality',
     'acoustid_scanner': 'Audio quality',
-    'library_reconciliation': 'Audio quality',
+    'library_reconciliation': 'Album review',
     'quality_upgrade': 'Audio quality',
     'quality_upgrade_scanner': 'Audio quality',
     'replaygain_filler': 'Audio quality',
@@ -1514,13 +1515,15 @@ class RepairWorker:
             # Ask, then substitute a NULL so the row shape never changes.
             error_col = 'last_error' if self._has_column(
                 cursor, 'repair_findings', 'last_error') else 'NULL'
+            case_col = 'review_case_key' if self._has_column(
+                cursor, 'repair_findings', 'review_case_key') else 'NULL'
 
             # Fetch page
             offset = page * limit
             cursor.execute(f"""
                 SELECT id, job_id, finding_type, severity, status, entity_type,
                        entity_id, file_path, title, description, details_json,
-                       user_action, resolved_at, created_at, updated_at, {error_col}
+                       user_action, resolved_at, created_at, updated_at, {error_col}, {case_col}
                 FROM repair_findings
                 {where}
                 ORDER BY {order_by}
@@ -1565,6 +1568,7 @@ class RepairWorker:
                     # to fix used to sit pending with the reason living only
                     # in a log line and a capped in-memory bulk list.
                     'last_error': row[15],
+                    'review_case_key': row[16],
                 })
 
             return {'items': items, 'total': total, 'page': page, 'limit': limit}

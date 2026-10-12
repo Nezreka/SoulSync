@@ -61,9 +61,7 @@ export function HealthHero({
 
   const meta: string[] = [];
   if (trackCount) meta.push(`${trackCount.toLocaleString()} tracks`);
-  meta.push(
-    health.pending > 0 ? `${health.pending.toLocaleString()} open findings` : 'nothing outstanding',
-  );
+  meta.push(`${health.pending.toLocaleString()} open findings from other tools`);
   if (runningJobs > 0) meta.push(`${runningJobs} job${runningJobs === 1 ? '' : 's'} running`);
 
   return (
@@ -74,7 +72,11 @@ export function HealthHero({
       </div>
 
       <div className="repair-health-body">
+        <strong>Other maintenance findings</strong>
         <div className="repair-health-meta">{meta.join(' · ')}</div>
+        <div className="repair-health-meta">
+          Based on scans completed so far; this score does not verify unscanned tracks.
+        </div>
 
         {segments.length > 0 ? (
           <div
@@ -95,7 +97,9 @@ export function HealthHero({
             ))}
           </div>
         ) : (
-          <div className="repair-health-bar-empty">Nothing is dragging your library down.</div>
+          <div className="repair-health-bar-empty">
+            No other open findings from completed scans.
+          </div>
         )}
 
         <div className="repair-health-actions">

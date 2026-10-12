@@ -374,11 +374,14 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 "json_type(%s, '$.changes.filename') IS NOT NULL)" %
                 (_DETAILS, _DETAILS, _DETAILS, _DETAILS)),
             'release_conflicts': "finding_type = 'reconciliation_release'",
-            'audio_conflicts': "finding_type = 'reconciliation_unresolved'",
+            'audio_conflicts': ("finding_type = 'reconciliation_unresolved' OR "
+                "(finding_type = 'reconciliation_extra' AND "
+                "json_extract(%s, '$.audio_conflict') = 'different_recording')" % _DETAILS),
             'album_completeness': (
                 "finding_type IN ('reconciliation_intent','reconciliation_missing')"),
             'duplicates': "finding_type = 'reconciliation_duplicate'",
-            'extra_files': "finding_type = 'reconciliation_extra'",
+            'extra_files': ("finding_type = 'reconciliation_extra' AND "
+                "COALESCE(json_extract(%s, '$.audio_conflict'), '') != 'different_recording'" % _DETAILS),
             'metadata': ("finding_type = 'reconciliation_metadata' AND "
                          "NOT (COALESCE(json_extract(%s, '$.title_difference_kind'), '') "
                          "IN ('typography','flavor','material','version') AND ("

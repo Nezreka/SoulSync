@@ -61105,99 +61105,9 @@ tr.tag-diff-same {
     flex-wrap: wrap;
 }
 
-/* Executive Library Health Hero in Simple Studio */
-.operations-executive-hero {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 18px 24px;
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-    flex-wrap: wrap;
-}
-
-.operations-exec-metric {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-}
-
-.operations-exec-score {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-width: 68px;
-    height: 68px;
-    border-radius: 14px;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(15, 23, 42, 0.6) 100%);
-    border: 1px solid rgba(129, 140, 248, 0.4);
-    box-shadow: 0 0 18px rgba(99, 102, 241, 0.2);
-}
-
-.operations-exec-num {
-    font-size: 20px;
-    font-weight: 800;
-    color: #fff;
-    line-height: 1;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
-.operations-exec-status {
-    font-size: 9.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #a5b4fc;
-    margin-top: 3px;
-}
-
-.operations-exec-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.operations-exec-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.01em;
-}
-
-.operations-exec-sub {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-}
-
-.operations-exec-cta {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 10px 20px;
-    border-radius: 10px;
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.operations-exec-cta:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
-}
-
 /* Spotlight Section in Simple Studio */
 .operations-spotlight-section {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    display: block;
     background: linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.65) 100%);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 16px;
@@ -61209,6 +61119,12 @@ tr.tag-diff-same {
 
 .operations-spotlight-header {
     margin-bottom: 6px;
+    cursor: pointer;
+    list-style-position: inside;
+}
+
+.operations-spotlight-section[open] .operations-spotlight-header {
+    margin-bottom: 16px;
 }
 
 .operations-spotlight-title-group {
@@ -61250,6 +61166,33 @@ tr.tag-diff-same {
     flex-direction: column;
     gap: 24px;
 }
+
+.review-queue-entry {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin: 18px 0 24px;
+    padding: 20px 24px;
+    border: 1px solid rgba(167, 139, 250, 0.35);
+    border-radius: 14px;
+    background: rgba(167, 139, 250, 0.07);
+}
+
+.review-queue-entry-copy { flex: 1 1 280px; }
+.review-queue-entry-eyebrow {
+    color: #b7a8fa;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+.review-queue-entry h3 { margin: 5px 0 3px; font-size: 20px; }
+.review-queue-entry p { margin: 0 0 8px; color: var(--text-secondary, #aab0c1); }
+.review-queue-entry-scan { color: var(--text-secondary, #aab0c1); font-size: 12px; }
+.review-queue-entry-error { display: block; color: #fca5a5; font-size: 12px; margin-top: 5px; }
+.review-queue-entry-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* ── Autonomous Authority & Triage Center ────────────────────────────── */
 .operations-triage-section {

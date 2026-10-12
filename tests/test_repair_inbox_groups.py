@@ -87,6 +87,16 @@ def _by_type(groups):
     return {g['finding_type']: g for g in groups}
 
 
+def test_findings_include_exact_album_review_case_link(worker):
+    worker.db._conn.execute('ALTER TABLE repair_findings ADD COLUMN review_case_key TEXT')
+    _insert(worker, 'reconciliation_metadata', job_id='library_reconciliation')
+    worker.db._conn.execute("UPDATE repair_findings SET review_case_key = 'album-case'")
+
+    page = worker.get_findings(job_id='library_reconciliation')
+
+    assert page['items'][0]['review_case_key'] == 'album-case'
+
+
 # ── the group fold ───────────────────────────────────────────────────────────
 
 def test_counts_every_status_in_one_row(worker):

@@ -63,7 +63,9 @@ export function AlbumInspectionTray({
         );
       });
 
-      setFindings(filtered.length > 0 ? filtered : result.items || []);
+      // A fuzzy search can return a different album with a similar title.
+      // Never fall back to acting on those unrelated findings.
+      setFindings(filtered);
     } catch (err) {
       setActionError((err as Error).message || 'Failed to load album issues');
     } finally {
@@ -130,7 +132,10 @@ export function AlbumInspectionTray({
     if (!findings || findings.length === 0) return;
     // only what has a fix: the rest would be marked resolved without one
     const fixable = findings.filter(
-      (f) => f.status === 'pending' && Boolean(findingFixLabel(f.finding_type)),
+      (f) =>
+        f.status === 'pending' &&
+        f.job_id !== 'library_reconciliation' &&
+        Boolean(findingFixLabel(f.finding_type)),
     );
     if (fixable.length === 0) return;
 
@@ -164,7 +169,9 @@ export function AlbumInspectionTray({
 
   const handleDismissAllOnAlbum = async () => {
     if (!findings || findings.length === 0) return;
-    const pending = findings.filter((f) => f.status === 'pending');
+    const pending = findings.filter(
+      (f) => f.status === 'pending' && f.job_id !== 'library_reconciliation',
+    );
     for (const f of pending) {
       setBusyIds((prev) => new Set(prev).add(f.id));
       try {
@@ -243,6 +250,14 @@ export function AlbumInspectionTray({
               <button
                 type="button"
                 className="btn btn--sm btn--primary album-tray-btn"
+                disabled={
+                  !findings?.some(
+                    (f) =>
+                      f.status === 'pending' &&
+                      f.job_id !== 'library_reconciliation' &&
+                      Boolean(findingFixLabel(f.finding_type)),
+                  )
+                }
                 onClick={() => void handleFixAllOnAlbum()}
                 title="Automatically resolve all safe issues on this album"
               >
@@ -261,6 +276,11 @@ export function AlbumInspectionTray({
               <button
                 type="button"
                 className="btn btn--sm btn--secondary album-tray-btn"
+                disabled={
+                  !findings?.some(
+                    (f) => f.status === 'pending' && f.job_id !== 'library_reconciliation',
+                  )
+                }
                 onClick={() => void handleDismissAllOnAlbum()}
                 title="Dismiss all issues on this album"
               >
@@ -434,9 +454,17 @@ export function AlbumInspectionTray({
                     </div>
 
                     <div className="album-track-actions">
+                      {f.job_id === 'library_reconciliation' && f.review_case_key ? (
+                        <a
+                          className="btn btn--xs btn--primary album-action-btn"
+                          href={`/review?mode=review&case=${encodeURIComponent(f.review_case_key)}`}
+                        >
+                          Review album plan
+                        </a>
+                      ) : null}
                       {f.status === 'pending' ? (
                         <>
-                          {isRedl ? (
+                          {f.job_id === 'library_reconciliation' ? null : isRedl ? (
                             <button
                               type="button"
                               className="btn btn--xs btn--primary album-action-btn redownload"
@@ -469,15 +497,17 @@ export function AlbumInspectionTray({
                             </button>
                           ) : null}
 
-                          <button
-                            type="button"
-                            className="btn btn--xs btn--secondary album-action-btn dismiss"
-                            disabled={busy}
-                            onClick={() => void handleDismissOne(f.id)}
-                            title="Dismiss issue"
-                          >
-                            Dismiss
-                          </button>
+                          {f.job_id !== 'library_reconciliation' ? (
+                            <button
+                              type="button"
+                              className="btn btn--xs btn--secondary album-action-btn dismiss"
+                              disabled={busy}
+                              onClick={() => void handleDismissOne(f.id)}
+                              title="Dismiss issue"
+                            >
+                              Dismiss
+                            </button>
+                          ) : null}
                         </>
                       ) : f.status === 'resolved' ? (
                         <div className="album-track-status-group">

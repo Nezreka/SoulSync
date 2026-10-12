@@ -1080,7 +1080,9 @@ export function ReviewPage() {
         <div className={styles.headerTools}>
           <div className={styles.headerCount}>
             <strong>{queueTotals?.all ?? queue?.total ?? 0} albums</strong>
-            <span>{queue?.ready_total || 0} ready changes</span>
+            <span>
+              {queueTotals?.ready ?? 0} ready albums · {queue?.ready_total || 0} ready changes
+            </span>
           </div>
           <button
             type="button"

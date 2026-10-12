@@ -74,6 +74,7 @@ export function FindingsInbox({
         // A type with no handler gets NO button. The client used to guess at
         // fixability and offered two types a button that could only ever fail.
         const canFix = Boolean(info?.fixable && !info.review_only) && group.pending > 0;
+        const albumReview = group.finding_type.startsWith('reconciliation_');
 
         return (
           <div
@@ -117,6 +118,11 @@ export function FindingsInbox({
                 </span>
               </span>
               <span className="repair-inbox-actions" onClick={(event) => event.stopPropagation()}>
+                {albumReview ? (
+                  <a className="repair-inbox-btn" href="/review?mode=review">
+                    Review album plans
+                  </a>
+                ) : null}
                 {canFix ? (
                   <button
                     type="button"
@@ -133,7 +139,7 @@ export function FindingsInbox({
                     {` all (${group.pending.toLocaleString()})`}
                   </button>
                 ) : null}
-                {group.pending > 0 ? (
+                {group.pending > 0 && !albumReview ? (
                   <button
                     type="button"
                     className="repair-inbox-btn ghost"

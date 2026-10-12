@@ -45,6 +45,7 @@ import { takeFindingsFocus } from '../-tools.findings-focus';
 import { FindingsSurface } from './findings-surface';
 import { Operations } from './operations';
 import { OperationsStudio } from './operations-studio';
+import { ReviewQueueEntry } from './review-queue-entry';
 import { RunHistory } from './run-history';
 
 /** The vanilla hides a finished job's progress panel 30s after it lands. */
@@ -453,11 +454,14 @@ export function MaintenanceHero() {
               {enabled ? 'Enabled' : 'Disabled'}
             </span>
           </label>
-          <a href="/review" className="btn btn--primary">
-            Open Review Queue
-          </a>
         </div>
       </div>
+
+      <ReviewQueueEntry
+        job={jobs?.find((job) => job.job_id === 'library_reconciliation')}
+        progress={progress.library_reconciliation}
+        onScanStarted={loadJobs}
+      />
 
       {/* ── SIMPLE MODE: Primary Curated Studio & Spotlight ──────────────── */}
       {mode === 'simple' ? (
@@ -465,7 +469,6 @@ export function MaintenanceHero() {
           jobs={jobs}
           progress={progress}
           runs={history || []}
-          trackCount={trackCount}
           onChanged={loadJobs}
           onShowFindings={showJobFindings}
           onSwitchToAdvanced={(_cat) => handleModeChange('advanced')}

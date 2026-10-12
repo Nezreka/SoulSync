@@ -447,6 +447,19 @@ def test_actionable_wrong_audio_remains_an_audio_conflict():
     }]
 
 
+def test_wrong_audio_case_is_found_by_audio_filter_and_not_extra_filter():
+    db = _Database()
+    db.add(1, '/music/Album/01.flac', {
+        'album_id': 10, 'album_title': 'Album',
+        'audio_conflict': 'different_recording',
+    }, job_id='library_reconciliation', kind='reconciliation_extra')
+
+    assert list_cases(db, job_id='library_reconciliation',
+                      category='audio_conflicts')['total'] == 1
+    assert list_cases(db, job_id='library_reconciliation',
+                      category='extra_files')['total'] == 0
+
+
 def test_repeated_audio_conflicts_are_one_album_question():
     items = [
         {'id': 1, 'finding_type': 'reconciliation_unresolved', 'details': {}},
