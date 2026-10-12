@@ -35,7 +35,10 @@ describe.each(['ntfy', 'gotify'])('%s in the automation builder', (type) => {
   });
 
   it('renders a Send test button when placed in THEN', () => {
-    const testCheck = JS.slice(JS.indexOf("if (['discord_webhook'"), JS.indexOf("onclick=\"_autoTestNotify"));
+    const testCheck = JS.slice(
+      JS.indexOf("if (['discord_webhook'"),
+      JS.indexOf('onclick="_autoTestNotify'),
+    );
     expect(testCheck).toContain(`'${type}'`);
   });
 });
