@@ -665,6 +665,14 @@ def _annotate_library_status(runtime: ImportRouteRuntime,
     if not payload.get("success") or not matches:
         return payload
     db = _get_import_db(runtime)
+    # album_name is optional on the way in (callers may pass only album_id);
+    # fall back to the metadata source's album title so release scoping
+    # still works and the review UI shows skip badges.
+    resolved_album_name = (
+        album_name
+        or str((payload.get("album") or {}).get("name") or "")
+        or str((payload.get("album") or {}).get("title") or "")
+    )
     quality_profile = _resolve_gate_profile(runtime)
     for match in matches:
         staging_file = match.get("staging_file") or {}
@@ -679,7 +687,7 @@ def _annotate_library_status(runtime: ImportRouteRuntime,
             match_type=match.get("match_type"),
             confidence=match.get("confidence", 0) or 0,
             source_hint=source,
-            album_name=album_name,
+            album_name=resolved_album_name,
             quality_profile=quality_profile,
             quiet=True,  # presentation only; enforcement re-checks and logs
         )

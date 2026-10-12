@@ -533,7 +533,7 @@ function AlbumMatcher({ item }: { item: ImportInboxItem }) {
                       folder
                     </>
                   ) : null}
-                  {ownedCount > 0 ? (
+                  {ownedCount > 0 && willSkip === 0 && willUpgrade === 0 ? (
                     <> · {ownedCount} already in your library (kept or replaced by quality)</>
                   ) : null}
                   {willSkip > 0 ? <> · {willSkip} will skip (already owned)</> : null}
@@ -699,7 +699,7 @@ function TrackRow({
       <span className={styles.trackNum}>{info.displayTrackNumber}</span>
       <span className={styles.trackName} title={info.name}>
         {info.name}
-        {owned?.owned ? (
+        {owned?.owned && !(match.library_status && !Object.hasOwn(overrides, index)) ? (
           <>
             {' '}
             <span

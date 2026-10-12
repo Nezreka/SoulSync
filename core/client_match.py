@@ -444,14 +444,31 @@ def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runt
         result, status = album_process(runtime, {"album": payload["album"], "matches": matches,
                                                  "source": payload.get("source")})
         if status >= 400 or not isinstance(result, dict):
-            return {"ok": False, "imported": 0,
-                    "error": (result or {}).get("error") if isinstance(result, dict) else None
-                             or "The import failed."}
+            error_msg = (result.get("error") if isinstance(result, dict) else None) \
+                or "The import failed."
+            return {"ok": False, "imported": 0, "error": error_msg}
         processed = int(result.get("processed") or 0)
         # "Already owned" skips don't increment processed — an album that is
         # fully owned is a successful no-op, not a failure.
         summary = result.get("summary") or {}
         skipped = int(summary.get("skipped_owned") or 0)
+        errors_list = result.get("errors") or []
+        total = len(matches)
+        if processed == 0 and skipped == total and total > 0 and not errors_list:
+            # Every track was a confirmed duplicate: the temp copies are
+            # redundant (originals remain in the download folder). Remove
+            # them instead of pushing noise to the manual staging inbox,
+            # where they'd just be skipped again.
+            try:
+                import shutil
+                shutil.rmtree(folder, ignore_errors=True)
+                runtime.logger.info(
+                    "[Import] %s: all %d tracks already owned — "
+                    "discarding duplicate copies",
+                    match.get("name") or "album", total,
+                )
+            except Exception as exc:  # noqa: BLE001 - temp cleanup is best-effort
+                runtime.logger.debug("[Import] temp folder cleanup failed: %s", exc)
         if not processed and not skipped:
             return {"ok": False, "imported": 0,
                     "error": result.get("error") or "The import failed."}

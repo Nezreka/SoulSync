@@ -1143,8 +1143,8 @@
 }
 
 .badge_imported {
-  border-color: rgb(var(--green-rgb));
-  color: rgb(var(--green-light-rgb));
+  border-color: rgba(var(--success-rgb), 0.4);
+  color: var(--success);
 }
 
 .badge_skipped_owned {
@@ -1158,8 +1158,8 @@
 }
 
 .badge_error {
-  border-color: rgb(var(--red-rgb));
-  color: rgb(var(--red-light-rgb));
+  border-color: rgba(var(--danger-rgb), 0.4);
+  color: var(--danger-light);
 }
 
 .jobDetailTrack {
