@@ -628,6 +628,10 @@ def _persist_tracklist_tracks(
                 WHERE id=?""",
             (remaining_count, album_id),
         )
+    # The count and positions just became known: the edition every total and
+    # number check reads has to know them too.
+    from core.library2.editions import sync_edition_facts
+    sync_edition_facts(conn.cursor(), [album_id])
     # Canonical materialization can be the moment an imported release becomes
     # provably complete (every track covered by a file or Wishlist rule).  Keep
     # the derived parent state and every child's wanted projection coherent.

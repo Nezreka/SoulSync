@@ -233,6 +233,22 @@ def test_retag_fixes_separate_total_and_verifies_it(library):
         assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
 
 
+def test_a_known_total_missing_from_the_file_is_written(library):
+    """What the catalogue knows goes into the file: a missing total was only
+    "not checked", and the retag never filled it."""
+    from core.library2.retag import write_tags
+    db, path, _ = library
+    audio = FLAC(path)
+    del audio['tracktotal'], audio['disctotal']
+    audio.save()
+    checks = json.loads(observe(library)['tags_json'])['_validation']['checks']
+    assert checks['total_tracks'] == checks['total_discs'] == 'missing'
+    assert write_tags(db, [7], embed_cover=False)['written'] == 1
+    assert (FLAC(path)['tracktotal'], FLAC(path)['disctotal']) == (['13'], ['1'])
+    with closing(db._get_connection()) as conn:
+        assert conn.execute('SELECT status FROM repair_findings').fetchone()[0] == 'resolved'
+
+
 def test_track_number_repair_synchronizes_vorbis_totals(library):
     from core.repair_jobs.track_number_repair import _fix_track_number_tag
     from core.tag_writer import read_number_pair

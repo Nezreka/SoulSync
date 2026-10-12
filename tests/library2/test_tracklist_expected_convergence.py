@@ -136,3 +136,17 @@ def test_a_name_search_result_may_not():
 def test_an_id_from_a_provider_the_album_does_not_claim_may_not():
     assert _from_a_known_release_id({"spotify": "abc"}, "deezer", "12345") is False
     assert _from_a_known_release_id({"deezer": "1"}, None, None) is False
+
+
+def test_a_persisted_tracklist_completes_the_default_edition(imported_conn):
+    """The moment the count becomes known is the moment the edition learns it;
+    otherwise the totals stay "unknown" until the next sweep."""
+    from core.library2.editions import backfill_editions, default_edition_id
+    album_id = _album(imported_conn, expected=None, tracks=2)
+    backfill_editions(imported_conn.cursor())
+
+    _persist_tracklist_tracks(imported_conn, album_id, [_entry(1), _entry(2, "B-side")], complete=True)
+
+    assert imported_conn.execute(
+        "SELECT track_count, disc_count FROM lib2_release_editions WHERE id=?",
+        (default_edition_id(imported_conn, album_id),)).fetchone()[:] == (2, 1)

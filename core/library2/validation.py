@@ -146,9 +146,13 @@ def validate_tags(conn, file_id, tags, config):
         checks[key] = ('not_required' if not diff['file_value'] and not diff['db_value']
                        else 'missing' if not diff['file_value'] else 'unknown' if not diff['db_value'] or diff.get('protected')
                        else 'mismatch' if diff['changed'] else 'correct')
-    for key, expected in (('total_tracks', data.get('track_count')), ('total_discs', data.get('total_discs'))):
+    for key, number, expected in (('total_tracks', 'track_number', data.get('track_count')),
+                                  ('total_discs', 'disc_number', data.get('total_discs'))):
         actual = tags.get(key)
-        checks[key] = 'unknown' if not expected else 'not_checked' if not actual else 'correct' if actual == expected else 'mismatch'
+        # A known total the file lacks is written like any other tag; it needs a
+        # number to sit beside, else nothing could ever write it (build_tag_diff).
+        checks[key] = ('unknown' if not expected else 'correct' if actual == expected else 'mismatch' if actual
+                       else 'missing' if tags.get(number) or data.get(number) else 'unknown')
     checks.update(artwork_checks(rows[0]['album_image_url'], tags, config))
     checks['edition'] = data.get('edition_status', 'not_checked')
     return {'status': 'issues' if any(v in ('missing', 'mismatch') for v in checks.values())

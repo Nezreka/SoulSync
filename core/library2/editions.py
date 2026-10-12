@@ -410,6 +410,58 @@ def sync_default_edition(cursor: Any, album_id: int) -> bool:
     return True
 
 
+def sync_edition_facts(cursor: Any, album_ids: Optional[Any] = None) -> int:
+    """Give each default edition what its album already knows. Idempotent.
+
+    The edition took its track count once, at creation, and its positions from
+    tracks not yet numbered; nothing ever set ``disc_count``. Every consumer
+    trusts the edition (``validation.edition_reference``, Track Number Repair),
+    so those NULLs read as "unknown" although the album knew its 18 tracks: no
+    total was checked or written, and Track Number Repair found nothing.
+
+    Fills a release track's missing position from its track (an edition's own
+    position is kept), keeps the count equal to the album's, and sets the disc
+    count once every slot of the edition is there. Without ``album_ids`` it
+    sweeps albums with a file. Returns the editions changed; does not commit.
+    """
+    if hasattr(cursor, "cursor") and not hasattr(cursor, "lastrowid"):
+        cursor = cursor.cursor()
+    ids = None if album_ids is None else [int(a) for a in album_ids]
+    if ids == []:
+        return 0
+    scope = ("e.release_group_id IN (%s)" % ",".join(map(str, ids)) if ids is not None else
+             "EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id=t.id"
+             " WHERE t.album_id=e.release_group_id)")
+    changed = 0
+    for edition in cursor.execute(
+            "SELECT e.id, e.release_group_id, e.track_count, e.disc_count, e.spotify_id, e.musicbrainz_id"
+            f" FROM lib2_release_editions e WHERE e.is_default=1 AND {scope}").fetchall():
+        album = cursor.execute(f"SELECT {_EDITION_ALBUM_COLUMNS} FROM lib2_albums WHERE id=?",
+                               (edition["release_group_id"],)).fetchone()
+        filled = cursor.execute(
+            """UPDATE lib2_release_tracks
+                  SET track_number=COALESCE(track_number, (SELECT t.track_number FROM lib2_tracks t WHERE t.id=track_id)),
+                      disc_number=COALESCE(disc_number, (SELECT t.disc_number FROM lib2_tracks t WHERE t.id=track_id))
+                WHERE release_edition_id=? AND track_id IN (
+                      SELECT t.id FROM lib2_tracks t WHERE t.album_id=?
+                         AND ((lib2_release_tracks.track_number IS NULL AND t.track_number IS NOT NULL)
+                              OR (lib2_release_tracks.disc_number IS NULL AND t.disc_number IS NOT NULL)))""",
+            (edition["id"], edition["release_group_id"])).rowcount
+        count = _edition_track_count(album) or edition["track_count"]
+        slots, numbered, discs = cursor.execute(
+            "SELECT COUNT(*), COUNT(track_number), MAX(COALESCE(disc_number,1)) FROM lib2_release_tracks"
+            " WHERE release_edition_id=?", (edition["id"],)).fetchone()
+        disc_count = discs if count and slots == numbered == count else edition["disc_count"]
+        if (count, disc_count) != (edition["track_count"], edition["disc_count"]):
+            cursor.execute(
+                "UPDATE lib2_release_editions SET track_count=?, disc_count=?, signature=?,"
+                " updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (count, disc_count, edition_signature(edition["spotify_id"], edition["musicbrainz_id"],
+                                                      album["title"], count), edition["id"]))
+        changed += bool(filled or (count, disc_count) != (edition["track_count"], edition["disc_count"]))
+    return changed
+
+
 def pin_album_release(cursor: Any, album_id: int, source: str,
                       provider_id: Optional[str]) -> None:
     """A manual album match pins (and locks) that release as canonical (#758).

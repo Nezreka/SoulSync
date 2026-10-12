@@ -202,3 +202,64 @@ def test_prune_removes_shadow_rows_of_deleted_tracks(imported_conn):
     assert conn.execute(
         "SELECT COUNT(*) FROM lib2_recordings WHERE id=?",
         (recording,)).fetchone()[0] == 0
+
+
+# ── the default edition keeps what its album already knows ────────────────────
+
+
+def _stale_edition(conn, *, positions, expected):
+    """An album whose default edition was created before the tracklist was known."""
+    from core.library2.editions import sync_edition_facts  # noqa: F401 - import check
+    artist = conn.execute("SELECT id FROM lib2_artists ORDER BY id LIMIT 1").fetchone()[0]
+    album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,expected_track_count) "
+                         "VALUES(?,'Attack on Titan Season 2 OST',?)", (artist, expected)).lastrowid
+    for disc, number in positions:
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title,disc_number,track_number) VALUES(?,?,?,?)",
+                             (album, f'{disc}-{number}', disc, number)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)", (track, f'/m/{disc}-{number}.flac'))
+    backfill_editions(conn.cursor())
+    edition = default_edition_id(conn, album)
+    conn.execute("UPDATE lib2_release_editions SET track_count=NULL, disc_count=NULL WHERE id=?", (edition,))
+    conn.execute("UPDATE lib2_release_tracks SET track_number=NULL WHERE release_edition_id=?", (edition,))
+    return album, edition
+
+
+def _edition(conn, edition):
+    return tuple(conn.execute("SELECT track_count, disc_count FROM lib2_release_editions WHERE id=?",
+                              (edition,)).fetchone())
+
+
+def test_sync_fills_counts_discs_and_positions_from_the_album(imported_conn):
+    """beerbongs & bentleys: 18 tracks known on the album, NULL on its edition,
+    so every total read "unknown" and Track Number Repair found nothing."""
+    from core.library2.editions import sync_edition_facts
+    conn = imported_conn
+    album, edition = _stale_edition(conn, positions=[(1, 1), (1, 2), (2, 1)], expected=3)
+
+    assert sync_edition_facts(conn.cursor())
+    assert _edition(conn, edition) == (3, 2)
+    assert [r[0] for r in conn.execute("SELECT track_number FROM lib2_release_tracks WHERE release_edition_id=? "
+                                       "ORDER BY track_id", (edition,))] == [1, 2, 1]
+    assert not sync_edition_facts(conn.cursor(), [album])  # converged
+
+
+def test_an_incomplete_edition_gets_its_count_but_no_disc_guess(imported_conn):
+    from core.library2.editions import sync_edition_facts
+    album, edition = _stale_edition(imported_conn, positions=[(1, 1), (1, 2)], expected=3)
+
+    sync_edition_facts(imported_conn.cursor(), [album])
+
+    assert _edition(imported_conn, edition) == (3, None)
+
+
+def test_an_edition_specific_position_is_kept(imported_conn):
+    from core.library2.editions import sync_edition_facts
+    conn = imported_conn
+    album, edition = _stale_edition(conn, positions=[(1, 1), (1, 2)], expected=2)
+    conn.execute("UPDATE lib2_release_tracks SET track_number=2 WHERE release_edition_id=? AND track_id="
+                 "(SELECT MIN(track_id) FROM lib2_release_tracks WHERE release_edition_id=?)", (edition, edition))
+
+    sync_edition_facts(conn.cursor(), [album])
+
+    assert sorted(r[0] for r in conn.execute("SELECT track_number FROM lib2_release_tracks WHERE "
+                                             "release_edition_id=?", (edition,))) == [2, 2]

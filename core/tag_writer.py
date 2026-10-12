@@ -531,10 +531,13 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             'protected': protected,
         })
 
-    for key, db_key, label in (('total_tracks', 'track_count', 'Track total'), ('total_discs', 'total_discs', 'Disc total')):
+    for key, db_key, number, label in (('total_tracks', 'track_count', 'track_number', 'Track total'),
+                                       ('total_discs', 'total_discs', 'disc_number', 'Disc total')):
         actual, expected = file_tags.get(key), db_data.get(db_key)
+        # A missing total is filled too, but only beside a number to write it with.
         diffs.append({'field': label, 'file_key': key, 'file_value': str(actual or ''), 'db_value': str(expected or ''),
-                      'changed': bool(actual and expected and actual != expected)})
+                      'changed': bool(expected and actual != expected
+                                      and (actual or file_tags.get(number) or db_data.get(number)))})
 
     if db_data.get('known_source_ids'):
         from core.metadata.source import known_source_id_tags

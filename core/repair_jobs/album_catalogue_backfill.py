@@ -78,6 +78,15 @@ class AlbumCatalogueBackfillJob(RepairJob):
         if context.check_stop() or context.wait_if_paused():
             return result
         try:
+            # Hourly backstop for every writer of an album's track count that
+            # does not tell the edition: totals and numbers are judged there.
+            from core.library2.editions import sync_edition_facts
+            with closing(context.db._get_connection()) as conn:
+                sync_edition_facts(conn)
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001 - never blocks the catalogue pass
+            logger.warning('Edition facts sync failed: %s', exc)
+        try:
             candidates = self._pending(context)
         except Exception as exc:
             logger.warning('Catalogue backfill enumeration failed: %s', exc)

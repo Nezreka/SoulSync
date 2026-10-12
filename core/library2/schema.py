@@ -1453,6 +1453,12 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
                 should_stop=should_stop)
         except Exception as e:  # noqa: BLE001
             logger.error("edition/recording backfill failed (will retry next start): %s", e)
+        try:
+            from core.library2.editions import sync_edition_facts
+            stats["edition_facts"] = sync_edition_facts(cursor)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("edition facts sync failed (will retry next start): %s", e)
 
     if not _stopped():
         # A02: single→album links the importer made before it checked the
