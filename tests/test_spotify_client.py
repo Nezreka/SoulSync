@@ -238,3 +238,27 @@ def test_has_write_scope_false_when_no_client():
     c = _SpotifyClient.__new__(_SpotifyClient)
     c.sp = None
     assert c.has_write_scope() is False
+
+
+# ── the fallback is named by the client that answers ──────────────────────────
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize('stored, token, expected', [
+    ('spotify', '', 'itunes'),      # primary source Spotify: its fallback is iTunes
+    ('itunes', '', 'itunes'),
+    ('deezer', '', 'deezer'),
+    ('discogs', '', 'itunes'),      # no token: the iTunes client answers
+    ('discogs', 'tok', 'discogs'),
+])
+def test_fallback_source_names_the_client_that_answers(monkeypatch, stored, token, expected):
+    """Callers label fallback results with this name. With the primary source
+    stored as 'spotify' it said 'spotify' while iTunes answered, and numeric
+    iTunes album ids were saved as Spotify ids (every later lookup: HTTP 400)."""
+    import core.spotify_client as sc
+    values = {'metadata.fallback_source': stored, 'discogs.token': token}
+    monkeypatch.setattr(sc.config_manager, 'get', lambda key, default=None: values.get(key, default))
+    client = _SpotifyClient.__new__(_SpotifyClient)
+    client._itunes_client = client._deezer_client = client._discogs_client = object()
+    assert client._fallback_source == expected

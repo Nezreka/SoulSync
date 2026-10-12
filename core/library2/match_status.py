@@ -367,6 +367,11 @@ def set_library_v2_match(
 
     ids = parse_external_ids(row["external_ids"])
     value = str(external_id).strip() if external_id not in (None, "") else None
+    if value and service == "spotify":
+        from core.library2.importer import looks_like_foreign_provider_id
+        if looks_like_foreign_provider_id(value):
+            # a Spotify fallback once handed iTunes ids over as Spotify's (§62.4)
+            raise ValueError(f"{value!r} is not a Spotify id")
     if value and _identity_must_be_unique(canonical, service):
         owner = provider_id_owner(conn, canonical, service, value)
         if owner is not None and owner != int(entity_id):

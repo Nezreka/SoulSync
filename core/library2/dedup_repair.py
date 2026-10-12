@@ -104,9 +104,11 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
         if not _table_columns(conn, lib2_table):
             continue
         has_mb_column = "musicbrainz_id" in _table_columns(conn, lib2_table)
+        # numeric or UUID-shaped only: the startup pass reads this on every boot
         rows = conn.execute(
             f"SELECT id, spotify_id, external_ids FROM {lib2_table} "
-            "WHERE spotify_id IS NOT NULL AND spotify_id != ''").fetchall()
+            "WHERE spotify_id IS NOT NULL AND spotify_id != '' AND "
+            "(spotify_id NOT GLOB '*[^0-9 ]*' OR spotify_id GLOB '*-*-*-*-*')").fetchall()
         for row in rows:
             value = str(row["spotify_id"]).strip()
             if not looks_like_foreign_provider_id(value):
@@ -142,6 +144,11 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
                     f"UPDATE {lib2_table} SET musicbrainz_id=COALESCE("
                     "NULLIF(musicbrainz_id,''), ?) WHERE id=?",
                     (value, row["id"]))
+            if lib2_table != "lib2_release_editions":
+                # its "matched" Spotify attempt was this value: ask again
+                from core.library2.match_status import _sync_attempt_ledger
+                _sync_attempt_ledger(conn, _ENTITY_TYPE_BY_TABLE[lib2_table],
+                                     int(row["id"]), "spotify", None)
             fixed += 1
     if fixed:
         logger.info("Re-homed %d foreign-shaped spotify_id values", fixed)

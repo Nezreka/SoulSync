@@ -1459,6 +1459,14 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("edition facts sync failed (will retry next start): %s", e)
+        try:
+            # Another provider's id in a Spotify slot (§62.4). Its writers are
+            # fixed at the source; this heals what an older build stored.
+            from core.library2.dedup_repair import _sanitize_provider_namespaces
+            stats["provider_namespaces"] = _sanitize_provider_namespaces(connection, cursor)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("provider namespace heal failed (will retry next start): %s", e)
 
     if not _stopped():
         # A02: single→album links the importer made before it checked the

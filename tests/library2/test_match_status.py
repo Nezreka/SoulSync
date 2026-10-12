@@ -114,6 +114,21 @@ def test_lib2_native_entity_can_be_manually_matched_and_cleared(imported_conn):
     assert deezer["external_id"] is None
 
 
+@pytest.mark.parametrize("foreign", ["551515699", "693f1940-7107-46a4-acf2-1d487cf46e51"])
+def test_an_id_spotify_cannot_have_never_enters_its_slot(imported_conn, foreign):
+    """Spotify ids are 22-char base62. A numeric iTunes/Deezer id or a
+    MusicBrainz UUID in that slot made every later Spotify call answer 400."""
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(1, 'Bad 25th Anniversary')"
+    ).lastrowid
+
+    with pytest.raises(ValueError):
+        MS.set_library_v2_match(imported_conn, "album", album_id, "spotify", foreign)
+
+    assert imported_conn.execute(
+        "SELECT spotify_id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] is None
+
+
 def test_track_match_ignores_legacy_track_row(imported_conn):
     imported_conn.execute("ALTER TABLE tracks ADD COLUMN spotify_track_id TEXT")
     imported_conn.execute("UPDATE tracks SET spotify_track_id='spt' WHERE id=100")

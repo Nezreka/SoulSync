@@ -406,3 +406,24 @@ def test_a_file_imported_under_two_servers_keeps_one_track(repair_db, monkeypatc
         "SELECT title FROM lib2_tracks WHERE album_id=?", (live,))) == ["Song", "Wish"]
     assert conn.execute("SELECT COUNT(*) FROM lib2_track_files WHERE path='/m/song.flac'"
                         ).fetchone()[0] == 1
+
+
+def test_startup_heals_a_fallback_id_and_lets_spotify_ask_again(repair_db):
+    """Bad 25th Anniversary: Spotify's fallback handed over the iTunes id as
+    Spotify's, and a "matched" Spotify attempt meant nothing looked again."""
+    from core.library2.schema import run_library_v2_backfills
+    _legacy_db, conn = repair_db
+    artist = _artist(conn, "Michael Jackson")
+    album = _album(conn, artist, "Bad 25th Anniversary", spotify_id="551515699",
+                   external_ids=json.dumps({"itunes": "551515699", "spotify": "551515699"}))
+    conn.execute("INSERT INTO lib2_provider_attempts(entity_type, entity_id, service, status) "
+                 "VALUES('album', ?, 'spotify', 'matched')", (album,))
+    conn.commit()
+
+    run_library_v2_backfills(conn)
+
+    row = conn.execute("SELECT spotify_id, external_ids FROM lib2_albums WHERE id=?", (album,)).fetchone()
+    assert row["spotify_id"] is None
+    assert json.loads(row["external_ids"]) == {"itunes": "551515699"}
+    assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_id=? "
+                        "AND service='spotify'", (album,)).fetchone()[0] == 0
