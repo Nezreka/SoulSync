@@ -92,6 +92,18 @@ def test_it_reaches_albums_and_tracks_too(conn):
     assert kinds == {"artist", "album", "track"}
 
 
+def test_a_provider_is_only_asked_about_entity_types_it_can_match(conn):
+    """Discogs has no track identities: each track it was handed missed, or,
+    holding a release-track id, raised "does not support track"."""
+    enrich = _enricher({})
+
+    backfill_missing_provider_ids(
+        conn, services=["discogs"], limit=10, enricher=enrich)
+
+    assert {entity_type for entity_type, _id, _svc in enrich.seen} == {"artist", "album"}
+    assert ("track", 1) not in _attempts(conn, "discogs")
+
+
 def test_a_miss_is_recorded_so_the_row_is_not_handed_out_again(conn):
     enrich = _enricher({"musicbrainz": {"success": False, "reason": "not_found"}})
 

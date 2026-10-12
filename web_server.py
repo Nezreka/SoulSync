@@ -240,7 +240,7 @@ from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
 from core.amazon_worker import AmazonWorker
-from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run
+from core.amazon_outage import amazon_enrichment_should_run as _amazon_enrichment_should_run, amazon_host_configured as _amazon_host_configured
 from core.hydrabase_client import HydrabaseClient
 from core.automation_engine import AutomationEngine
 
@@ -3405,6 +3405,7 @@ def _get_enrichment_status():
         'spotify_enrichment': lambda: bool(config_manager.get('spotify.client_id') and config_manager.get('spotify.client_secret')),
         'tidal_enrichment': lambda: bool(tidal_client and getattr(tidal_client, 'access_token', None)),
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
+        'amazon_enrichment': lambda: _amazon_host_configured(config_manager),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
         'jiosaavn_enrichment': is_jiosaavn_enabled,

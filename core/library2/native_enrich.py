@@ -1632,9 +1632,14 @@ def backfill_missing_provider_ids(
     including a failure, because a row whose attempt went unrecorded is handed
     straight back on the next iteration.
     """
+    from core.library2.match_status import SERVICES
     from core.library2.provider_attempts import record_attempt
-    from core.library2.worker_queue import next_pending
+    from core.library2.worker_queue import ENTITY_ORDER, next_pending
 
+    # Only the types a provider can hold an id for, as its worker asks: Discogs
+    # has no tracks, so every track it was handed missed or raised.
+    supported = {name: tuple(t for t in ENTITY_ORDER if t in types)
+                 for name, _label, types in SERVICES}
     if enricher is None:
         enricher = enrich_native_entity_for_service
     if next_item is None:
@@ -1662,7 +1667,7 @@ def backfill_missing_provider_ids(
             if service in exhausted:
                 continue
             try:
-                item = next_item(conn, service)
+                item = next_item(conn, service, entity_types=supported.get(service, ()))
             except Exception as exc:  # noqa: BLE001 — one provider, not the run
                 logger.debug("provider backfill: queue read for %s failed: %s",
                              service, exc)
