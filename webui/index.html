@@ -4017,6 +4017,46 @@
                                                     data-video-test-service="opensubtitles">Test OpenSubtitles</button>
                                             </div>
                                         </div>
+                                        <div class="api-service-frame stg-service" data-video-service="subdl">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #7c6cf0;"></span>
+                                                <h4 class="service-title">SubDL (Subtitles)</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key:</label>
+                                                    <input type="password" id="subdl-api-key"
+                                                        placeholder="SubDL API Key">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Get a free key from <a
+                                                            href="https://subdl.com/api-doc"
+                                                            target="_blank" style="color: #22a079;">SubDL</a>
+                                                        (account panel)</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="api-service-frame stg-service" data-video-service="subsource">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #4da3ff;"></span>
+                                                <h4 class="service-title">SubSource (Subtitles)</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key:</label>
+                                                    <input type="password" id="subsource-api-key"
+                                                        placeholder="SubSource API Key">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Get a free key from <a
+                                                            href="https://subsource.net/profile"
+                                                            target="_blank" style="color: #22a079;">SubSource</a>
+                                                        (profile page)</div>
+                                                </div>
+                                            </div>
+                                        </div>
                                         <div class="api-service-frame stg-service" data-video-service="trakt">
                                             <div class="stg-service-header" onclick="toggleStgService(this)">
                                                 <span class="stg-service-dot" style="color: #ed1c24;"></span>
@@ -8254,15 +8294,57 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label for="vo-sub-hi-forced">Hearing-impaired / forced
+                                                        preference:</label>
+                                                    <select id="vo-sub-hi-forced">
+                                                        <option value="off">Off — best match wins</option>
+                                                        <option value="prefer_hi">Prefer hearing-impaired</option>
+                                                        <option value="prefer_forced">Prefer forced</option>
+                                                    </select>
+                                                    <small class="settings-hint">A tiebreak only, never a filter:
+                                                        when two subtitles score the same, the preferred kind
+                                                        wins.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-autosync">
+                                                        <span>Auto-sync subtitles to audio</span>
+                                                    </label>
+                                                    <small class="settings-hint">After a download, shift the
+                                                        subtitle timing to match the video's own audio
+                                                        (ffsubsync, offline). Requires the
+                                                        <code>ffsubsync</code> Python package on the server;
+                                                        a failed sync keeps the original file.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>Subtitle provider chain:</label>
-                                                    <ol class="vo-provider-order" id="vo-provider-order"></ol>
-                                                    <small class="settings-hint">Each source is tried in order,
-                                                        top first, until subtitles are found. More providers are
-                                                        coming &mdash; reordering arrives in a later phase.</small>
-                                                    <small class="settings-hint">The API key lives under
-                                                        <a href="#opensubtitles-api-key"
-                                                            style="color: #22a079;">Services &rarr;
-                                                            OpenSubtitles</a>.</small>
+                                                    <div id="subchain-widget">
+                                                        <div class="dlchain-columns">
+                                                            <div class="dlchain-col">
+                                                                <div class="dlchain-col-head">
+                                                                    <span class="dlchain-col-label">Available</span>
+                                                                    <span class="dlchain-col-hint">drag one across, or click it</span>
+                                                                </div>
+                                                                <div class="dlchain-pool" id="subchain-pool"></div>
+                                                            </div>
+                                                            <div class="dlchain-col">
+                                                                <div class="dlchain-col-head">
+                                                                    <span class="dlchain-col-label">Provider chain</span>
+                                                                    <span class="dlchain-col-hint"
+                                                                        id="subchain-mode-hint"></span>
+                                                                </div>
+                                                                <div class="dlchain-list" id="subchain-list"></div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <small class="settings-hint">Each provider is tried in order,
+                                                        top first, until subtitles are found. Whisper stays
+                                                        pinned last as the last resort when enabled.</small>
+                                                    <small class="settings-hint">API keys live under
+                                                        Services &rarr; OpenSubtitles, SubDL, SubSource.
+                                                        Embedded needs no key.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8299,6 +8381,51 @@
                                                         CPU). Requires the
                                                         <code>faster-whisper</code> Python package on the
                                                         server.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Advanced:</label>
+                                                    <div class="vo-sub-adv-grid">
+                                                        <div>
+                                                            <label for="vo-sub-min-score">Minimum match score</label>
+                                                            <input type="number" id="vo-sub-min-score" min="0" max="200" step="1">
+                                                            <small class="settings-hint">Candidates scoring below this are a miss and never download.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-daily-quota">Daily quota per provider</label>
+                                                            <input type="number" id="vo-sub-daily-quota" min="1" max="1000" step="1">
+                                                            <small class="settings-hint">Max subtitle downloads per provider per day (UTC).</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-upgrade-delta">Upgrade threshold</label>
+                                                            <input type="number" id="vo-sub-upgrade-delta" min="0" max="200" step="1">
+                                                            <small class="settings-hint">A new candidate must beat the current subtitle by this much to replace it.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-worker-interval">Retry every (minutes)</label>
+                                                            <input type="number" id="vo-sub-worker-interval" min="5" max="1440" step="1">
+                                                            <small class="settings-hint">How often the wanted loop retries misses.</small>
+                                                        </div>
+                                                        <div>
+                                                            <label for="vo-sub-worker-batch">Retries per cycle</label>
+                                                            <input type="number" id="vo-sub-worker-batch" min="1" max="200" step="1">
+                                                            <small class="settings-hint">Max wanted rows attempted per worker cycle.</small>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Library backfill:</label>
+                                                    <div>
+                                                        <button class="test-button" id="vo-sub-backfill"
+                                                            type="button">Scan library for missing subtitles</button>
+                                                    </div>
+                                                    <small class="settings-hint"
+                                                        id="vo-sub-backfill-status"></small>
+                                                    <small class="settings-hint">Queues wanted rows for
+                                                        library videos that have no subtitles yet, so the
+                                                        worker fetches them like new imports. Runs in the
+                                                        background; needs Download subtitles on.</small>
                                                 </div>
                                             </div>
 

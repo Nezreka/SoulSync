@@ -112,7 +112,12 @@ def create_video_blueprint() -> Blueprint:
                                  # whisper model download (Phase 4): writes to
                                  # server disk + pulls ~500MB from the net —
                                  # admin-only. The status GET stays open.
-                                 "/api/video/subtitles/whisper/download") \
+                                 "/api/video/subtitles/whisper/download",
+                                 # library backfill sweep: launches a
+                                 # background thread that walks and mutates
+                                 # the whole library DB — admin-only. The
+                                 # status GET stays open.
+                                 "/api/video/subtitles/backfill") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # season-wide monitor flip — same library
                                   # management as /api/video/monitor above

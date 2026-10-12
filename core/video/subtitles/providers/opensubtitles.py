@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
 
 BASE = "https://api.opensubtitles.com/api/v1"
 _UA = "SoulSync v1.0"
@@ -204,9 +204,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         # NOTE: the hi/forced degradation applies to the merged list; hash
         # matches keep their hash_match flag through it (scoring, not filtering,
         # decides).
-        want_hi, want_forced = bool(query.hi), bool(query.forced)
-        exact = [c for c in merged if c.hi == want_hi and c.forced == want_forced]
-        return exact or merged
+        return flag_filter(merged, query)
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         if not self._api_key or candidate is None:
