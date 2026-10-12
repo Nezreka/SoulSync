@@ -1276,6 +1276,7 @@ class MusicDatabase:
             self._add_profile_support_v2(cursor)
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
+            self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
             self._add_profile_listenbrainz_support(cursor)
@@ -4512,6 +4513,21 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding columns to similar_artists: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _fix_profile_one_owner_rows(self, cursor):
+        """Repair rows stamped owner_profile_id=1 by the pre-#1660 import bug.
+
+        Profile 1 is the shared library scope (owner_profile_id IS NULL), but
+        record_soulsync_library_entry used to write owner_profile_id=1 for
+        profile-1 downloads. Those rows were invisible to every shared-scope
+        lookup. This is idempotent: only touches rows that still have the
+        bad value.
+        """
+        try:
+            for table in ("tracks", "albums", "artists"):
+                cursor.execute(f"UPDATE {table} SET owner_profile_id = NULL WHERE owner_profile_id = 1")
+        except Exception as e:
+            logger.debug(f"Profile-1 owner repair skipped: {e}")
 
     def _fix_watchlist_spotify_id_nullable(self, cursor):
         """
@@ -25217,10 +25233,22 @@ class MusicDatabase:
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
                                     AND EXISTS (SELECT 1 FROM tracks ti
-                                                WHERE ti.spotify_track_id = mpt.source_track_id))
+                                                WHERE ti.spotify_track_id = mpt.source_track_id
+                                                   OR ti.deezer_id = mpt.source_track_id
+                                                   OR ti.tidal_id = mpt.source_track_id
+                                                   OR ti.qobuz_id = mpt.source_track_id
+                                                   OR ti.itunes_track_id = mpt.source_track_id))
+                                   -- The name join stays exact (case-sensitive):
+                                   -- COLLATE NOCASE would defeat idx_artists_name /
+                                   -- idx_tracks_title (~18s vs ~6ms on a 300k-track
+                                   -- library). The track_artist OR covers
+                                   -- compilations filed under Various Artists.
+                                   -- File-import tracks (file:{digest} ids) never
+                                   -- id-match; the name join is their path.
                                    OR EXISTS (SELECT 1 FROM artists a
                                               JOIN tracks t ON t.artist_id = a.id
-                                              WHERE a.name = mpt.artist_name
+                                              WHERE (a.name = mpt.artist_name
+                                                     OR t.track_artist = mpt.artist_name)
                                                 AND t.title = mpt.track_name)
                                ) THEN 1
                                ELSE 0 END) as in_library,
@@ -25327,10 +25355,12 @@ class MusicDatabase:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
                 # In-library, id-first like the batched variant: source id
-                # against enriched tracks' spotify_track_id
-                # (idx_tracks_spotify_id), OR the case-sensitive name
-                # join (COLLATE NOCASE would defeat idx_artists_name /
-                # idx_tracks_title — ~18s vs ~6ms on a 300k-track library).
+                # against the provider id columns (spotify/deezer/tidal/qobuz/
+                # itunes), OR the case-sensitive name join (COLLATE NOCASE would
+                # defeat idx_artists_name / idx_tracks_title — ~18s vs ~6ms on a
+                # 300k-track library). The track_artist OR covers compilations
+                # filed under Various Artists. File-import tracks (file:{digest}
+                # ids) never id-match; the name join is their path.
                 try:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
@@ -25339,10 +25369,15 @@ class MusicDatabase:
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
                              AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id))
+                                         WHERE ti.spotify_track_id = mpt.source_track_id
+                                            OR ti.deezer_id = mpt.source_track_id
+                                            OR ti.tidal_id = mpt.source_track_id
+                                            OR ti.qobuz_id = mpt.source_track_id
+                                            OR ti.itunes_track_id = mpt.source_track_id))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
-                                       WHERE a.name = mpt.artist_name
+                                       WHERE (a.name = mpt.artist_name
+                                              OR t.track_artist = mpt.artist_name)
                                          AND t.title = mpt.track_name)
                           )
                     """, (playlist_id,))
