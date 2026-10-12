@@ -178,6 +178,10 @@
         left: 0;
         width: 280px;
         height: 100vh;
+        /* dvh tracks the visible viewport when the mobile browser chrome
+           (URL bar) shows/hides — 100vh alone can size the drawer taller
+           than the visible area in landscape, pushing the nav off-screen. */
+        height: 100dvh;
         z-index: 10001;
         transform: translateX(-100%);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -3955,7 +3959,12 @@ html.download-modal-open body {
         max-height: 50vh;
         max-height: max(220px, 50dvh);
         overflow: auto;
-        overscroll-behavior: contain;
+        /* The inner list must chain its scroll to the outer modal when it hits
+           top/bottom — `contain` here traps the gesture, so reaching the end
+           of the tracklist dead-ends instead of scrolling the modal. The outer
+           .download-missing-modal-content keeps `contain` to stop the chain
+           at the modal (the page behind must not scroll). */
+        overscroll-behavior: auto;
     }
     .download-missing-modal-footer {
         padding-bottom: max(12px, env(safe-area-inset-bottom));
@@ -4181,5 +4190,106 @@ html.download-modal-open body {
     }
     .track-compact-artist {
         font-size: 12px;
+    }
+}
+
+/* --- Landscape phones: compact the drawer header so the nav can scroll ---
+   In landscape the viewport is ~360px tall. The sidebar header (brand +
+   Audio/Video toggle + profile) eats ~200px of that, leaving almost no room
+   for .sidebar-scroll — the nav items pile up below the fold with nothing to
+   scroll. This compacts the header at short heights so the scroll area gets
+   real space. */
+@media (max-height: 500px) {
+    .sidebar-header {
+        min-height: 0;
+        padding: 12px 16px;
+        gap: 6px;
+    }
+    .sidebar-header .app-subtitle {
+        display: none;
+    }
+    .sidebar-header .sidebar-logo {
+        width: 28px;
+        height: 28px;
+    }
+    .sidebar-header .app-name {
+        font-size: 18px;
+    }
+    .sidebar-header .side-toggle {
+        margin-top: 2px;
+    }
+    .sidebar-header .side-toggle-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+    #profile-indicator {
+        margin-top: 2px;
+    }
+}
+
+/* --- Mobile tab/pill bars: never overlap, scroll instead of clipping ---
+   Thibs' screenshots show pill tab groups (Audiobooks genres, Watchlist
+   tabs, Settings Library tabs) either cut off at the viewport edge or —
+   worse — rendering on top of each other ("AudiobookPodcasts"). On small
+   screens these groups become horizontal scrollers: items keep their size
+   (flex-shrink: 0) and the group scrolls instead of overflowing. */
+@media (max-width: 768px) {
+    .genre-pills,
+    .genre-tabs,
+    .watchlist-tabs,
+    .settings-tabs,
+    .pill-group,
+    .tab-group,
+    [role="tablist"] {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .genre-pills::-webkit-scrollbar,
+    .genre-tabs::-webkit-scrollbar,
+    .watchlist-tabs::-webkit-scrollbar,
+    .settings-tabs::-webkit-scrollbar,
+    .pill-group::-webkit-scrollbar,
+    .tab-group::-webkit-scrollbar,
+    [role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+    .genre-pills > *,
+    .genre-tabs > *,
+    .watchlist-tabs > *,
+    .settings-tabs > *,
+    .pill-group > *,
+    .tab-group > *,
+    [role="tablist"] > * {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+}
+
+/* --- Hide hamburger behind open modals ---
+   The hamburger is position:fixed with a high z-index so it's always
+   reachable. When a modal opens (e.g. the Deezer service setup), the
+   hamburger paints above the modal's own header and overlaps its title.
+   Modals get their own close control, so the hamburger is redundant while
+   one is open. */
+html.download-modal-open .hamburger-btn,
+html.modal-open .hamburger-btn,
+body.modal-open .hamburger-btn {
+    display: none !important;
+}
+
+/* --- Page titles must clear the fixed hamburger ---
+   The hamburger is position:fixed at left:16px, 44px wide (ends at 60px).
+   Page headers starting at the left edge slide under it — gzetk's screenshot
+   shows "Au" of "Auto-Sync Manager" hidden behind the button. Give page
+   headers left padding on mobile so titles start clear of the button. */
+@media (max-width: 768px) {
+    .page-header,
+    .page-title,
+    h1.page-title {
+        padding-left: 56px;
     }
 }
