@@ -17100,6 +17100,165 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .mm-cover-empty.tidal { background: linear-gradient(135deg, var(--white-a18), var(--white-a04)); color: #fff; }
 .mm-cover-empty.youtube { background: linear-gradient(135deg, rgba(255, 0, 0, 0.22), rgba(255, 0, 0, 0.06)); color: #ff4d4d; }
 
+/* your own playlist: the cover is editable */
+.mm-cover-wrap {
+    position: relative;
+    flex-shrink: 0;
+}
+.mm-cover-edit {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 7px 4px;
+    border: 0;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+.mm-cover-wrap:hover .mm-cover-edit,
+.mm-cover-wrap:focus-within .mm-cover-edit {
+    opacity: 1;
+}
+.mm-cover-edit:disabled {
+    opacity: 1;
+    cursor: default;
+}
+.mm-cover-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 30;
+    width: 248px;
+    padding: 10px;
+    border-radius: var(--radius-lg);
+    background: #1c1c1e;
+    border: 1px solid var(--white-a10);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.mm-cover-item {
+    display: block;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    background: var(--white-a06);
+    color: #fff;
+    font-size: 13px;
+    text-align: left;
+    border: 0;
+    cursor: pointer;
+}
+.mm-cover-item:hover { background: var(--white-a10); }
+.mm-cover-remove { color: #ff7a7a; }
+.mm-cover-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--white-a50);
+}
+.mm-cover-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.mm-cover-tile {
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    cursor: pointer;
+    background: none;
+}
+.mm-cover-tile:hover { border-color: rgb(var(--accent-rgb)); }
+.mm-cover-tile img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+}
+.mm-cover-urlrow {
+    display: flex;
+    gap: 6px;
+}
+.mm-cover-url {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 9px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--white-a10);
+    background: #111;
+    color: #fff;
+    font-size: 12px;
+}
+.mm-cover-error {
+    font-size: 12px;
+    color: #ff9d9d;
+}
+
+/* playlist description, under the title */
+.mm-desc {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 8px;
+}
+.mm-desc p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--white-a75);
+    white-space: pre-line;
+}
+.mm-desc-readonly { margin-top: 8px; }
+.mm-desc-pencil {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--white-a50);
+    font-size: 13px;
+    cursor: pointer;
+}
+.mm-desc-pencil:hover { color: #fff; background: var(--white-a06); }
+.mm-desc-add {
+    margin-top: 8px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--white-a40);
+    font-size: 13px;
+    cursor: pointer;
+}
+.mm-desc-add:hover { color: rgb(var(--accent-light-rgb)); }
+.mm-desc-edit { margin-top: 8px; }
+.mm-desc-input {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--white-a10);
+    background: #111;
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.5;
+    resize: vertical;
+}
+.mm-desc-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 6px;
+}
+
 .mm-hero-info {
     flex: 1;
     min-width: 0;
@@ -17365,6 +17524,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-color: var(--white-a12);
 }
 .mm-btn-ghost:hover { background: rgba(255, 255, 255, 0.13); color: #fff; }
+
+.mm-btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+    border-radius: 7px;
+}
 
 .mm-btn-danger {
     background: transparent;

@@ -24399,6 +24399,56 @@ class MusicDatabase:
             logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
             return False
 
+    def set_mirrored_playlist_image_url(
+        self,
+        playlist_id: int,
+        image_url: Optional[str],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Set (or clear, with None) a mirrored playlist's poster, owner-scoped.
+
+        For user playlists this is the cover the owner picked: the mirror
+        upsert preserves image_url on every track edit, so a cover set here
+        survives adds, removes and reorders. The list and detail views fall
+        back to track art when it is NULL.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET image_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [image_url, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting image for mirrored playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_description(
+        self,
+        playlist_id: int,
+        description: Optional[str],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Set (or clear, with None) a mirrored playlist's description, owner-scoped."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET description = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [description, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting description for mirrored playlist {playlist_id}: {e}")
+            return False
+
     def backfill_missing_mirrored_covers(self, profile_id: int = 1) -> int:
         """Give already-discovered playlists the covers they never got.
 

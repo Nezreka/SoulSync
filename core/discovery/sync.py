@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -305,6 +306,24 @@ def _record_library_membership(tracks_json, match_details) -> None:
             logger.info(f"[Sync] Recorded library membership for {written} mirrored tracks")
     except Exception as e:  # noqa: BLE001 - never fail a completed sync over bookkeeping
         logger.warning(f"Failed to record library membership: {e}")
+
+def _sync_is_user_playlist(playlist_id, profile_id) -> bool:
+    """True when the synced mirror is a user-made playlist (source 'soulsync').
+
+    Best-effort: any lookup failure (tests stub the db, ids aren't always
+    ints) reads as "not a user playlist", keeping the source-poster guards.
+    """
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        getter = getattr(db, 'get_mirrored_playlist', None)
+        if getter is None:
+            return False
+        row = getter(int(playlist_id), profile_id=profile_id)
+        return bool(row) and row.get('source') == 'soulsync'
+    except Exception:
+        return False
+
 
 def run_sync_task(
     playlist_id,
@@ -633,14 +652,46 @@ def run_sync_task(
         # don't want persisted to app.log.
         _synced = getattr(result, 'synced_tracks', 0)
         logger.info(f"[PLAYLIST IMAGE] has_image={bool(playlist_image_url)}, synced_tracks={_synced}")
+        # A user playlist's cover is the owner's explicit choice — there is no
+        # upstream poster — so it pushes on every sync. The first-sync-only /
+        # preserve-existing rules below protect SOURCE posters (#993, #792,
+        # #811): re-pushing those would clobber a cover the user set by hand
+        # on the server.
+        _is_user_playlist = _sync_is_user_playlist(playlist_id, profile_id)
+        # An uploaded cover is a path on this server ("/api/user-playlists/<id>/
+        # cover"): make it absolute so the clients can fetch it. Same-host is
+        # the common case; a server on another box degrades to today's
+        # best-effort False.
+        _push_image_url = playlist_image_url
+        # the row's image_url is NULL for a cover-less playlist, and .get()
+        # hands that None straight through — guard it, or every such sync
+        # dies here on AttributeError.
+        _cover_local_path = None
+        if _push_image_url and _push_image_url.startswith('/'):
+            _port = int(os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008'))
+            _push_image_url = f"http://127.0.0.1:{_port}{_push_image_url.split('?')[0]}"
+            # a SoulSync-local cover also exists as a file: Plex fetches URLs
+            # itself, so 127.0.0.1 breaks when it runs in another container —
+            # hand Plex the file instead (mkdir=False: this is a probe).
+            if playlist_image_url.startswith('/api/user-playlists/'):
+                try:
+                    from core.playlists import user_playlists as _up
+                    _cm = deps.config_manager
+                    _base = getattr(_cm, 'base_dir', None) if _cm else None
+                    _cand = _up.cover_path(int(playlist_id), str(_base) if _base else None,
+                                           mkdir=False)
+                    if os.path.isfile(_cand):
+                        _cover_local_path = _cand
+                except Exception:
+                    _cover_local_path = None
         # Modes that edit a playlist in place (reconcile #792, append #811) must NOT
         # push the source image, and neither does a sync of a playlist that already
         # exists (#993) — either re-clobbers a user's custom poster. The source cover
         # is pushed only to a brand-new playlist (a genuine first mirror); after that
         # its cover is left alone. A one-off retroactive backfill is future work.
-        if sync_mode in ('reconcile', 'append'):
+        if sync_mode in ('reconcile', 'append') and not _is_user_playlist:
             logger.info(f"[PLAYLIST IMAGE] {sync_mode} mode — preserving existing playlist image")
-        elif playlist_image_url and _synced > 0 and _playlist_preexisted:
+        elif playlist_image_url and _synced > 0 and _playlist_preexisted and not _is_user_playlist:
             logger.info("[PLAYLIST IMAGE] playlist already existed — leaving its current cover untouched (#993)")
         elif playlist_image_url and _synced > 0:
             try:
@@ -650,12 +701,13 @@ def run_sync_task(
                 if active_server == 'plex' and _engine and _engine.client('plex'):
                     from services.sync_service import plex_client_for_profile
                     _px = plex_client_for_profile(profile_id, _engine.client('plex'))
-                    ok = _px.set_playlist_image(playlist_name, playlist_image_url)
+                    ok = _px.set_playlist_image(playlist_name, _push_image_url,
+                                                local_path=_cover_local_path)
                     logger.info(f"[PLAYLIST IMAGE] Plex upload result: {ok}")
                 elif active_server in ('jellyfin', 'emby') and _engine and _engine.client('jellyfin'):
                     from services.sync_service import jellyfin_client_for_profile
                     _jf = jellyfin_client_for_profile(profile_id, _engine.client('jellyfin'))
-                    ok = _jf.set_playlist_image(playlist_name, playlist_image_url)
+                    ok = _jf.set_playlist_image(playlist_name, _push_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Jellyfin upload result: {ok}")
                 elif active_server == 'navidrome' and _engine and _engine.client('navidrome'):
                     # Subsonic has no playlist-cover field, but Navidrome's native
@@ -663,7 +715,7 @@ def run_sync_task(
                     # NavidromeClient.set_playlist_image.
                     from services.sync_service import navidrome_client_for_profile
                     _nd = navidrome_client_for_profile(profile_id, _engine.client('navidrome'))
-                    ok = _nd.set_playlist_image(playlist_name, playlist_image_url)
+                    ok = _nd.set_playlist_image(playlist_name, _push_image_url)
                     logger.info(f"[PLAYLIST IMAGE] Navidrome upload result: {ok}")
             except Exception as img_err:
                 logger.error(f"[PLAYLIST IMAGE] Exception: {img_err}")

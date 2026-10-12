@@ -1,6 +1,7 @@
 """user playlist endpoints - the playlists people make inside soulsync.
 
-create, list for the add-to-playlist picker, add / remove / reorder tracks.
+create, list for the add-to-playlist picker, add / remove / reorder tracks,
+plus the parts only an owned playlist has: cover, description, duplicate.
 everything else (rename, delete, identify, sync, auto-sync) goes through the
 mirrored-playlist routes, because a user playlist is a mirrored playlist.
 
@@ -9,7 +10,9 @@ active profile, admin included: an admin adding a song from search should
 never land it in someone else's playlist.
 """
 
-from flask import Blueprint, jsonify, request
+import os
+
+from flask import Blueprint, jsonify, request, send_file
 
 from core.playlists import user_playlists as up
 from core.profile_context import get_current_profile_id
@@ -19,6 +22,7 @@ logger = get_logger("web_server")
 
 # injected by configure()
 get_database = None
+config_manager = None
 
 
 def configure(**deps):
@@ -41,6 +45,15 @@ def _own_user_playlist(database, playlist_id):
     a foreign or non-user playlist reads exactly like a missing one."""
     playlist = database.get_mirrored_playlist(playlist_id, profile_id=get_current_profile_id())
     return playlist if up.is_user_playlist(playlist) else None
+
+
+def _cover_base_dir():
+    base = getattr(config_manager, "base_dir", None) if config_manager else None
+    return str(base) if base else None
+
+
+def _not_found():
+    return jsonify({"error": "Playlist not found"}), 404
 
 
 @bp.route('/api/user-playlists', methods=['GET'])
@@ -79,7 +92,7 @@ def add_user_playlist_tracks(playlist_id):
         database = get_database()
         playlist = _own_user_playlist(database, playlist_id)
         if not playlist:
-            return jsonify({"error": "Playlist not found"}), 404
+            return _not_found()
         tracks = data.get('tracks')
         if not isinstance(tracks, list):
             return jsonify({"error": "tracks must be a list"}), 400
@@ -100,7 +113,7 @@ def remove_user_playlist_track(playlist_id, position):
         database = get_database()
         playlist = _own_user_playlist(database, playlist_id)
         if not playlist:
-            return jsonify({"error": "Playlist not found"}), 404
+            return _not_found()
         count = up.remove_track(database, playlist, position)
         return jsonify({"success": True, "track_count": count})
     except up.UserPlaylistError as e:
@@ -117,7 +130,7 @@ def reorder_user_playlist(playlist_id):
         database = get_database()
         playlist = _own_user_playlist(database, playlist_id)
         if not playlist:
-            return jsonify({"error": "Playlist not found"}), 404
+            return _not_found()
         order = data.get('order')
         if not isinstance(order, list):
             return jsonify({"error": "order must be a list"}), 400
@@ -128,3 +141,126 @@ def reorder_user_playlist(playlist_id):
     except Exception as e:
         logger.error(f"Error reordering user playlist {playlist_id}: {e}")
         return jsonify({"error": "Failed to reorder playlist"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>', methods=['PATCH'])
+def update_user_playlist(playlist_id):
+    """description for now; rename stays on the mirrored custom-name route."""
+    data = request.get_json(silent=True) or {}
+    if 'description' not in data:
+        return jsonify({"error": "Nothing to update"}), 400
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        description = up.set_description(database, playlist, data.get('description'))
+        return jsonify({"success": True, "description": description})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error updating user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to update playlist"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/duplicate', methods=['POST'])
+def duplicate_user_playlist(playlist_id):
+    data = request.get_json(silent=True) or {}
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        result = up.duplicate_playlist(
+            database, playlist, data.get('name'), base_dir=_cover_base_dir(),
+        )
+        return jsonify({"success": True, **result})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error duplicating user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to duplicate playlist"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/cover', methods=['POST'])
+def upload_user_playlist_cover(playlist_id):
+    """multipart 'file': any image pillow reads, re-encoded to a square webp."""
+    f = request.files.get('file')
+    if not f:
+        return jsonify({"error": "No image"}), 400
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        image_url = up.set_cover_upload(
+            database, playlist, f, base_dir=_cover_base_dir(),
+        )
+        return jsonify({"success": True, "image_url": image_url})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error uploading cover for user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to set cover"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/cover', methods=['PUT'])
+def set_user_playlist_cover(playlist_id):
+    """JSON: {"image_url": "<http(s) url>"} or {"from_track": <1-based position>}."""
+    data = request.get_json(silent=True) or {}
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        if 'image_url' in data:
+            image_url = up.set_cover_url(database, playlist, data.get('image_url'))
+        elif 'from_track' in data:
+            image_url = up.set_cover_from_track(database, playlist, data.get('from_track'))
+        else:
+            return jsonify({"error": "Give an image_url or a from_track position"}), 400
+        return jsonify({"success": True, "image_url": image_url})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error setting cover for user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to set cover"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/cover', methods=['DELETE'])
+def clear_user_playlist_cover(playlist_id):
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        up.clear_cover(database, playlist, base_dir=_cover_base_dir())
+        return jsonify({"success": True})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error clearing cover for user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to clear cover"}), 500
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/cover', methods=['GET'])
+def get_user_playlist_cover(playlist_id):
+    # Reads are NOT owner-scoped: the media-server sync fetches this URL with
+    # no session (and Plex fetches it server-side), so get_current_profile_id()
+    # would fall back to the admin and 404 every non-admin playlist's cover.
+    # Same posture as the avatar endpoint: the file serves, everything else
+    # about the playlist stays behind the profile gate.
+    try:
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not up.is_user_playlist(playlist):
+            return _not_found()
+        path = up.cover_path(playlist_id, _cover_base_dir())
+        if not os.path.isfile(path):
+            return jsonify({"error": "No cover"}), 404
+        resp = send_file(path, mimetype="image/webp", max_age=3600)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        return resp
+    except Exception as e:
+        logger.error(f"Error serving cover for user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to load cover"}), 500

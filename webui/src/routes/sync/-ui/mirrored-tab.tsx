@@ -93,6 +93,7 @@ import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
 import {
   createUserPlaylist,
+  duplicateUserPlaylist,
   isUserPlaylist,
   removeFromUserPlaylist,
   reorderUserPlaylist,
@@ -1369,6 +1370,27 @@ export function MirroredTab({
                   void editTracks(detail.playlistId, () =>
                     reorderUserPlaylist(detail.playlistId, order),
                   )
+              : undefined
+          }
+          onRefresh={() => editTracks(detail.playlistId, async () => {})}
+          onDuplicate={
+            isUserPlaylist(detail.data)
+              ? async () => {
+                  try {
+                    const copy = await duplicateUserPlaylist(detail.playlistId);
+                    const data = await fetchMirroredPlaylist(copy.id);
+                    if (!data.error) {
+                      setDetail({ playlistId: copy.id, data });
+                    }
+                    window.showToast?.(`Duplicated as “${copy.name}”`, 'success');
+                  } catch (err) {
+                    window.showToast?.(
+                      err instanceof Error ? err.message : 'Could not duplicate the playlist',
+                      'error',
+                    );
+                  }
+                  void load();
+                }
               : undefined
           }
         />
