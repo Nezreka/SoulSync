@@ -157,6 +157,32 @@ describe('library v2 remaining mutation boundaries', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('links the picked artist as an alias of this one', async () => {
+    const linked: { id: string; body: unknown }[] = [];
+    server.use(
+      http.get('/api/library/v2/artists/7/aliases', () =>
+        HttpResponse.json({ success: true, canonical_artist_id: 7, aliases: [] }),
+      ),
+      http.get('/api/library/v2/artists', () =>
+        HttpResponse.json({ success: true, artists: [{ id: 9, name: 'Other Spelling' }] }),
+      ),
+      http.post('/api/library/v2/artists/:id/link-alias', async ({ params, request }) => {
+        linked.push({ id: String(params.id), body: await request.json() });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+
+    renderWithQueryClient(<ArtistAliases artistId={7} artistName="Canonical" />);
+    fireEvent.click(screen.getByRole('button', { name: '+ Link alias' }));
+    fireEvent.change(screen.getByPlaceholderText(/other artist row/), {
+      target: { value: 'Other' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Link' }));
+
+    await waitFor(() => expect(linked).toEqual([{ id: '9', body: { alias_of: 7 } }]));
+  });
+
   it('surfaces an alias-unlink 4xx and retries the same alias', async () => {
     let attempts = 0;
     server.use(

@@ -1821,10 +1821,13 @@ function LinkArtistAliasModal({
     mutationFn: (q: string) =>
       fetchLibraryV2Artists({ q, sort: 'name', page: 1, monitored: 'all' }),
   });
+  // The row picked here becomes the alias; this artist stays canonical. The
+  // reverse made this artist the alias, so a second link failed with "already
+  // has aliases of its own".
   const link = useMutation({
-    mutationFn: (aliasOfId: number) => {
+    mutationFn: (aliasId: number) => {
       if (!canWrite) throw new Error('Library changes require the admin profile');
-      return linkLibraryV2ArtistAlias(artistId, aliasOfId);
+      return linkLibraryV2ArtistAlias(aliasId, artistId);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
