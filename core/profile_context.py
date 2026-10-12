@@ -44,7 +44,7 @@ def get_background_profile():
 
 
 __all__ = ["set_background_profile", "reset_background_profile", "get_background_profile",
-           "get_current_profile_id", "is_admin_request", "admin_only"]
+           "get_current_profile_id", "is_admin_request", "admin_only", "admin_or_api_key"]
 
 
 # ── request-side accessors ───────────────────────────────────────────────────
@@ -179,4 +179,25 @@ def admin_only(view_fn):
                 "error": "Admin access required",
             }), 403
         return view_fn(*args, **kwargs)
+    return wrapper
+
+
+def admin_or_api_key(view_fn):
+    """@admin_only, or a valid API key.
+
+    admin_only answers from the cookie session, so with security.require_login
+    on a key-authed caller with no session is refused even though the login and
+    launch-PIN gates already let the key through. Use this on the routes a
+    service holding a key must reach (profile invites); everything else stays
+    on admin_only. A key is admin-minted and already acts with admin rights on
+    /api/v1, and the stamp below is the one the before_request gates use.
+    """
+    import functools
+
+    @functools.wraps(view_fn)
+    def wrapper(*args, **kwargs):
+        from api.auth import apply_api_key_request_context
+        if apply_api_key_request_context():
+            return view_fn(*args, **kwargs)
+        return admin_only(view_fn)(*args, **kwargs)
     return wrapper
