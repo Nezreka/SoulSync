@@ -57,7 +57,12 @@ def test_empty_payload_cannot_wipe_a_nonempty_mirror(client):
 
     r = _post(client, 'sp-wipe-me', [])
     assert r.status_code == 400, r.get_json()
-    assert 'empty track list' in r.get_json()['error']
+    body = r.get_json()
+    # the frontend checks res.success === false strictly, and readJson doesn't
+    # throw on a 400 — a bare {"error": ...} would fall through to the success
+    # branch and toast "Added to Playlists!".
+    assert body['success'] is False
+    assert 'empty track list' in body['error']
 
     # The stored tracks survived the refused write.
     assert len(_tracks(client, pl_id)) == 2

@@ -20964,12 +20964,19 @@ def mirror_playlist_endpoint():
                 source, str(source_playlist_id), profile_id
             )
             if existing and (existing.get('track_count') or 0) > 0:
-                return jsonify({"error": (
-                    f"Refusing to replace non-empty mirror '{name}' with an empty "
-                    f"track list — the payload looks like a failed fetch. If the "
-                    f"upstream playlist is genuinely empty, delete the mirror and "
-                    f"re-mirror it."
-                )}), 400
+                # NB: include success:false — the callers check
+                # res.success === false strictly, and readJson doesn't throw
+                # on a 400, so a bare {"error": ...} would fall through to
+                # the success branch in the UI.
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Refusing to replace non-empty mirror '{name}' with an empty "
+                        f"track list — the payload looks like a failed fetch. If the "
+                        f"upstream playlist is genuinely empty, delete the mirror and "
+                        f"re-mirror it."
+                    ),
+                }), 400
 
         quality_profile_id = data.get('quality_profile_id')
         if quality_profile_id is not None:
