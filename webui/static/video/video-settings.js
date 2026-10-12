@@ -1440,7 +1440,7 @@
     }
     function _subchainTile(id) {
         var m = subchainMeta(id);
-        var name = escapeHtml(m.name);
+        var name = escA(m.name);
         return '<button type="button" class="dlchain-tile" draggable="true" data-src="' + id + '" '
             + 'data-action="add" title="Add ' + name + ' to the chain">'
             + '<span class="dlchain-tile-art"><span class="emoji-icon">' + m.emoji + '</span></span>'
@@ -1448,7 +1448,7 @@
     }
     function _subchainStep(id, position, total, locked) {
         var m = subchainMeta(id);
-        var name = escapeHtml(m.name);
+        var name = escA(m.name);
         var role = locked ? 'Last resort' : (position === 1 ? 'Tried first' : 'Fallback ' + (position - 1));
         var html = '<div class="dlchain-step" data-src="' + id + '" '
             + 'title="' + name + ' - ' + role + '" aria-label="' + name + ', ' + role + '"'
@@ -1482,7 +1482,7 @@
             : '<div class="dlchain-empty">Every provider is in the chain.</div>';
         var steps = order.map(function (id, i) { return _subchainStep(id, i + 1, order.length, false); });
         if (_subchainWhisperActive()) steps.push(_subchainStep('whisper', order.length + 1, order.length + 1, true));
-        var lastName = order.length ? escapeHtml(subchainMeta(order[order.length - 1]).name) : '';
+        var lastName = order.length ? escA(subchainMeta(order[order.length - 1]).name) : '';
         var slotTitle = order.length
             ? 'Drag a provider here \u2014 tried after ' + lastName
             : 'Drag a provider here \u2014 this one is tried first';
@@ -2014,7 +2014,6 @@
         });
         var bfBtn = document.getElementById('vo-sub-backfill');
         if (bfBtn) bfBtn.addEventListener('click', startBackfill);
-        loadBackfillStatus();
         var reset = document.getElementById('vo-reset');
         if (reset) reset.addEventListener('click', function () {
             // POST blank templates + standard toggles; the backend normalises to the
@@ -2090,6 +2089,10 @@
         load();
         loadKeys();
         loadSharedLibrary();
+        // Backfill status rides the video page lifecycle, NOT the shared
+        // library load: that load has an exact fetch contract (and a
+        // fail/retry path) the extra status fetch would break.
+        loadBackfillStatus();
         loadImportLists();
         loadNotify();
         loadQuality();
