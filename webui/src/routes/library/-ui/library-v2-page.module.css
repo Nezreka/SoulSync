@@ -2336,6 +2336,15 @@ button.statusWarn:disabled {
   font-weight: 600;
 }
 
+.filteredDivider {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(250, 204, 21, 0.35);
+  color: rgb(250, 204, 21);
+  font-size: 12px;
+  font-weight: 600;
+  scroll-margin-top: 44px;
+}
+
 .filteredEmpty {
   padding: 8px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);

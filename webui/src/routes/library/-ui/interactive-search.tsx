@@ -561,6 +561,17 @@ export function InteractiveSearchModal({
   }, [rejected]);
   const shownRejected = rejected.filter((r) => shownCodes.has(rejectedCode(r)));
   const visible = [...filtered, ...shownRejected];
+  // A chip appends its hits below every passing result, which with a page of
+  // them happened out of sight: a click that showed nothing. Turning one on
+  // scrolls to where they start.
+  const filteredStartRef = useRef<HTMLTableRowElement>(null);
+  const shownCountRef = useRef(0);
+  useEffect(() => {
+    if (shownCodes.size > shownCountRef.current) {
+      filteredStartRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    }
+    shownCountRef.current = shownCodes.size;
+  }, [shownCodes]);
   const progressItems = useMemo(() => Object.entries(sourceProgress), [sourceProgress]);
   const showPeers =
     columns.peers &&
@@ -1018,6 +1029,7 @@ export function InteractiveSearchModal({
         <div className={styles.searchResultsToolbar}>
           <span>
             {filtered.length} of {results.length} results
+            {shownRejected.length ? ` · ${shownRejected.length} filtered shown` : ''}
           </span>
           <label className={styles.searchCompactSort}>
             Sort
@@ -1123,6 +1135,13 @@ export function InteractiveSearchModal({
                     <tr>
                       <td colSpan={columnCount} className={styles.filteredEmpty}>
                         Nothing here passed the download checks — the filters on the right show why.
+                      </td>
+                    </tr>
+                  ) : null}
+                  {shownRejected.length ? (
+                    <tr ref={filteredStartRef}>
+                      <td colSpan={columnCount} className={styles.filteredDivider}>
+                        Filtered — shown anyway · {shownRejected.length}
                       </td>
                     </tr>
                   ) : null}

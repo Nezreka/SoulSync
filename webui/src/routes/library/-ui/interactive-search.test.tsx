@@ -410,9 +410,14 @@ describe('library v2 interactive grab', () => {
     expect(screen.queryByText('Kernkraft 400 (Sped Up)')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'All filtered · 2' })).toBeInTheDocument();
 
-    // one reason at a time...
+    // one reason at a time, below a divider the list scrolls to...
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
     fireEvent.click(screen.getByRole('button', { name: 'wrong version · 1' }));
     expect(screen.getByText('Kernkraft 400 (Sped Up)')).toBeInTheDocument();
+    expect(screen.getByText('Filtered — shown anyway · 1')).toBeInTheDocument();
+    expect(screen.getByText(/1 of 3 results · 1 filtered shown/)).toBeInTheDocument();
+    expect(scrolled).toHaveBeenCalledOnce();
     expect(screen.getByText('version: sped up')).toBeInTheDocument();
     expect(screen.queryByText('Kernkraft 400 (cover)')).not.toBeInTheDocument();
     // ...or all of them
@@ -420,6 +425,7 @@ describe('library v2 interactive grab', () => {
     expect(screen.getByText('Kernkraft 400 (cover)')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'All filtered · 2' }));
     expect(screen.queryByText('Kernkraft 400 (Sped Up)')).not.toBeInTheDocument();
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
   });
 
   it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {
