@@ -67,3 +67,46 @@ def test_track_owned_by_id_and_name_counts_once(tmp_path):
         conn.commit()
     assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == 2
     assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2
+
+
+def _build_deezer_db(tmp_path):
+    """Spectro's case: a Deezer playlist whose tracks the library holds.
+
+    The library files compilations under Various Artists (track_artist keeps
+    the real performer) and the Deezer download stores its provider id in
+    deezer_id — spotify_track_id is NULL. The old join only checked
+    spotify_track_id and exact artists.name, so the dashboard reported 0.
+    """
+    db = MusicDatabase(str(tmp_path / "deezer_counts.db"))
+    with db._get_connection() as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO artists (id, name, server_source) VALUES (1, 'Various Artists', 'soulsync')")
+        c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (1, 1, 'Best Of 2017', 'soulsync')")
+        c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, track_artist,
+                                          server_source, deezer_id, spotify_track_id, file_path)
+                     VALUES (1, 1, 1, 'Chained To The Rhythm', 'Katy Perry',
+                             'soulsync', '509938442', NULL, '/app/Transfer/test.flac')""")
+        c.execute("""INSERT INTO mirrored_playlists (id, source, source_playlist_id, name, profile_id)
+                     VALUES (10, 'deezer', '15846267061', 'My Music', 1)""")
+        c.execute("""INSERT INTO mirrored_playlist_tracks
+                     (playlist_id, position, track_name, artist_name, source_track_id)
+                     VALUES (10, 0, 'Chained To The Rhythm', 'Katy Perry', '509938442')""")
+        conn.commit()
+    return db
+
+
+def test_deezer_id_match_counts_in_library(tmp_path):
+    db = _build_deezer_db(tmp_path)
+    assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == 1
+    assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 1
+
+
+def test_compilation_track_artist_match_counts_in_library(tmp_path):
+    """Even without any provider id, the per-track credit must match."""
+    db = _build_deezer_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE tracks SET deezer_id = NULL WHERE id = 1")
+        conn.execute("UPDATE mirrored_playlist_tracks SET source_track_id = '' WHERE playlist_id = 10")
+        conn.commit()
+    assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == 1
+    assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 1

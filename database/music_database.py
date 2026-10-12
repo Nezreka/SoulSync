@@ -25217,10 +25217,19 @@ class MusicDatabase:
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
                                     AND EXISTS (SELECT 1 FROM tracks ti
-                                                WHERE ti.spotify_track_id = mpt.source_track_id))
+                                                WHERE ti.spotify_track_id = mpt.source_track_id
+                                                   OR ti.deezer_id = mpt.source_track_id
+                                                   OR ti.tidal_id = mpt.source_track_id
+                                                   OR ti.qobuz_id = mpt.source_track_id))
+                                   -- The name join stays exact (case-sensitive):
+                                   -- COLLATE NOCASE would defeat idx_artists_name /
+                                   -- idx_tracks_title (~18s vs ~6ms on a 300k-track
+                                   -- library). The track_artist OR covers
+                                   -- compilations filed under Various Artists.
                                    OR EXISTS (SELECT 1 FROM artists a
                                               JOIN tracks t ON t.artist_id = a.id
-                                              WHERE a.name = mpt.artist_name
+                                              WHERE (a.name = mpt.artist_name
+                                                     OR t.track_artist = mpt.artist_name)
                                                 AND t.title = mpt.track_name)
                                ) THEN 1
                                ELSE 0 END) as in_library,
@@ -25327,10 +25336,11 @@ class MusicDatabase:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
                 # In-library, id-first like the batched variant: source id
-                # against enriched tracks' spotify_track_id
-                # (idx_tracks_spotify_id), OR the case-sensitive name
-                # join (COLLATE NOCASE would defeat idx_artists_name /
-                # idx_tracks_title — ~18s vs ~6ms on a 300k-track library).
+                # against the provider id columns (spotify/deezer/tidal/qobuz),
+                # OR the case-sensitive name join (COLLATE NOCASE would defeat
+                # idx_artists_name / idx_tracks_title — ~18s vs ~6ms on a
+                # 300k-track library). The track_artist OR covers compilations
+                # filed under Various Artists.
                 try:
                     cursor.execute("""
                         SELECT COUNT(DISTINCT mpt.id) as in_library
@@ -25339,10 +25349,14 @@ class MusicDatabase:
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
                              AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id))
+                                         WHERE ti.spotify_track_id = mpt.source_track_id
+                                            OR ti.deezer_id = mpt.source_track_id
+                                            OR ti.tidal_id = mpt.source_track_id
+                                            OR ti.qobuz_id = mpt.source_track_id))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
-                                       WHERE a.name = mpt.artist_name
+                                       WHERE (a.name = mpt.artist_name
+                                              OR t.track_artist = mpt.artist_name)
                                          AND t.title = mpt.track_name)
                           )
                     """, (playlist_id,))
