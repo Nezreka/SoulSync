@@ -80,6 +80,12 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 2. Click **N runs** on the automation card to open its run-history modal.
 3. For signal chains, check that the upstream automation actually fired its signal — and remember the 10-second cooldown and 5-level depth limit.
 4. Look in \`app.log\` for the automation name around the expected fire time.
+
+## Spotify: redirect URI rejected (INVALID_CLIENT / mismatch)
+
+1. The **Redirect URI** in SoulSync Settings and the one in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) must match **exactly** — scheme, host, port, path, and trailing slash.
+2. Spotify only allows plain \`http://\` for loopback (\`http://127.0.0.1:8888/callback\` — \`localhost\` is rejected). Any other host — a NAS, a remote server, or Docker reached by hostname or LAN IP — must be **HTTPS**, served through a reverse proxy or Tailscale. See [Connecting services](#gs-connecting).
+3. Save the dashboard change, then click **Authenticate** in SoulSync again.
 `
         },
         {

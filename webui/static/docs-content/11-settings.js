@@ -12,7 +12,7 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 
 ## Service list
 
-- **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync.
+- **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).
 - **slskd** — slskd URL and API key, entered on the Soulseek source panel (Downloads / Sources tabs). Powers Soulseek downloading.
 - **Tidal** — Client ID, Client Secret, and Redirect URI. Log in with the Authenticate button — it opens Tidal's authorization page in the browser, and the callback is just a success page: close the window and you're connected.
 - **Last.fm** — API key, API secret, and your username. Powers scrobbling, similar artists, and listening-history import.

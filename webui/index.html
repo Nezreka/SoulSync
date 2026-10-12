@@ -3311,7 +3311,11 @@
                                                         http://127.0.0.1:8888/callback</div>
                                                     <div class="callback-help">Add this URL to your Spotify app's
                                                         'Redirect URIs' in
-                                                        the Spotify Developer Dashboard</div>
+                                                        the Spotify Developer Dashboard. Spotify requires
+                                                        HTTPS for any URI that isn't loopback — on a NAS or
+                                                        remote server, enter an HTTPS proxy URL in the
+                                                        Redirect URI field above instead
+                                                        (see Help &amp; Docs → Getting Started).</div>
                                                 </div>
                                                 <div class="form-actions">
                                                     <button class="auth-button" onclick="authenticateSpotify()">🔐
