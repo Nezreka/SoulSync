@@ -369,3 +369,41 @@ def test_subsource_download_miss_paths(monkeypatch):
     monkeypatch.setattr(p, "_download_bytes", boom)
     assert p.download(c) is None
     assert subsource_extract(b"") is None
+
+
+# ── review fixes: flag filter / zip picker / season 0 ─────────────────────
+
+def test_flag_filter_pref_bypasses_prune():
+    """With a HI/forced preference set and no explicit flag requirement, the
+    candidate list stays unpruned — otherwise every HI candidate is dropped
+    whenever a plain one exists and the scoring tiebreak never sees it."""
+    from core.video.subtitles.providers.base import (
+        SubtitleCandidate, SubtitleQuery, flag_filter)
+    plain = SubtitleCandidate("p", "en", False, False, "plain", "r1")
+    hi = SubtitleCandidate("p", "en", True, False, "hi", "r2")
+    q = SubtitleQuery(language="en", hi_forced_pref="prefer_hi")
+    assert flag_filter([plain, hi], q) == [plain, hi]
+    # pref off → exact-flag prune as before
+    q2 = SubtitleQuery(language="en")
+    assert flag_filter([plain, hi], q2) == [plain]
+    # explicit requirement still filters even with a pref set
+    q3 = SubtitleQuery(language="en", hi=True, hi_forced_pref="prefer_hi")
+    assert flag_filter([plain, hi], q3) == [hi]
+
+
+def test_pick_zip_member_skips_macos_shadows():
+    from core.video.subtitles.providers.subdl import _pick_zip_member as pick_dl
+    from core.video.subtitles.providers.subsource import _pick_zip_member as pick_ss
+    names = ["__MACOSX/._movie.srt", "movie.srt"]
+    assert pick_dl(names) == "movie.srt"
+    assert pick_ss(names) == "movie.srt"
+    assert pick_dl(["__MACOSX/._movie.srt"]) is None
+    assert pick_ss([".hidden.srt", "real.srt"]) == "real.srt"
+
+
+def test_subsource_episode_season_zero():
+    """Season 0 (Specials) is falsy — it must still resolve."""
+    from core.video.subtitles.providers.subsource import _sub_episode
+    assert _sub_episode({"season": 0, "episode": 3}) == (0, 3)
+    assert _sub_episode({"season": 0, "episodeNumber": 5}) == (0, 5)
+    assert _sub_episode({"season": 2, "episode": 1}) == (2, 1)

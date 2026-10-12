@@ -230,6 +230,16 @@ def fetch_subtitle_detailed(query: SubtitleQuery, provider_order: list[str],
     best_miss: tuple[float, str | None, Any] = (0.0, None, None)  # score, pid, candidate
     for pid, provider in _iter_configured(provider_order, get_setting,
                                           skip_background=skip_background):
+        # Quota gate BEFORE the search: an exhausted provider's candidates
+        # can never be downloaded, so spending a search API call on it is
+        # pure waste. Exempt (local) providers are never gated; a broken
+        # check reads as "has quota" — accounting never blocks a fetch.
+        if quota_check is not None and not provider_is_quota_exempt(pid):
+            try:
+                if not quota_check(pid):
+                    continue
+            except Exception:  # noqa: BLE001
+                pass
         # LAZY per provider: a later provider is never searched once an
         # earlier one yields a download (its search() is an API call — don't
         # spend it when the answer is already in hand).

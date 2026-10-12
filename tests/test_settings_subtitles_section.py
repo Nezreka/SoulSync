@@ -50,7 +50,8 @@ def test_section_lives_in_the_video_panel(panel):
     assert "Subtitles" in panel
     for element_id in ("vo-subs-dl", "vo-sub-langs", "subchain-widget",
                        "subchain-pool", "subchain-list",
-                       "vo-sub-hi-forced", "vo-sub-autosync"):
+                       "vo-sub-hi-forced", "vo-sub-autosync",
+                       "vo-sub-backfill", "vo-sub-backfill-status"):
         assert f'id="{element_id}"' in panel, element_id
 
 
@@ -124,6 +125,12 @@ def test_autosync_toggle_wired(panel, video_js):
     assert 'id="vo-sub-autosync"' in panel
     assert "chk('vo-sub-autosync', _videoOrg.subtitle_autosync)" in video_js
     assert "subtitle_autosync: on('vo-sub-autosync')" in video_js
+
+
+def test_backfill_button_wired(panel, video_js):
+    assert 'id="vo-sub-backfill"' in panel
+    assert "startBackfill" in video_js
+    assert "/api/video/subtitles/backfill" in video_js
 
 
 def test_advanced_knobs_wired(panel, video_js):

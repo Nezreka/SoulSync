@@ -23,7 +23,7 @@ import urllib.request
 import zipfile
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
 
 BASE = "https://api.subdl.com/api/v1"
 DL_HOST = "https://dl.subdl.com"
@@ -211,8 +211,19 @@ def _as_int(value: Any) -> int | None:
 
 
 def _pick_zip_member(names: list[str]) -> str | None:
-    """First .srt in a zip. Pure."""
+    """First real .srt in a zip. Pure.
+
+    macOS-made zips carry AppleDouble shadow files (``__MACOSX/._movie.srt``)
+    that also end in .srt — picking one reads binary metadata and fails the
+    text check even though a valid subtitle sits next to it. Skip resource
+    forks and dotfiles.
+    """
     for n in names:
+        if n.startswith("__MACOSX/"):
+            continue
+        base = n.rsplit("/", 1)[-1]
+        if base.startswith("."):
+            continue
         if n.lower().endswith(".srt"):
             return n
     return None
@@ -280,9 +291,7 @@ class SubDLProvider(SubtitleProvider):
                                          season=season, episode=episode)
         # Exact-flag matches preferred; degrade to the unfiltered list rather
         # than a total miss (same Bazarr-style degradation as OpenSubtitles).
-        want_hi, want_forced = bool(query.hi), bool(query.forced)
-        exact = [c for c in cands if c.hi == want_hi and c.forced == want_forced]
-        return exact or cands
+        return flag_filter(cands, query)
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         if not self._api_key or candidate is None:

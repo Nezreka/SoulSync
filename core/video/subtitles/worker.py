@@ -951,6 +951,14 @@ def _run_backfill_thread(db_provider) -> None:
         videos = _library_video_ids(db)
         seen = created = marked = 0
         for i in range(0, len(videos), batch):
+            # Re-check the master toggle per batch: a big library takes
+            # minutes (2s breathers), and disabling subtitles mid-sweep
+            # must stop the sweep, not just future ones.
+            if i > 0 and not _load_settings(db).get("download_subtitles"):
+                with _backfill_lock:
+                    _backfill_state.update(state="done",
+                                           error="disabled mid-sweep")
+                return
             for kind, vid in videos[i:i + batch]:
                 one = _backfill_one_video(db, settings, kind, vid)
                 seen += 1

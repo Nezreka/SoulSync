@@ -381,7 +381,6 @@ def test_manual_download_needs_can_download(client, client_non_admin, tmp_path,
 def test_backfill_endpoint_refuses_when_disabled(client):
     """POST /subtitles/backfill with the master toggle off → 400, no sweep."""
     from core.video import organization as org_mod
-    db = client.application.view_functions  # noqa: F841 (fixture sanity)
     import api.video as videoapi
     vdb = videoapi._video_db
     settings = org_mod.load(vdb)
@@ -390,3 +389,12 @@ def test_backfill_endpoint_refuses_when_disabled(client):
     r = client.post("/api/video/subtitles/backfill")
     assert r.status_code == 400
     assert "disabled" in r.get_json()["error"]
+
+
+def test_backfill_endpoint_is_admin_only(client_non_admin):
+    """The backfill sweep walks and mutates the whole library DB — admin only.
+    The status GET stays open."""
+    r = client_non_admin.post("/api/video/subtitles/backfill")
+    assert r.status_code == 403
+    assert client_non_admin.get(
+        "/api/video/subtitles/backfill/status").status_code == 200

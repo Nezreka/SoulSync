@@ -1552,6 +1552,7 @@
             else if (action === 'remove') subchainRemove(id);
         });
     }
+    var _subchainDragWired = false;
     function _subchainWireDrag() {
         var pool = document.getElementById('subchain-pool');
         var list = document.getElementById('subchain-list');
@@ -1612,6 +1613,11 @@
                 _subchainCommit();
             });
         }
+        // Container-level handlers attach ONCE: pool/list are persistent
+        // nodes (only their innerHTML is rewritten per render), so wiring
+        // them on every render would stack duplicate drop handlers.
+        if (_subchainDragWired) return;
+        _subchainDragWired = true;
         // Anywhere else in the chain column appends too, so a slightly-off
         // drop still does the obvious thing instead of nothing.
         list.addEventListener('dragover', function (e) { e.preventDefault(); list.classList.add('drag-over'); });
@@ -1809,6 +1815,60 @@
             if (errEl) { errEl.textContent = 'Could not start download (network error).'; errEl.hidden = false; }
         });
     }
+    // ── Library backfill ────────────────────────────────────────────────
+    var BACKFILL_URL = '/api/video/subtitles/backfill';
+    var _backfillPoll = null;
+    function _backfillStopPoll() {
+        if (_backfillPoll) { clearInterval(_backfillPoll); _backfillPoll = null; }
+    }
+    function _backfillStartPoll() {
+        if (_backfillPoll) return;
+        _backfillPoll = setInterval(function () { loadBackfillStatus(); }, 2000);
+    }
+    function renderBackfillStatus(st) {
+        var el = document.getElementById('vo-sub-backfill-status');
+        var btn = document.getElementById('vo-sub-backfill');
+        if (!el || !st) return;
+        if (st.state === 'running') {
+            if (btn) btn.disabled = true;
+            el.textContent = 'Scanning\u2026 ' + (st.videos_seen || 0) + ' videos checked, '
+                + (st.rows_created || 0) + ' queued.';
+            _backfillStartPoll();
+            return;
+        }
+        if (btn) btn.disabled = false;
+        _backfillStopPoll();
+        if (st.state === 'done') {
+            el.textContent = st.error ? ('Stopped early: ' + st.error)
+                : 'Done \u2014 ' + (st.videos_seen || 0) + ' videos checked, '
+                    + (st.rows_created || 0) + ' queued.';
+        } else if (st.state === 'error') {
+            el.textContent = 'Backfill failed: ' + (st.error || 'unknown error');
+        } else {
+            el.textContent = '';
+        }
+    }
+    function loadBackfillStatus() {
+        return fetch(BACKFILL_URL + '/status', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) renderBackfillStatus(d); })
+            .catch(function () { /* status is best-effort */ });
+    }
+    function startBackfill() {
+        fetch(BACKFILL_URL, { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) {
+                return r.json().then(function (d) { return { ok: r.ok, body: d }; });
+            })
+            .then(function (res) {
+                if (res.ok) { loadBackfillStatus(); return; }
+                var el = document.getElementById('vo-sub-backfill-status');
+                if (el) el.textContent = (res.body && res.body.error) || 'Could not start the scan.';
+            })
+            .catch(function () {
+                var el = document.getElementById('vo-sub-backfill-status');
+                if (el) el.textContent = 'Could not start the scan.';
+            });
+    }
     function fillOrg() {
         if (!_videoOrg) return;
         var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
@@ -1952,6 +2012,9 @@
             // its last-resort step.
             saveOrganization(false).then(function () { loadWhisperStatus(); });
         });
+        var bfBtn = document.getElementById('vo-sub-backfill');
+        if (bfBtn) bfBtn.addEventListener('click', startBackfill);
+        loadBackfillStatus();
         var reset = document.getElementById('vo-reset');
         if (reset) reset.addEventListener('click', function () {
             // POST blank templates + standard toggles; the backend normalises to the

@@ -100,3 +100,27 @@ class SubtitleProvider(ABC):
     @abstractmethod
     def download(self, candidate: SubtitleCandidate) -> str | None:
         """The subtitle text (srt) for a candidate from ``search()``, or None."""
+
+
+def flag_filter(cands: list[SubtitleCandidate],
+                query: SubtitleQuery) -> list[SubtitleCandidate]:
+    """Exact-flag preference with Bazarr-style degradation, shared by the
+    network providers.
+
+    Candidates matching the query's hi/forced flags exactly are preferred;
+    when none match, the unfiltered list is returned rather than a total
+    miss.
+
+    EXCEPTION — the HI/forced *preference* (``query.hi_forced_pref``): when
+    a preference is set and the query does not explicitly require specific
+    flags, the list is returned UNPRUNED. Pruning here would discard every
+    HI candidate whenever a plain one exists (wanted rows default to
+    hi=False/forced=False), and scoring's preference tiebreak would never
+    be evaluated on the candidates it exists to prefer.
+    """
+    pref = str(getattr(query, "hi_forced_pref", "off") or "off").strip().lower()
+    if pref in ("prefer_hi", "prefer_forced") and not query.hi and not query.forced:
+        return cands
+    want_hi, want_forced = bool(query.hi), bool(query.forced)
+    exact = [c for c in cands if c.hi == want_hi and c.forced == want_forced]
+    return exact or cands

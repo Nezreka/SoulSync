@@ -335,6 +335,43 @@ def test_quota_check_skips_exhausted_provider(monkeypatch):
     assert text == "srt-first" and pid == "first"
 
 
+def test_quota_check_skips_search_too(monkeypatch):
+    """An exhausted provider is skipped BEFORE its search() — a search is an
+    API call, and its candidates could never be downloaded anyway."""
+    import core.video.subtitles.providers as pkg
+    from core.video.subtitles.providers import fetch_subtitle_detailed
+    from core.video.subtitles.providers.base import SubtitleQuery
+
+    searches = []
+
+    class Exhausted(SubtitleProvider):
+        id = "exhausted"
+        display_name = "Exhausted"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            searches.append(1)
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r1")]
+
+        def download(self, candidate):
+            return "srt"
+
+    monkeypatch.setattr(pkg, "get_providers", lambda: {"exhausted": Exhausted()})
+    q = SubtitleQuery(identity={}, language="en",
+                      filename="Movie.2024.1080p.WEB-GROUP.mkv")
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["exhausted"], lambda k, d=None: 0.0,
+        quota_check=lambda p: False)
+    assert text is None and pid is None
+    assert searches == []  # never searched
+
+
 # ── Phase 3: per-item language override enforcement in the fetch path ──────
 
 def _movie_row(db, movie_id=42):

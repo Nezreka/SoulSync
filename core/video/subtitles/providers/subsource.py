@@ -21,7 +21,7 @@ import urllib.request
 import zipfile
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
 
 BASE = "https://api.subsource.net/api/v1"
 _UA = "SoulSync v1.0"
@@ -116,8 +116,14 @@ def _sub_id(entry: dict) -> Any:
 
 def _sub_episode(entry: dict) -> tuple[int | None, int | None]:
     """(season, episode) for an entry, from fields or the release name. Pure."""
-    season = _as_int(entry.get("season") or entry.get("seasonNumber"))
-    episode = _as_int(entry.get("episode") or entry.get("episodeNumber"))
+    # Explicit None checks: season 0 (Specials) is falsy, so `or` would
+    # fall through to the alternate field and lose it.
+    s_val = entry.get("season") if entry.get("season") is not None \
+        else entry.get("seasonNumber")
+    e_val = entry.get("episode") if entry.get("episode") is not None \
+        else entry.get("episodeNumber")
+    season = _as_int(s_val)
+    episode = _as_int(e_val)
     if season is None or episode is None:
         m = re.search(r"[Ss](\d{1,2})[Ee](\d{1,3})", _sub_title(entry))
         if m:
@@ -132,8 +138,19 @@ def _sub_episode(entry: dict) -> tuple[int | None, int | None]:
 
 
 def _pick_zip_member(names: list[str]) -> str | None:
-    """First .srt in a zip; subtitle zips are single-file. Pure."""
+    """First real .srt in a zip; subtitle zips are single-file. Pure.
+
+    macOS-made zips carry AppleDouble shadow files (``__MACOSX/._movie.srt``)
+    that also end in .srt — picking one reads binary metadata and fails the
+    text check even though a valid subtitle sits next to it. Skip resource
+    forks and dotfiles.
+    """
     for n in names:
+        if n.startswith("__MACOSX/"):
+            continue
+        base = n.rsplit("/", 1)[-1]
+        if base.startswith("."):
+            continue
         if n.lower().endswith(".srt"):
             return n
     return None
@@ -198,9 +215,7 @@ class SubSourceProvider(SubtitleProvider):
         cands = self._entries_to_candidates(entries, query)
         # Exact-flag matches preferred; degrade to the unfiltered list rather
         # than a total miss (same Bazarr-style degradation as OpenSubtitles).
-        want_hi, want_forced = bool(query.hi), bool(query.forced)
-        exact = [c for c in cands if c.hi == want_hi and c.forced == want_forced]
-        return exact or cands
+        return flag_filter(cands, query)
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         if not self._api_key or candidate is None:
