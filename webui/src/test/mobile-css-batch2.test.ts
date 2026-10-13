@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
  * measurements from the real Chromium harness.
  */
 
-const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8');
+const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
 
 const MOBILE = read('static/mobile.css');
 const STYLE = read('static/style.css');

@@ -84711,16 +84711,6 @@ body.src-modal-open { overflow: hidden; }
     font-size: 0.78em;
     color: var(--white-a35);
 }
-/* Phone step rows: the row's fixed chrome (grip + rank + art tile + move +
-   remove ≈ 134px plus gaps) leaves ~20px for the source name at 360px —
-   "Soulseek" ellipsised to almost nothing (batch #2, RC3). The art tile
-   and the drag grip are the expendable pieces on touch (the up/down move
-   buttons remain), so drop them and tighten the row. */
-@media (max-width: 560px) {
-    .dlchain-step { gap: 8px; padding: 10px; }
-    .dlchain-step-art, .dlchain-grip { display: none; }
-}
-
 /* Below 360px even the slimmed row left the source name a ~34px box for
    ~63px of text at 320px (batch #2 fold-in). Drop the rank numeral in the
    same spirit: chain order is still obvious from the row order and the
@@ -84768,6 +84758,12 @@ body.src-modal-open { overflow: hidden; }
     .dlchain-tile-name { font-size: 0.72em; }
     .dlchain-list { padding: 12px 10px; }
     .dlchain-step { width: 100%; padding: 8px; gap: 8px; }
+    /* The row's fixed chrome (grip + rank + art tile + move + remove
+       ≈ 134px plus gaps) left ~20px for the source name at 360px —
+       "Soulseek" ellipsised to almost nothing (batch #2, RC3). The art
+       tile and the drag grip are the expendable pieces on touch; the
+       up/down move buttons below remain. */
+    .dlchain-step-art, .dlchain-grip { display: none; }
     .dlchain-move { width: 30px; height: 22px; font-size: 10px; }
     .dlchain-btn { width: 30px; height: 30px; }
     /* these were taller than the desktop rule after the chain was compacted */
