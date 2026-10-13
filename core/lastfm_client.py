@@ -147,8 +147,13 @@ class LastFMClient:
             ts = t.get('timestamp')
             if isinstance(ts, str):
                 try:
-                    from datetime import datetime
+                    from datetime import datetime, timezone
                     dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+                    if dt.tzinfo is None:
+                        # listening_history stores UTC; a naive stamp is UTC,
+                        # never system-local (else every scrobble outside UTC
+                        # ships shifted by the local offset).
+                        dt = dt.replace(tzinfo=timezone.utc)
                     ts = int(dt.timestamp())
                 except Exception:
                     continue

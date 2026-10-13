@@ -58,6 +58,9 @@ class DelugeAdapter:
         'hash', 'name', 'state', 'progress', 'total_size',
         'total_done', 'download_payload_rate', 'upload_payload_rate',
         'num_seeds', 'num_peers', 'eta', 'save_path', 'tracker_status',
+        # the label plugin's key. deluge leaves out keys it doesn't know, so
+        # this is harmless with the plugin off
+        'label',
     ]
 
     def __init__(self) -> None:
@@ -276,6 +279,7 @@ class DelugeAdapter:
             eta=int(item['eta']) if isinstance(item.get('eta'), (int, float)) and item.get('eta', 0) > 0 else None,
             save_path=item.get('save_path'),
             error=item.get('tracker_status') if 'Error' in (item.get('state') or '') else None,
+            category=str(item.get('label') or '') or None,
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

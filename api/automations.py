@@ -278,6 +278,8 @@ def test_automation_notify():
             'discord_webhook': automation_engine._send_discord_notification,
             'pushbullet': automation_engine._send_pushbullet_notification,
             'telegram': automation_engine._send_telegram_notification,
+            'ntfy': automation_engine._send_ntfy_notification,
+            'gotify': automation_engine._send_gotify_notification,
             'webhook': automation_engine._send_webhook,
         }
         sender = senders.get(ntype)

@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.3"
+_SOULSYNC_BASE_VERSION = "3.5.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1614,7 +1614,7 @@ def _register_automation_handlers():
         process_watchlist_scan_automatically=_process_watchlist_scan_automatically,
         is_wishlist_actually_processing=is_wishlist_actually_processing,
         is_watchlist_actually_scanning=is_watchlist_actually_scanning,
-        get_watchlist_scan_state=lambda: watchlist_scan_state,
+        get_watchlist_scan_state=lambda: _watchlist_scan_state.get_state(),
         run_playlist_discovery_worker=_run_playlist_discovery_worker,
         run_sync_task=_run_sync_task,
         run_playlist_organize_download=_run_playlist_organize_download,
@@ -1803,12 +1803,19 @@ def library_recent_tracks_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
+def _sample_track_key(raw):
+    """a sample studio track id as text. jellyfin and navidrome ids aren't
+    numbers, and int() turned every request from those libraries into a 400."""
+    from core.sample.ids import track_key
+    return track_key(raw)
+
+
 @app.route('/api/sample/analysis', methods=['GET'])
 def sample_analysis_web():
     try:
         from api.sample import fetch_analysis, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1828,7 +1835,7 @@ def sample_analyze_web():
         from api.sample import enqueue_track_analysis, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1850,10 +1857,10 @@ def sample_peaks_web():
     try:
         from api.sample import fetch_peaks, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
             buckets = int(request.args.get('buckets') or 1500)
         except (TypeError, ValueError):
-            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+            return jsonify({"success": False, "data": None, "error": "track_id is required and buckets must be a whole number"}), 400
         try:
             payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
             return jsonify({"success": True, "data": payload, "error": None}), status
@@ -2008,7 +2015,7 @@ def sample_stems_web():
         from api.sample import separate_stems, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2026,7 +2033,7 @@ def sample_stems_status_web():
     try:
         from api.sample import stems_status, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2039,7 +2046,7 @@ def sample_stems_status_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
-@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+@app.route('/api/sample/stems/<track_id>/<stem>/audio', methods=['GET'])
 def sample_stem_audio_web(track_id, stem):
     try:
         from api.sample import stem_audio_path, SampleHttpError
@@ -4327,6 +4334,8 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if repair_worker and hasattr(repair_worker, 'refresh_acoustid_config'):
+                repair_worker.refresh_acoustid_config()
             if 'spotify' in new_settings:
                 publish_spotify_status(
                     connected=False,
@@ -10991,6 +11000,10 @@ def library_log_play():
 
     Fire-and-forget from the frontend ~10s into a track. Best-effort: a logging
     failure never affects playback, so we always return 200-ish.
+
+    Returns the listening_history row id as play_id. The row is NOT
+    scrobble-eligible yet: the frontend marks it eligible via
+    /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
         from core.playback.play_log import build_play_event
@@ -11006,10 +11019,33 @@ def library_log_play():
         from core.listening_scope import listening_owner
         db = get_database()
         event['profile_id'] = listening_owner(db, get_current_profile_id())
-        db.record_web_player_play(event)
-        return jsonify({"success": True})
+        play_id = db.record_web_player_play(event)
+        return jsonify({"success": True, "play_id": play_id})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/log-play/eligible', methods=['POST'])
+def library_log_play_eligible():
+    """Mark a web-player listening_history row as scrobble-eligible.
+
+    Fire-and-forget from the frontend once playback crosses the Last.fm
+    threshold (half the track or 4 minutes, whichever comes first). A 10s
+    log-play is a "play" for SoulSync's own stats; only an eligible row may
+    be scrobbled to Last.fm / ListenBrainz. Best-effort, always 200-ish.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        from core.listening_scope import listening_owner
+        db = get_database()
+        # same pile the play was logged into: one profile's ping can never
+        # flip another pile's row.
+        owner = listening_owner(db, get_current_profile_id())
+        ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        return jsonify({"success": ok})
+    except Exception as e:
+        logger.debug(f"log-play/eligible failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
@@ -20552,12 +20588,10 @@ from api.user_profiles import _get_lb_credentials_for_profile  # one outside cal
 # the chat/labels/beatport/repair blueprints below) ---
 # --- Watchlist Auto-Scanning System ---
 
-watchlist_scan_state = {
-    'status': 'idle',
-    'results': [],
-    'summary': {},
-    'error': None
-}
+# Shared scan state lives in core/watchlist/scan_state.py — single source of
+# truth for both manual scans (api/artist_watchlist.py) and auto-scans here.
+# The socket emit loop and the API endpoint read the same dict.
+from core.watchlist import scan_state as _watchlist_scan_state
 
 # Watchlist auto-scan logic lives in core/watchlist/auto_scan.py.
 from core.watchlist import auto_scan as _watchlist_auto_scan
@@ -20592,11 +20626,13 @@ def _build_watchlist_auto_scan_deps():
         watchlist_auto_scanning_heartbeat = value
 
     def _get_state():
-        return watchlist_scan_state
+        return _watchlist_scan_state.get_state()
 
     def _set_state(value):
-        global watchlist_scan_state
-        watchlist_scan_state = value
+        # Mutate in place to preserve the shared object identity.
+        state = _watchlist_scan_state.get_state()
+        state.clear()
+        state.update(value)
 
     return _watchlist_auto_scan.WatchlistAutoScanDeps(
         app=app,
@@ -20917,6 +20953,33 @@ def mirror_playlist_endpoint():
 
         database = get_database()
         profile_id = get_current_profile_id()
+
+        # #1656: refuse to REPLACE a non-empty mirror with an empty track
+        # list. An empty payload is what a failed client-side fetch looks
+        # like, and storing it deletes every track the mirror had — the
+        # #990 guard only refuses a non-empty list of blank tracks, so an
+        # empty list sailed straight through with success:true. A brand-new
+        # mirror (or one that is already empty) may still be saved with zero
+        # tracks — a genuinely empty upstream playlist is legal.
+        if not tracks:
+            existing = database.get_mirrored_playlist_by_source(
+                source, str(source_playlist_id), profile_id
+            )
+            if existing and (existing.get('track_count') or 0) > 0:
+                # NB: include success:false — the callers check
+                # res.success === false strictly, and readJson doesn't throw
+                # on a 400, so a bare {"error": ...} would fall through to
+                # the success branch in the UI.
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Refusing to replace non-empty mirror '{name}' with an empty "
+                        f"track list — the payload looks like a failed fetch. If the "
+                        f"upstream playlist is genuinely empty, delete the mirror and "
+                        f"re-mirror it."
+                    ),
+                }), 400
+
         quality_profile_id = data.get('quality_profile_id')
         if quality_profile_id is not None:
             try:
@@ -20935,7 +20998,9 @@ def mirror_playlist_endpoint():
             quality_profile_id=quality_profile_id,
             description=data.get('description'),
             owner=data.get('owner'),
-            image_url=data.get('image_url')
+            image_url=data.get('image_url'),
+            # only a source that reports skips sends the key; leaving it out keeps the stored counts
+            **({'source_skipped': data.get('source_skipped')} if 'source_skipped' in data else {}),
         )
 
         if playlist_id is None:
@@ -23364,7 +23429,7 @@ app.register_blueprint(_bp_mpl())
 
 # user playlists (made inside soulsync, stored as mirrored playlists)
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
-_cfg_upl(get_database=get_database)
+_cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
 
 # beatport chart discovery/sync (rides the source_playlists spine)
@@ -24188,7 +24253,7 @@ def _emit_scan_status_loop():
             continue
         # Watchlist scan
         try:
-            state = watchlist_scan_state.copy()
+            state = _watchlist_scan_state.get_state().copy()
             if state.get('started_at'):
                 state['started_at'] = state['started_at'].isoformat()
             if state.get('completed_at'):

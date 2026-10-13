@@ -273,7 +273,7 @@ export function DiscoverPage() {
     data: GenreDiveData | null;
     phase: 'loading' | 'error' | 'ready';
   } | null>(null);
-  const [recModalOpen, setRecModalOpen] = useState(false);
+  const [recModalKind, setRecModalKind] = useState<'recommended' | 'listening' | null>(null);
   // the recipe editor: a new mix, or the one being edited
   const [recipeEditor, setRecipeEditor] = useState<{ editing: RecipeMixCard | null } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
@@ -913,6 +913,14 @@ export function DiscoverPage() {
   const listeningArtists = recommendedVisible(
     okData<{ artists?: RecommendedArtist[] }>(page.sections.listeningRecs?.data)?.artists ?? [],
   );
+  // Whichever shelf opened the View All modal supplies its artists.
+  const modalPayload =
+    recModalKind === 'listening'
+      ? okData<{ artists?: RecommendedArtist[]; source?: string }>(
+          page.sections.listeningRecs?.data,
+        )
+      : recPayload;
+  const modalArtists = recModalKind === 'listening' ? listeningArtists : recArtists;
   useEffect(() => {
     if (recArtists.length) {
       void rec.enrichImages(recArtists, recSource(recPayload));
@@ -1043,7 +1051,7 @@ export function DiscoverPage() {
             onAddToWatchlist={(artistId, artistName, source) =>
               void rec.toggleWatchlist(artistId, artistName, source)
             }
-            onViewAll={kind === 'recommended' ? () => setRecModalOpen(true) : undefined}
+            onViewAll={() => setRecModalKind(kind)}
           />
         );
       }
@@ -1502,7 +1510,7 @@ export function DiscoverPage() {
               onJump={hero.jump}
               onToggleWatchlist={() => void hero.toggleWatchlist()}
               onWatchAll={() => void hero.watchAll()}
-              onViewRecommended={() => setRecModalOpen(true)}
+              onViewRecommended={() => setRecModalKind('recommended')}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
               onPauseChange={hero.setPaused}
@@ -1885,23 +1893,23 @@ export function DiscoverPage() {
         />
       )}
 
-      {recModalOpen && (
+      {recModalKind && (
         <RecommendedModal
-          artists={recArtists}
-          source={recSource(recPayload)}
-          cachedSource={recPayload?.source ?? null}
+          artists={modalArtists}
+          source={recSource(modalPayload)}
+          cachedSource={modalPayload?.source ?? null}
           watchingIds={rec.watchingIds}
           images={rec.images}
           addingAll={addingAll}
           buildDetailPath={detailPath}
-          onClose={() => setRecModalOpen(false)}
+          onClose={() => setRecModalKind(null)}
           onAddToWatchlist={(artistId, artistName) =>
             void rec.toggleWatchlist(artistId, artistName)
           }
           onAddAll={() => {
             setAddingAll(true);
             void (async () => {
-              for (const a of recArtists) {
+              for (const a of modalArtists) {
                 if (a.artist_id && !rec.watchingIds.has(String(a.artist_id))) {
                   await rec.toggleWatchlist(String(a.artist_id), a.artist_name ?? '');
                 }

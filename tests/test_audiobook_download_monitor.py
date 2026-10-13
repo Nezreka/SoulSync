@@ -612,8 +612,11 @@ def test_the_completeness_gate_uses_the_captured_runtime(db, tmp_path):
     # storefront is shedding.
     from core.audiobook_download_monitor import _check_complete
 
+    # The release names the edition's narrator, so the narration check is a
+    # confident match and the captured runtime is what gets compared.
     db.record_download("hash-1", "B1", "The Final Empire", "torrent",
-                       client_id="hash-1", book=_stored_book(runtime_minutes=600))
+                       client_id="hash-1", book=_stored_book(runtime_minutes=600),
+                       release_title="The Final Empire narrated by Michael Kramer")
     row = db.get_downloads()[0]
     folder = tmp_path / "dl"
     folder.mkdir()
@@ -1150,3 +1153,51 @@ def test_an_imported_book_clears_its_fallback_count(db):
         tick(db=db)
 
     assert "B1" not in monitor._fallbacks
+
+
+
+# ---------------------------------------------------------------------------
+# a finished download with files but no audio fails at once, it never stages
+# ---------------------------------------------------------------------------
+
+def test_files_but_no_audio(tmp_path):
+    from core.audiobook_completeness import has_files_but_no_audio
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    assert has_files_but_no_audio(epub) is True
+    ebook_dir = tmp_path / "ebook"
+    ebook_dir.mkdir()
+    (ebook_dir / "Blaze.epub").write_bytes(b"x")
+    assert has_files_but_no_audio(ebook_dir) is True
+    (ebook_dir / "01.m4b").write_bytes(b"x")
+    assert has_files_but_no_audio(ebook_dir) is False
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    # missing or empty may still be arriving
+    assert has_files_but_no_audio(empty) is False
+    assert has_files_but_no_audio(tmp_path / "nope") is False
+    assert has_files_but_no_audio("") is False
+
+
+def test_a_finished_ebook_fails_instead_of_staging():
+    patch_out = process_download(
+        _row(), get_status=lambda s, r: _status("completed"),
+        resolve_path=_identity_path, organize=_ok_organize(),
+        check_complete=lambda s, r: {"complete": False, "no_audio": True,
+                                     "reason": "No audio files in the download"},
+    )
+    assert patch_out["status"] == "failed"
+    assert "No audio" in patch_out["error"]
+
+
+def test_the_gate_spots_an_ebook(db, tmp_path):
+    from core.audiobook_download_monitor import _check_complete
+    db.record_download("hash-1", "B1", "Blaze", "torrent",
+                       client_id="hash-1", book=_stored_book(runtime_minutes=600))
+    row = db.get_downloads()[0]
+    epub = tmp_path / "Blaze.epub"
+    epub.write_bytes(b"x")
+    assert _check_complete(str(epub), row)["no_audio"] is True
+    empty = tmp_path / "arriving"
+    empty.mkdir()
+    assert not _check_complete(str(empty), row).get("no_audio")

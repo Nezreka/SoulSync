@@ -539,6 +539,14 @@ class RepairWorker:
                 logger.error("Failed to initialize AcoustIDClient: %s", e)
         return self._acoustid_client
 
+    def refresh_acoustid_config(self):
+        """Refresh AcoustID client configuration after settings update."""
+        if self._acoustid_client is not None:
+            try:
+                self._acoustid_client.refresh_config()
+            except Exception as e:
+                logger.debug("Failed to refresh AcoustID client config: %s", e)
+
     @property
     def metadata_cache(self):
         if self._metadata_cache is None:
@@ -1765,6 +1773,48 @@ class RepairWorker:
         except Exception as e:
             logger.error("Error reopening finding %s: %s", finding_id, e)
             return False
+        finally:
+            if conn:
+                conn.close()
+
+    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
+        """Reopen all dismissed findings, optionally filtered.
+
+        The bulk undo for dismiss — e.g. reopening 10k+ dismissed BPM
+        findings at once. Only touches dismissed rows; resolved findings
+        represent completed work and are never reopened in bulk.
+        Returns the number of findings reopened.
+        """
+        # Guard against empty-string filters silently becoming unfiltered
+        if job_id == "" or finding_type == "":
+            logger.warning("Bulk reopen called with empty filter, refusing")
+            return 0
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            query = """
+                UPDATE repair_findings
+                SET status = 'pending', user_action = NULL, resolved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'dismissed'
+            """
+            params = []
+            if job_id:
+                query += " AND job_id = ?"
+                params.append(job_id)
+            if finding_type:
+                query += " AND finding_type = ?"
+                params.append(finding_type)
+            cursor.execute(query, params)
+            conn.commit()
+            count = cursor.rowcount
+            logger.info("Reopened %d dismissed findings (job_id=%s, finding_type=%s)",
+                        count, job_id, finding_type)
+            return count
+        except Exception as e:
+            logger.error("Error bulk reopening findings: %s", e)
+            return 0
         finally:
             if conn:
                 conn.close()
@@ -3132,9 +3182,14 @@ class RepairWorker:
         The fix_action is passed via details['_fix_action']:
           'staging' — move file to the staging folder for import
           'delete'  — delete file from disk
+          'delete_confirmed' — delete, after the user saw the library track
+                               that shares its filename
         If no action specified, returns an error asking the user to choose.
         """
         fix_action = details.get('_fix_action', '')
+        confirmed = fix_action == 'delete_confirmed'
+        if confirmed:
+            fix_action = 'delete'
         if fix_action not in ('staging', 'delete'):
             return {'success': False, 'error': 'Please choose an action: move to staging or delete',
                     'needs_action': True}
@@ -3157,7 +3212,7 @@ class RepairWorker:
             # raised. Fail closed if the DB cannot be read: neither action may
             # move or delete a file whose current status is unknown.
             from core.repair_jobs.orphan_file_detector import (
-                is_tracked_path, known_file_suffixes,
+                is_tracked_path, known_file_suffixes, same_name_library_paths,
             )
             try:
                 suffixes = known_file_suffixes(self.db)
@@ -3169,10 +3224,19 @@ class RepairWorker:
             if is_tracked_path(resolved, suffixes):
                 return {'success': True, 'action': 'already_tracked',
                         'message': 'File is now tracked in the library; no file was changed'}
-            if is_tracked_path(resolved, suffixes, min_depth=1):
-                return {'success': False, 'error':
-                        'Another library track has the same filename, but its album path '
-                        'differs; verify this orphan manually before moving or deleting it'}
+            # a library track with the same filename in another album may be
+            # this song or a different one. staging keeps the file so it goes
+            # ahead. a delete shows the user that track and waits for a yes:
+            # refusing both with no way past left these stuck for good.
+            if fix_action == 'delete' and not confirmed and is_tracked_path(resolved, suffixes, min_depth=1):
+                try:
+                    library_paths = same_name_library_paths(self.db, resolved)
+                except Exception as e:
+                    logger.debug("same-name library lookup failed: %s", e)
+                    library_paths = []
+                return {'success': False, 'needs_confirm': True, 'library_paths': library_paths,
+                        'error': 'A library track has the same filename in another folder. '
+                                 'Check it is the same song before deleting this file.'}
 
             if fix_action == 'staging':
                 # Move to staging folder
@@ -3770,6 +3834,42 @@ class RepairWorker:
             msg += ' + refreshed cover.jpg'
         return {'success': True, 'action': 'library_retag', 'message': msg, **res}
 
+    def _write_bpm_tag(self, file_path, bpm, bpm_source=None):
+        """put an applied bpm into the file too. it only ever reached the
+        database, so players and media servers never saw it. returns a note
+        for the message.
+
+        the deezer.tags.bpm setting gates deezer-sourced bpm writes only.
+        locally-analyzed bpm always writes — the backfill is an explicit
+        user action to fix bpm.
+        """
+        # Deezer-sourced BPM respects the deezer.tags.bpm setting.
+        # Locally-analyzed BPM always writes (explicit user action).
+        if bpm_source == 'deezer':
+            if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+                return ' (BPM tags are off in settings, file not changed)'
+        try:
+            bpm = float(bpm)
+        except (TypeError, ValueError):
+            return ''
+        if bpm <= 0 or not file_path:
+            return ''
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else ''
+        resolved = _resolve_file_path(file_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager)
+        if not resolved or not os.path.exists(resolved):
+            return ' (file not reachable, saved in SoulSync only)'
+        try:
+            from core.tag_writer import write_tags_to_file
+            result = write_tags_to_file(resolved, {'bpm': int(round(bpm))}, embed_cover=False)
+        except Exception as e:  # noqa: BLE001 - the db value already landed
+            logger.warning("Could not write BPM to %s: %s", resolved, e)
+            return ' (could not write the file tag)'
+        if not result.get('success') or 'bpm' not in (result.get('written_fields') or []):
+            logger.warning("BPM tag not written to %s: %s", resolved, result.get('error'))
+            return ' (could not write the file tag)'
+        return ', written to the file'
+
     def _fix_metadata_gap(self, entity_type, entity_id, file_path, details):
         """Apply found metadata fields to the track."""
         found_fields = details.get('found_fields')
@@ -3822,8 +3922,11 @@ class RepairWorker:
 
             applied = list(updates.keys()) + list(direct_fields.keys())
             if applied:
-                return {'success': True, 'action': 'applied_metadata',
-                        'message': f'Applied metadata: {", ".join(applied)}'}
+                message = f'Applied metadata: {", ".join(applied)}'
+                if 'bpm' in updates:
+                    bpm_source = details.get('bpm_source') if isinstance(details, dict) else None
+                    message += self._write_bpm_tag(file_path, updates['bpm'], bpm_source)
+                return {'success': True, 'action': 'applied_metadata', 'message': message}
             return {'success': False, 'error': 'No applicable metadata fields to update'}
         finally:
             if conn:
@@ -4813,7 +4916,11 @@ class RepairWorker:
 
         res = apply_album_year_fix(
             db=self.db,
-            album_id=int(album_id),
+            # album_id stays as-is: on Navidrome-backed libraries album ids
+            # are TEXT soul ids (e.g. '2G0CgWoRXSwDbwnkmPpg6e'), and int()
+            # raises on those. apply_album_year_fix only uses the id in SQL
+            # parameter bindings, which are type-agnostic. (#1633)
+            album_id=album_id,
             canonical_year=str(canonical_year),
             canonical_date=canonical_date,
             tracks=tracks,

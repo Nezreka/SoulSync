@@ -32,7 +32,7 @@
   text-transform: none;
   color: #f5b942;
   border: 1px solid #3a3423;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 2px 8px;
 }
 
@@ -56,7 +56,7 @@
   align-self: flex-start;
   padding: 8px 16px;
   border: 1px solid #f5b942;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #2a2417;
   color: #f5b942;
   font-size: 13px;
@@ -96,7 +96,7 @@
   height: 16px;
   border: 2px solid #2c2a25;
   border-top-color: #f5b942;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: stemsSpin 0.9s linear infinite;
 }
 
@@ -112,7 +112,7 @@
   gap: 8px;
   padding: 10px;
   border: 1px solid #4a2c2c;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #221616;
 }
 
@@ -144,7 +144,7 @@
   gap: 6px;
   padding: 7px 14px;
   border: 1px solid #f5b942;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: none;
   color: #f5b942;
   font-size: 12px;
@@ -172,7 +172,7 @@
   gap: 8px;
   padding: 8px 10px;
   border: 1px solid #2c2a25;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #1a1916;
 }
 
@@ -211,7 +211,7 @@
   width: 28px;
   height: 28px;
   border: 1px solid #2c2a25;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   color: #8a877f;
   font-size: 11px;
@@ -297,7 +297,7 @@
 .setupCode {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: #0f0e0c;
   color: #b9b5aa;
   font-size: 11px;
@@ -332,7 +332,7 @@
 .secondary {
   padding: 7px 14px;
   border: 1px solid #3a3730;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #1c1b18;
   color: #e8e4da;
   font-size: 13px;

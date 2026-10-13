@@ -434,6 +434,7 @@ export function DiscographyModal({
                     ['include_acoustic', 'Acoustic'],
                     ['include_compilations', 'Compilations'],
                     ['include_instrumentals', 'Instrumentals'],
+                    ['include_other_artists', 'Other artists'],
                   ]}
                   future={future}
                   onToggle={(key) => setFuture((prev) => ({ ...prev, [key]: !prev[key] }))}

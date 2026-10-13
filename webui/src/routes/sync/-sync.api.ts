@@ -13,6 +13,7 @@ import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
+import type { SourceSkipped } from './-sync.state';
 import type { RawDiscoveryResult } from './-sync.transform';
 
 import { isServiceExport } from './-sync.export';
@@ -493,6 +494,8 @@ export interface MirroredPlaylistDetail {
   image_url?: string;
   updated_at?: string;
   mirrored_at?: string;
+  /** what the source never handed over when it was mirrored (#1613). */
+  source_skipped?: SourceSkipped | null;
   tracks?: {
     id?: number;
     position?: number;

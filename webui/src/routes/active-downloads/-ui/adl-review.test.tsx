@@ -495,3 +495,66 @@ describe('AdlDeletedRow source labels', () => {
     expect(container.querySelector('.adl-row-batch')).toBeNull();
   });
 });
+
+describe('quarantine presence and album origin', () => {
+  it('shows a compact library icon with the existing copy details', () => {
+    const { getByRole, container } = render(
+      <AdlQuarantineRow
+        entry={entry({
+          library_status: 'present',
+          library_match: {
+            album: 'SAW',
+            filename: 'Xtal.flac',
+            quality: 'FLAC 16-bit',
+            verification_status: 'human_verified',
+          },
+        })}
+        open={false}
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    const icon = getByRole('img', { name: /already in library/i });
+    expect(icon.getAttribute('title')).toContain('SAW');
+    expect(icon.getAttribute('title')).toContain('FLAC 16-bit');
+    expect(icon.getAttribute('title')).toContain('human verified');
+    expect(icon.closest('.verif-quar-title-row')).not.toBeNull();
+    expect(container.querySelector('.verif-presence-icons')?.textContent).toBe('');
+  });
+
+  it('marks only additional album imports and includes the download source', () => {
+    const { getByRole } = render(
+      <AdlQuarantineRow
+        entry={entry({ album_extra: { album: 'SAW', download_source: 'usenet' } })}
+        open={false}
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    expect(
+      getByRole('img', { name: /additional.*Usenet album import/i }).getAttribute('title'),
+    ).toContain('SAW');
+  });
+
+  it('adds no icons for ordinary missing tracks and explains unknown in details', () => {
+    const { queryByRole, rerender, getByText } = render(
+      <AdlQuarantineRow
+        entry={entry({ library_status: 'missing', album_extra: null })}
+        open={true}
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    expect(queryByRole('img', { name: /already in library|additional track/i })).toBeNull();
+    getByText('No matching library copy found');
+    rerender(
+      <AdlQuarantineRow
+        entry={entry({ library_status: 'unknown' })}
+        open={true}
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    getByText('Library check unavailable');
+  });
+});

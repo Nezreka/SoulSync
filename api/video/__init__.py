@@ -104,7 +104,20 @@ def create_video_blueprint() -> Blueprint:
                                  # manual "I have this" links — library matching
                                  # management, same as the overrides below. The
                                  # GETs (search/status) stay open.
-                                 "/api/video/manual-match") \
+                                 "/api/video/manual-match",
+                                 # per-movie/per-show subtitle language overrides
+                                 # (Phase 3) — per-title management, same as the
+                                 # acquisition overrides. The GET stays open.
+                                 "/api/video/subtitles/overrides",
+                                 # whisper model download (Phase 4): writes to
+                                 # server disk + pulls ~500MB from the net —
+                                 # admin-only. The status GET stays open.
+                                 "/api/video/subtitles/whisper/download",
+                                 # library backfill sweep: launches a
+                                 # background thread that walks and mutates
+                                 # the whole library DB — admin-only. The
+                                 # status GET stays open.
+                                 "/api/video/subtitles/backfill") \
                 or path.endswith(("/metadata", "/lock", "/refresh-art",
                                   # season-wide monitor flip — same library
                                   # management as /api/video/monitor above
@@ -125,6 +138,9 @@ def create_video_blueprint() -> Blueprint:
                 # clients-tab match & import: following a download is a grab
                 "/api/video/downloads/adopt",
                 "/api/video/youtube/download",
+                # manual subtitle download (Phase 3): an explicit user download
+                # action, same permission as a grab
+                "/api/video/subtitles/manual-download",
                 # the tab's bulk action — spends the same disk and bandwidth as
                 # the per-row grab above, so it takes the same permission
                 "/api/video/wishlist/youtube/download-all",
@@ -167,6 +183,7 @@ def create_video_blueprint() -> Blueprint:
     from .backups import register_routes as reg_backups
     from .watch import register_routes as reg_watch
     from .manual_match import register_routes as reg_manual_match
+    from .subtitles import register_routes as reg_subtitles
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -193,5 +210,6 @@ def create_video_blueprint() -> Blueprint:
     reg_backups(bp)
     reg_watch(bp)
     reg_manual_match(bp)
+    reg_subtitles(bp)
 
     return bp

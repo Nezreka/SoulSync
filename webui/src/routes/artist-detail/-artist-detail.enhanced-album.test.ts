@@ -471,6 +471,19 @@ describe('normTitleForMatch', () => {
 
 describe('getAlbumCanonicalSource', () => {
   it('prefers Spotify, then Deezer, then iTunes', () => {
+    // A pinned release must override the normal Spotify-first fallback.
+    expect(
+      getAlbumCanonicalSource({
+        title: "Kill 'Em All (Remastered)",
+        track_count: 10,
+        canonical_source: 'deezer',
+        canonical_album_id: '14581190',
+        canonical_locked: 1,
+        spotify_album_id: '3m69LQokz6DaKB3yw4BH6n',
+        deezer_id: '14581190',
+      }),
+    ).toEqual({ source: 'deezer', id: '14581190' });
+
     expect(getAlbumCanonicalSource({ deezer_id: 'd', spotify_album_id: 's' })).toEqual({
       source: 'spotify',
       id: 's',

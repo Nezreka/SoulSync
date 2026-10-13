@@ -32,8 +32,9 @@ class BpmBackfillJob(RepairJob):
         'For each track missing BPM, the job tries:\n'
         '1. Deezer API (via the track\'s Deezer ID) — fast, accurate\n'
         '2. Local audio analysis (librosa) — no API calls, works on any file\n\n'
-        'Results are reported as findings for your review. The BPM is written to the '
-        'database; file tags are updated if the deezer.tags.bpm setting is enabled.\n\n'
+        'Results are reported as findings for your review. Nothing changes until you '
+        'apply a finding: then the BPM is saved in SoulSync and written into the file\'s '
+        'tags (unless BPM tags are turned off under the Deezer tag settings).\n\n'
         'Settings:\n'
         '- Use Deezer: Look up BPM via the Deezer API first\n'
         '- Use local analysis: Fall back to analyzing the audio file locally'
@@ -175,8 +176,22 @@ class BpmBackfillJob(RepairJob):
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'deezer'
+                        else:
+                            logger.info(
+                                "Deezer has no BPM for track %s (deezer_id=%s)",
+                                track_id, deezer_id,
+                            )
+                    else:
+                        logger.warning(
+                            "Deezer returned no data for track %s (deezer_id=%s)",
+                            track_id, deezer_id,
+                        )
                 except Exception as e:
-                    logger.debug("Deezer BPM lookup failed for track %s: %s", track_id, e)
+                    logger.warning("Deezer BPM lookup failed for track %s: %s", track_id, e)
+            elif not deezer_client:
+                logger.debug("Deezer client unavailable, skipping Deezer BPM lookup for track %s", track_id)
+            elif not deezer_id:
+                logger.debug("Track %s has no deezer_id, skipping Deezer BPM lookup", track_id)
 
             # 2. Fall back to local analysis
             if bpm_value is None and local_available and file_path:
@@ -193,6 +208,14 @@ class BpmBackfillJob(RepairJob):
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'local'
+                        else:
+                            # Analysis ran but couldn't detect a confident BPM
+                            # (common on classical/ambient). Distinct from a
+                            # crash — the file was readable, just no beat.
+                            logger.info(
+                                "Local BPM analysis found no confident BPM for track %s",
+                                track_id,
+                            )
                     except Exception as e:
                         result.errors += 1
                         logger.warning("Local BPM analysis failed for track %s: %s", track_id, e)

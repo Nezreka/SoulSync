@@ -117,3 +117,53 @@ export function movedOrder(count: number, from: number, to: number): number[] {
   order.splice(to, 0, item);
   return order;
 }
+
+/** the short blurb under the playlist's name. blank clears it. */
+export async function setPlaylistDescription(
+  playlistId: number,
+  description: string,
+): Promise<{ description: string }> {
+  return send(`/api/user-playlists/${playlistId}`, json('PATCH', { description }));
+}
+
+/** copy the whole playlist under a new id: tracks, cover and description. */
+export async function duplicateUserPlaylist(
+  playlistId: number,
+  name?: string,
+): Promise<{ id: number; name: string }> {
+  return send(
+    `/api/user-playlists/${playlistId}/duplicate`,
+    json('POST', name === undefined ? {} : { name }),
+  );
+}
+
+/** upload a photo; the server re-encodes it to a square webp. */
+export async function uploadPlaylistCover(
+  playlistId: number,
+  file: File,
+): Promise<{ image_url: string }> {
+  const form = new FormData();
+  form.append('file', file);
+  return send(`/api/user-playlists/${playlistId}/cover`, { method: 'POST', body: form });
+}
+
+/** point the cover at a remote http(s) image. */
+export async function setPlaylistCoverUrl(
+  playlistId: number,
+  imageUrl: string,
+): Promise<{ image_url: string }> {
+  return send(`/api/user-playlists/${playlistId}/cover`, json('PUT', { image_url: imageUrl }));
+}
+
+/** borrow a track's artwork. fromTrack is 1-based, as the detail numbers them. */
+export async function setPlaylistCoverFromTrack(
+  playlistId: number,
+  fromTrack: number,
+): Promise<{ image_url: string }> {
+  return send(`/api/user-playlists/${playlistId}/cover`, json('PUT', { from_track: fromTrack }));
+}
+
+/** back to no cover: the views fall back to track art. */
+export async function clearPlaylistCover(playlistId: number): Promise<void> {
+  await send(`/api/user-playlists/${playlistId}/cover`, { method: 'DELETE' });
+}

@@ -5063,7 +5063,7 @@ function _renderPlacedBlock(slotKey, data) {
             <select id="cfg-${slotKey}-condop">${opts}</select>
             <input type="text" id="cfg-${slotKey}-condvalue" value="${_escAttr(cond.value || '')}" placeholder="error" style="width:110px;">
         </div></div>`;
-        if (['discord_webhook', 'pushbullet', 'telegram', 'webhook'].includes(data.type)) {
+        if (['discord_webhook', 'pushbullet', 'telegram', 'ntfy', 'gotify', 'webhook'].includes(data.type)) {
             thenExtraHtml += `<div class="placed-block-config"><div class="config-row">
                 <button type="button" class="btn btn--sm btn--secondary" onclick="_autoTestNotify('${slotKey}')">Send test</button>
                 <span id="cfg-${slotKey}-test-result" style="font-size:11px;opacity:0.6;"></span>

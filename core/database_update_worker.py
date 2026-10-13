@@ -583,7 +583,7 @@ class DatabaseUpdateWorker:
             # guard is bypassed and live tracks get deleted as stale. Never
             # remove on a scan that ran during a server-side rescan.
             # Applies to every server type whose client implements
-            # is_library_scanning() (Plex, Jellyfin, Navidrome) — the probe
+            # is_library_scanning() (Plex, Jellyfin, Navidrome, SoulSync) — the probe
             # is consulted, not the server_type string.
             if stale and hasattr(self.media_client, "is_library_scanning"):
                 try:

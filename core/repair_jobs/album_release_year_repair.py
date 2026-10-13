@@ -120,7 +120,7 @@ def find_album_folder(track_paths: List[str]) -> Optional[str]:
 def is_folder_exclusive_to_album(
     db: Any,
     folder_path: str,
-    album_id: int,
+    album_id: str,
     transfer_folder: Optional[str] = None,
     artist_name: Optional[str] = None,
 ) -> bool:
@@ -314,7 +314,7 @@ def rename_album_folder(
     db: Any,
     old_folder: str,
     new_folder_name: str,
-    album_id: int,
+    album_id: str,
 ) -> Optional[str]:
     """Safely rename the album directory and update track file paths in the database."""
     if not old_folder or not os.path.isdir(old_folder) or not new_folder_name:
@@ -398,7 +398,7 @@ def rename_album_folder(
 
 def apply_album_year_fix(
     db: Any,
-    album_id: int,
+    album_id: str,
     canonical_year: str,
     canonical_date: Optional[str] = None,
     tracks: Optional[List[Dict[str, Any]]] = None,

@@ -78,12 +78,21 @@ describe('Library settings media tabs', () => {
     }
   });
 });
-it('lets four tabs share a phone-width row', () => {
+it('lets four tabs scroll at phone width instead of squeezing their labels', () => {
   // measured in chromium: at 100px minimum each the switcher was 435px wide in
-  // a 375px viewport and pushed the page sideways.
+  // a 375px viewport and pushed the page sideways. The first fix shared the
+  // row (flex: 1; min-width: 0), which stopped the sideways push but squeezed
+  // "Audiobooks" into a 68px tab and its label painted over "Podcasts"
+  // (mobile CSS batch #2, RC2). Now the tabs keep their content size and the
+  // switcher scrolls horizontally, like the app's other tab rails.
   const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
-  // style.css is crlf, so match across any line ending
-  expect(css).toMatch(
-    /@media \(max-width: 600px\) \{\s*#settings-page \.stg-media-card \.stg-media-switcher \{[^}]*\}\s*[^}]*\.stg-media-switcher button \{[^}]*min-width: 0/,
-  );
+  // style.css has several max-width:600px blocks; take the one with the switcher.
+  const starts = [...css.matchAll(/@media \(max-width: 600px\)/g)].map((m) => m.index);
+  const at = starts.find((i) => css.slice(i, i + 2000).includes('.stg-media-switcher'));
+  expect(at).toBeDefined();
+  const block = css.slice(at, at! + 2000);
+  expect(block).toMatch(/\.stg-media-switcher \{[^}]*overflow-x: auto/);
+  expect(block).toMatch(/\.stg-media-switcher button \{[^}]*flex: 0 0 auto/);
+  expect(block).toMatch(/\.stg-media-switcher button \{[^}]*white-space: nowrap/);
+  expect(block).not.toMatch(/\.stg-media-switcher button \{[^}]*flex: 1;/);
 });

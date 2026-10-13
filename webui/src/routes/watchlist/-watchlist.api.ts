@@ -309,6 +309,8 @@ export interface WatchlistArtistConfigUpdate {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  /** Include tracks by artists other than the watched one (tributes, soundtracks). Default off. */
+  include_other_artists: boolean;
   /** The three-state preference: null = follow the global. Sent INSTEAD of the
    *  legacy `auto_download` boolean — the server reads that one as a deliberate
    *  choice, so posting it on every save would pin every artist the user ever

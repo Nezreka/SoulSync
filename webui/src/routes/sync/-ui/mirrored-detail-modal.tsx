@@ -36,8 +36,17 @@ import {
   mirroredTotalRuntime,
   timeAgo,
 } from '../-sync.mirrored';
+import { skippedNoteText } from '../-sync.modal-core';
 import { AddToPlaylistButton } from '../../../features/playlists/add-to-playlist';
-import { isUserPlaylist, movedOrder } from '../../../features/playlists/user-playlists';
+import {
+  clearPlaylistCover,
+  isUserPlaylist,
+  movedOrder,
+  setPlaylistCoverFromTrack,
+  setPlaylistCoverUrl,
+  setPlaylistDescription,
+  uploadPlaylistCover,
+} from '../../../features/playlists/user-playlists';
 
 export interface MirroredDetailModalProps {
   playlistId: number;
@@ -62,6 +71,10 @@ export interface MirroredDetailModalProps {
   onRemoveTrack?: (position: number) => void;
   /** the full 1-based position list in its new order. */
   onReorder?: (order: number[]) => void;
+  /** refetch the detail after a cover/description change. */
+  onRefresh: () => void;
+  /** copy the whole playlist; the tab opens the new one. */
+  onDuplicate?: () => Promise<void>;
 }
 
 interface EditProps {
@@ -163,6 +176,7 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
 }
 
 export function MirroredDetailModal({
+  playlistId,
   data,
   now,
   onClose,
@@ -174,10 +188,56 @@ export function MirroredDetailModal({
   discoverLabel = 'Identify',
   onRemoveTrack,
   onReorder,
+  onRefresh,
+  onDuplicate,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const own = isUserPlaylist(data);
   const editable = own && Boolean(onRemoveTrack && onReorder);
+  // cover + description state. meta edits refetch through onRefresh, so the
+  // modal always shows what's saved, same as the track edits below.
+  const [coverOpen, setCoverOpen] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const [coverUrlDraft, setCoverUrlDraft] = useState('');
+  const [descEditing, setDescEditing] = useState(false);
+  const [descDraft, setDescDraft] = useState('');
+  const [descBusy, setDescBusy] = useState(false);
+  const [dupBusy, setDupBusy] = useState(false);
+  useEffect(() => {
+    setCoverOpen(false);
+    setCoverError(null);
+    setDescEditing(false);
+  }, [data]);
+  const runCoverEdit = async (edit: () => Promise<unknown>) => {
+    setCoverBusy(true);
+    setCoverError(null);
+    try {
+      await edit();
+      setCoverOpen(false);
+      onRefresh();
+    } catch (err) {
+      setCoverError(err instanceof Error ? err.message : 'Could not update the cover');
+    } finally {
+      setCoverBusy(false);
+    }
+  };
+  const saveDescription = async () => {
+    setDescBusy(true);
+    try {
+      await setPlaylistDescription(playlistId, descDraft);
+      setDescEditing(false);
+      onRefresh();
+    } catch (err) {
+      window.showToast?.(
+        err instanceof Error ? err.message : 'Could not save the description',
+        'error',
+      );
+    } finally {
+      setDescBusy(false);
+    }
+  };
+  const artTracks = tracks.filter((t) => t.image_url);
   // one edit at a time: positions are only true until the refetch lands, so a
   // second click on a stale row could hit the wrong track. a new payload
   // (the refetch) is what frees it.
@@ -194,6 +254,8 @@ export function MirroredDetailModal({
   const srcLabel = mirroredDetailSourceLabel(source);
   const heroArt = mirroredHeroArt(data.image_url, tracks);
   const { totalMs, label: totalLabel } = mirroredTotalRuntime(tracks);
+  // why a 395 track playlist mirrors as 365 (#1613)
+  const skippedNote = own ? null : skippedNoteText(data.source_skipped ?? undefined, srcLabel);
 
   return (
     <div
@@ -210,7 +272,108 @@ export function MirroredDetailModal({
             <div className="mm-hero-bg" style={{ backgroundImage: `url('${heroArt}')` }} />
           ) : null}
           <div className="mm-hero-content">
-            {heroArt ? (
+            {own ? (
+              <div className="mm-cover-wrap">
+                {heroArt ? (
+                  <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
+                ) : (
+                  <div className="mm-cover mm-cover-empty soulsync">{sourceIcon}</div>
+                )}
+                <button
+                  type="button"
+                  className="mm-cover-edit"
+                  disabled={coverBusy}
+                  onClick={() => {
+                    setCoverError(null);
+                    setCoverOpen((v) => !v);
+                  }}
+                >
+                  {coverBusy ? 'Saving…' : 'Change cover'}
+                </button>
+                {coverOpen ? (
+                  <div className="mm-cover-menu" role="menu">
+                    <label className="mm-cover-item">
+                      Upload a photo…
+                      <input
+                        type="file"
+                        accept="image/*"
+                        hidden
+                        disabled={coverBusy}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = '';
+                          if (file) void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
+                        }}
+                      />
+                    </label>
+                    {artTracks.length > 0 ? (
+                      <>
+                        <div className="mm-cover-label">From this playlist</div>
+                        <div className="mm-cover-tiles">
+                          {artTracks.slice(0, 8).map((t, i) => (
+                            <button
+                              key={`${t.position ?? i}-${t.image_url}`}
+                              type="button"
+                              className="mm-cover-tile"
+                              title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
+                              disabled={coverBusy}
+                              onClick={() =>
+                                void runCoverEdit(() =>
+                                  setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
+                                )
+                              }
+                            >
+                              <img src={t.image_url} alt="" loading="lazy" />
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="mm-cover-label">Or paste an image link</div>
+                    <div className="mm-cover-urlrow">
+                      <input
+                        type="url"
+                        className="mm-cover-url"
+                        placeholder="https://…"
+                        value={coverUrlDraft}
+                        disabled={coverBusy}
+                        onChange={(event) => setCoverUrlDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && coverUrlDraft.trim()) {
+                            void runCoverEdit(() =>
+                              setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                            );
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="mm-btn mm-btn-ghost mm-btn-sm"
+                        disabled={coverBusy || !coverUrlDraft.trim()}
+                        onClick={() =>
+                          void runCoverEdit(() =>
+                            setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                          )
+                        }
+                      >
+                        Set
+                      </button>
+                    </div>
+                    {data.image_url ? (
+                      <button
+                        type="button"
+                        className="mm-cover-item mm-cover-remove"
+                        disabled={coverBusy}
+                        onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
+                      >
+                        Remove cover
+                      </button>
+                    ) : null}
+                    {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : heroArt ? (
               <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
             ) : (
               <div className={`mm-cover mm-cover-empty ${source}`}>{sourceIcon}</div>
@@ -218,6 +381,68 @@ export function MirroredDetailModal({
             <div className="mm-hero-info">
               <span className="mm-eyebrow">{own ? 'Your Playlist' : 'Mirrored Playlist'}</span>
               <h2 className="mm-title">{data.name}</h2>
+              {own ? (
+                descEditing ? (
+                  <div className="mm-desc-edit">
+                    <textarea
+                      className="mm-desc-input"
+                      value={descDraft}
+                      maxLength={1000}
+                      rows={2}
+                      placeholder="What is this mix for?"
+                      disabled={descBusy}
+                      onChange={(event) => setDescDraft(event.target.value)}
+                    />
+                    <div className="mm-desc-actions">
+                      <button
+                        type="button"
+                        className="mm-btn mm-btn-ghost mm-btn-sm"
+                        disabled={descBusy}
+                        onClick={() => setDescEditing(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="mm-btn mm-btn-primary mm-btn-sm"
+                        disabled={descBusy}
+                        onClick={() => void saveDescription()}
+                      >
+                        {descBusy ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                ) : data.description ? (
+                  <div className="mm-desc">
+                    <p>{data.description}</p>
+                    <button
+                      type="button"
+                      className="mm-desc-pencil"
+                      title="Edit description"
+                      aria-label="Edit description"
+                      onClick={() => {
+                        setDescDraft(data.description ?? '');
+                        setDescEditing(true);
+                      }}
+                    >
+                      ✎
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="mm-desc-add"
+                    onClick={() => {
+                      setDescDraft('');
+                      setDescEditing(true);
+                    }}
+                  >
+                    Add a description
+                  </button>
+                )
+              ) : data.description ? (
+                <p className="mm-desc mm-desc-readonly">{data.description}</p>
+              ) : null}
               <div className="mm-meta">
                 {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
                 {data.owner ? (
@@ -238,6 +463,7 @@ export function MirroredDetailModal({
                   {own ? 'Edited' : 'Mirrored'} {timeAgo(data.updated_at || data.mirrored_at, now)}
                 </span>
               </div>
+              {skippedNote ? <div className="mm-skipped-note">{skippedNote}</div> : null}
             </div>
           </div>
           <button type="button" className="mm-close" onClick={onClose} aria-label="Close">
@@ -317,6 +543,20 @@ export function MirroredDetailModal({
                 Edit Source
               </button>
             )}
+            {own && onDuplicate ? (
+              <button
+                type="button"
+                className="mm-btn mm-btn-ghost"
+                title="Copy this playlist, with its tracks, cover and description"
+                disabled={dupBusy}
+                onClick={() => {
+                  setDupBusy(true);
+                  void onDuplicate().finally(() => setDupBusy(false));
+                }}
+              >
+                {dupBusy ? 'Duplicating…' : 'Duplicate'}
+              </button>
+            ) : null}
             {onRefreshFromSource && !own ? (
               <div className="mm-btn-wrap">
                 <button

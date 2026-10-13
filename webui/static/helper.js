@@ -3460,6 +3460,30 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.4': [
+        { date: 'October 2026 · 3.5.4' },
+        { title: 'Subtitles replace Bazarr', desc: 'Providers are pluggable, a wanted loop retries misses with hash-first scoring, per-title language overrides, proper hi/forced naming, an upgrade loop and manual search. Optional local Whisper transcription as the last resort, and fetching is on by default for new imports (#1635, #1638, #1643, #1644).', page: 'settings' },
+        { title: 'Subtitle chain widget and backfill', desc: 'The provider chain is a settings widget you can drag into order, and a backfill runs subtitles across the existing library, admins only (#1668).', page: 'settings' },
+        { title: 'Follow an audiobook series', desc: 'A series joins author and narrator follows: backfill every missing volume or new books only, and new volumes land on the wishlist on the daily scan (#1599).' },
+        { title: 'Optional m4b merge', desc: 'A book that arrives as many files folds into one .m4b with a chapter marker per file, off by default. Originals are only deleted after the merged file verifies (thanks SeadogsBooty on discord) (#1648).', page: 'settings' },
+        { title: 'Plex-safe audiobook imports', desc: 'The book is built in a hidden staging folder and revealed with one atomic rename, so Plex only ever sees the finished book. A scan nudge goes out after the import lands (thanks SeadogsBooty on discord) (#1664).' },
+        { title: 'Narration-aware completeness', desc: 'Complete books stop being held for being a different narration than the wishlisted edition, and holds say which narration and which check applied (thanks SeadogsBooty on discord) (#1647, #1655).' },
+        { title: 'Audiobook wishlist, music design', desc: 'The audiobooks wishlist tab wears the same design as music: hero, stat strip, a triage banner for failed titles and one sticky command bar (#1675).' },
+        { title: 'One downloads page', desc: 'Music and video share one downloads page with a music | video switcher, deep-linkable, and the old video page redirects. Video wishlist drains are capped per run (thanks @c5pie) (#1650, #1651).', page: 'active-downloads' },
+        { title: 'Playlist covers, descriptions, duplicate', desc: 'Your own playlists get a cover (upload, pick from a track\'s art, or paste a URL), a description, and a duplicate button. A user playlist\'s cover pushes to your server on every sync (#1666).', page: 'sync' },
+        { title: 'Usenet finds the album for the song', desc: 'A single-song request can use an album release: the track is picked out by title, artist, version and duration. An option keeps the album\'s other tracks too (#1604).' },
+        { title: 'Scrobbling leaves the stats toggle alone', desc: 'The scrobble flush runs on its own cadence, and the web player scrobbles by Last.fm\'s rule: half the track or 4 minutes, 30s minimum (thanks @cin) (#1654).', page: 'settings' },
+        { title: 'Mirror playlists stay safe', desc: 'A failed Spotify fetch no longer refreshes a mirror to empty, and an empty track payload no longer wipes a mirror\'s tracks (thanks @splitsec2) (#1657, #1659).' },
+        { title: 'Library sees every provider', desc: 'The in-library count sees Deezer, Tidal and Qobuz tracks, profile 1\'s downloads stop reading as missing, and playlist sync matches again when the candidate pool is empty (thanks @zikasak) (#1624, #1660).' },
+        { title: 'Poisoned batches stop misfiling', desc: 'Wishlist batches with no real album id stop stamping every track with the first row\'s album, and a repair signal flags albums shaped like the bad one (thanks @kevin2xk) (#1620).' },
+        { title: 'Matching and verification fixes', desc: 'The Soulseek scorer vetoes a wrong song that only shares a version qualifier, AcoustID handles dash-wrapped subtitles, and cross-script same-title recordings skip instead of failing (thanks @zikasak) (#1630).', page: 'tools' },
+        { title: 'Watchlist credits the artist', desc: 'The scanner only wishlists tracks credited to the watched artist, with an opt-in other-artists toggle. The scan deck stops disappearing a second after it appears (thanks SeadogsBooty on discord) (#1636, #1645).', page: 'watchlist' },
+        { title: 'Quarantine says what arrived', desc: 'Muted icons when the song is already in your library or was an extra album track. Slowed and sped-up versions are their own versions, approving counts as replace intent, and Discogs dates keep their precision (thanks @nick2000713) (#1653).' },
+        { title: 'Phone layout fixes', desc: 'Buttons stop stretching into ovals, the watchlist rail scrolls, settings and modals clear the menu button, the player\'s play button is round with the EQ reachable, and the dashboard listen cards stack instead of clipping (thanks @Thibs, @c5pie and gzetk) (#1683).' },
+        { title: 'Accent colours and dead CSS', desc: 'The UI follows your accent instead of hardcoded Spotify greens, palettes collapse onto design tokens, and a hardened checker deletes dead CSS by the thousand lines (thanks @Thundernerd) (#1617, #1625, #1631, #1649, #1669).' },
+        { title: 'More fixes', desc: 'BPM backfill reopens dismissed findings in bulk and always writes locally analyzed BPM (thanks Specialmed on discord) (#1646). The nav drawer scrolls in landscape on phones, Spotify\'s HTTPS redirect requirement is documented for NAS and Docker (thanks @Thibs) (#1661, #1663), and tribute albums stop winning the album picker (thanks @TheJimmerJammer123) (#1641). Imports skip tracks already in your library (thanks SeadogsBooty on discord) (#1667) and the inbox stays honest mid-scan (#1679). Deezer sessions re-login when the token dies (#1681), standalone library scans work (thanks Spectro on discord) (#1682), AcoustID keys apply without a restart and a bad key stops the scan early (thanks @splitsec2) (#1672), pinned canonical albums are respected (thanks @kiwijar) (#1670), scrollbars fade while you scroll (thanks @Thibs) (#1673), and automations gain ntfy and Gotify notifications (thanks @SimpleSimonLA) (#1674).' },
+        { title: 'Earlier versions', desc: '3.5.3 brought My Playlists, match & import from download clients, and audiobook format choices.' },
+    ],
     '3.5.3': [
         { date: 'October 2026 · 3.5.3' },
         { title: 'My Playlists', desc: 'Make your own playlists on the Sync page and add any track from search, the library, discover, download modals and the now playing view. They identify, sync to your server and download missing like mirrored playlists.', page: 'sync' },
@@ -3479,35 +3503,6 @@ const WHATS_NEW = {
         { title: 'Video episode imports', desc: 'Episodes are judged against their runtime the way Sonarr does, so wrong TV runtimes stop failing good files.' },
         { title: 'API keys and colours', desc: 'API key fixes and X-API-Key support (thanks @splitsec2) (#1587, #1597), and accent colours that never rendered now follow your accent (thanks @Thundernerd) (#1598).' },
         { title: 'Earlier versions', desc: '3.5.2 brought sign in with Plex, listening history per person, and Wishlist + Watchlist in Download Discography.' },
-    ],
-    '3.5.2': [
-        { date: 'October 2026 · 3.5.2' },
-        { title: 'Sign in with Plex', desc: 'Turn it on in Settings and everyone you share Plex with can log in with their own Plex account. The server owner signs in as admin, anyone else gets their own profile, and their playlists land in their own Plex. Settings also has Re-link with Plex for a fresh token.', page: 'settings' },
-        { title: 'Connect with Plex in My Account', desc: 'A profile that signs in with a password, like a shared friend or a kid, can connect its own Plex account for its playlists and listening history.' },
-        { title: 'Listening history per person', desc: 'Plex plays go to whoever played them, so the kids\' plays stay out of your stats, mixes, discover and Last.fm. Linking someone later moves their plays to them.', page: 'stats' },
-        { title: 'Plays stop counting twice', desc: 'Your scrobbles coming back from Last.fm or ListenBrainz used to land as a second play, hours off. They match their play now, and your existing history is cleaned up once, with a backup of the listening tables first. The listening clock reads your local time.', page: 'stats' },
-        { title: 'Kids profiles play library music', desc: 'A profile with explicit filtering could not play anything from the library (audio format not supported). Clean tracks play again, and explicit ones say not available on this profile.' },
-        { title: 'Sidebar weather', desc: 'The sidebar paints the real sky: rain, snow, fog, storms, wind and day or night, a planet and satellite on clear nights, and holiday decorations. Preview any sky from Settings > Advanced > Developer (#1575, #1576).' },
-        { title: 'Path and library fixes', desc: 'Tracks keep both the server path and SoulSync\'s own, so a Navidrome mount under a different name stops breaking playlist writes. Mirrored tracks are identified by their own Deezer or Spotify ID, cast albums search with the right performer, and duplicate and repair fixes (#1566, #1568, #1569, #1571, #1572, #1573, #1574).' },
-        { title: 'Repair fixes from @nick2000713', desc: 'The Live/Commentary cleaner keeps interludes, exact stem matches win, Tools job toggles arm their timer, and the album year fix restores the folder on failure (#1570). Multi-part audiobooks also take their own part.' },
-        { title: 'Wishlist + Watchlist in one go', desc: 'Download Discography has a second button: queue the releases you picked and add the artist to your watchlist with release types, filters and auto-download set right in the modal. The artist page add to watchlist button opens the same settings, and releases that fail to resolve get a retry button (#1553).' },
-        { title: 'One edition per album', desc: 'New edition preference in global watchlist settings: all editions, one per album standard, or one per album most complete. No more standard and deluxe downloading the same songs twice (#1561).', page: 'watchlist' },
-        { title: 'Singles own themselves', desc: 'A single no longer shows owned because the album has the same song. The artist page checks the single release itself, and labels releases your watchlist filters skip (#1556, #1562).' },
-        { title: 'Music video and episode requests', desc: 'Non-admin profiles can request music videos and single episodes. Requests land on the same page as music and approving downloads them (#1500, #1503).' },
-        { title: 'Dashboard refresh', desc: 'Every section redesigned in the same layout, plus a weekly listening digest with hours, tracks, top artist, streak and a 7-day chart (#1552).', page: 'dashboard' },
-        { title: 'Playlist sync fixes', desc: 'Wishlisted tracks download as a playlist-named batch so the scan runs after them, new mirrors get their server playlist on the first sync, completion counts tracks that still need identifying, and origins can be removed without deleting the file (#1545, #1547, #1548, #1549).', page: 'sync' },
-        { title: 'ListenBrainz weeklies stay current', desc: 'Weekly Exploration and Weekly Jams pick up the new week on refresh instead of sticking to the last cached one (#1564).', page: 'sync' },
-        { title: 'Tagging fixes', desc: 'MusicBrainz stops matching the wrong same-named band, wishlist downloads keep featured artists, sort tags follow the primary source, hip hop and hip-hop merge, and full-depth re-tag writes again (#1509, #1508, #1510, #1512, #1511).' },
-        { title: 'New tagging options', desc: 'Opt-in artist.nfo for Jellyfin, Kodi and Emby, original release date as DATE, last.fm artist tags as a genre fallback, and $label in the album path template (#1497, #1520, #1544).', page: 'settings' },
-        { title: 'Audiobook import fixes', desc: 'Single-file torrents import instead of stalling on no audio files, and release search finds series volumes named Series 03 - Title (#1554, #1563).' },
-        { title: 'Soulseek cleanup scope', desc: 'Cleanup only removes this client\'s own transfers and searches, with a scope setting for single-client installs (#1501, #1524).', page: 'settings' },
-        { title: 'Deezer matching fixes', desc: 'Identification, re-identify and enrichment stop picking karaoke or reprise versions over the original song, and MP3s get their MusicBrainz recording ID (#1565).' },
-        { title: 'Every profile\'s video follows', desc: 'Followed people, studios, channels, playlists and shows are scanned for every profile, not just admin.' },
-        { title: 'Duplicates keep your playlists', desc: 'Each copy in a duplicate finding shows which server playlists it is in, and Keep Best keeps that copy, so cleaning up never pulls songs out of a playlist.', page: 'tools' },
-        { title: 'Deezer finds the original song', desc: 'Deezer downloads also look the track up by its own ID and its own artist, so a soundtrack song no longer comes back as the reprise or karaoke version, or not at all (#1582).' },
-        { title: 'Explicit tracks pass verification', desc: 'AcoustID verification stopped quarantining every track titled Explicit (#1579).' },
-        { title: 'Video downloads stop repeating', desc: 'The video wishlist counts copies SoulSync already placed, so it stops grabbing the same release every hour. Usenet grabs import instead of sitting at 100%, and mixed Jellyfin libraries show up to pick.' },
-        { title: 'Earlier versions', desc: '3.5.0 brought the video discover overhaul, per-profile sync and discover, and repair jobs on the automation engine.' },
     ],
 };
 
@@ -3537,6 +3532,31 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.4: subtitles replace bazarr, audiobook series and m4b, one downloads page, playlist covers and a phone pass',
+        description: 'Subtitles grow up to replace Bazarr, audiobooks get series follows and an m4b merge with Plex-safe imports, one downloads page for music and video, Usenet pulls a track out of an album release, scrobbling leaves the stats toggle alone, and mirror playlists stay safe. Your playlists get covers and descriptions, and the phone layout gets a full pass.',
+        features: [
+            'Subtitles: pluggable providers, a wanted loop with hash-first scoring, per-title overrides, hi/forced naming, upgrades and manual search, plus optional local Whisper as the last resort. The provider chain is a settings widget now, with a backfill for the existing library (#1635, #1638, #1643, #1644, #1668).',
+            'Audiobooks: follow a whole series, optional m4b merge on import, Plex-safe staged imports, and narration-aware completeness (thanks SeadogsBooty on discord) (#1599, #1647, #1648, #1655, #1664). The audiobook wishlist wears the music design (#1675).',
+            'One downloads page for music and video, with video wishlist drains capped per run (thanks @c5pie) (#1650, #1651).',
+            'Your playlists get a cover (upload, track art or a URL), a description and a duplicate button (#1666).',
+            'Usenet and torrents can satisfy a single-song request from an album release, with an option to keep the album\'s other tracks (#1604).',
+            'Scrobbling runs on its own cadence and the web player follows Last.fm\'s rule (thanks @cin) (#1654).',
+            'Mirror safety: failed Spotify fetches and empty payloads can\'t wipe a mirror (thanks @splitsec2) (#1657, #1659).',
+            'Library and matching: in-library counts for every provider, profile 1 downloads visible, playlist sync matches again, Soulseek and AcoustID verification fixes, pinned canonical albums respected (thanks @zikasak, @kevin2xk, @Logan-Selley, @kiwijar) (#1620, #1624, #1630, #1634, #1660, #1670).',
+            'Phones: a full layout pass from 22 screenshots. Round player controls and a reachable EQ, a scrolling watchlist rail, settings and modals clear of the menu button, dashboard cards stack (thanks @Thibs, @c5pie and gzetk) (#1683).',
+            'Imports skip tracks already in your library (thanks SeadogsBooty on discord) (#1667); Deezer sessions re-login on a dead token (#1681); standalone library scans work (thanks Spectro on discord) (#1682); AcoustID keys apply live and a bad key stops the scan (thanks @splitsec2) (#1672); scrollbars fade while scrolling (thanks @Thibs) (#1673); ntfy and Gotify notifications in automations (thanks @SimpleSimonLA) (#1674).',
+            'Watchlist only wishlists tracks credited to the watched artist; the scan deck stops disappearing (thanks SeadogsBooty on discord) (#1636, #1645).',
+            'Quarantine says when a song already arrived, slowed/sped-up are their own versions, Discogs dates keep precision (thanks @nick2000713) (#1653).',
+            'The UI follows your accent; dead CSS deleted by the thousand lines (thanks @Thundernerd) (#1617, #1625, #1631, #1649, #1669).',
+            'BPM backfill reopens findings in bulk (thanks Specialmed on discord) (#1646); phone landscape nav drawer; Spotify HTTPS docs for NAS/Docker (thanks @Thibs) (#1661, #1663).',
+        ],
+    },
+    {
+        title: 'Earlier in 3.5.3',
+        description: 'My Playlists, match & import from download clients, audiobook format choices, BPM backfill that fills, and Tidal playlists that load every track.',
+        features: [],
+    },
+    {
         title: '3.5.3: my playlists, match & import from your clients, audiobook choices and bpm that fills',
         description: 'Make your own playlists, import downloads SoulSync did not start, choose audiobook formats and layout, BPM Backfill and Sample Studio actually work, Tidal playlists load every track, and a stack of Deezer, repair and worker fixes.',
         features: [
@@ -3555,40 +3575,11 @@ const VERSION_MODAL_SECTIONS = [
             'API key fixes (thanks @splitsec2) and accent colours that finally render (thanks @Thundernerd) (#1587, #1597, #1598).',
         ],
     },
-    {
-        title: 'Earlier in 3.5.2',
-        description: 'Sign in with Plex, listening history per person, live sidebar weather, and Wishlist + Watchlist in Download Discography.',
-        features: [],
-    },
-    {
-        title: '3.5.2: sign in with plex, your own listening history, watchlist + editions and more',
-        description: 'Sign in with Plex, listening history that is yours, live sidebar weather, Download Discography learns about watchlists and editions, music videos and episodes become requestable, the dashboard gets a new look, and a stack of tagging, playlist sync and download fixes.',
-        features: [
-            'Sign in with Plex for everyone you share your server with, Re-link with Plex in Settings, and Connect with Plex in My Account.',
-            'Listening history per person: Plex plays go to whoever played them, and plays stop counting twice when scrobbles come back.',
-            'Kids profiles play library music again.',
-            'Sidebar weather: the real sky, holiday decorations, and a developer preview (#1575, #1576).',
-            'Duplicates keep the copy a playlist points at; Deezer finds the original song (#1582); explicit tracks pass AcoustID (#1579).',
-            'Video: no more hourly re-grabs of the same release, usenet grabs import, mixed Jellyfin libraries can be picked.',
-            'Library paths keep the server path and SoulSync\'s own; mirrored tracks identified by ID; duplicate and repair fixes (#1566 to #1574).',
-            'Wishlist + Watchlist button in Download Discography, with per-artist watchlist settings in the modal (#1553).',
-            'Edition preference: one edition per album instead of standard and deluxe both downloading (#1561).',
-            'Singles stop showing owned from the album copy of the song; watchlist-skipped releases are labeled (#1556, #1562).',
-            'Music video and single-episode requests for non-admin profiles (#1500, #1503).',
-            'Dashboard visual refresh plus a weekly listening digest (#1552).',
-            'Playlist sync: playlist-named batches, server playlist on first sync, honest completion counts, remove origin (#1545, #1547, #1548, #1549).',
-            'ListenBrainz weekly playlists pick up the new week (#1564).',
-            'Tagging: right MusicBrainz band, featured artists kept, sort tags, genre dedupe, full-depth re-tag fixed (#1508 to #1512).',
-            'New options: artist.nfo, original date as DATE, last.fm genre fallback, $label in paths (#1497, #1520, #1544).',
-            'Audiobooks: single-file torrents import, Series 03 volumes found (#1554, #1563).',
-            'Soulseek cleanup scoped to its own transfers; repair and tools fixes from @mandos21 (#1501, #1524, #1535, #1537, #1538).',
-        ],
-    },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.5.3';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.4';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

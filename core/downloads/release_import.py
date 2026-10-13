@@ -228,6 +228,10 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         "source": source,
         "profile_id": import_profile_id(parent),
         "is_album_download": True,
+        "_album_import_extra": {
+            "album": album.get("name") or "",
+            "download_source": "",
+        },
         "has_clean_metadata": True,
         "has_full_metadata": True,
         "original_search_result": {
@@ -246,6 +250,7 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
     # provider. Carry safe origin breadcrumbs, never the requested song's IDs.
     original = parent.get("original_search_result") or parent.get("search_result") or {}
     username = parent.get("_download_username") or original.get("username")
+    ctx["_album_import_extra"]["download_source"] = str(username or "")
     if username:
         ctx["_download_username"] = username
         ctx["original_search_result"]["username"] = username

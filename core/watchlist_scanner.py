@@ -51,6 +51,51 @@ def _mark_personalized_kinds_stale(database, kinds, profile_id=1):
 logger = get_logger("watchlist_scanner")
 
 
+# Ligatures NFKD does not decompose (verified: œ æ ß ł ø ð þ survive
+# NFKD + combining-mark stripping unchanged). Map them explicitly so
+# "Cœur de pirate" still matches "Coeur de pirate" across providers.
+_LIGATURE_MAP = {
+    'œ': 'oe', 'Œ': 'OE', 'æ': 'ae', 'Æ': 'AE',
+    'ß': 'ss', 'ẞ': 'SS', 'ø': 'o', 'Ø': 'O',
+    'ł': 'l', 'Ł': 'L', 'ð': 'd', 'Ð': 'D',
+    'þ': 'th', 'Þ': 'TH', 'ŋ': 'n', 'Ŋ': 'N',
+}
+
+
+def _normalize_artist_credit(name: str) -> str:
+    """Normalize an artist name for cross-provider credit comparison.
+
+    The watched artist's name comes from whichever provider the user searched
+    (usually Spotify), while track credits come from the preferred metadata
+    source (Deezer/MusicBrainz/iTunes) — these routinely differ in quote
+    style, diacritics, ligatures, periods and articles ("Guns N’ Roses" vs
+    "Guns N' Roses", "Cœur de pirate" vs "Coeur de pirate", "T. Rex" vs
+    "T Rex", "The Beatles" vs "Beatles"). Normalizing both sides keeps real
+    tracks included. The substring guard is preserved by the exact
+    per-component match downstream ("Metallica" still never matches
+    "Metallica Tribute Band").
+
+    Known limitation: the leading-"the" strip cannot distinguish a distinct
+    act named "The X" from watched artist "X" (e.g. credit "The Metallica"
+    matches watched "Metallica"). No pure string comparison can; the strip
+    stays because dropping it reintroduces worse false negatives.
+    """
+    import unicodedata
+    t = name or ''
+    for lig, rep in _LIGATURE_MAP.items():
+        t = t.replace(lig, rep)
+    t = unicodedata.normalize('NFKD', t)
+    t = ''.join(c for c in t if not unicodedata.combining(c))
+    t = (t.replace('’', "'").replace('‘', "'")
+          .replace('“', '"').replace('”', '"'))
+    t = t.replace('.', '')
+    t = t.strip()
+    if t[:4].lower() == 'the ':
+        t = t[4:]
+    t = t.rstrip(',!?:;')
+    return t.strip()
+
+
 # the provider that owns each watchlist id column, most trusted first. the
 # internal row id is its OWN namespace and is named as such - it is not a
 # provider id and must never be compared against one.
@@ -1278,10 +1323,11 @@ class WatchlistScanner:
         g_acoustic = config_manager.get('watchlist.global_include_acoustic', False)
         g_compilations = config_manager.get('watchlist.global_include_compilations', False)
         g_instrumentals = config_manager.get('watchlist.global_include_instrumentals', False)
+        g_other_artists = config_manager.get('watchlist.global_include_other_artists', False)
 
         logger.info(
             "Applying global watchlist override to %s artists "
-            "(albums=%s, eps=%s, singles=%s, live=%s, remixes=%s, acoustic=%s, compilations=%s, instrumentals=%s)",
+            "(albums=%s, eps=%s, singles=%s, live=%s, remixes=%s, acoustic=%s, compilations=%s, instrumentals=%s, other_artists=%s)",
             len(watchlist_artists),
             g_albums,
             g_eps,
@@ -1291,6 +1337,7 @@ class WatchlistScanner:
             g_acoustic,
             g_compilations,
             g_instrumentals,
+            g_other_artists,
         )
 
         for artist in watchlist_artists:
@@ -1302,6 +1349,7 @@ class WatchlistScanner:
             artist.include_acoustic = g_acoustic
             artist.include_compilations = g_compilations
             artist.include_instrumentals = g_instrumentals
+            artist.include_other_artists = g_other_artists
 
     def _resolve_edition_unit(self, album_unit, album_fetcher, *,
                               edition_preference=EDITION_PREFERENCE_ALL,
@@ -2684,6 +2732,15 @@ class WatchlistScanner:
             include_acoustic = getattr(watchlist_artist, 'include_acoustic', False)
             include_compilations = getattr(watchlist_artist, 'include_compilations', False)
             include_instrumentals = getattr(watchlist_artist, 'include_instrumentals', False)
+            include_other_artists = getattr(watchlist_artist, 'include_other_artists', False)
+
+            # Check that the watched artist is credited on the track. Tribute
+            # albums, soundtracks and compilations surface tracks by unrelated
+            # artists; without this check they all get wishlisted.
+            if not include_other_artists:
+                if not self._track_credits_watched_artist(track, album_data, watchlist_artist):
+                    logger.debug(f"Skipping track '{track_name}' — not credited to watched artist")
+                    return False
 
             # Check compilation albums (album-level filter)
             if not include_compilations:
@@ -2732,6 +2789,50 @@ class WatchlistScanner:
         except Exception as e:
             logger.warning(f"Error checking track content type inclusion: {e}")
             return True  # Default to including on error
+
+    def _track_credits_watched_artist(self, track, album_data, watchlist_artist) -> bool:
+        """True if the watched artist is credited on the track.
+
+        Fail-open: when there is no artist data at all (thin providers), the
+        track is included rather than risk dropping real music. Uses the
+        shared track_artist_matches helper (exact per-component match, so
+        "Metallica" never matches "Metallica Tribute Band"). Lazy import —
+        discography_filters imports this module at load time, so a top-level
+        import would be circular.
+        """
+        try:
+            from core.metadata.discography_filters import track_artist_matches
+        except Exception as e:
+            logger.debug(f"artist-credit check unavailable ({e}); including track")
+            return True
+
+        artist_name = _normalize_artist_credit(getattr(watchlist_artist, 'artist_name', '') or '')
+
+        def _credit_names(obj):
+            raw = obj.get('artists', []) if isinstance(obj, dict) else getattr(obj, 'artists', [])
+            if isinstance(raw, str):
+                raw = [raw]
+            elif isinstance(raw, dict):
+                raw = [raw]
+            names = []
+            for entry in raw or []:
+                if isinstance(entry, dict):
+                    name = entry.get('name', '') or ''
+                else:
+                    name = str(entry or '')
+                name = _normalize_artist_credit(name)
+                if name:
+                    names.append(name)
+            return names
+
+        names = _credit_names(track)
+        if not names and album_data is not None:
+            # Fall back to album artists when the track carries no credits.
+            names = _credit_names(album_data)
+        if not names:
+            logger.debug("track has no artist credits; including (fail open)")
+            return True
+        return track_artist_matches(names, artist_name)
 
     def is_track_missing_from_library(self, track, album_name: str = None,
                                       edition_preference: str = None) -> bool:

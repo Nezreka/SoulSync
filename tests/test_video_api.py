@@ -532,11 +532,14 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         data = client.get("/api/video/libraries").get_json()
         assert data["server"] == "plex"
         assert [m["title"] for m in data["movies"]] == ["Movies"]
-        assert data["selected"]["movies"] is None
+        # one library of each kind and nothing ever picked: they're picked
+        # for you, so a fresh install's first scan reads something
+        assert data["selected"] == {"movies": "Movies", "tv": "TV"}
 
-        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": "TV"}).status_code == 200
+        # "— None —" for tv is a choice and stays one on the next load
+        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": "TV"}
+        assert data2["selected"] == {"movies": "Movies", "tv": ""}
     finally:
         videoapi._video_db = None
 
@@ -611,18 +614,21 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": "",
             "fanart_api_key": "", "opensubtitles_api_key": "", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "", "subsource_api_key": "",
             "ryd_enabled": True, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
                           "fanart_api_key": "fa", "opensubtitles_api_key": "os",
+                          "subdl_api_key": "sdl", "subsource_api_key": "sso",
                           "ryd_enabled": False, "sponsorblock_enabled": True,
                           "billboard_autoplay": False, "watch_region": "gb"})
         assert client.get("/api/video/enrichment/config").get_json() == {
             "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
             "fanart_api_key": "fa", "opensubtitles_api_key": "os", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "sdl", "subsource_api_key": "sso",
             "ryd_enabled": False, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": False, "watch_region": "GB"}

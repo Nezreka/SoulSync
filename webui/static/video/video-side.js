@@ -308,11 +308,48 @@
         var ap = cp.allowed_pages;
         return !ap || ap.indexOf(pageId) > -1;
     }
+    // Hand off to the unified React downloads page with its video view
+    // preselected. Downloads is a shared page: the shell stays on the
+    // video side and only the page's media tab is set — no side flip.
+    // Routes in-app, no full reload. mode 'replace' (boot / deep link)
+    // must not leave /video-downloads in history, or Back would bounce
+    // straight back into this redirect.
+    function gotoUnifiedDownloads(mode) {
+        _backStack = [];
+        setActiveNav('video-downloads');
+        // Reveal wiring, same mechanism showPage() drives for the legacy
+        // shared pages: the attribute keys the video-side.css rules that
+        // show #webui-react-root and hide the video host. Without it the
+        // blanket video-side rule keeps the React root display:none and
+        // the routed page renders invisibly under the stale video page.
+        document.body.setAttribute('data-video-page', 'video-downloads');
+        var replace = mode === 'replace' || mode === 'restore';
+        try {
+            var wsr = window.SoulSyncWebRouter;
+            if (wsr && typeof wsr.navigateToPage === 'function') {
+                wsr.navigateToPage('active-downloads', { query: { media: 'video' }, replace: replace });
+                // No side flip here (there was one, in #1651): flipping is
+                // what stranded the side toggle — the toggle resumes the
+                // active-marked page, which is this hand-off, so every
+                // Video click re-ran it and bounced straight back to music
+                // with no way out.
+                return;
+            }
+        } catch (e) { /* fall through to a real redirect */ }
+        try { window.location.assign('/active-downloads?media=video'); }
+        catch (e2) { window.location.href = '/active-downloads?media=video'; }
+    }
+
     function navigate(pageId, mode) {
         // Music-only profile: there is no video page to fall back to — punt the
         // whole navigation back to the music side instead.
         if (!sideAllowed('video')) { switchSide('music', { force: true }); return; }
         if (!videoPageAllowed(pageId)) { pageId = DEFAULT_VIDEO_PAGE; mode = 'replace'; }
+        // The music + video downloads pages are unified into the React
+        // /active-downloads page — the old video shell subpage is gone, so
+        // every in-shell navigation (sidebar, goto links) and every
+        // /video-downloads deep link lands on the unified page's video view.
+        if (pageId === 'video-downloads') { gotoUnifiedDownloads(mode); return; }
         setActiveNav(pageId);
         showPage(pageId);
         if (DETAIL_PAGES[pageId] || mode === 'restore') return;

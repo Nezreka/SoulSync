@@ -17,8 +17,8 @@
     height: 44px;
     background: rgba(20, 20, 20, 0.9);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
+    border: 1px solid var(--white-a15);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     flex-direction: column;
     align-items: center;
@@ -178,6 +178,10 @@
         left: 0;
         width: 280px;
         height: 100vh;
+        /* dvh tracks the visible viewport when the mobile browser chrome
+           (URL bar) shows/hides — 100vh alone can size the drawer taller
+           than the visible area in landscape, pushing the nav off-screen. */
+        height: 100dvh;
         z-index: 10001;
         transform: translateX(-100%);
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -986,7 +990,7 @@
 
     /* Artists page hero — mobile */
     .artists-hero-section {
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
     }
 
     .artists-hero-main {
@@ -1093,7 +1097,7 @@
     .artist-hero-section {
         margin: 10px;
         padding: 16px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
     }
 
     .artist-hero-content {
@@ -1167,7 +1171,7 @@
     .artist-hero-right {
         width: 100%;
         border-left: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        border-top: 1px solid var(--white-a06);
         padding-top: 12px;
     }
 
@@ -1276,8 +1280,8 @@
         bottom: 16px;
         right: 16px;
         height: auto;
-        border-radius: 16px;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--white-a10);
     }
 
     /* --- Phase 7: Settings --- */
@@ -1352,7 +1356,7 @@
         max-width: 100%;
         height: 95vh;
         max-height: 95vh;
-        border-radius: 16px;
+        border-radius: var(--radius-xl);
     }
 
     /* Download modal hero - compact */
@@ -1631,7 +1635,7 @@
         width: 100%;
         max-width: 100%;
         max-height: 95vh;
-        border-radius: 16px;
+        border-radius: var(--radius-xl);
         overflow: hidden;
         display: flex;
         flex-direction: column;
@@ -1880,8 +1884,15 @@
        can't stretch them into vertical ellipses. The video dashboard's Studios
        halves (.vst-half) are excluded because this chain's specificity beats
        their own min-height: 208px — their content is absolutely positioned, so
-       "winning" here collapses each half to a 38px sliver on phones. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not(.modal-track-play-btn):not(.cancel-track-btn) {
+       "winning" here collapses each half to a 38px sliver on phones.
+       Segmented-control pills and fixed-size swatches are excluded for the
+       same reason: they are designed shorter than 38px to sit inside a track
+       (.watchlist-filter-btn is 28px in a 36px track; .dash-qs-swatch is a
+       16px circle) and this rule stretched them into ovals / made them
+       protrude from their track (mobile CSS batch #2, RC1). The import
+       page's pills are a CSS module (hashed class), so they are hooked by
+       data attribute like the other import-page exclusions. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn) {
         min-height: 38px;
     }
 
@@ -1976,7 +1987,7 @@
     .media-player {
         margin: 8px 10px;
         padding: 14px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
         min-height: 100px;
         flex-shrink: 0;
     }
@@ -2641,7 +2652,7 @@
         right: 0;
         background: rgba(20, 20, 20, 0.98);
         backdrop-filter: blur(20px);
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid var(--white-a10);
         border-radius: 16px 16px 0 0;
         padding: 16px;
         z-index: 10001;
@@ -2653,9 +2664,9 @@
     .enhanced-mobile-actions-popover .popover-title {
         font-size: 13px;
         font-weight: 600;
-        color: rgba(255, 255, 255, 0.5);
+        color: var(--white-a50);
         padding: 0 4px 8px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid var(--white-a06);
         margin-bottom: 4px;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -2670,13 +2681,13 @@
         background: none;
         border: none;
         border-radius: 10px;
-        color: rgba(255, 255, 255, 0.85);
+        color: var(--white-a85);
         font-size: 14px;
         cursor: pointer;
         transition: background 0.15s;
     }
     .enhanced-mobile-actions-popover button:active {
-        background: rgba(255, 255, 255, 0.08);
+        background: var(--white-a08);
     }
     .enhanced-mobile-actions-popover button .popover-icon {
         font-size: 16px;
@@ -2687,8 +2698,8 @@
         color: rgba(255, 80, 80, 0.8);
     }
     .enhanced-mobile-actions-popover button.popover-cancel {
-        color: rgba(255, 255, 255, 0.4);
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        color: var(--white-a40);
+        border-top: 1px solid var(--white-a06);
         margin-top: 4px;
     }
     .mobile-popover-overlay {
@@ -2852,7 +2863,7 @@
         width: 100%;
         max-height: 200px;
         border-right: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        border-bottom: 1px solid var(--white-a06);
         overflow-y: auto;
     }
 
@@ -2972,7 +2983,7 @@
 
     .rate-gauge-card {
         padding: 10px 8px 8px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
     }
 
     .gauge-card-header {
@@ -3255,7 +3266,7 @@
         padding: 8px 8px;
         margin: 8px 0 10px;
         gap: 6px;
-        border-radius: 12px;
+        border-radius: var(--radius-lg);
     }
     .enh-source-icon {
         min-width: 72px;
@@ -3416,7 +3427,7 @@
         align-items: center;
         gap: 10px;
         padding: 8px 6px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid var(--white-a05);
     }
     .enhanced-track-table td,
     .enhanced-track-table th {
@@ -3434,7 +3445,7 @@
     }
     /* no hover on a phone, so the play glyph cannot stay dim */
     .enhanced-track-table .enhanced-play-btn:not(:disabled) {
-        color: rgba(255, 255, 255, 0.75);
+        color: var(--white-a75);
     }
     .enhanced-track-table .col-title {
         flex: 1 1 auto;
@@ -3955,7 +3966,12 @@ html.download-modal-open body {
         max-height: 50vh;
         max-height: max(220px, 50dvh);
         overflow: auto;
-        overscroll-behavior: contain;
+        /* The inner list must chain its scroll to the outer modal when it hits
+           top/bottom — `contain` here traps the gesture, so reaching the end
+           of the tracklist dead-ends instead of scrolling the modal. The outer
+           .download-missing-modal-content keeps `contain` to stop the chain
+           at the modal (the page behind must not scroll). */
+        overscroll-behavior: auto;
     }
     .download-missing-modal-footer {
         padding-bottom: max(12px, env(safe-area-inset-bottom));
@@ -3992,7 +4008,7 @@ html.download-modal-open body {
     }
     .download-missing-modal-content .download-tracks-table thead tr {
         background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid var(--white-a08);
     }
 
     .download-missing-modal-content .download-tracks-table tbody tr {
@@ -4181,5 +4197,165 @@ html.download-modal-open body {
     }
     .track-compact-artist {
         font-size: 12px;
+    }
+}
+
+/* --- Landscape phones: compact the drawer header so the nav can scroll ---
+   In landscape the viewport is ~360px tall. The sidebar header (brand +
+   Audio/Video toggle + profile) eats ~200px of that, leaving almost no room
+   for .sidebar-scroll — the nav items pile up below the fold with nothing to
+   scroll. This compacts the header at short heights so the scroll area gets
+   real space. */
+@media (max-height: 500px) {
+    .sidebar-header {
+        min-height: 0;
+        padding: 12px 16px;
+        gap: 6px;
+    }
+    .sidebar-header .app-subtitle {
+        display: none;
+    }
+    .sidebar-header .sidebar-logo {
+        width: 28px;
+        height: 28px;
+    }
+    .sidebar-header .app-name {
+        font-size: 18px;
+    }
+    .sidebar-header .side-toggle {
+        margin-top: 2px;
+    }
+    .sidebar-header .side-toggle-btn {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+    #profile-indicator {
+        margin-top: 2px;
+    }
+}
+
+/* --- Mobile tab/pill bars: never overlap, scroll instead of clipping ---
+   Thibs' screenshots show pill tab groups (Audiobooks genres, Watchlist
+   tabs, Settings Library tabs) either cut off at the viewport edge or —
+   worse — rendering on top of each other ("AudiobookPodcasts"). On small
+   screens these groups become horizontal scrollers: items keep their size
+   (flex-shrink: 0) and the group scrolls instead of overflowing. */
+@media (max-width: 768px) {
+    .genre-pills,
+    .genre-tabs,
+    .watchlist-tabs,
+    .settings-tabs,
+    .pill-group,
+    .tab-group,
+    [role="tablist"] {
+        display: flex;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .genre-pills::-webkit-scrollbar,
+    .genre-tabs::-webkit-scrollbar,
+    .watchlist-tabs::-webkit-scrollbar,
+    .settings-tabs::-webkit-scrollbar,
+    .pill-group::-webkit-scrollbar,
+    .tab-group::-webkit-scrollbar,
+    [role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+    .genre-pills > *,
+    .genre-tabs > *,
+    .watchlist-tabs > *,
+    .settings-tabs > *,
+    .pill-group > *,
+    .tab-group > *,
+    [role="tablist"] > * {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+}
+
+/* --- Hide hamburger behind open modals ---
+   The hamburger is position:fixed with a high z-index so it's always
+   reachable. When a modal opens (e.g. the Deezer service setup), the
+   hamburger paints above the modal's own header and overlaps its title.
+   Modals get their own close control, so the hamburger is redundant while
+   one is open.
+   Batch #2: the original rule waited for modal-open / download-modal-open,
+   which almost nothing sets. What actually signals an open modal, and what
+   this rule keys off:
+   - body classes the app toggles: src-modal-open (settings service/source
+     modals — the Deezer one), pf-modal-open (profile layers), np-modal-open
+     (the player).
+   - overlay roots via :has(), for the React modals that set no body class —
+     the pattern style.css already uses for the vanilla modals. Each family
+     below was checked: its overlay is either mounted only while open, or
+     stays mounted and carries its open class (.visible / .active) only
+     while open, so the hamburger never hides with nothing open.
+   - the audiobook overlays (AudiobookOverlay) portal a backdrop whose
+     class is a hashed CSS module, unnameable here — the component stamps
+     data-audiobook-overlay on it instead, and that attribute is the hook.
+   Modal families NOT listed either stack above the hamburger already
+   (z-index ≥ 10000: download, mirrored, repair-help, server-search, the
+   generic .modal-overlay) or are covered by the body classes above. */
+html.download-modal-open .hamburger-btn,
+html.modal-open .hamburger-btn,
+body.modal-open .hamburger-btn,
+body.src-modal-open .hamburger-btn,
+body.pf-modal-open .hamburger-btn,
+body.np-modal-open .hamburger-btn,
+body:has(.auto-sync-overlay) .hamburger-btn,
+body:has(.confirm-modal-overlay) .hamburger-btn,
+body:has(.discog-modal-overlay.visible) .hamburger-btn,
+body:has(.arec-overlay.visible) .hamburger-btn,
+body:has(.art-picker-overlay.visible) .hamburger-btn,
+body:has(.watchadd-modal-overlay.visible) .hamburger-btn,
+body:has(.server-disambig-overlay.visible) .hamburger-btn,
+body:has(.genre-browser-modal-overlay.active) .hamburger-btn,
+body:has([data-audiobook-overlay]) .hamburger-btn {
+    display: none !important;
+}
+
+/* --- Page titles must clear the fixed hamburger ---
+   The hamburger is position:fixed at left:16px, 44px wide (ends at 60px).
+   Page headers starting at the left edge slide under it — gzetk's screenshot
+   shows "Au" of "Auto-Sync Manager" hidden behind the button. Give page
+   headers left padding on mobile so titles start clear of the button. */
+@media (max-width: 768px) {
+    .page-header,
+    .page-title,
+    h1.page-title {
+        padding-left: 56px;
+    }
+
+    /* Settings sub-pages title their pane with .stg-active-title-text, not
+       .page-title, so they slid under the hamburger too ("…brary",
+       "…wnloads", "…ality" in the batch #2 screenshots). The title sits in
+       the detail pane, right of the category rail; indent the title block
+       itself so the Save button on the same row is untouched. */
+    #settings-page .stg-active-section-title {
+        padding-left: 56px;
+    }
+}
+
+/* --- Auto-Sync Manager header on phones ---
+   The header is a flex row: title/blurb, the summary strip (a grid of
+   minmax(150px,1fr) tiles) passed in as an aside, and the actions. The
+   title div is the only shrinkable child, so on a phone it was crushed
+   toward min-content (~90px — the one-word-per-line blurb in gzetk's
+   screenshot) while the second stat pill clipped at the modal's edge
+   (batch #2, RC4). Wrap: title + actions share the first row, the summary
+   takes a full-width row of its own below. */
+@media (max-width: 768px) {
+    .auto-sync-header {
+        flex-wrap: wrap;
+    }
+    .auto-sync-header > div {
+        min-width: 0;
+    }
+    .auto-sync-header .auto-sync-summary {
+        flex: 1 1 100%;
+        order: 3;
     }
 }

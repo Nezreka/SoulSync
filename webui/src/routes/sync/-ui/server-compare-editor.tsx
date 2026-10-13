@@ -747,7 +747,7 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
                 style={{
                   textAlign: 'center',
                   padding: 30,
-                  color: 'rgba(255,255,255,0.2)',
+                  color: 'var(--white-a20)',
                   fontSize: 12,
                 }}
               >
@@ -804,7 +804,7 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
                 style={{
                   textAlign: 'center',
                   padding: 30,
-                  color: 'rgba(255,255,255,0.2)',
+                  color: 'var(--white-a20)',
                   fontSize: 12,
                 }}
               >

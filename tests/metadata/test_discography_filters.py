@@ -313,17 +313,30 @@ class TestTrackAlreadyOwned:
         # The pre-fetched candidates must reach check_track_exists verbatim.
         assert db.calls[0]['candidate_tracks'] is owned
 
-    def test_empty_candidate_list_still_uses_batched_path(self):
-        """Owns-nothing case: an EMPTY list (not None) must be forwarded so the
-        check takes the fast in-memory path (scores against zero candidates →
-        instant 'not owned') instead of falling back to the slow per-track SQL."""
+    def test_empty_candidate_list_with_exhaustive_flag_uses_fast_path(self):
+        """Owns-nothing case: an EMPTY list (not None) WITH the exhaustive flag
+        must be forwarded so the check takes the fast in-memory path (scores
+        against zero candidates → instant 'not owned') instead of falling back
+        to the slow per-track SQL. (#1621: a bare [] without the flag now
+        means "no information" and takes the legacy path.)"""
         db = _FakeDB((None, 0.0))
         result = track_already_owned(
             db, 'Anything', 'Artist', 'Album', 'plex', candidate_tracks=[],
+            candidate_tracks_exhaustive=True,
         )
         assert result is False
-        # [] is forwarded (not coerced to None) — that's what keeps it fast.
+        # [] is forwarded (not coerced to None) with the flag — that's what
+        # keeps it fast.
         assert db.calls[0]['candidate_tracks'] == []
+        assert db.calls[0]['candidate_tracks_exhaustive'] is True
+
+    def test_bare_empty_list_forwards_without_exhaustive_flag(self):
+        """Without the flag, [] is "no information" (#1621) — the helper must
+        not claim exhaustiveness the caller didn't assert."""
+        db = _FakeDB((None, 0.0))
+        track_already_owned(db, 'Anything', 'Artist', 'Album', 'plex', candidate_tracks=[])
+        assert db.calls[0]['candidate_tracks'] == []
+        assert db.calls[0]['candidate_tracks_exhaustive'] is False
 
     def test_default_omits_candidate_tracks_for_legacy_callers(self):
         """Callers that don't pre-fetch get None → check_track_exists keeps its

@@ -279,7 +279,7 @@ export function HaveTrackModal({
         </div>
         <div className="enhanced-match-results" id="enhanced-have-track-results">
           {searchError ? (
-            <div className="enhanced-match-results-hint" style={{ color: '#ff6b6b' }}>
+            <div className="enhanced-match-results-hint" style={{ color: 'var(--danger-light)' }}>
               Error: {searchError}
             </div>
           ) : results === null ? (

@@ -160,7 +160,11 @@ export function ManualMatchModal({
             className="enhanced-enrich-btn enhanced-clear-match-btn"
             type="button"
             title="Remove the current match — reverts to Not Found"
-            style={{ background: 'rgba(255,80,80,0.12)', color: '#ff6b6b', marginLeft: 6 }}
+            style={{
+              background: 'rgba(var(--danger-rgb), 0.12)',
+              color: 'var(--danger-light)',
+              marginLeft: 6,
+            }}
             onClick={() => void clearMatch()}
           >
             Clear Match

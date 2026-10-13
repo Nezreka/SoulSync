@@ -103,6 +103,24 @@ class AcoustIDScannerJob(RepairJob):
                 result.errors += 1
                 return result
 
+        # Validate that the configured API key is accepted by AcoustID before
+        # scanning thousands of tracks.
+        probe_test_key = getattr(acoustid_client, 'test_api_key', None)
+        if callable(probe_test_key):
+            try:
+                valid_key, key_reason = probe_test_key()
+            except Exception as e:
+                logger.debug("AcoustID pre-flight key test encountered non-fatal error: %s", e)
+                valid_key, key_reason = True, str(e)
+            if not valid_key:
+                logger.warning("AcoustID scan not started: %s", key_reason)
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'AcoustID key invalid — scan aborted: {key_reason}',
+                        log_type='error')
+                result.errors += 1
+                return result
+
         # Load all library tracks from DB with their file paths
         db_tracks = self._load_db_tracks(context)
         if not db_tracks:
@@ -173,10 +191,14 @@ class AcoustIDScannerJob(RepairJob):
                 )
 
             try:
-                self._scan_file(
+                status = self._scan_file(
                     resolved, track_id, track_info, acoustid_client, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
+                if status == 'abort_invalid_key':
+                    logger.warning("Aborting AcoustID scan due to invalid API key")
+                    self._save_checkpoint_id(context, last_completed_id)
+                    return result
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
@@ -292,6 +314,8 @@ class AcoustIDScannerJob(RepairJob):
                 context.report_progress(
                     log_line=f'Error: {fname} — {message}', log_type='error')
             result.errors += 1
+            if probe.get('_acoustid_invalid_key'):
+                return 'abort_invalid_key'
             return
 
         outcome = probe.get('_acoustid_decision')

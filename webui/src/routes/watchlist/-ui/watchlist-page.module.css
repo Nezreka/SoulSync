@@ -20,10 +20,10 @@
 }
 
 .tab {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-a05);
   color: var(--text-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
+  border: 1px solid var(--white-a08);
+  border-radius: var(--radius-pill);
   padding: 7px 18px;
   cursor: pointer;
   font-size: 13px;
@@ -32,18 +32,18 @@
 
 .tab:hover {
   color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--white-a10);
 }
 
 .tabActive {
-  background: linear-gradient(135deg, #1db954, #12833b);
+  background: linear-gradient(135deg, var(--accent), #12833b);
   color: #fff;
   border-color: transparent;
 }
 
 .tabActive:hover {
   color: #fff;
-  background: linear-gradient(135deg, #1db954, #12833b);
+  background: linear-gradient(135deg, var(--accent), #12833b);
 }
 
 .labelsGrid {
@@ -54,9 +54,9 @@
 
 .labelCard {
   position: relative;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
+  background: var(--white-a04);
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-lg);
   padding: 18px;
   cursor: pointer;
   transition:
@@ -65,8 +65,8 @@
 }
 
 .labelCard:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(29, 185, 84, 0.4);
+  background: var(--white-a08);
+  border-color: rgba(var(--accent-rgb), 0.4);
 }
 
 .labelIcon {
@@ -95,7 +95,7 @@
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 180, 40, 0.16);
   color: #ffb84d;
 }
@@ -143,8 +143,8 @@
 
 .podcastCard {
   position: relative;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--white-a03);
+  border: 1px solid var(--white-a08);
   border-radius: 14px;
   overflow: visible;
   cursor: pointer;
@@ -158,8 +158,8 @@
 }
 
 .podcastCard:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(29, 185, 84, 0.45);
+  background: var(--white-a06);
+  border-color: rgba(var(--accent-rgb), 0.45);
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
@@ -191,7 +191,7 @@
   align-items: center;
   justify-content: center;
   font-size: 48px;
-  background: linear-gradient(135deg, rgba(29, 185, 84, 0.1), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), var(--white-a03));
 }
 
 .podcastActions {
@@ -205,11 +205,11 @@
   background: rgba(15, 18, 24, 0.75);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--white-a12);
   color: #cfd3da;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -225,7 +225,7 @@
 
 .podcastMenuBtn:hover {
   background: rgba(20, 25, 34, 0.95);
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--white-a25);
   color: #fff;
 }
 
@@ -234,7 +234,7 @@
   top: 38px;
   right: 0;
   background: #181d26;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--white-a15);
   border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   min-width: 190px;
@@ -264,7 +264,7 @@
   padding: 8px 12px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: #d1d5db;
   font-size: 13px;
   font-weight: 500;
@@ -277,7 +277,7 @@
 }
 
 .podcastDropdownItem:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   color: #fff;
 }
 
@@ -326,27 +326,27 @@
   font-size: 11px;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 6px;
-  background: rgba(29, 185, 84, 0.15);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--success-rgb), 0.15);
   color: #26d462;
-  border: 1px solid rgba(29, 185, 84, 0.3);
+  border: 1px solid rgba(var(--success-rgb), 0.3);
 }
 
 .podcastBadgeMuted {
   font-size: 11px;
   font-weight: 500;
   padding: 2px 7px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  background: var(--white-a06);
   color: #9aa0aa;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--white-a08);
 }
 
 .podcastBadgeRetention {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(245, 158, 11, 0.14);
   color: #fbbf24;
   border: 1px solid rgba(245, 158, 11, 0.28);
@@ -356,7 +356,7 @@
   font-size: 11px;
   font-weight: 500;
   padding: 2px 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(147, 51, 234, 0.14);
   color: #c084fc;
   border: 1px solid rgba(147, 51, 234, 0.25);
@@ -365,7 +365,7 @@
 .podcastFooter {
   margin-top: auto;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--white-a05);
 }
 
 .podcastScanText {
@@ -390,17 +390,17 @@
 .modalShowArt {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
 }
 
 .modalShowArtPlaceholder {
   width: 52px;
   height: 52px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-md);
+  background: var(--white-a05);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -416,8 +416,8 @@
 }
 
 .retentionPresetBtn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--white-a06);
+  border: 1px solid var(--white-a10);
   color: #d1d5db;
   padding: 6px 14px;
   border-radius: 20px;
@@ -431,13 +431,13 @@
 }
 
 .retentionPresetBtn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--white-a12);
   color: #fff;
 }
 
 .retentionPresetBtnActive {
-  background: rgba(29, 185, 84, 0.2);
-  border-color: #1db954;
+  background: rgba(var(--accent-rgb), 0.2);
+  border-color: var(--accent);
   color: #26d462;
 }
 
@@ -462,8 +462,8 @@
 
 .retentionInput {
   background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
+  border: 1px solid var(--white-a15);
+  border-radius: var(--radius-md);
   color: #fff;
   padding: 8px 12px;
   font-size: 14px;
@@ -472,7 +472,7 @@
 
 .retentionInput:focus {
   outline: none;
-  border-color: #1db954;
+  border-color: var(--accent);
 }
 
 .retentionInputSuffix {

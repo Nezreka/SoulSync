@@ -36,9 +36,40 @@ CLEAR_MISMATCH_THRESHOLD = 0.30  # Below this artist sim = clear wrong song.
 # unicode hyphen/en/em dashes, the minus sign, and the FULLWIDTH hyphen-minus a
 # Japanese tagger produces (残酷な天使のテーゼ － Instrumental).
 _DASH_CHARS = r"\-‐‑‒–—―−－"
+# The qualifier may carry ONE optional trailing dash: provider metadata wraps
+# subtitles as '-Blue Forest Version-' (#1627), and the old dash-free-to-$ rule
+# left those normalizing differently from their '(…)' twin. The OPENING
+# delimiter keeps its whitespace-adjacency requirement — loosening that
+# reintroduces the 'Post-Remix' → 'post' over-strip the comment above
+# documents.
 _DASH_QUALIFIER_RE = re.compile(
-    rf"(?:\s[{_DASH_CHARS}]\s*|\s*[{_DASH_CHARS}]\s)(?P<qualifier>[^{_DASH_CHARS}]+)$"
+    rf"(?:\s[{_DASH_CHARS}]\s*|\s*[{_DASH_CHARS}]\s)"
+    rf"(?P<qualifier>[^{_DASH_CHARS}]+)(?:[{_DASH_CHARS}])?$"
 )
+# Tilde/wave-dash-wrapped version qualifiers ('~Acoustic~', '〜Live〜',
+# '～Remaster～'). A SEPARATE pattern, not a widened _DASH_CHARS: a bare '~'
+# inside a title (stylized spellings) must never become a strip delimiter —
+# only the explicit open+close pair strips, and only when the wrapped text
+# reads as a version qualifier.
+_TILDE_CHARS = r"~〜～"
+_TILDE_QUALIFIER_RE = re.compile(
+    rf"\s[{_TILDE_CHARS}](?P<qualifier>[^{_TILDE_CHARS}]+)[{_TILDE_CHARS}]\s*$"
+)
+
+
+def _version_tail_match(s: str):
+    """The trailing version-tail annotation on ``s``, if any.
+
+    The dash form (' - Remastered 2011', '-Blue Forest Version-') or a
+    tilde/wave-dash-wrapped form ('~Acoustic~', '〜Live〜'). The caller still
+    gates on :func:`is_trailing_version_qualifier`, and ``similarity`` still
+    scores the un-stripped reading too — a wrong strip costs a few points,
+    never a quarantine.
+    """
+    match = _DASH_QUALIFIER_RE.search(s)
+    if match is None:
+        match = _TILDE_QUALIFIER_RE.search(s)
+    return match
 
 
 class Decision(Enum):
@@ -95,15 +126,15 @@ def _normalized_readings(text: str) -> tuple:
     s = re.sub(r'\s*<[^>]*>', '', s)
     # Trailing featuring / version tags.
     s = re.sub(r'\s+(?:feat\.?|ft\.?|featuring)\s+.*$', '', s, flags=re.IGNORECASE)
-    dash_qualifier = _DASH_QUALIFIER_RE.search(s)
-    if dash_qualifier and is_trailing_version_qualifier(dash_qualifier.group("qualifier")):
-        canonical = _finish_normalization(s[:dash_qualifier.start()].rstrip())
+    tail = _version_tail_match(s)
+    if tail and is_trailing_version_qualifier(tail.group("qualifier")):
+        canonical = _finish_normalization(s[:tail.start()].rstrip())
         verbatim = _finish_normalization(s)
         if not canonical:
             # The base title may have been entirely inside brackets. Recover
             # it before scoring either the stripped or the verbatim reading.
-            original_dash = _DASH_QUALIFIER_RE.search(original)
-            base = original[:original_dash.start()].rstrip() if original_dash else original
+            original_tail = _version_tail_match(original)
+            base = original[:original_tail.start()].rstrip() if original_tail else original
             canonical = _finish_normalization(base) or base
             verbatim = _finish_normalization(original) or original
         return (
@@ -414,6 +445,40 @@ def evaluate(expected_title: str, expected_artist: str,
                        f"'{matched_title}' by '{matched_artist}' "
                        f"(expected '{expected_artist}')")
         if artist_sim < CLEAR_MISMATCH_THRESHOLD:
+            # #1628: the "winner" is only the best-scoring recording, not the
+            # only candidate — a Latin stray credit ('They Die', 0.20) can
+            # outrank the real non-Latin artist (宇多田ヒカル, 0.00
+            # cross-script) on the same matching title, and the 0.20 then
+            # reads as a CLEAR mismatch. But a same-title recording whose
+            # artist is cross-script-incomparable with the expected one is
+            # exactly the shape this module already treats as "unknown, never
+            # failed": the score says nothing about the names. Scan every
+            # recording — if one names this title with an unreadable artist,
+            # the FAIL would rest on a ranking accident, so stay silent
+            # instead of quarantining.
+            #
+            # Accepted masking (deliberate trade-off, not a gap): this SKIP can
+            # hide a genuinely wrong file — e.g. the file is really Hamasaki's
+            # and a same-title 浜崎あゆみ recording exists, where the old code
+            # FAILed. Unresolvable in principle: with the artist names
+            # cross-script incomparable, nothing separates "expected artist,
+            # unreadable credit" from "different artist, unreadable credit",
+            # and failing on the title alone would re-quarantine the correct
+            # files this change exists to protect. Same standing trade-off as
+            # the module's other SKIP branches: a skipped wrong file stays
+            # downloadable and retryable; a failed right file is quarantined
+            # and never retried. The former costs a download slot, the latter
+            # costs the track.
+            for rec in recordings:
+                if (similarity(expected_title, rec.get('title') or '')
+                        >= TITLE_MATCH_THRESHOLD
+                        and is_cross_script_mismatch(expected_artist,
+                                                     rec.get('artist') or '')):
+                    return out(Decision.SKIP,
+                               f"Title matches and a same-title recording's "
+                               f"artist ('{rec.get('artist')}') is written in a "
+                               f"different script, so the names cannot be "
+                               f"compared")
             return out(Decision.FAIL,
                        f"Audio mismatch: '{matched_title}' by '{matched_artist}' "
                        f"— expected artist not found")

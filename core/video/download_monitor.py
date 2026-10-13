@@ -264,7 +264,11 @@ def _make_organizer(db):
         if patch.get("status") == "completed" and patch.get("dest_path"):
             if settings.get("save_artwork") or settings.get("write_nfo"):
                 write_sidecars(db, dl, patch["dest_path"], settings, fs)
-            if settings.get("download_subtitles"):
+            # Pack episodes skip the fetch here: their dict carries the pack's id
+            # (keying on it would share one row set across the pack), so the
+            # pack importer fetches per episode AFTER _record_pack_episode gives
+            # each its own download row (durable per-episode wanted rows).
+            if settings.get("download_subtitles") and not dl.get("pack_episode"):
                 write_subtitles_for(db, dl, patch["dest_path"], settings, fs)
         return patch
 
@@ -293,8 +297,14 @@ def _episode_row(dl, season, episode, path, size):
     ctx = dict(_pack_ctx(dl))
     ctx.update({"scope": "episode", "season": season, "episode": episode})
     base = os.path.basename(str(path))
+    # "pack_episode" is a TRANSIENT marker, not a column: _record_pack_episode
+    # whitelists the keys it persists, so this never reaches the DB. It tells
+    # _wanted_video_key this row re-uses the pack row's id (so subtitle wanted
+    # rows must not be keyed on it — every pack episode would otherwise share
+    # ONE ('download', <pack_id>) row set).
     return {**dl, "kind": "show", "release_title": base, "filename": base,
-            "size_bytes": int(size or 0), "search_ctx": json.dumps(ctx)}
+            "size_bytes": int(size or 0), "search_ctx": json.dumps(ctx),
+            "pack_episode": True}
 
 
 def _pack_ctx(dl):
@@ -363,6 +373,20 @@ def _make_pack_importer(db, organize):
                     "error": "Nothing in this pack looked like an episode (%d file%s checked)"
                              % (len(skipped), "" if len(skipped) == 1 else "s")}
 
+        # Settings + fs for the per-episode subtitle fetch above (loaded once
+        # per pack; the organize closure keeps its own copies).
+        try:
+            from core.video import organization as _pack_org
+            _pack_settings = _pack_org.load(db)
+        except Exception:  # noqa: BLE001
+            from core.video import organization as _pack_org_fallback
+            _pack_settings = _pack_org_fallback.default_settings()
+        try:
+            from core.video.importer import real_fs as _pack_real_fs
+            _pack_fs = _pack_real_fs()
+        except Exception:  # noqa: BLE001
+            _pack_fs = None
+
         imported, failed = [], []
         for (season, episode), info in sorted(claimed.items()):
             ep_dl = _episode_row(dl, season, episode, info["path"], info.get("size_bytes"))
@@ -380,9 +404,24 @@ def _make_pack_importer(db, organize):
                             season, episode, patch.get("error") or "import refused")
                 continue
             imported.append((season, episode, patch))
-            if _record_pack_episode(db, ep_dl, patch):
+            child_id = _record_pack_episode(db, ep_dl, patch)
+            if child_id:
                 # The episode row is persisted — now reclaim the pack copy.
                 _reclaim_source(patch.get("_cleanup_source"))
+                # Per-episode subtitles with durable wanted rows: key on the
+                # child's OWN download id (not the pack id), so each episode
+                # gets its own row set and Phase 2's retry loop can pick up
+                # misses. Best-effort like the single-file path.
+                if _pack_settings.get("download_subtitles") and _pack_fs is not None:
+                    try:
+                        child_dl = {k: v for k, v in ep_dl.items()
+                                    if k != "pack_episode"}
+                        child_dl["id"] = child_id
+                        write_subtitles_for(db, child_dl, patch.get("dest_path"),
+                                            _pack_settings, _pack_fs)
+                    except Exception:  # noqa: BLE001 - subtitles never break imports
+                        logger.exception("pack %s: S%02dE%02d subtitle fetch failed",
+                                         dl.get("id"), season, episode)
             # Per EPISODE, not per pack: the row that just landed is the only one this
             # file satisfies, and a below-cutoff episode still keeps its row so the
             # upgrade-until-cutoff sweep can better it later.
@@ -460,16 +499,143 @@ def write_sidecars(db, dl, dest_path, settings, fs):
         logger.exception("sidecar write failed for download %s", (dl or {}).get("id"))
 
 
-def write_subtitles_for(db, dl, dest_path, settings, fs):
-    """Best-effort: download external .srt files (OpenSubtitles) next to the imported
-    video for the user's preferred languages. The .srt sits NEXT TO the file (so an
-    episode's subs land in its Season folder, not the show root). Never raises."""
+def _subtitle_provider_order(db) -> list:
+    """The parsed ``subtitle_provider_order`` setting (a JSON list string inside
+    the ``organization`` settings blob — the same blob GET /api/video/organization
+    serves, so the settings UI's read-only chain renders what the fetcher
+    actually uses).
+
+    ``db`` is the contract (read via ``organization.load``); garbage (or a
+    missing setting) falls back to ``["opensubtitles"]``. Never raises.
+    """
     try:
-        import json as _json
+        from core.video import organization
+        from core.video.subtitles import parse_provider_order
+        return parse_provider_order(organization.load(db).get("subtitle_provider_order"))
+    except Exception:  # noqa: BLE001 - a settings hiccup must not break the fetch
+        return ["opensubtitles"]
+
+
+def _any_provider_configured(provider_order, get_setting) -> bool:
+    """True when at least one id in the order resolves to a CONFIGURED provider.
+
+    fetch_subtitle returns None for both "tried and missed" and "nothing was
+    configured to try" — a keyless setup must not accumulate phantom attempts
+    on wanted rows Phase 2 should retry once a key is added. Never raises.
+
+    Background-only providers (Whisper) don't count: they never run in the
+    import hook, so a whisper-only setup must keep rows `wanted`, not `failed`.
+    """
+    try:
+        from core.video.subtitles.providers import get_providers
+        providers = get_providers()
+    except Exception:  # noqa: BLE001
+        return False
+    for pid in provider_order or []:
+        if not isinstance(pid, str):
+            continue
+        provider = providers.get(pid)
+        if provider is None:
+            continue
+        if getattr(provider, "background_download_only", False):
+            continue
+        try:
+            if provider.is_configured(get_setting):
+                return True
+        except Exception:  # noqa: BLE001 - a broken config check reads as unconfigured
+            continue
+    return False
+
+
+def _wanted_video_key(db, dl):
+    """(video_kind, video_id) keying ``subtitle_wanted`` rows for this download.
+
+    The wanted table addresses LIBRARY items (movies.id / episodes.id) — the same
+    rows Phase 4's per-item UI will target — so the real library id is preferred:
+
+    - owned re-grab (media_source='library'): media_id IS the library row id —
+      movies.id for movies (direct); shows.id for episodes (resolved to
+      episodes.id via the grab's season/episode from search_ctx — the row exists
+      because the scanner ingested it when the title was first imported).
+    - anything else (fresh TMDB grab, manual import): NO library row exists yet —
+      movies/episodes rows are created by the media-server scanner ingest
+      (core/video/scanner.py), which only runs after the file lands — so the
+      download row itself is the key: ('download', dl id).
+
+    Returns None when neither is available; the fetch then stays fire-and-forget
+    (today's behaviour) instead of raising. Never raises.
+    """
+    try:
+        dl = dl or {}
+        kind = str(dl.get("kind") or "").lower()
+        mid = dl.get("media_id")
+        if mid is not None and str(dl.get("media_source") or "").lower() == "library":
+            try:
+                mid = int(mid)
+            except (TypeError, ValueError):
+                mid = None
+            if mid is not None:
+                if kind == "movie":
+                    return ("movie", mid)
+                # episodes: media_id is the SHOWS row (see _media_ids and the
+                # video_download_history joins) — resolve the episode row.
+                try:
+                    ctx = json.loads(dl.get("search_ctx") or "{}") or {}
+                except (ValueError, TypeError):
+                    ctx = {}
+                if isinstance(ctx, dict) and ctx.get("season") is not None:
+                    ep_id = db.episode_id_for(mid, ctx.get("season"), ctx.get("episode"))
+                    if ep_id is not None:
+                        return ("episode", ep_id)
+        # Pack episodes re-use the PACK row's id (_episode_row's transient
+        # "pack_episode" marker — verified: _record_pack_episode whitelists
+        # its keys, so the marker never hits the DB). Keying on it would make
+        # every episode of the pack share ONE ('download', <pack_id>) wanted
+        # row set — misses recorded as 'have', attempts conflated across N
+        # episodes. The pack importer fetches per episode AFTER _record_pack_episode
+        # gives each its own child download row (Phase 2), keyed on the child
+        # id — so a pack_episode dict reaching here has no durable key.
+        if dl.get("pack_episode"):
+            return None
+        dl_id = dl.get("id")
+        if dl_id is not None:
+            return ("download", int(dl_id))
+    except Exception:  # noqa: BLE001 - key resolution is best-effort
+        pass
+    return None
+
+
+def write_subtitles_for(db, dl, dest_path, settings, fs):
+    """Best-effort: download external .srt files next to the imported video for the
+    user's preferred languages. The .srt sits NEXT TO the file (so an episode's subs
+    land in its Season folder, not the show root).
+
+    Every language gets a durable ``subtitle_wanted`` row FIRST; then the provider
+    chain (``fetch_subtitle_detailed``, hash-first scored) is tried per language
+    and marks the row 'have', a real miss (a provider was configured and tried)
+    marks it 'failed' so Phase 2's retry loop can pick it back up. Rows already
+    present for the video only define the language list when the USER set them
+    (``user_set=1``, explicit per-video picks) — rows the hook itself
+    created on a previous import are residue, not an override, so changing the
+    global ``subtitle_langs`` takes effect on re-grab. The language list itself
+    comes from ``effective_subtitle_languages``: explicit user_set rows first,
+    then the per-movie/per-show ``subtitle_overrides`` table (Phase 3), then
+    the global setting. youtube-kind downloads
+    are skipped entirely (no wanted rows, no fetch), matching ``write_sidecars``.
+    Pack episodes (the transient ``pack_episode`` marker from ``_episode_row``)
+    get no key here — the pack importer calls this per episode AFTER
+    ``_record_pack_episode`` with the child's own download id (marker removed),
+    so each episode gets durable rows keyed on its child row.
+    Never raises. Shared by the monitor and the manual-import endpoint.
+    """
+    try:
         from core.video import subtitles
-        api_key = db.get_setting("opensubtitles_api_key") if db else None
-        fetch = subtitles.opensubtitles_fetcher(api_key)
-        if not fetch:
+        from core.video.subtitles.providers import fetch_subtitle_detailed
+        from core.video.subtitles.providers.base import SubtitleQuery
+        from core.video.subtitles.scoring import opensubtitles_hash
+
+        kind = str((dl or {}).get("kind") or "").lower()
+        if kind == "youtube":
             return
         tmdb_id, imdb_id = _media_ids(db, dl)
         identity = {}
@@ -478,7 +644,7 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
         if imdb_id:
             identity["imdb_id"] = imdb_id
         try:
-            ctx = _json.loads(dl.get("search_ctx") or "{}")
+            ctx = json.loads(dl.get("search_ctx") or "{}")
         except (ValueError, TypeError):
             ctx = {}
         if isinstance(ctx, dict) and ctx.get("season") is not None:
@@ -486,9 +652,163 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
             identity["episode"] = ctx.get("episode")
         if not (identity.get("tmdb_id") or identity.get("imdb_id")):
             return
-        langs = subtitles.parse_langs(settings.get("subtitle_langs"))
-        subtitles.write_subtitles(dest_path, langs, identity, fetch, fs)
-    except Exception:   # noqa: BLE001 - subtitle fetch is best-effort, never fatal
+
+        # Language list precedence: (1) rows the USER set (user_set=1, explicit
+        # per-video picks); (2) the Phase 3 per-movie/per-show
+        # ``subtitle_overrides`` table (via effective_subtitle_languages); (3)
+        # the global subtitle_langs. Rows the hook itself created on a previous
+        # import (user_set=0) are residue, not intent — changing
+        # subtitle_langs (or the override) must take effect on re-grab, so when
+        # no user-set row exists the wanted rows are (re)created for the
+        # CURRENT effective languages. Pre-existing user_set=0 rows for
+        # languages no longer wanted are left alone (not deleted) — their
+        # history stays honest and Phase 2 still sees them.
+        key = _wanted_video_key(db, dl)
+        rows = []
+        if key is not None:
+            video_kind, video_id = key
+            rows = db.subtitle_get_for_video(video_kind, video_id)
+            user_rows = [r for r in rows if r.get("user_set")]
+            if user_rows:
+                rows = user_rows
+            else:
+                # One code path for the hook and the worker: the central
+                # lookup re-reads the download row from the DB. A caller acting
+                # on a different identity than the row carries (the
+                # manual-import endpoint applies the user's corrected
+                # identity) must persist it onto the row BEFORE calling —
+                # otherwise the worker's residue check sees the stale identity
+                # and deletes these rows. Falls back to the global list when
+                # the show isn't in the library (yet).
+                #
+                # A transient lookup failure (SubtitleLookupError) reads as
+                # UNKNOWN, not "global": still create rows for the global list
+                # so the import doesn't lose a fetch to a hiccup. The worker
+                # only deletes residue when the set is KNOWN, so these rows
+                # are reconciled (not orphaned) once lookups succeed.
+                try:
+                    langs = subtitles.effective_subtitle_languages(
+                        db, video_kind, video_id, settings)
+                except subtitles.SubtitleLookupError:
+                    langs = subtitles.parse_langs((settings or {}).get("subtitle_langs"))
+                for lang in langs:
+                    db.subtitle_want(video_kind, video_id, lang)
+                rows = db.subtitle_get_for_video(video_kind, video_id)
+        else:
+            # kind=None never touches the DB (no override branch runs), so
+            # this can't raise SubtitleLookupError — global list, directly.
+            for lang in subtitles.effective_subtitle_languages(db, None, None, settings):
+                rows.append({"language": lang, "hi": 0, "forced": 0})
+
+        provider_order = _subtitle_provider_order(db)
+        # Blob-first, top-level fallback: Phase 2 tuning knobs (subtitle_min_score,
+        # …) live in the organization blob like their siblings; provider secrets
+        # (opensubtitles_api_key, …) live top-level. One get_setting serves both.
+        _top_get = getattr(db, "get_setting", None) or (lambda k, d=None: d)
+        _blob = settings or {}
+        def get_setting(k, d=None):  # noqa: E306
+            if k in _blob:
+                return _blob[k]
+            return _top_get(k, d)
+        # A miss when NO provider was configured must not burn attempts: the
+        # row stays 'wanted' with attempts untouched so Phase 2 retries it
+        # once a key is added. Computed once — config can't change mid-loop.
+        tried_any = _any_provider_configured(provider_order, get_setting)
+        folder = os.path.dirname(str(dest_path or ""))
+        try:
+            existing = {str(n).lower() for n in (fs.list_dir(folder) or [])}
+        except Exception:  # noqa: BLE001
+            existing = set()
+        if not dest_path:
+            # No file, no fetch: without a path the query would run blind
+            # (threshold skipped) and a sidecar would land in the process CWD.
+            # The wanted rows stay for the worker to retry once a path exists.
+            return
+        # Hash once per file, not once per language (two 64KB reads).
+        filename = os.path.basename(str(dest_path or "")) or None
+        moviehash = None
+        if dest_path and os.path.exists(str(dest_path)):
+            try:
+                moviehash = opensubtitles_hash(str(dest_path))
+            except Exception:  # noqa: BLE001 - hash is a bonus, never fatal
+                moviehash = None
+        for row in rows:
+            lang = str(row.get("language") or "en")
+            if not subtitles.valid_lang_code(lang):
+                # Filesystem boundary: a language code flows into the sidecar
+                # filename, so a corrupt/legacy row (e.g. '../../evil' written
+                # before parse_langs filtered codes) must never reach
+                # srt_name — skip it. The worker's residue check deletes these
+                # system rows on its next pass; explicit user picks are kept
+                # but never fetched under a corrupt code.
+                continue
+            hi = bool(row.get("hi"))
+            forced = bool(row.get("forced"))
+            name = subtitles.srt_name(dest_path, lang, hi=hi, forced=forced)
+            if name.lower() in existing:
+                # Already on disk (e.g. carried over with the file on import) —
+                # truthfully 'have', no fetch needed (and no fetch ran, so no
+                # attempt is recorded — attempts measures fetches).
+                if key is not None:
+                    db.subtitle_mark(video_kind, video_id, lang, "have", hi=hi,
+                                     forced=forced, count_attempt=False)
+                continue
+            # NOTE: no quota gate here — new imports always try (the provider
+            # API enforces its own quota as the backstop; a refused download
+            # marks the row 'failed' for the worker to retry). The worker's
+            # gate is what throttles retries. Quota is bumped via on_download
+            # above so the worker sees what the hook spent.
+            def _bump(_pid, _db=db):
+                # Every successful provider.download() burns real quota — count
+                # each one so the Phase 2 worker's daily cap sees what the hook
+                # spent (a missing bump would let the worker overshoot it).
+                # Quota-exempt providers (Whisper — local transcription) never
+                # bump: they consume no network quota.
+                from core.video.subtitles.providers import provider_is_quota_exempt
+                if provider_is_quota_exempt(_pid):
+                    return
+                try:
+                    _db.subtitle_quota_bump(str(_pid))
+                except Exception:  # noqa: BLE001 - quota is accounting, never fatal
+                    pass
+            # skip_background=True: Whisper's download() is minutes of local
+            # CPU transcription — it must never stall the download monitor.
+            # The wanted-loop worker (a background thread) runs background
+            # providers instead; the hook's miss below leaves the row
+            # 'wanted' (attempts untouched) when only deferred providers are
+            # configured, so the worker picks it up without backoff delay.
+            text, pid, _candidate, _score = fetch_subtitle_detailed(
+                SubtitleQuery(identity=dict(identity), language=lang, hi=hi, forced=forced,
+                              filename=filename, moviehash=moviehash,
+                              file_path=str(dest_path)),
+                provider_order, get_setting, on_download=_bump,
+                skip_background=True)
+            if not text:
+                if key is not None and tried_any:
+                    db.subtitle_mark(video_kind, video_id, lang, "failed", hi=hi, forced=forced)
+                # nothing configured → the row stays 'wanted', attempts
+                # untouched (no phantom attempts for keyless setups)
+                continue
+            try:
+                fs.write_text(os.path.join(folder, name), text)
+            except Exception:  # noqa: BLE001 - the fetch SUCCEEDED and burned
+                # quota, so this is a real attempt: mark 'failed' WITH the
+                # attempt counted, or Phase 2 retries blind and burns quota again.
+                logger.exception("subtitle sidecar write failed for %s", name)
+                if key is not None:
+                    db.subtitle_mark(video_kind, video_id, lang, "failed", hi=hi, forced=forced)
+                continue
+            if key is not None:
+                db.subtitle_mark(video_kind, video_id, lang, "have", hi=hi, forced=forced)
+                # Just evaluated: the fetch picked the best available candidate,
+                # so the Phase 3 upgrade loop must not re-search this row right
+                # away — start its re-check cooldown now.
+                try:
+                    db.subtitle_stamp_upgrade_check(video_kind, video_id, lang,
+                                                    hi=hi, forced=forced)
+                except Exception:  # noqa: BLE001 - the stamp is hygiene, never fatal
+                    pass
+    except Exception:  # noqa: BLE001 - subtitle fetch is best-effort, never fatal
         logger.exception("subtitle fetch failed for download %s", (dl or {}).get("id"))
 
 
@@ -1251,6 +1571,14 @@ def ensure_started(db_provider) -> None:
         _started = True
         threading.Thread(target=_run, args=(db_provider,), daemon=True,
                          name="video-download-monitor").start()
+    # The subtitle wanted-loop rides along: it retries subtitle_wanted rows on
+    # its own cadence (Phase 2, "Replace Bazarr"). Idempotent; no-op when the
+    # master toggle is off.
+    try:
+        from core.video.subtitles.worker import ensure_started as _ensure_subtitles
+        _ensure_subtitles(db_provider)
+    except Exception:  # noqa: BLE001 - subtitles never break the monitor
+        logger.exception("subtitle worker failed to start")
 
 
 __all__ = ["process_download", "ensure_started"]

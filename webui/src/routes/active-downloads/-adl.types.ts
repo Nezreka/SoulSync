@@ -211,6 +211,15 @@ export interface AdlReviewSummary {
 
 /** A quarantined file plus its sidecar. */
 export interface AdlQuarantineEntry {
+  library_status?: 'present' | 'missing' | 'unknown';
+  library_match?: {
+    album: string;
+    filename: string;
+    quality: string;
+    verification_status: string;
+  } | null;
+  /** Only tracks added by the album_tracks expansion carry this provenance. */
+  album_extra?: { album: string; download_source: string } | null;
   id: string;
   filename: string;
   original_filename: string;
@@ -265,6 +274,8 @@ export interface ClientTorrentItem {
   seeding_time?: number | null;
   save_path?: string | null;
   content_path?: string | null;
+  /** the client's own category (qbittorrent category, transmission/deluge label). */
+  category?: string | null;
   error?: string | null;
   /** present when SoulSync itself dispatched this item. */
   soulsync?: { kind?: string; title?: string };

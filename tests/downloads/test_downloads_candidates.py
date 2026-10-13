@@ -880,3 +880,51 @@ def test_projected_alternative_inherits_validated_root_match_evidence():
     assert dc.attempt_download_with_candidates('release', tracks, _Track(), 'batch', _build_deps(), quality_first=True)
     assert download_tasks['release']['filename'] == root._release_sources[0].filename
     assert download_tasks['release']['picked_candidate']['confidence'] == 0.94
+
+
+
+# #1616: a wishlist (sync and download) track whose stored album has no credit
+# and no count. master leaves _explicit_artist_context unset and the count at 0
+
+def _wishlist_moana_track_info():
+    return {
+        "id": "136340808", "source": "deezer", "track_number": 4,
+        "_is_explicit_album_download": True,
+        "_fallback_album_artist": "Auli'i Cravalho",
+        "_explicit_album_context": {"id": "14582002", "name": "Moana (Deluxe)",
+                                    "release_date": "2017-01-06", "total_tracks": 0,
+                                    "album_type": "album", "artists": []},
+    }
+
+
+def test_wishlist_track_gets_its_albums_artist_and_count(monkeypatch):
+    from core.metadata import album_tracks, registry
+    calls = []
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda s, a, **_k: calls.append((s, a)) or {
+        "id": "14582002", "release_date": "2017-01-06", "total_tracks": 66, "album_type": "album",
+        "artists": [{"name": "Various Artists"}],
+    })
+    deps = _build_deps()
+    _seed_task("t1616a", track_info=_wishlist_moana_track_info())
+    dc.attempt_download_with_candidates("t1616a", [_Candidate()],
+                                        _Track(album="Moana (Deluxe)", artists=["Auli'i Cravalho"]),
+                                        batch_id=None, deps=deps)
+    assert calls == [("deezer", "14582002")]
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Various Artists"}]
+    assert album["total_tracks"] == 66
+
+
+def test_wishlist_track_keeps_one_folder_when_the_lookup_fails(monkeypatch):
+    from core.metadata import album_tracks, registry
+    monkeypatch.setattr(registry, "get_primary_source", lambda: "spotify")
+    monkeypatch.setattr(album_tracks, "get_album_for_source", lambda *_a, **_k: None)
+    deps = _build_deps()
+    _seed_task("t1616b", track_info=_wishlist_moana_track_info())
+    # a different singer on the same album still files under the album's one fallback
+    dc.attempt_download_with_candidates("t1616b", [_Candidate()],
+                                        _Track(album="Moana (Deluxe)", artists=["Dwayne Johnson"]),
+                                        batch_id=None, deps=deps)
+    album = matched_downloads_context["user1::song.flac"]["spotify_album"]
+    assert album["artists"] == [{"name": "Auli'i Cravalho"}]

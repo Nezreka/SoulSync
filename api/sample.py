@@ -22,6 +22,7 @@ import zipfile
 
 from flask import request, send_file
 
+from core.sample.ids import track_key
 from database.music_database import get_database
 from utils.logging_config import get_logger
 from .auth import require_api_key
@@ -40,7 +41,7 @@ class SampleHttpError(Exception):
         self.status = status
 
 
-def _track_exists(track_id: int) -> bool:
+def _track_exists(track_id: str) -> bool:
     db = get_database()
     conn = db._get_connection()
     try:
@@ -50,17 +51,21 @@ def _track_exists(track_id: int) -> bool:
         conn.close()
 
 
-def _require_track(track_id: int) -> None:
-    if not _track_exists(track_id):
-        raise SampleHttpError("NOT_FOUND", f"unknown track_id {track_id}", 404)
+def _require_track(track_id: str) -> None:
+    try:
+        key = track_key(track_id)
+    except ValueError:
+        raise SampleHttpError("BAD_REQUEST", "track_id is required", 400) from None
+    if not _track_exists(key):
+        raise SampleHttpError("NOT_FOUND", f"unknown track_id {key}", 404)
 
 
-def _resolve_track_path(track_id: int) -> str:
+def _resolve_track_path(track_id: str) -> str:
     """DB file_path -> a file that exists on disk. Shared by peaks/preview/chop."""
     return _resolve_source_path(track_id, stem=None)
 
 
-def _resolve_source_path(track_id: int, stem: str | None) -> str:
+def _resolve_source_path(track_id: str, stem: str | None) -> str:
     """Track audio, or one separated stem when `stem` is given.
 
     Raises SampleHttpError 409 when a stem is requested but the track was
@@ -159,7 +164,7 @@ def recent_library_tracks(limit=50):
     return [serialize_track(row) for row in rows]
 
 
-def fetch_analysis(track_id: int, retry: bool = False):
+def fetch_analysis(track_id: str, retry: bool = False):
     """Cached analysis row, or enqueue + return pending status.
 
     Returns (payload_dict, http_status). Never raises except SampleHttpError.
@@ -196,7 +201,7 @@ def _analysis_payload(row: dict, status: str) -> dict:
     return out
 
 
-def enqueue_track_analysis(track_id: int):
+def enqueue_track_analysis(track_id: str):
     """Enqueue background analysis for a track. Idempotent.
 
     A sticky worker error is surfaced as a 422 failure envelope rather than
@@ -217,7 +222,7 @@ def enqueue_track_analysis(track_id: int):
         raise SampleHttpError("ANALYSIS_ERROR", str(e), 500) from e
 
 
-def fetch_peaks(track_id: int, buckets: int, stem: str | None = None):
+def fetch_peaks(track_id: str, buckets: int, stem: str | None = None):
     """Min/max waveform peaks, computed once per (track, buckets, stem) then cached."""
     _require_track(track_id)
     try:
@@ -266,7 +271,7 @@ _CHOP_FORMATS = ("wav16", "wav24", "flac")
 def _parse_render_params(data: dict):
     """Shared validation for preview/chop bodies. Returns a clean dict."""
     try:
-        track_id = int(data.get("track_id") or 0)
+        track_id = track_key(data.get("track_id"))
     except (TypeError, ValueError):
         raise SampleHttpError("BAD_REQUEST", "track_id is required", 400) from None
     try:
@@ -314,7 +319,7 @@ def _parse_render_params(data: dict):
     }
 
 
-def _source_bpm_for_stretch(track_id: int, target_bpm) -> float | None:
+def _source_bpm_for_stretch(track_id: str, target_bpm) -> float | None:
     """BPM to stretch from, or None when no stretch was requested.
 
     Raises 409 when a target BPM is given but the track was never analyzed.
@@ -333,7 +338,7 @@ def _source_bpm_for_stretch(track_id: int, target_bpm) -> float | None:
     return float(row["bpm"])
 
 
-def _delay_bpm(track_id: int, target_bpm, fx) -> float | None:
+def _delay_bpm(track_id: str, target_bpm, fx) -> float | None:
     """tempo the delay locks to: the stretched tempo, else the track's own.
 
     409 when the delay is on and neither is known.
@@ -354,7 +359,7 @@ def _delay_bpm(track_id: int, target_bpm, fx) -> float | None:
     return float(row["bpm"])
 
 
-def render_preview(track_id: int, start_s: float, end_s: float, pitch_st: float,
+def render_preview(track_id: str, start_s: float, end_s: float, pitch_st: float,
                    target_bpm, stem: str | None = None, fx=None) -> tuple:
     """Fast librosa render of the in/out region for auditioning.
 
@@ -399,7 +404,7 @@ def preview_file_path(preview_id: str) -> str:
     return path
 
 
-def save_chop(track_id: int, start_s: float, end_s: float, pitch_st: float,
+def save_chop(track_id: str, start_s: float, end_s: float, pitch_st: float,
               target_bpm, name: str, tags: list, format: str,
               stem: str | None = None, folder: str | None = None, fx=None) -> tuple:
     """Final render (Rubber Band when available) + stash row (file + bookmark).
@@ -526,7 +531,7 @@ def _unlink_quiet(path: str) -> None:
         pass
 
 
-def trim_selection(track_id: int, start_s: float, end_s: float,
+def trim_selection(track_id: str, start_s: float, end_s: float,
                    stem: str | None = None) -> tuple:
     """Tighten [start_s, end_s) to the part that actually sounds.
 
@@ -553,7 +558,7 @@ def trim_selection(track_id: int, start_s: float, end_s: float,
 
 def parse_trim_body(data: dict) -> dict:
     try:
-        track_id = int(data.get("track_id") or 0)
+        track_id = track_key(data.get("track_id"))
         start_s = float(data.get("start_s", 0))
         end_s = float(data.get("end_s", 0))
     except (TypeError, ValueError):
@@ -630,7 +635,7 @@ def export_stash_zip() -> tuple:
 
 # ── Phase 4: stem separation ─────────────────────────────────────────
 
-def _stems_payload(track_id: int, status: str, method: str) -> dict:
+def _stems_payload(track_id: str, status: str, method: str) -> dict:
     from core.sample import stems as stems_mod
     from core.sample import store as sample_store
 
@@ -654,7 +659,7 @@ def _stems_payload(track_id: int, status: str, method: str) -> dict:
     return payload
 
 
-def separate_stems(track_id: int, backend: str | None = None, method: str | None = None) -> tuple:
+def separate_stems(track_id: str, backend: str | None = None, method: str | None = None) -> tuple:
     """Enqueue a split for a track. Idempotent.
 
     method: demucs (the only one now). needs onnxruntime.
@@ -691,7 +696,7 @@ def separate_stems(track_id: int, backend: str | None = None, method: str | None
         raise SampleHttpError("STEMS_ERROR", str(e), 500) from e
 
 
-def stems_status(track_id: int, method: str | None = None) -> tuple:
+def stems_status(track_id: str, method: str | None = None) -> tuple:
     """Current split status (the last method asked for, unless one is named)."""
     _require_track(track_id)
     try:
@@ -713,7 +718,7 @@ def stems_status(track_id: int, method: str | None = None) -> tuple:
         raise SampleHttpError("STEMS_ERROR", str(e), 500) from e
 
 
-def stem_audio_path(track_id: int, stem: str) -> tuple:
+def stem_audio_path(track_id: str, stem: str) -> tuple:
     """(file_path, mimetype) for one separated stem."""
     from core.sample import stems as stems_mod
 
@@ -750,7 +755,7 @@ def register_routes(bp):
         pass ?retry=1 to clear a recorded error and queue again.
         """
         try:
-            track_id = int(request.args.get("track_id") or 0)
+            track_id = track_key(request.args.get("track_id"))
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
@@ -766,7 +771,7 @@ def register_routes(bp):
         """Enqueue background analysis for a track. Idempotent."""
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get("track_id") or 0)
+            track_id = track_key(data.get("track_id"))
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
@@ -790,10 +795,10 @@ def register_routes(bp):
         <db_dir>/sample-studio/peaks/, served from cache after.
         """
         try:
-            track_id = int(request.args.get("track_id") or 0)
+            track_id = track_key(request.args.get("track_id"))
             buckets = int(request.args.get("buckets") or 1500)
         except (TypeError, ValueError):
-            return api_error("BAD_REQUEST", "track_id and buckets must be integers", 400)
+            return api_error("BAD_REQUEST", "track_id is required and buckets must be a whole number", 400)
         try:
             payload, status = fetch_peaks(track_id, buckets, stem=request.args.get("stem") or None)
             return api_success(payload, status=status)
@@ -933,7 +938,7 @@ def register_routes(bp):
         """
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get("track_id") or 0)
+            track_id = track_key(data.get("track_id"))
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         backend = data.get("backend")
@@ -948,7 +953,7 @@ def register_routes(bp):
     def sample_stems_status():
         """Poll separation progress: queued|running|done|error|idle."""
         try:
-            track_id = int(request.args.get("track_id") or 0)
+            track_id = track_key(request.args.get("track_id"))
         except (TypeError, ValueError):
             return api_error("BAD_REQUEST", "track_id is required", 400)
         try:
@@ -957,7 +962,7 @@ def register_routes(bp):
         except SampleHttpError as e:
             return _handle_service_error(e)
 
-    @bp.route("/sample/stems/<int:track_id>/<stem>/audio", methods=["GET"])
+    @bp.route("/sample/stems/<track_id>/<stem>/audio", methods=["GET"])
     @require_api_key
     def sample_stem_audio(track_id, stem):
         """Serve one separated stem as WAV."""

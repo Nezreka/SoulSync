@@ -37,6 +37,16 @@ _TRANSMISSION_STATUS = {
 }
 
 
+def _first_label(labels) -> Optional[str]:
+    """transmission has labels, not one category. the first one is the
+    category soulsync itself sets when it adds a torrent."""
+    if isinstance(labels, list):
+        for label in labels:
+            if str(label or '').strip():
+                return str(label).strip()
+    return None
+
+
 def _map_state(status_code: int, percent_done: float) -> str:
     base = _TRANSMISSION_STATUS.get(status_code, "error")
     # Transmission reports 'paused' (0) for both never-started and
@@ -250,7 +260,7 @@ class TransmissionAdapter:
     _STATUS_FIELDS = [
         'hashString', 'name', 'status', 'percentDone', 'totalSize',
         'downloadedEver', 'rateDownload', 'rateUpload', 'peersSendingToUs',
-        'peersGettingFromUs', 'eta', 'downloadDir', 'errorString',
+        'peersGettingFromUs', 'eta', 'downloadDir', 'errorString', 'labels',
     ]
 
     def _parse_status(self, item: dict) -> TorrentStatus:
@@ -273,6 +283,7 @@ class TransmissionAdapter:
             eta=eta,
             save_path=item.get('downloadDir'),
             error=item.get('errorString') or None,
+            category=_first_label(item.get('labels')),
         )
 
     async def remove(self, torrent_id: str, delete_files: bool = False) -> bool:

@@ -502,6 +502,10 @@ Only **author** pages carry a watchlist button — 👁️ **Add to Watchlist** 
 
 You can follow from the author page, or from the **Watch** / **Watching** badge on person tiles in search results (top-right corner). Following asks the narrator question up front (defaults **exact**) and sets the cutoff to **the day you followed** — "following an author means 'tell me about the next one', not 'queue the eighty-eight they already wrote'." A \`since\` date can be passed to backfill older titles.
 
+## Following a series
+
+A book's page shows its series in reading order, and the series header has a **Follow series** button. It wishlists **every volume you are missing** straight away (anything you own or already want is skipped) and then picks up new volumes on the daily scan. **New books only** is the alternative: nothing existing is queued, only volumes published from today. The series is matched on its Audible series ID, so two series that share a name stay apart, and two editions of the same volume (say a dramatised adaptation) queue once. A followed series shows up on the watchlist tab with the other follows, marked **Series**, and opens a search for its name.
+
 ## The watchlist tab
 
 On the shared watchlist page, the audiobooks tab shows one card per followed author (click → author page):

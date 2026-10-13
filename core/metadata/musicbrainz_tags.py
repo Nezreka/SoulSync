@@ -25,11 +25,15 @@ def track_matches_title(title, track):
         normalized(track.get("title")), normalized((track.get("recording") or {}).get("title"))}
 
 
-def release_by_artist(release, artist_names, artist_mbid=None):
+def release_by_artist(release, artist_names, artist_mbid=None, mbid_name=None):
     """the release is credited to the artist we expect. an id match wins; else a
     credited name or the artist's current name folds equal to one we expect.
     equal, not similar: "Mammoth Mammoth" is a different band from "Mammoth"
-    (#1426). no expected name or no credited name -> can't judge, True."""
+    (#1426). no expected name or no credited name -> can't judge, True.
+
+    mbid_name is the name artist_mbid was resolved from. a credit with that
+    name and a different id is another band with the same name, so the names
+    can't vouch for it: the finnish "Nirvana" single is not by nirvana."""
     from core.text.fold import fold_title
     credits = [c for c in (release or {}).get("artist-credit") or [] if isinstance(c, dict)]
     if isinstance(artist_names, str):
@@ -40,6 +44,13 @@ def release_by_artist(release, artist_names, artist_mbid=None):
         return True
     if artist_mbid and any((c.get("artist") or {}).get("id") == artist_mbid for c in credits):
         return True
+    id_name = fold_title(mbid_name or "", drop_brackets=False)
+    if artist_mbid and id_name:
+        for c in credits:
+            cid = (c.get("artist") or {}).get("id")
+            names = {fold_title(n or "", drop_brackets=False) for n in (c.get("name"), (c.get("artist") or {}).get("name"))}
+            if cid and id_name in names:
+                return False
     joined = "".join((c.get("name") or (c.get("artist") or {}).get("name") or "") + (c.get("joinphrase") or "")
                      for c in credits)
     names = {joined} | {c.get("name") or "" for c in credits} | {(c.get("artist") or {}).get("name") or "" for c in credits}

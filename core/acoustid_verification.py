@@ -303,6 +303,10 @@ class AcoustIDVerification:
                 status = 'ok' if lookup.get('recordings') else 'no_match'
 
             if status in ('error', 'no_backend', 'fingerprint_error', 'unavailable'):
+                if isinstance(context, dict):
+                    context['_acoustid_status'] = status
+                    if lookup.get('invalid_key'):
+                        context['_acoustid_invalid_key'] = True
                 # Something is broken (not the track's fault) — never quarantine
                 # on this; surface it so the user can fix it.
                 return VerificationResult.ERROR, lookup.get('error', 'AcoustID lookup failed')

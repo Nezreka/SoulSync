@@ -20,10 +20,13 @@ def register_routes(bp):
     def video_libraries():
         from . import get_video_db
         try:
-            from core.video.sources import list_video_libraries, resolve_video_server
+            from core.video.sources import (_auto_pick_single_libraries, list_video_libraries,
+                                             resolve_video_server)
             libs = list_video_libraries() or {"server": None, "movies": [], "tv": []}
             server = libs.get("server") or resolve_video_server()
-            libs["selected"] = (get_video_db().get_library_selection(server)
+            libs["selected"] = (_auto_pick_single_libraries(
+                                    libs.get("server"), libs, get_video_db().get_library_selection(server),
+                                    db=get_video_db())
                                 if server else {"movies": None, "tv": None})
             return jsonify(libs)
         except Exception:

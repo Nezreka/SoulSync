@@ -663,8 +663,13 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
             if not spotify_album_context.get('album_type'):
                 spotify_album_context['album_type'] = 'album'
-            if not spotify_album_context.get('artists') and track.artists:
-                spotify_album_context['artists'] = [{'name': track.artists[0]}]
+            if not spotify_album_context.get('artists'):
+                # a wishlist album with no credit falls back to ONE singer for
+                # the whole album, so a failed lookup still keeps one folder (#1616)
+                _fb_album_artist = (track_info or {}).get('_fallback_album_artist') or (
+                    track.artists[0] if track.artists else '')
+                if _fb_album_artist:
+                    spotify_album_context['artists'] = [{'name': _fb_album_artist}]
 
             download_payload = candidate.__dict__
 

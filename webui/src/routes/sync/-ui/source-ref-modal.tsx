@@ -65,10 +65,10 @@ export function SourceRefModal({ row, currentRef, onClose, onSubmit }: SourceRef
           boxShadow: '0 18px 50px rgba(0,0,0,0.55)',
         }}
       >
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
           {sourceRefPrompt(row.source, row.name ?? '')}
         </div>
-        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: 14 }}>
+        <div style={{ fontSize: 13, color: 'var(--white-a55)', marginBottom: 14 }}>
           The {sourceRefLabel(row.source)} this mirror re-syncs from.
         </div>
         <input
@@ -84,9 +84,9 @@ export function SourceRefModal({ row, currentRef, onClose, onSubmit }: SourceRef
             width: '100%',
             padding: '10px 12px',
             borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.12)',
-            background: 'rgba(255,255,255,0.05)',
-            color: '#fff',
+            border: '1px solid var(--white-a12)',
+            background: 'var(--white-a05)',
+            color: 'var(--text-1)',
             fontSize: 13,
           }}
         />
@@ -97,7 +97,7 @@ export function SourceRefModal({ row, currentRef, onClose, onSubmit }: SourceRef
             style={{
               background: 'none',
               border: 'none',
-              color: 'rgba(255,255,255,0.5)',
+              color: 'var(--white-a50)',
               cursor: 'pointer',
               fontSize: 13,
             }}
@@ -112,7 +112,7 @@ export function SourceRefModal({ row, currentRef, onClose, onSubmit }: SourceRef
               borderRadius: 10,
               border: '1px solid rgba(var(--accent-rgb),0.35)',
               background: 'rgba(var(--accent-rgb),0.12)',
-              color: '#fff',
+              color: 'var(--text-1)',
               cursor: 'pointer',
               fontSize: 13,
             }}

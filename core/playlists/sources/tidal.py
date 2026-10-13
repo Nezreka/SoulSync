@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Optional
 
+from core.discovery.endpoints import playlist_skipped_counts
 from core.playlists.sources.base import (
     NormalizedTrack,
     PlaylistDetail,
@@ -51,6 +52,8 @@ class TidalPlaylistSource(PlaylistSource):
         if playlist is None:
             return None
         meta = self._meta_from_playlist(playlist)
+        # always set, so a refresh that skipped nothing clears an old count
+        meta.extra["source_skipped"] = playlist_skipped_counts(playlist)
         tracks_raw = getattr(playlist, "tracks", None) or []
         tracks = [self._track_from_tidal(t, idx) for idx, t in enumerate(tracks_raw)]
         meta.track_count = len(tracks)

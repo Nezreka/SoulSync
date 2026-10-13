@@ -1471,6 +1471,8 @@ def get_tidal_playlist_tracks(playlist_id):
             'owner': getattr(full_playlist, 'owner', 'Unknown'),
             'track_count': len(full_playlist.tracks),
             'image_url': getattr(full_playlist, 'image_url', None),
+            # what tidal never handed over, so the mirror can say so (#1613)
+            'source_skipped': _playlist_skipped_counts(full_playlist),
             'tracks': []
         }
 
@@ -1514,6 +1516,16 @@ def start_tidal_discovery(playlist_id):
 
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
+
+        # a fresh fetch has fresh counts, keep the mirror's note current
+        try:
+            from database.music_database import get_database as _get_db
+            _get_db().set_mirrored_playlist_source_skipped(
+                'tidal', playlist_id, _playlist_skipped_counts(target_playlist),
+                profile_id=get_current_profile_id(),
+            )
+        except Exception as e:
+            logger.debug("tidal skipped counts not saved to mirror: %s", e)
 
         # Initialize discovery state if it doesn't exist, or update existing state
         if playlist_id in tidal_discovery_states:
@@ -1923,6 +1935,7 @@ from core.discovery.endpoints import (
     update_playlist_phase as _update_playlist_phase_core,
     save_bubble_snapshot as _save_bubble_snapshot_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
+    playlist_skipped_counts as _playlist_skipped_counts,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
     playlist_name_obj as _pl_name_obj,

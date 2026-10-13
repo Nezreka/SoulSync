@@ -1073,6 +1073,11 @@ class ConfigManager:
                 # Off keeps an owned book on the wishlist as "In library";
                 # on drops it, like the music wishlist does.
                 "remove_owned_from_wishlist": False,
+                # Optional post-import fold of multi-file books into one
+                # chaptered .m4b. Off by default: it rewrites the library
+                # copy, and a listener who prefers the per-file layout opts
+                # out by leaving this off.
+                "merge_m4b": False,
             },
             "podcasts": {
                 "download_path": default_podcast_path,

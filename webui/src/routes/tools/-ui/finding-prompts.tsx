@@ -467,7 +467,7 @@ function WitnessMeDialog({
       <div
         style={{
           background: 'var(--bg-secondary, #1e1e2e)',
-          border: '2px solid #e74c3c',
+          border: '2px solid var(--danger)',
           borderRadius: '12px',
           padding: '28px',
           maxWidth: '480px',
@@ -476,7 +476,7 @@ function WitnessMeDialog({
           fontFamily: 'inherit',
         }}
       >
-        <h3 style={{ margin: '0 0 8px', color: '#e74c3c', fontSize: '1.2em' }}>
+        <h3 style={{ margin: '0 0 8px', color: 'var(--danger)', fontSize: '1.2em' }}>
           Mass Deletion Warning
         </h3>
         <p style={{ margin: '0 0 12px', fontSize: '0.95em', opacity: 0.9 }}>
@@ -489,7 +489,7 @@ function WitnessMeDialog({
         </p>
         <p style={{ margin: '0 0 6px', fontSize: '0.9em', opacity: 0.9 }}>
           To confirm you understand the risk, type{' '}
-          <strong style={{ color: '#e74c3c' }}>witness me</strong> below:
+          <strong style={{ color: 'var(--danger)' }}>witness me</strong> below:
         </p>
         <input
           type="text"
@@ -503,9 +503,9 @@ function WitnessMeDialog({
           style={{
             width: '100%',
             padding: '10px',
-            border: '1px solid #555',
+            border: '1px solid var(--white-a30)',
             borderRadius: '6px',
-            background: '#111',
+            background: 'var(--bg-primary)',
             color: 'var(--text-primary)',
             fontSize: '1em',
             margin: '8px 0 16px',
@@ -519,7 +519,7 @@ function WitnessMeDialog({
             onClick={() => resolve(false)}
             style={{
               padding: '8px 20px',
-              border: '1px solid #555',
+              border: '1px solid var(--white-a30)',
               borderRadius: '6px',
               background: 'transparent',
               color: 'var(--text-primary)',
@@ -538,8 +538,8 @@ function WitnessMeDialog({
               padding: '8px 20px',
               border: 'none',
               borderRadius: '6px',
-              background: match ? '#e74c3c' : '#555',
-              color: match ? '#fff' : '#888',
+              background: match ? 'var(--danger)' : 'var(--white-a30)',
+              color: match ? 'var(--text-1)' : 'var(--text-3)',
               cursor: match ? 'pointer' : 'not-allowed',
               fontSize: '0.9em',
               fontWeight: 600,

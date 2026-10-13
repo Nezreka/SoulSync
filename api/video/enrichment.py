@@ -82,6 +82,8 @@ def register_routes(bp):
             # Backfill-worker keys (free, optional) + no-key toggles.
             "fanart_api_key": db.get_setting("fanart_api_key") or "",
             "opensubtitles_api_key": db.get_setting("opensubtitles_api_key") or "",
+            "subdl_api_key": db.get_setting("subdl_api_key") or "",
+            "subsource_api_key": db.get_setting("subsource_api_key") or "",
             "trakt_api_key": db.get_setting("trakt_api_key") or "",
             "mdblist_api_key": db.get_setting("mdblist_api_key") or "",
             "ryd_enabled": (db.get_setting("ryd_enabled") or "1") == "1",
@@ -123,6 +125,8 @@ def register_routes(bp):
         put_key("tvdb_api_key")
         put_key("fanart_api_key")
         put_key("opensubtitles_api_key")
+        put_key("subdl_api_key")
+        put_key("subsource_api_key")
         put_key("trakt_api_key")
         put_key("mdblist_api_key")
         # No-key worker on/off toggles (read live by the worker — no rebuild needed).

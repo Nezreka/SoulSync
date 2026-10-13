@@ -1186,6 +1186,16 @@ class MusicMatchingEngine:
                 'patterns': [r'\bradio\s*edit\b', r'\bradio\s*version\b', r'\bclean\s*edit\b'],
                 'penalty': 0.08  # -8% penalty for radio edits (minor difference)
             },
+            # tempo edits ahead of remix: "Slowed Edit" holds the remix word
+            # 'edit', but its audio is the slowed cut, not a remix
+            'slowed': {
+                'patterns': [r'\bslowed\b', r'\bdaycore\b'],
+                'penalty': 0.20
+            },
+            'sped_up': {
+                'patterns': [r'\bsped\s*up\b', r'\bspeed\s*up\b', r'\bnightcore\b'],
+                'penalty': 0.20
+            },
             'remix': {
                 'patterns': [r'\bremix\b', r'\brmx\b', r'\brework\b', r'\bedit\b(?!ion)'],
                 'penalty': 0.15  # -15% penalty for remixes
@@ -1254,6 +1264,55 @@ class MusicMatchingEngine:
         # Detect version type in Soulseek result
         version_type, penalty = self.detect_version_type(slskd_track.filename)
 
+        # --- Base-title veto (#1626) ---
+        # A shared version qualifier inflates whole-path similarity enough to
+        # pass the title gate: wanted "Crystalline (Orchestral Version)" vs a
+        # DIFFERENT song's "Damnation Flame (Orchestral Version)" in the right
+        # artist folder scored 0.69 and cleared the accept threshold — the
+        # "(Orchestral Version)" overlap pushed the title score past the 0.30
+        # gate while the artist folder contributed 0.40. Compare the BARE song
+        # titles instead: if both reduce to non-empty base titles that are
+        # nowhere near each other, this is the wrong song no matter what the
+        # folders say. Fail open — all three must hold or nothing happens:
+        #   (a) the artist component matched cleanly (word-boundary hit: the
+        #       similarity fallback is capped at 0.70, so >= 0.99 is exact);
+        #   (b) both base titles are non-empty;
+        #   (c) base-title similarity under a FLOOR, not exact inequality, so
+        #       a typo'd filename never gets vetoed.
+        # Same song, different version ("X" vs "X (Remastered)") reduces to
+        # equal base titles and never vetoes — that call stays with the strict
+        # version matching below. Skipped when the base scorer already
+        # rejected (0.0), so its early-return paths are untouched.
+        if base_confidence > 0.0:
+            _artist_evidence = getattr(slskd_track, 'artist_score', None) or 0.0
+            if _artist_evidence >= 0.99:
+                # Pass the wanted artist on both sides (MAJOR-1, #1626): for
+                # flat "Artist - Title" filenames — an explicitly supported
+                # shape — the last segment is the whole "Artist - Title"
+                # string, and without the artist the name dilutes the
+                # candidate base title ("up" vs "pink floyd up"), vetoing
+                # correct short-titled tracks by long-named artists.
+                # strip_artist_prefix only strips on exact folded equality
+                # and never returns empty, so this is fail-safe.
+                _wanted_artist = (getattr(spotify_track, 'artists', None)
+                                  or [''])[0]
+                _wanted_base = self.base_title_of(spotify_track.name,
+                                                  _wanted_artist)
+                _cand_base = self.base_title_of(slskd_track.filename,
+                                                _wanted_artist,
+                                                from_filename=True)
+                if _wanted_base and _cand_base:
+                    _base_sim = SequenceMatcher(
+                        None, _wanted_base, _cand_base).ratio()
+                    if _base_sim < 0.30:
+                        logger.debug(
+                            f"Base-title veto: '{spotify_track.name}' vs "
+                            f"'{slskd_track.filename[:60]}' (base "
+                            f"'{_wanted_base}' vs '{_cand_base}', "
+                            f"sim={_base_sim:.2f})"
+                        )
+                        return 0.0, 'rejected_base_title_mismatch'
+
         # Check if Spotify track title contains version indicators
         spotify_title_lower = spotify_track.name.lower()
 
@@ -1263,6 +1322,14 @@ class MusicMatchingEngine:
         # which is the exact case the setting exists for.
         _preferred = self._preferred_version()
         _wanted_on_purpose = bool(_preferred) and version_type == _preferred
+
+        # A slowed / sped-up cut is its own audio in BOTH directions. The checks
+        # below only reject a versioned candidate, so the plain studio file
+        # scored 0.73 for "Devil Eyes - Slowed" and got imported as it.
+        _wanted_version = self.detect_version_type(spotify_track.name)[0]
+        if ((version_type in self.TEMPO_EDITS or _wanted_version in self.TEMPO_EDITS)
+                and version_type != _wanted_version):
+            return 0.0, 'rejected_version_mismatch'
 
         # STRICT VERSION MATCHING: Reject mismatched versions
         if version_type == 'live' and not _wanted_on_purpose:
@@ -1365,6 +1432,8 @@ class MusicMatchingEngine:
     # silently matching nothing.
     PREFERABLE_VERSIONS = ('extended', 'radio', 'remix', 'live', 'acoustic',
                            'instrumental', 'demo', 'clean', 'explicit')
+    # tempo edits: never a stand-in for the original, nor the original for them
+    TEMPO_EDITS = ('slowed', 'sped_up')
 
     _BRACKET_GROUP = re.compile(r'[\(\[][^\)\]]*[\)\]]')
 

@@ -24,6 +24,15 @@ def reset_state():
     download_batches.clear()
 
 
+@pytest.fixture(autouse=True)
+def no_persisted_album_pins(monkeypatch):
+    # the preflight goes through the persistent album -> release pin. a pin one
+    # test records must not answer another test's preflight
+    from core.metadata import album_mbid_cache
+    monkeypatch.setattr(album_mbid_cache, 'lookup', lambda *a, **k: None)
+    monkeypatch.setattr(album_mbid_cache, 'record', lambda *a, **k: True)
+
+
 class _FakeConfig:
     def __init__(self, values=None):
         self._v = values or {}
@@ -740,6 +749,52 @@ def test_mb_release_preflight_runs_after_every_track_is_analysed(monkeypatch):
 
     assert 'preflight' in order and 'analysed' in order
     assert order.index('preflight') > order.index('analysed')
+
+
+def test_mb_release_preflight_scores_against_the_whole_album(monkeypatch):
+    """#1618: three late nirvana tracks searched as a 3-track album, and a
+    2-track 1980 single from another band outscored the 14-track album."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    counts = []
+
+    import core.album_consistency as ac
+    monkeypatch.setattr(ac, '_find_best_release',
+                        lambda album, artist, count, svc, **_k: counts.append(count) or {'id': 'mbid-1'})
+    deps = _build_deps(mb_worker=_FakeMBWorker(svc=_FakeMBSvc()), mb_release_cache={})
+    _seed_batch('B14', is_album_download=True,
+                album_context={'name': 'Nirvana', 'total_tracks': 14},
+                artist_context={'name': 'Nirvana'})
+
+    mw.run_full_missing_tracks_process('B14', 'album:1',
+                                       [{'name': n, 'artists': ['Nirvana']} for n in ('Rape Me', 'Dumb', 'Lithium')],
+                                       deps)
+
+    assert counts == [14]
+
+
+def test_mb_release_preflight_keeps_the_release_the_album_is_pinned_to(monkeypatch):
+    """#1618: the first batch pinned the album's release. the preflight for its
+    leftover tracks searched afresh and cached a different release over it."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    from core.metadata import album_mbid_cache
+    monkeypatch.setattr(album_mbid_cache, 'lookup', lambda album, artist: 'pinned-1')
+    pinned = {'id': 'pinned-1', 'title': 'With the Lights Out'}
+    svc = _FakeMBSvc()
+    svc.mb_client = SimpleNamespace(get_release=lambda mbid, includes=None: pinned if mbid == 'pinned-1' else None)
+
+    import core.album_consistency as ac
+    monkeypatch.setattr(ac, '_find_best_release', lambda *a, **k: pytest.fail('searched past the pin'))
+    cache = {}
+    deps = _build_deps(mb_worker=_FakeMBWorker(svc=svc), mb_release_cache=cache)
+    _seed_batch('B15', is_album_download=True,
+                album_context={'name': 'With the Lights Out', 'total_tracks': 81},
+                artist_context={'name': 'Nirvana'})
+
+    mw.run_full_missing_tracks_process('B15', 'album:1', [{'name': 'T1', 'artists': ['Nirvana']}], deps)
+
+    assert cache[('with the lights out', 'nirvana')] == 'pinned-1'
 
 
 def test_mb_release_preflight_skipped_when_no_mb_worker(monkeypatch):

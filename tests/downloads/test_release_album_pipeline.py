@@ -66,7 +66,10 @@ def album_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "music.db"))
     monkeypatch.setenv("SOULSYNC_CONFIG_PATH", str(tmp_path / "config.json"))
     db = database.MusicDatabase(str(tmp_path / "music.db"))
-    monkeypatch.setattr(database, "_database_instances", {threading.get_ident(): db})
+    # _database_instances is keyed by (thread id, resolved path) — seed the
+    # entry get_database() will actually look up (no-arg call resolves the
+    # DATABASE_PATH set above).
+    monkeypatch.setattr(database, "_database_instances", {(threading.get_ident(), str(tmp_path / "music.db")): db})
     monkeypatch.setattr(wishlist_service, "_wishlist_service", None)
     monkeypatch.setattr(release_import, "_recent_imports", type(release_import._recent_imports)())
     profile_id = db.create_profile("Album requester")
@@ -383,3 +386,14 @@ def test_a_second_format_of_the_requested_track_is_not_imported(album_environmen
     # The request took the MP3; the profile would pick the FLAC of the same slot.
     assert _expand(env, files=[*env.originals, mp3], requested=3) == 2
     assert [ctx["track_info"]["name"] for ctx in env.contexts] == ["Second", "Third"]
+
+
+def test_only_additional_album_tracks_keep_the_album_import_provenance(album_environment):
+    env = album_environment
+    _request(env)
+    assert _expand(env) == 2
+    contexts = env.contexts
+    assert contexts
+    for ctx in contexts:
+        assert ctx['_album_import_extra'] == {'album': ALBUM, 'download_source': 'usenet'}
+    assert '_album_import_extra' not in env.context

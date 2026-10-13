@@ -160,6 +160,12 @@ class VideoLibraryScanner:
                           error="No connected Plex/Jellyfin video server")
                 return
             server = source.server_name
+            problem = getattr(source, "scan_problem", None)
+            problem = problem(media_type) if problem else None
+            if problem:
+                logger.warning("Video scan (%s) can't run: %s", mode, problem)
+                self._set(state="error", phase="no library", error=problem)
+                return
             incremental = mode == "incremental"
             do_prune = mode == "deep"
             # Movies and TV are independent libraries — scan only the requested
