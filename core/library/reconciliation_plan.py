@@ -498,8 +498,8 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             and not competing_release_slot
             and assigned_duration_delta is not None and assigned_duration_delta <= 3000
             and (corroborating_metadata >= 2 or
-                 (artist_agrees and position_agrees and
-                  (corroborating_metadata >= 1 or top_recording_id_agrees)))
+                 (artist_agrees and top_recording_id_agrees) or
+                 (artist_agrees and position_agrees and corroborating_metadata >= 1))
         )
         ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
         alternatives = sorted((w for j, (w, _) in enumerate(weighted[file_index])

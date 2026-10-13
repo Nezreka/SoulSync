@@ -19,6 +19,7 @@ from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
     _display_album_title, _distinctive_position_conflict,
+    _full_coverage_digital_alternative,
     _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot, _numbered_slot,
     _promote_album_context_candidate,
@@ -1409,6 +1410,21 @@ def test_digital_edition_discovery_accepts_a_release_group_seed():
     assert _release_group_candidates(
         'group-id', [{} for _ in range(10)], context, {}) == [
             ('musicbrainz', 'digital'), ('musicbrainz', 'cd')]
+
+
+def test_complete_digital_edition_stays_reviewable_when_one_track_is_ambiguous():
+    complete = {'extra_files': [], 'missing_slots': []}
+    physical = (14, 14, 0, 'musicbrainz', 'cd', [], complete)
+    digital = (13, 14, 0, 'musicbrainz', 'digital', [], complete)
+    metadata = lambda row: {'format': 'Digital Media' if row[4] == 'digital' else 'CD'}
+
+    assert _full_coverage_digital_alternative(
+        physical, [physical, digital], 'digital', 14, metadata)
+    assert not _full_coverage_digital_alternative(
+        physical, [physical, digital], 'release', 14, metadata)
+    assert not _full_coverage_digital_alternative(
+        physical, [physical, (*digital[:6], {**complete, 'missing_slots': [14]})],
+        'digital', 14, metadata)
 
 
 def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):

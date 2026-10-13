@@ -565,6 +565,23 @@ def _edition_preference(meta: dict, numbering_mode: str) -> tuple[int, int]:
     return digital, international
 
 
+def _full_coverage_digital_alternative(selected: tuple, ranked: list[tuple],
+                                       numbering_mode: str, file_count: int,
+                                       metadata) -> bool:
+    """A near-equal digital edition should remain an explicit album choice."""
+    clear, matched, _, _, _, _, plan = selected
+    if (numbering_mode != 'digital' or matched != file_count or
+            plan['extra_files'] or plan['missing_slots'] or
+            _edition_preference(metadata(selected), numbering_mode)[0]):
+        return False
+    return any(
+        row[3] == 'musicbrainz' and row[1] == matched and row[0] >= clear - 1 and
+        not row[6]['extra_files'] and not row[6]['missing_slots'] and
+        _edition_preference(metadata(row), numbering_mode)[0]
+        for row in ranked[1:6]
+    )
+
+
 def _has_unexplained_identified_extras(files: list[dict], scored: tuple) -> bool:
     """Whether a plausible album file fits no slot or competing local copy."""
     plan = scored[6]
@@ -1866,12 +1883,20 @@ class LibraryReconciliationJob(RepairJob):
                 position_conflict = bool(
                     not (album and album.get('canonical_locked')) and
                     _distinctive_position_conflict(files, scored[0], scored[1:]))
+                digital_edition_choice = bool(
+                    album_id is not None and album and not album.get('canonical_locked') and
+                    _full_coverage_digital_alternative(
+                        scored[0], ranked_candidates, numbering_mode, len(files),
+                        lambda row: _release_metadata(
+                            row, release_meta_cache, exact_musicbrainz_releases))
+                )
                 if (locked_conflict or tied or edition_conflict or symmetric_mismatch or
-                        position_conflict or
+                        position_conflict or digital_edition_choice or
                         (matched == 0 and not pinned)):
                     issue_type = ('reconciliation_release' if album_id is not None and
                                   (tied or locked_conflict or edition_conflict or
-                                   symmetric_mismatch or position_conflict)
+                                   symmetric_mismatch or position_conflict or
+                                   digital_edition_choice)
                                   else 'reconciliation_unresolved')
                     if locked_conflict:
                         description = ('The locked release does not fit as well as another candidate.'
@@ -1888,6 +1913,9 @@ class LibraryReconciliationJob(RepairJob):
                     elif position_conflict:
                         description = ('Another edition preserves the position of a distinct '
                                        'recording. Choose the release before changing track numbers.')
+                    elif digital_edition_choice:
+                        description = ('A digital edition covers every file, but one track has '
+                                       'different evidence. Compare the editions before choosing.')
                     else:
                         description = 'No release track could be assigned confidently.'
                     choice_common = {

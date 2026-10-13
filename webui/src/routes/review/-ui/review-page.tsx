@@ -1101,6 +1101,10 @@ export function ReviewPage() {
     (decision) => decision.category === 'album_completeness',
   );
   const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
+  const reviewMetadataCount =
+    reviewCase?.items.filter(
+      (item) => item.finding_type === 'reconciliation_metadata' && item.review_tier !== 'ready',
+    ).length || 0;
   const readyIncludedInGroup = reviewDecisions.some(
     (decision) =>
       ['metadata', 'numbering', 'title_conventions'].includes(decision.category) &&
@@ -1904,7 +1908,7 @@ export function ReviewPage() {
                   </button>
                   <button
                     type="button"
-                    data-state={plan.ready || plan.manual ? 'needs-review' : 'settled'}
+                    data-state={plan.ready || reviewMetadataCount ? 'needs-review' : 'settled'}
                     onClick={() => {
                       setTrackFilter('change');
                       setAlbumView('tracks');
@@ -1912,7 +1916,7 @@ export function ReviewPage() {
                   >
                     <span>4 · Proposed edits</span>
                     <strong>
-                      {plan.ready} ready · {plan.manual} awaiting review
+                      {plan.ready} ready · {reviewMetadataCount} awaiting review
                     </strong>
                     <small>See every affected field and file →</small>
                   </button>
@@ -2455,8 +2459,8 @@ export function ReviewPage() {
                       </p>
                     </div>
                   </div>
-                  {active?.details?.release_disambiguation && (
-                    <p>Edition note: {textValue(active.details.release_disambiguation)}</p>
+                  {Boolean(active?.details?.release_disambiguation) && (
+                    <p>Edition note: {textValue(active?.details?.release_disambiguation)}</p>
                   )}
                   <ReleaseComparison
                     candidates={

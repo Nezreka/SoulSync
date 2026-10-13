@@ -82,7 +82,7 @@ def test_large_duration_error_remains_unsettled_after_neighbor_is_removed():
     assert any('30.1 seconds' in reason for reason in result['pairs'][0]['ambiguity_reasons'])
 
 
-def test_tied_fingerprint_can_be_settled_by_artist_position_and_duration():
+def test_tied_fingerprint_can_be_settled_by_recording_id_artist_and_duration():
     file = _file('TV Dinners - 2008 Remaster',
                  '/album/02 - TV Dinners - 2008 Remaster.mp3', 230616,
                  {'mbid': 'tv', 'title': 'TV Dinners', 'artist': 'ZZ Top', 'score': 0.99})
@@ -90,7 +90,7 @@ def test_tied_fingerprint_can_be_settled_by_artist_position_and_duration():
     file['acoustid']['recordings'].append(
         {'mbid': 'gun', 'title': 'Gun Love', 'artist': 'ZZ Top', 'score': 0.99})
     slots = [{'title': 'TV Dinners', 'artist': 'ZZ Top', 'recording_mbid': 'tv',
-              'track_number': 2, 'disc_number': 1, 'duration_ms': 230573}]
+              'track_number': 8, 'disc_number': 1, 'duration_ms': 230573}]
 
     result = reconcile_folder([file], slots)
 

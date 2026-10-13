@@ -975,7 +975,7 @@ export function ReconciliationEvidence({
     .toLocaleLowerCase()
     .trim();
   const audioSupportsExpected = objects(audio.recordings).some(
-    (recording) => label(recording.title).toLocaleLowerCase().trim() === expectedTitle,
+    (recording) => baseVersionTitle(label(recording.title)) === baseVersionTitle(expectedTitle),
   );
 
   return (
@@ -1088,7 +1088,7 @@ export function ReconciliationEvidence({
           <AudioEvidence details={details} />
         </div>
       )}
-      {(!prominent || Boolean(details.checked_files) || reasons.length > 0) && (
+      {(!prominent || objects(details.checked_files).length > 0 || reasons.length > 0) && (
         <details className={styles.technicalEvidence}>
           <summary>
             <EvidenceIcon name="info" /> Technical evidence
