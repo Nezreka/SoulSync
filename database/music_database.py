@@ -1311,7 +1311,7 @@ class MusicDatabase:
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
             self._add_norm_columns(cursor)
-            self._add_lower_text_indexes(cursor)
+            self._add_lookup_indexes(cursor)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS genre_translation_cache (
@@ -4256,12 +4256,23 @@ class MusicDatabase:
         ('idx_artists_name_lower', 'artists', 'name'),
     )
 
-    def _add_lower_text_indexes(self, cursor):
+    # tracks never had an index on file_path. the import pipeline, its side
+    # effects, verification, the missing-track import and the repair jobs all
+    # look tracks up or update them by exact path, often once per track, and
+    # each one read the whole table: 110-170 ms warm, seconds cold. 0.01 ms
+    # with it.
+    _PLAIN_LOOKUP_INDEXES = (
+        ('idx_tracks_file_path', 'tracks', 'file_path'),
+    )
+
+    def _add_lookup_indexes(self, cursor):
         try:
             for name, table, column in self._LOWER_TEXT_INDEXES:
                 cursor.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} (LOWER({column}))")
+            for name, table, column in self._PLAIN_LOOKUP_INDEXES:
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})")
         except Exception as e:
-            logger.error(f"Error adding lower() text indexes: {e}")
+            logger.error(f"Error adding lookup indexes: {e}")
 
     @staticmethod
     def _normalizer(kind: str):
@@ -23187,15 +23198,23 @@ class MusicDatabase:
                 # so the fold above can build cards whose play target no
                 # longer exists. Drop those here — never delete the history
                 # rows themselves.
-                from core.library.expired_cleanup import path_suffix_key  # matches the existing lazy import at :21740
-                cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
-                live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
-                cards = [
+                # only a card whose file is gone from disk needs the library
+                # asked, and only about that card's path. this loaded every
+                # track's path on every dashboard load (18 s cold, 1.3 s warm).
+                from core.library.expired_cleanup import path_suffix_key
+                from core.library.live_paths import live_suffix_keys
+                gone_from_disk = [
                     c for c in cards
-                    if not c.get('play_file_path')
-                    or os.path.exists(c['play_file_path'])
-                    or path_suffix_key(c['play_file_path']) in live_keys
+                    if c.get('play_file_path') and not os.path.exists(c['play_file_path'])
                 ]
+                if gone_from_disk:
+                    live_keys = live_suffix_keys(
+                        cursor, [c['play_file_path'] for c in gone_from_disk])
+                    dropped = {
+                        id(c) for c in gone_from_disk
+                        if path_suffix_key(c['play_file_path']) not in live_keys
+                    }
+                    cards = [c for c in cards if id(c) not in dropped]
 
                 # the normalized columns are indexed; the LOWER(TRIM()) form
                 # this replaced scanned every album per card (1.3 s of cpu per

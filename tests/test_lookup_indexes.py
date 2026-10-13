@@ -85,3 +85,31 @@ def test_playable_resolver_searches_titles_instead_of_scanning(db, monkeypatch):
     for plan in plans:
         assert any("USING INDEX idx_tracks_title_lower" in s for s in plan), plan
         assert not any(s.startswith("SCAN t") for s in plan), plan
+
+
+# ---------------------------------------------------------------------------
+# tracks never had an index on file_path. imports, verification, the
+# missing-track import and the repair jobs look tracks up by exact path,
+# often once per track, and each lookup read the whole table (110-170 ms
+# warm, seconds cold).
+# ---------------------------------------------------------------------------
+
+def test_init_creates_the_file_path_index(db):
+    c = sqlite3.connect(str(db.database_path))
+    sql = c.execute("SELECT sql FROM sqlite_master WHERE name = 'idx_tracks_file_path'").fetchone()
+    c.close()
+    assert sql and "ON tracks (file_path)" in sql[0]
+
+
+@pytest.mark.parametrize("sql", [
+    "SELECT id FROM tracks WHERE file_path = ?",                     # imports, repair
+    "SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1",              # rematch hints
+    "UPDATE tracks SET file_path = ? WHERE file_path = ?",           # atomic recovery, repair moves
+    "UPDATE tracks SET verification_status = ? WHERE file_path = ?",  # verification
+    "DELETE FROM tracks WHERE file_path = ?",
+])
+def test_exact_path_lookups_search_the_index(db, sql):
+    params = tuple("x" for _ in range(sql.count("?")))
+    plan = _plan(db, sql, params)
+    assert any("idx_tracks_file_path" in step for step in plan), plan
+    assert not any(step == "SCAN tracks" for step in plan), plan
