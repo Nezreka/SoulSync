@@ -14,7 +14,7 @@ class WebScanManager:
     Features:
     - Debounces multiple scan requests to prevent spam
     - Thread-safe operation with Flask
-    - Works with Plex, Jellyfin, and Navidrome
+    - Works with Plex, Jellyfin, Navidrome, and SoulSync standalone
     - Scan completion callbacks for chained operations
     - Progress tracking and status reporting
     """

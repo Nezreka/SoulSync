@@ -9,6 +9,7 @@ artist/album folder structure, and returns compatible data objects.
 import hashlib
 import os
 import re
+import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
@@ -268,6 +269,8 @@ class SoulSyncClient(MediaServerClient):
         self._cache_time = 0
         self._cache_ttl = 300  # 5 minute cache
         self._last_scan_time = None
+        self._scan_thread = None  # Background rescan started by trigger_library_scan
+        self._scan_lock = threading.Lock()  # Serializes trigger check + assign + start
         self._reload_config()
 
     def _reload_config(self):
@@ -462,6 +465,84 @@ class SoulSyncClient(MediaServerClient):
         return self._cache
 
     # ── Public Interface (matches Plex/Jellyfin/Navidrome) ──
+
+    # ── Library Scan ──
+
+    def trigger_library_scan(self, library_name: str = "Music") -> bool:
+        """Trigger a standalone library scan.
+
+        The other clients ask an external server to rescan; standalone
+        SoulSync IS the server, so a scan is a filesystem walk of the
+        Transfer folder. The walk reads every file's tags and can take
+        a while on a large library, so it runs on a background thread —
+        the same fire-and-forget shape as the server APIs. When the
+        walk finishes, its result replaces the scan cache, so the next
+        get_all_artists() (e.g. the DatabaseUpdateWorker) sees the new
+        files without waiting out the cache TTL.
+
+        ``library_name`` is accepted for parity with the other clients
+        and ignored — standalone has exactly one library. Returns True
+        when a scan is running after the call (started here, or one
+        was already in progress). Never raises, matching the other
+        clients: failures are logged and reported as False.
+        """
+        thread = None
+        try:
+            if not self.is_connected():
+                logger.warning("[SoulSync] Library scan requested but the Transfer path is not available")
+                return False
+            # The check + assign + start must be atomic: callers are
+            # concurrent by design (scan-manager timer thread, the
+            # audiobook monitor's per-book nudge threads), and two
+            # triggers racing the check would each spawn a full
+            # Transfer walk. is_alive() is also False in the
+            # assign→start gap, so the lock has to cover start() too.
+            with self._scan_lock:
+                if self.is_library_scanning():
+                    logger.info("[SoulSync] Library scan already in progress")
+                    return True
+                thread = threading.Thread(
+                    target=self._run_triggered_scan,
+                    daemon=True,
+                    name="soulsync-library-scan",
+                )
+                self._scan_thread = thread
+                thread.start()
+            logger.info("[SoulSync] Library scan triggered (background filesystem rescan)")
+            return True
+        except Exception as e:
+            logger.error(f"[SoulSync] Failed to trigger library scan: {e}")
+            if thread is not None and self._scan_thread is thread and not thread.is_alive():
+                self._scan_thread = None
+            return False
+
+    def is_library_scanning(self, library_name: str = "Music") -> bool:
+        """Whether a triggered background rescan is still running."""
+        thread = self._scan_thread
+        return thread is not None and thread.is_alive()
+
+    def _run_triggered_scan(self):
+        """Background body for trigger_library_scan: run a full rescan,
+        then swap the cache so readers pick up the new library state.
+        A walk that raises — or that finds the Transfer path gone
+        (unmounted between the trigger's connectivity check and the
+        walk, where _scan_transfer would otherwise return an empty
+        list) — keeps the previous cache: stale data beats an emptied
+        library view."""
+        import time
+        try:
+            if not os.path.isdir(self._transfer_path):
+                logger.error(f"[SoulSync] Triggered library scan aborted — Transfer path not available: {self._transfer_path}")
+                return
+            artists = self._scan_transfer()
+            self._cache = artists
+            self._cache_time = time.time()
+            self._last_scan_time = datetime.now().isoformat()
+        except Exception as e:
+            logger.error(f"[SoulSync] Triggered library scan failed: {e}")
+        finally:
+            if self._scan_thread is threading.current_thread():
+                self._scan_thread = None
 
     def get_all_artists(self) -> List[SoulSyncArtist]:
         """Get all artists from the Transfer folder."""
