@@ -317,6 +317,12 @@
     function gotoUnifiedDownloads(mode) {
         _backStack = [];
         setActiveNav('video-downloads');
+        // Reveal wiring, same mechanism showPage() drives for the legacy
+        // shared pages: the attribute keys the video-side.css rules that
+        // show #webui-react-root and hide the video host. Without it the
+        // blanket video-side rule keeps the React root display:none and
+        // the routed page renders invisibly under the stale video page.
+        document.body.setAttribute('data-video-page', 'video-downloads');
         var replace = mode === 'replace' || mode === 'restore';
         try {
             var wsr = window.SoulSyncWebRouter;

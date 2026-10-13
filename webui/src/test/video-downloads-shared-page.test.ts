@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
 
 const SIDE = read('static/video/video-side.js');
+const SIDE_CSS = read('static/video/video-side.css');
 
 /** The source between two markers, so a pin reads one function, not the file. */
 function between(src: string, start: string, end: string): string {
@@ -44,6 +45,23 @@ describe('video downloads is a shared page, not a side flip', () => {
   it('the hand-off never flips the app side', () => {
     const handoff = between(SIDE, 'function gotoUnifiedDownloads(', 'function navigate(');
     expect(handoff).not.toContain('_switchAppSide(');
+  });
+
+  it('the hand-off sets the body page attribute that keys the reveal CSS', () => {
+    // navigate() hands off before showPage() can set data-video-page, so the
+    // hand-off sets it itself; without it the blanket video-side hide rule
+    // keeps the React host display:none and the page renders invisibly.
+    const handoff = between(SIDE, 'function gotoUnifiedDownloads(', 'function navigate(');
+    expect(handoff).toContain("document.body.setAttribute('data-video-page', 'video-downloads')");
+  });
+
+  it('the video-side CSS reveals the React host for downloads and hides the video host', () => {
+    expect(SIDE_CSS).toContain(
+      'body[data-side="video"][data-video-page="video-downloads"] #webui-react-root',
+    );
+    expect(SIDE_CSS).toContain(
+      'body[data-side="video"][data-video-page="video-downloads"] #video-page-host',
+    );
   });
 
   it('the side toggle still returns to the active-marked video page', () => {
