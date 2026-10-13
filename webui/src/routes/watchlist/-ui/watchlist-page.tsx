@@ -703,9 +703,11 @@ export function WatchlistPage() {
         </div>
       ) : null}
 
-      <div className={styles.tabs}>
+      <div className={styles.tabs} role="tablist" aria-label="Watchlist sections">
         <button
           type="button"
+          role="tab"
+          aria-selected={search.tab === 'artists'}
           className={`${styles.tab} ${search.tab === 'artists' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'artists' }) })}
         >
@@ -713,6 +715,8 @@ export function WatchlistPage() {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={search.tab === 'labels'}
           className={`${styles.tab} ${search.tab === 'labels' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'labels' }) })}
         >
@@ -720,6 +724,8 @@ export function WatchlistPage() {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={search.tab === 'podcasts'}
           className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
         >
@@ -727,6 +733,8 @@ export function WatchlistPage() {
         </button>
         <button
           type="button"
+          role="tab"
+          aria-selected={search.tab === 'audiobooks'}
           className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
           onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
         >

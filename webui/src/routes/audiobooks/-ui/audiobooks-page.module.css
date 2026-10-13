@@ -311,7 +311,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1 1 420px;
+  /* min(420px, 100%): the 420px basis must not exceed the search bar on a
+     phone — it pushed the Search button half off the pill (batch #2, RC3).
+     min-width: 0 for the same reason: the automatic minimum size is the
+     input's intrinsic width (~330px of content), which otherwise becomes
+     the floor no matter what the basis says. */
+  flex: 1 1 min(420px, 100%);
+  min-width: 0;
   padding: 0 8px 0 16px;
   height: 48px;
   border-radius: 14px;
@@ -427,6 +433,29 @@
 .searchModeActive {
   background: rgba(var(--accent-rgb), 0.9);
   color: #fff;
+}
+
+/* Below 360px the four modes total ~266px inside a ~246px bar (at 320px)
+   and the strip — a single flex item whose automatic minimum is its
+   content — painted past the bar's right edge (batch #2 fold-in). Let the
+   strip shrink to the bar and scroll internally, like the app's other
+   rails; ≥360px rendering is untouched. */
+@media (max-width: 359px) {
+  .searchModes {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .searchModes::-webkit-scrollbar {
+    display: none;
+  }
+
+  .searchMode {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
 }
 
 .browseTopRow {

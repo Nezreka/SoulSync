@@ -551,6 +551,7 @@ function FilterPill({
       type="button"
       role="tab"
       aria-selected={active}
+      data-import-page-pill
       className={clsx(styles.pill, { [styles.active]: active })}
       onClick={onClick}
     >

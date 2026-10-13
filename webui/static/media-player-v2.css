@@ -53,9 +53,24 @@
         radial-gradient(120% 105% at 50% 45%, transparent 52%, rgba(0, 0, 0, 0.55) 100%);
 }
 
-#np-modal-overlay .np-modal > *:not(#np-v2-bg):not(.np-v2-shorts-overlay) {
+/* The close button is excluded: it is absolutely positioned chrome
+   (style.css .np-close-btn, top/right), and this rule's specificity beat
+   that — as a relative box its right:20px became a -20px shift, parking
+   it half off the modal's top-left corner (batch #2, RC5). */
+#np-modal-overlay .np-modal > *:not(#np-v2-bg):not(.np-v2-shorts-overlay):not(.np-close-btn) {
     position: relative;
     z-index: 2;
+}
+
+/* …but exclusion alone left the chevron untappable: its own z-index is
+   also 2 (style.css) and .np-body follows it in the DOM, so the body
+   subtree painted over it and elementFromPoint at its centre returned
+   .np-left (batch #2 fold-in). z-index: 3 lifts it above the z-index: 2
+   content family; the chrome that must stay above it — the shorts
+   overlay (10), the visuals drawer/side panel/exit (8/9/5) and the speed
+   menu (9999) — all sit higher, so nothing else changes hands. */
+#np-modal-overlay .np-close-btn {
+    z-index: 3;
 }
 
 /* ---- Body: stage (art + info) | panel (transport + tabs) ------------------ */
@@ -757,10 +772,26 @@
 
     #np-modal-overlay .np-right { overflow: visible; }
 
+    /* Transport row budget: 4 side buttons + play + gaps must fit the
+       phone content box (~324px at a 360px viewport). At desktop sizes the
+       row is 4×46 + 70 + 4×24 = 350px, so shrink the buttons and the gap
+       here. flex-shrink: 0 itself lives in style.css (batch #2, RC5).
+       Scoped to .np-controls-row on purpose: the Stop button is also an
+       .np-btn but lives in .np-stop-row and is a text pill sized auto on
+       purpose (.np-btn.np-btn-stop in style.css) — the unscoped version
+       of this rule crushed it into a 42px box (batch #2 fold-in). */
+    #np-modal-overlay .np-controls-row { gap: 14px !important; }
+    #np-modal-overlay .np-controls-row .np-btn { width: 42px !important; height: 42px !important; }
+    #np-modal-overlay .np-controls-row .np-btn-play { width: 64px !important; height: 64px !important; }
+
+    /* Panels flow in the body scroll on mobile: the old 46vh nested
+       scroller meant reaching the EQ (SETTINGS panel) took exhausting the
+       body scroll, switching tab, then scrolling a second small window —
+       on a phone the tab bar ended up flush with the bottom edge and the
+       panels felt unreachable (batch #2, RC5). */
     .np-v2-tabpanels {
+        max-height: none;
         overflow: visible;
-        max-height: 46vh;
-        overflow-y: auto;
     }
 
     .np-v2-shorts-grid { grid-template-columns: 1fr; }
