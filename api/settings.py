@@ -4,7 +4,7 @@ Settings and API key management endpoints.
 
 from flask import request, current_app
 from . import key_store
-from .auth import require_api_key
+from .auth import SCOPE_ADMIN, VALID_SCOPES, require_api_key
 from .helpers import api_success, api_error
 
 # Keys that must NEVER be exposed via the API
@@ -87,15 +87,20 @@ def register_routes(bp):
     def create_api_key():
         """Generate a new API key.
 
-        Body: {"label": "My Bot"}
+        Body: {"label": "My Bot", "scope": "read"}
+        ``scope`` is "admin" (the default) or "read".
         The raw key is returned ONCE in the response.
         """
         body = request.get_json(silent=True) or {}
         label = body.get("label", "")
+        scope = body.get("scope", SCOPE_ADMIN)
+        if scope not in VALID_SCOPES:
+            return api_error("BAD_REQUEST",
+                             f"scope must be one of: {', '.join(VALID_SCOPES)}.", 400)
 
         try:
             cfg = current_app.soulsync["config_manager"]
-            raw_key, record = key_store.create_key(cfg, label)
+            raw_key, record = key_store.create_key(cfg, label, scope)
             return api_success(key_store.created_view(raw_key, record), status=201)
         except Exception as e:
             return api_error("SETTINGS_ERROR", str(e), 500)
