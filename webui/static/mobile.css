@@ -1884,8 +1884,15 @@
        can't stretch them into vertical ellipses. The video dashboard's Studios
        halves (.vst-half) are excluded because this chain's specificity beats
        their own min-height: 208px — their content is absolutely positioned, so
-       "winning" here collapses each half to a 38px sliver on phones. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not(.modal-track-play-btn):not(.cancel-track-btn) {
+       "winning" here collapses each half to a 38px sliver on phones.
+       Segmented-control pills and fixed-size swatches are excluded for the
+       same reason: they are designed shorter than 38px to sit inside a track
+       (.watchlist-filter-btn is 28px in a 36px track; .dash-qs-swatch is a
+       16px circle) and this rule stretched them into ovals / made them
+       protrude from their track (mobile CSS batch #2, RC1). The import
+       page's pills are a CSS module (hashed class), so they are hooked by
+       data attribute like the other import-page exclusions. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn) {
         min-height: 38px;
     }
 
@@ -4274,10 +4281,39 @@ html.download-modal-open body {
    reachable. When a modal opens (e.g. the Deezer service setup), the
    hamburger paints above the modal's own header and overlaps its title.
    Modals get their own close control, so the hamburger is redundant while
-   one is open. */
+   one is open.
+   Batch #2: the original rule waited for modal-open / download-modal-open,
+   which almost nothing sets. What actually signals an open modal, and what
+   this rule keys off:
+   - body classes the app toggles: src-modal-open (settings service/source
+     modals — the Deezer one), pf-modal-open (profile layers), np-modal-open
+     (the player).
+   - overlay roots via :has(), for the React modals that set no body class —
+     the pattern style.css already uses for the vanilla modals. Each family
+     below was checked: its overlay is either mounted only while open, or
+     stays mounted and carries its open class (.visible / .active) only
+     while open, so the hamburger never hides with nothing open.
+   - the audiobook overlays (AudiobookOverlay) portal a backdrop whose
+     class is a hashed CSS module, unnameable here — the component stamps
+     data-audiobook-overlay on it instead, and that attribute is the hook.
+   Modal families NOT listed either stack above the hamburger already
+   (z-index ≥ 10000: download, mirrored, repair-help, server-search, the
+   generic .modal-overlay) or are covered by the body classes above. */
 html.download-modal-open .hamburger-btn,
 html.modal-open .hamburger-btn,
-body.modal-open .hamburger-btn {
+body.modal-open .hamburger-btn,
+body.src-modal-open .hamburger-btn,
+body.pf-modal-open .hamburger-btn,
+body.np-modal-open .hamburger-btn,
+body:has(.auto-sync-overlay) .hamburger-btn,
+body:has(.confirm-modal-overlay) .hamburger-btn,
+body:has(.discog-modal-overlay.visible) .hamburger-btn,
+body:has(.arec-overlay.visible) .hamburger-btn,
+body:has(.art-picker-overlay.visible) .hamburger-btn,
+body:has(.watchadd-modal-overlay.visible) .hamburger-btn,
+body:has(.server-disambig-overlay.visible) .hamburger-btn,
+body:has(.genre-browser-modal-overlay.active) .hamburger-btn,
+body:has([data-audiobook-overlay]) .hamburger-btn {
     display: none !important;
 }
 
@@ -4291,5 +4327,35 @@ body.modal-open .hamburger-btn {
     .page-title,
     h1.page-title {
         padding-left: 56px;
+    }
+
+    /* Settings sub-pages title their pane with .stg-active-title-text, not
+       .page-title, so they slid under the hamburger too ("…brary",
+       "…wnloads", "…ality" in the batch #2 screenshots). The title sits in
+       the detail pane, right of the category rail; indent the title block
+       itself so the Save button on the same row is untouched. */
+    #settings-page .stg-active-section-title {
+        padding-left: 56px;
+    }
+}
+
+/* --- Auto-Sync Manager header on phones ---
+   The header is a flex row: title/blurb, the summary strip (a grid of
+   minmax(150px,1fr) tiles) passed in as an aside, and the actions. The
+   title div is the only shrinkable child, so on a phone it was crushed
+   toward min-content (~90px — the one-word-per-line blurb in gzetk's
+   screenshot) while the second stat pill clipped at the modal's edge
+   (batch #2, RC4). Wrap: title + actions share the first row, the summary
+   takes a full-width row of its own below. */
+@media (max-width: 768px) {
+    .auto-sync-header {
+        flex-wrap: wrap;
+    }
+    .auto-sync-header > div {
+        min-width: 0;
+    }
+    .auto-sync-header .auto-sync-summary {
+        flex: 1 1 100%;
+        order: 3;
     }
 }

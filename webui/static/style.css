@@ -4411,10 +4411,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .preset-buttons {
     display: flex;
     gap: 8px;
+    /* flex:1 + nowrap presets couldn't shrink below min-content, so the
+       third preset was cut at the card edge on phones (batch #2, RC3). */
+    flex-wrap: wrap;
 }
 
 .preset-button {
-    flex: 1;
+    flex: 1 1 120px;
     padding: 10px 12px;
     background: linear-gradient(135deg, var(--white-a05), var(--white-a02));
     border: 1px solid var(--white-a10);
@@ -23873,6 +23876,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     align-items: center;
     gap: 8px;
+    /* The toolbar's content is ~338px wide; on a phone the unwrapped row
+       pushed the last control (the Auto-scroll toggle) off the right edge
+       (batch #2, RC3). Let it wrap instead. */
+    flex-wrap: wrap;
 }
 
 .log-action-btn {
@@ -53939,9 +53946,15 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-btn {
     width: 46px !important; height: 46px !important; border-radius: var(--radius-circle) !important;
     color: rgba(255,255,255,0.62) !important; transition: all 0.16s ease !important;
+    /* The transport row is 4×46 + 70 + gaps ≈ 350px; on a phone the row is
+       narrower, and with default flex-shrink the buttons compressed
+       horizontally only — the 70px play button rendered as a tall oval
+       (batch #2, RC5). Transport buttons never shrink. */
+    flex-shrink: 0;
 }
 .np-btn:hover { color: #fff !important; background: var(--white-a07) !important; transform: scale(1.08) !important; }
 .np-btn-play {
+    flex-shrink: 0;
     width: 70px !important; height: 70px !important; border-radius: var(--radius-circle) !important;
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb))) !important;
     color: #06140b !important;
@@ -58921,6 +58934,21 @@ tr.tag-diff-same {
     font-size: 13px;
 }
 
+/* Below 360px the toggle group's two buttons total ~282px and start after
+   the hero's left block — at 320px the group ran to x=328 and the page
+   scrolled sideways (batch #2 fold-in). Tighten the buttons so the group
+   fits the narrowest phones; ≥360px rendering is untouched. */
+@media (max-width: 359px) {
+    .operations-mode-toggle-group {
+        max-width: 100%;
+    }
+
+    .operations-mode-toggle-btn {
+        padding: 8px 10px;
+        gap: 4px;
+    }
+}
+
 /* Header Actions: Mode switcher + Master toggle in maintenance header */
 .tools-maintenance-header-actions {
     display: flex;
@@ -59124,7 +59152,10 @@ tr.tag-diff-same {
 
 .operations-triage-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    /* min(280px, 100%): the 280px floor must never exceed the container —
+       on a phone the cards live in a ~252px box and spilled out of their
+       parent card (mobile CSS batch #2, RC3). */
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
     gap: 16px;
 }
 
@@ -59682,6 +59713,31 @@ tr.tag-diff-same {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 16px;
+}
+
+.operations-pillars-title-group {
+    flex-shrink: 0;
+}
+
+.operations-pillars-sub {
+    min-width: 0;
+}
+
+/* Phones: the title group and the explainer paragraph can't share a row —
+   the paragraph was crushed into the leftover sliver beside the title and
+   the two columns collided (batch #2, RC3). Stack them instead. */
+@media (max-width: 640px) {
+    .operations-pillars-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .operations-pillars-sub {
+        margin: 0;
+        text-align: left;
+    }
 }
 
 .operations-pillars-title {
@@ -59698,7 +59754,9 @@ tr.tag-diff-same {
 
 .operations-pillars-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    /* min(320px, 100%): see .operations-triage-grid — the floor capped at
+       the container width so a card can never be wider than a phone. */
+    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
     gap: 16px;
 }
 
@@ -84653,6 +84711,14 @@ body.src-modal-open { overflow: hidden; }
     font-size: 0.78em;
     color: var(--white-a35);
 }
+/* Below 360px even the slimmed row left the source name a ~34px box for
+   ~63px of text at 320px (batch #2 fold-in). Drop the rank numeral in the
+   same spirit: chain order is still obvious from the row order and the
+   up/down buttons remain. Scoped under 360px so the layout verified at
+   360px is untouched — there the name box is ~86px and names fit. */
+@media (max-width: 359px) {
+    .dlchain-step-rank { display: none; }
+}
 
 /* the rest of the source settings, under the pool */
 .dlchain-extra {
@@ -84669,7 +84735,15 @@ body.src-modal-open { overflow: hidden; }
 .dlchain-extra[hidden] { display: none; }
 .dlchain-extra .form-group { margin-bottom: 0; }
 
-@media (max-width: 820px) { .dlchain-columns { grid-template-columns: 1fr; gap: 18px; } }
+@media (max-width: 820px) {
+    .dlchain-columns { grid-template-columns: 1fr; gap: 18px; }
+    /* Grid items default to min-width:auto, so the stacked columns kept
+       their desktop min-content (~273px) and the pool's Filter + source
+       cards stuck out of the panel on phones (batch #2, RC3). Let the
+       columns actually shrink to the panel width. */
+    .dlchain-columns > * { min-width: 0; }
+    .dlchain-pool, .dlchain-list { min-width: 0; }
+}
 
 /* Phones: dragging is not realistic on a touch screen, so the arrows become the
    primary control and take a real tap target. */
@@ -84684,6 +84758,12 @@ body.src-modal-open { overflow: hidden; }
     .dlchain-tile-name { font-size: 0.72em; }
     .dlchain-list { padding: 12px 10px; }
     .dlchain-step { width: 100%; padding: 8px; gap: 8px; }
+    /* The row's fixed chrome (grip + rank + art tile + move + remove
+       ≈ 134px plus gaps) left ~20px for the source name at 360px —
+       "Soulseek" ellipsised to almost nothing (batch #2, RC3). The art
+       tile and the drag grip are the expendable pieces on touch; the
+       up/down move buttons below remain. */
+    .dlchain-step-art, .dlchain-grip { display: none; }
     .dlchain-move { width: 30px; height: 22px; font-size: 10px; }
     .dlchain-btn { width: 30px; height: 30px; }
     /* these were taller than the desktop rule after the chain was compacted */
@@ -85680,8 +85760,26 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .stg-media-summary.is-live { color: rgba(var(--accent-rgb),.8); }
 @media (max-width: 600px) {
     #settings-page .stg-media-card .stg-media-switcher { display: flex; }
-    /* four tabs at 100px each overflow a phone, so they share the row */
-    #settings-page .stg-media-switcher button { flex: 1; min-width: 0; padding: 9px 4px; }
+    /* Four tabs at 100px each overflow a phone. The old fix shared the row
+       (flex: 1; min-width: 0), which squeezed "Audiobooks" into a 68px tab
+       and let the label paint over "Podcasts" (batch #2, RC2). Instead the
+       tabs keep their content size and the switcher scrolls horizontally,
+       like the app's other tab rails. This rule is ID-scoped and more
+       specific than mobile.css's [role="tablist"] rail rule, so the
+       nowrap/flex-shrink treatment has to be restated here. */
+    #settings-page .stg-media-switcher {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+    #settings-page .stg-media-switcher::-webkit-scrollbar { display: none; }
+    #settings-page .stg-media-switcher button {
+        flex: 0 0 auto;
+        min-width: 0;
+        padding: 9px 14px;
+        white-space: nowrap;
+    }
 }
 #settings-page .stg-media-panel > .settings-group {
     margin-top: 0;

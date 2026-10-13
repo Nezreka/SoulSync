@@ -37,7 +37,17 @@ export function AudiobookOverlay({ onClose, label, children }: AudiobookOverlayP
   if (typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className={styles.modalBackdrop} onClick={onBackdropClick} role="presentation">
+    // data-audiobook-overlay is the stable hook for global CSS: the
+    // backdrop's class is a hashed CSS module, so mobile.css cannot name
+    // it — its hamburger-hide rule keys off this attribute via :has()
+    // instead (mobile CSS batch #2). The attribute lives and dies with the
+    // portal, so there is no body class to leak on unmount.
+    <div
+      className={styles.modalBackdrop}
+      data-audiobook-overlay=""
+      onClick={onBackdropClick}
+      role="presentation"
+    >
       <div ref={ref} role="dialog" aria-modal="true" aria-label={label}>
         {children}
       </div>
