@@ -11,8 +11,29 @@ from flask import Flask
 from core.repair_review_identity import missing_slot_key, review_case_key
 from core.repair_review_queue import classify_case, get_case, list_cases, safe_finding_ids
 from core.library.reconciliation_store import ensure_schema, persist_album_plan, retire_unseen_plans
-from core.repair_worker import RepairWorker
+from core.repair_worker import RepairWorker, _same_reviewed_file
 from database.music_database import MusicDatabase
+
+
+def test_reviewed_file_accepts_mount_alias_but_rejects_different_inode(tmp_path):
+    scanned = tmp_path / 'scan' / 'track.flac'
+    scanned.parent.mkdir()
+    scanned.write_bytes(b'audio')
+    alias = tmp_path / 'library' / 'track.flac'
+    alias.parent.mkdir()
+    alias.hardlink_to(scanned)
+    other = tmp_path / 'other.flac'
+    other.write_bytes(b'audio')
+    assert _same_reviewed_file(str(scanned), str(alias))
+    assert not _same_reviewed_file(str(scanned), str(other))
+
+
+def test_album_title_cleanup_keeps_edition_and_drops_pressing_plant():
+    from core.repair_jobs.library_reconciliation import _clean_album_display_title
+
+    assert _clean_album_display_title(
+        'The Fame Monster (deluxe, EDC Blackburn Ltd.)') == 'The Fame Monster (deluxe)'
+    assert _clean_album_display_title('Greatest Hits (Deluxe)') == 'Greatest Hits (Deluxe)'
 
 
 class _Connection(sqlite3.Connection):
@@ -704,11 +725,16 @@ def test_grouped_title_convention_decision_applies_every_current_action():
     applied = []
     worker.fix_finding = lambda finding_id, **_kwargs: (
         applied.append(finding_id) or {'success': True})
+    refreshes = []
+    worker._schedule_album_refresh = lambda key, folder: (
+        refreshes.append((key, folder)) or True)
 
     result = worker.apply_review_decision_group(case_id, 'title_conventions', action='fix')
 
-    assert result == {'success': True, 'applied': 2, 'total': 2}
+    assert result == {'success': True, 'applied': 2, 'total': 2,
+                      'refresh_queued': True}
     assert applied == [1, 2]
+    assert refreshes == [(case_id, '/music/Album')]
 
 
 def test_accepted_reconciliation_exception_reopens_when_audio_evidence_changes(tmp_path):

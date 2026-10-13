@@ -368,11 +368,25 @@ function DuplicateCopies({
             ? copy.playlists.map(label).filter(Boolean)
             : [];
           const trackId = label(copy.track_id || copy.id);
+          const quality = object(copy.quality);
+          const audioFacts = [
+            label(quality.format),
+            quality.sample_rate ? `${Math.round(count(quality.sample_rate) / 1000)} kHz` : '',
+            quality.bits_per_sample ? `${label(quality.bits_per_sample)} bit` : '',
+            quality.bitrate || copy.bitrate
+              ? `${Math.round(count(quality.bitrate || copy.bitrate) / 1000)} kbps`
+              : '',
+            copy.duration ? formatDuration(copy.duration) : '',
+            copy.size_bytes ? `${(count(copy.size_bytes) / 1048576).toFixed(1)} MB` : '',
+          ].filter(Boolean);
           return (
             <article key={`${trackId}-${path}-${index}`}>
               <div>
                 <strong>{path.split('/').pop() || label(copy.title) || 'Unknown file'}</strong>
                 <small>{path}</small>
+                {audioFacts.length > 0 && (
+                  <span className={styles.audioFacts}>{audioFacts.join(' · ')}</span>
+                )}
                 {Boolean(copy.recording_disambiguation) && (
                   <span>Recording: {label(copy.recording_disambiguation)}</span>
                 )}
@@ -455,164 +469,181 @@ function candidateAssignments(candidate: Data): string {
   const pairs = objects(candidate.pairs)
     .map(
       (pair) =>
-        `${label(pair.file)}:${label(pair.disc_number)}:${label(pair.slot_number)}:${label(pair.slot_title)}`,
+        `${label(pair.file)}:${label(pair.disc_number)}:${label(pair.track_number || pair.slot_number)}:${label(pair.slot_title)}`,
     )
+    .sort()
     .join('|');
-  const missing = Array.isArray(candidate.missing) ? candidate.missing.map(label).join('|') : '';
-  const extra = Array.isArray(candidate.extra) ? candidate.extra.map(label).join('|') : '';
+  const missing = Array.isArray(candidate.missing)
+    ? candidate.missing.map(label).join('|')
+    : Array.isArray(candidate.missing_tracks)
+      ? candidate.missing_tracks.map(label).join('|')
+      : '';
+  const extra = Array.isArray(candidate.extra)
+    ? candidate.extra.map(label).join('|')
+    : Array.isArray(candidate.extra_files)
+      ? candidate.extra_files.map(label).join('|')
+      : '';
   return `${label(candidate.total_slots)}::${pairs}::missing=${missing}::extra=${extra}`;
 }
 
-function ReleaseCandidates({
-  details,
+export function ReleaseComparison({
+  candidates,
+  selected,
+  onSelect,
   onPin,
-  busy,
+  busy = false,
+  currentRelease,
 }: {
-  details: Data;
+  candidates: Data[];
+  selected: number;
+  onSelect: (index: number) => void;
   onPin?: (index: number) => void;
-  busy: boolean;
+  busy?: boolean;
+  currentRelease?: Data;
 }) {
-  const candidates = objects(details.candidates);
-  const attempted = objects(details.attempted_releases);
-  if (!candidates.length && !attempted.length) return null;
-  const comparable =
-    candidates.length > 1 &&
-    candidates.every((candidate) => Array.isArray(candidate.pairs)) &&
-    candidates.some((candidate) => objects(candidate.pairs).length > 0);
-  const sameAssignments =
-    comparable &&
-    candidates.every(
-      (candidate) => candidateAssignments(candidate) === candidateAssignments(candidates[0]),
-    );
-  const releases = candidates.length ? candidates : attempted;
+  if (!candidates.length) return null;
+  const active = candidates[Math.min(selected, candidates.length - 1)];
+  const pairs = objects(active.pairs).sort(
+    (left, right) =>
+      count(left.disc_number) - count(right.disc_number) ||
+      count(left.track_number || left.slot_number) - count(right.track_number || right.slot_number),
+  );
+  const missing = Array.isArray(active.missing)
+    ? active.missing.map(label)
+    : Array.isArray(active.missing_tracks)
+      ? active.missing_tracks.map(label)
+      : [];
+  const extra = Array.isArray(active.extra)
+    ? active.extra.map(label)
+    : Array.isArray(active.extra_files)
+      ? active.extra_files.map(label)
+      : [];
+  const firstShape = candidateAssignments(candidates[0]);
+  const allEquivalent = candidates.every(
+    (candidate) => candidateAssignments(candidate) === firstShape,
+  );
   return (
-    <section className={styles.releaseSection}>
+    <section className={styles.releaseSection} aria-label="Compare release candidates">
       <div className={styles.sectionHeading}>
         <div>
           <h4>
-            <EvidenceIcon name="disc" />
-            {candidates.length ? 'Compared releases' : 'Release lookups attempted'}
+            <EvidenceIcon name="disc" /> Compare {candidates.length} release candidates
           </h4>
-          {candidates.length > 1 && (
-            <p>
-              {sameAssignments
-                ? 'Track assignments are identical; audio cannot identify the edition.'
-                : 'The releases assign one or more files differently.'}
-            </p>
-          )}
+          <p>
+            {allEquivalent
+              ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
+              : 'Select an edition to inspect its track mapping and unmatched files.'}
+          </p>
         </div>
       </div>
-      <div className={styles.releaseGrid}>
-        {releases.map((candidate, index) => {
-          const pairs = objects(candidate.pairs);
-          const missing = Array.isArray(candidate.missing) ? candidate.missing.map(label) : [];
-          const extra = Array.isArray(candidate.extra) ? candidate.extra.map(label) : [];
+      <div className={styles.releaseSelector}>
+        {candidates.map((candidate, index) => {
+          const isCurrent =
+            Boolean(currentRelease?.release_id) &&
+            currentRelease?.source === candidate.source &&
+            String(currentRelease?.release_id) === String(candidate.release_id);
           return (
-            <article
-              className={styles.releaseCard}
+            <button
               key={`${label(candidate.source)}-${label(candidate.release_id)}-${index}`}
+              type="button"
+              data-selected={selected === index || undefined}
+              onClick={() => onSelect(index)}
             >
-              <header>
-                <span className={styles.candidateRank}>{index + 1}</span>
-                <ReviewArtwork
-                  title={label(candidate.release_title) || 'Release'}
-                  url={label(candidate.image_url)}
-                  size="release"
-                />
-                <div>
-                  <strong>
-                    Candidate {index + 1} · {label(candidate.source) || 'Unknown source'}
-                  </strong>
-                  <small>
-                    <ProviderReleaseId
-                      source={label(candidate.source)}
-                      releaseId={label(candidate.release_id)}
-                    />
-                  </small>
-                  {Boolean(
-                    candidate.release_title ||
-                    candidate.country ||
-                    candidate.format ||
-                    candidate.date ||
+              <span className={styles.candidateRank}>{index + 1}</span>
+              <ReviewArtwork
+                title={label(candidate.release_title) || 'Release'}
+                url={label(candidate.image_url)}
+                size="release"
+              />
+              <span>
+                <strong>{label(candidate.release_title) || `Candidate ${index + 1}`}</strong>
+                <small>
+                  {[
+                    candidate.source,
+                    candidate.country,
+                    candidate.format,
+                    candidate.date,
                     candidate.disambiguation,
-                  ) && (
-                    <span className={styles.releaseMetadata}>
-                      {Boolean(candidate.release_title) && <b>{label(candidate.release_title)}</b>}
-                      {[
-                        candidate.country,
-                        candidate.format,
-                        candidate.date,
-                        candidate.disambiguation,
-                      ]
-                        .map(label)
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </span>
-                  )}
-                </div>
-              </header>
-              {candidate.matched !== undefined && <CandidateFit candidate={candidate} />}
-              {sameAssignments && pairs.length > 0 && (
-                <p className={styles.sameMapping}>
-                  <EvidenceIcon name="check" /> Same track mapping
-                </p>
-              )}
-              {onPin && (
-                <button type="button" disabled={busy} onClick={() => onPin(index)}>
-                  Pin this release
-                </button>
-              )}
-              {pairs.length > 0 ? (
-                index === 0 || sameAssignments ? (
-                  <p className={styles.muted}>
-                    {index === 0
-                      ? 'Track assignments shown above.'
-                      : 'Same assignments as candidate 1.'}
-                  </p>
-                ) : (
-                  <details className={styles.candidateDetails}>
-                    <summary>Review different assignments</summary>
-                    <TrackGroups pairs={pairs} />
-                  </details>
-                )
-              ) : (
-                candidates.length > 0 && (
-                  <p className={styles.muted}>
-                    {Array.isArray(candidate.pairs)
-                      ? 'No local files could be assigned to this release.'
-                      : 'Track comparisons were not saved for this finding. Rerun the scan to add them.'}
-                  </p>
-                )
-              )}
-              {missing.length > 0 && (
-                <details className={styles.issueDetails}>
-                  <summary>
-                    {missing.length} missing track
-                    {missing.length === 1 ? '' : 's'}
-                  </summary>
-                  <ul>
-                    {missing.map((track) => (
-                      <li key={track}>{track}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {extra.length > 0 && (
-                <details className={styles.issueDetails}>
-                  <summary>
-                    {extra.length} unassigned file
-                    {extra.length === 1 ? '' : 's'}
-                  </summary>
-                  <ul>
-                    {extra.map((file) => (
-                      <li key={file}>{file}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-            </article>
+                  ]
+                    .map(label)
+                    .filter(Boolean)
+                    .join(' · ')}
+                </small>
+                {isCurrent && <small>Current library release</small>}
+              </span>
+              <CandidateFit candidate={candidate} />
+            </button>
           );
         })}
+      </div>
+      <div className={styles.releaseDetail}>
+        <div className={styles.releaseDetailHeader}>
+          <div>
+            <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
+            <small>
+              {label(active.source)}{' '}
+              <ProviderReleaseId
+                source={label(active.source)}
+                releaseId={label(active.release_id)}
+              />
+            </small>
+          </div>
+          {onPin && (
+            <button type="button" disabled={busy} onClick={() => onPin(selected)}>
+              Use this release
+            </button>
+          )}
+        </div>
+        {pairs.length > 0 ? (
+          <div className={styles.candidateTrackList}>
+            {pairs.map((pair, index) => (
+              <div key={`${label(pair.file)}-${index}`}>
+                <b>
+                  {label(pair.disc_number || 1)}.{label(pair.track_number || pair.slot_number)}
+                </b>
+                <span>
+                  <strong>{label(pair.slot_title)}</strong>
+                  <small>
+                    {label(pair.file)}
+                    {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
+                  </small>
+                </span>
+                <StatusChip
+                  tone={label(pair.confidence) === 'clear' ? 'good' : 'warning'}
+                  icon={label(pair.confidence) === 'clear' ? 'check' : 'warning'}
+                >
+                  {label(pair.confidence) === 'clear' ? 'Strong match' : 'Needs review'}
+                </StatusChip>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.muted}>No local files could be assigned to this release.</p>
+        )}
+        {(missing.length > 0 || extra.length > 0) && (
+          <div className={styles.candidateExceptions}>
+            {missing.length > 0 && (
+              <section>
+                <strong>{missing.length} absent release tracks</strong>
+                <ul>
+                  {missing.map((name, index) => (
+                    <li key={`${name}-${index}`}>{name}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {extra.length > 0 && (
+              <section>
+                <strong>{extra.length} unassigned local files</strong>
+                <ul>
+                  {extra.map((name, index) => (
+                    <li key={`${name}-${index}`}>{name}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -770,14 +801,14 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
 
 export function ReconciliationEvidence({
   finding,
-  onPin,
   onKeepCopy,
   busy = false,
+  prominent = false,
 }: {
   finding: ReviewFinding;
-  onPin?: (index: number) => void;
   onKeepCopy?: (trackId: string) => void;
   busy?: boolean;
+  prominent?: boolean;
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
@@ -813,6 +844,10 @@ export function ReconciliationEvidence({
         ]),
     ).values(),
   ];
+  const localDuration = count(details.file_duration_ms || object(details.current_tags).duration_ms);
+  const expectedDuration = count(details.expected_duration_ms);
+  const durationDelta =
+    localDuration && expectedDuration ? Math.abs(localDuration - expectedDuration) : 0;
 
   return (
     <div className={styles.reconciliationEvidence}>
@@ -846,16 +881,22 @@ export function ReconciliationEvidence({
           </div>
         </section>
       )}
-      <ReleaseCandidates details={details} onPin={onPin} busy={busy} />
       <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
       {ambiguityReasons.length > 0 && (
         <section className={styles.problemCard} data-tone="warning">
           <h4>
             <EvidenceIcon name="warning" /> Why this needs review
           </h4>
+          {durationDelta > 3000 && (
+            <p>
+              <strong>Length mismatch:</strong> {formatDuration(localDuration)} local versus{' '}
+              {formatDuration(expectedDuration)} on the release ({(durationDelta / 1000).toFixed(1)}{' '}
+              seconds apart).
+            </p>
+          )}
           <p>{ambiguityReasons.join(' · ')}</p>
           {competingAudioIdentities.length > 0 && (
-            <>
+            <div className={styles.competingIdentities}>
               <strong>Other recordings linked to this fingerprint</strong>
               <small>
                 These scores measure fingerprint similarity, not certainty about the track.
@@ -867,7 +908,7 @@ export function ReconciliationEvidence({
                   </li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
         </section>
       )}
@@ -899,14 +940,20 @@ export function ReconciliationEvidence({
             </ul>
           </section>
         )}
+      {prominent && (
+        <div className={styles.prominentEvidence}>
+          <Facts finding={finding} details={details} />
+          <AudioEvidence details={details} />
+        </div>
+      )}
       <details className={styles.technicalEvidence}>
         <summary>
           <EvidenceIcon name="info" /> Technical evidence
           <span>Files, tags, IDs, and scoring details</span>
         </summary>
         <div className={styles.technicalGrid}>
-          <Facts finding={finding} details={details} />
-          <AudioEvidence details={details} />
+          {!prominent && <Facts finding={finding} details={details} />}
+          {!prominent && <AudioEvidence details={details} />}
           <CheckedFiles details={details} />
           {reasons.length > 0 && (
             <section className={styles.technicalCard}>

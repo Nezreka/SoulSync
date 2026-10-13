@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import struct
 
+import pytest
 from mutagen.flac import FLAC
 
 from core.library.reconciliation_evidence import ReconciliationEvidence
@@ -17,7 +18,7 @@ from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reconciliation import (
     LibraryReconciliationJob, _album_titles_compatible, _candidate_evidence,
     _candidate_rank, _candidate_shape, _candidate_shapes_equivalent,
-    _display_album_title,
+    _display_album_title, _distinctive_position_conflict,
     _group_disc_folders, _group_logical_albums,
     _has_unexplained_identified_extras, _normalize_slot, _numbered_slot,
     _promote_album_context_candidate,
@@ -26,6 +27,27 @@ from core.repair_jobs.library_reconciliation import (
 )
 from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
+
+
+@pytest.fixture(autouse=True)
+def defer_background_refresh_in_synchronous_scan_tests(monkeypatch):
+    # These fixtures rescan explicitly with controlled catalog and fingerprint
+    # responses. A daemon refresh would outlive the fixture and race its database.
+    monkeypatch.setattr(RepairWorker, '_schedule_album_refresh',
+                        lambda self, case_id, folder: True)
+
+
+def test_distinctive_version_position_blocks_shorter_release_retag():
+    files = [{'tags': {'title': 'Come Back Down', 'track_number': 16},
+              'path': '/music/16 - Come Back Down.mp3'}]
+    selected = (10, 10, 0, 'musicbrainz', 'short',
+                [{'title': 'Come Back Down', 'track_number': 1}],
+                {'pairs': [{'file_index': 0, 'slot_index': 0}]})
+    alternate = (9, 9, 0, 'musicbrainz', 'long',
+                 [{'title': 'Come Back Down (live)', 'track_number': 16}],
+                 {'pairs': [{'file_index': 0, 'slot_index': 0}]})
+    files[0]['tags']['title'] = 'Come Back Down (live)'
+    assert _distinctive_position_conflict(files, selected, [alternate])
 
 
 class _Acoustid:

@@ -26,7 +26,7 @@ from core.library.reconciliation_evidence import (
 from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
     display_title_compatible, file_version_markers, semantic_title_key,
-    title_difference_kind,
+    title_difference_kind, slot_version_markers,
 )
 from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
 from core.library.retag_planner import plan_track
@@ -58,6 +58,20 @@ _ALBUM_MATERIAL_QUALIFIER = re.compile(
 _SOUNDTRACK_SUFFIX = re.compile(
     r'\s*[\[(]?(?:original\s+(?:motion\s+picture|television)\s+)?soundtrack[\])]?$|'
     r'\s*[\[(]?music\s+from\s+the\s+(?:motion\s+picture|film)[\])]?$', re.I)
+_PRESSING_PLANT_DETAIL = re.compile(
+    r'\b(?:EDC\s+Blackburn|EDC\s+Germany|Blackburn\s+Ltd\.?|'
+    r'Columbia\s+House|club\s+edition|manufactured\s+by)\b', re.I)
+
+
+def _clean_album_display_title(title: str) -> str:
+    """Drop known manufacturing flavor while preserving a named edition."""
+    match = (re.match(r'^(.*?)\s+\(([^()]*)\)\s*$', title.strip()) or
+             re.match(r'^(.*?)\s+\[([^\[\]]*)\]\s*$', title.strip()))
+    if not match or not _PRESSING_PLANT_DETAIL.search(match.group(2)):
+        return title
+    parts = [part.strip() for part in re.split(r'[,;/]', match.group(2))]
+    kept = [part for part in parts if part and not _PRESSING_PLANT_DETAIL.search(part)]
+    return f'{match.group(1)} ({", ".join(kept)})' if kept else match.group(1)
 
 
 def _suggest_filename(path: str, slot: dict) -> str:
@@ -278,14 +292,17 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     return groups, trusted
 
 
-def _retire_stale_findings(db, observed: set[tuple[str, str, str]]) -> None:
+def _retire_stale_findings(db, observed: set[tuple[str, str, str]],
+                           target_folder: str | None = None) -> None:
     """Close proposals absent from a completed library scan."""
     conn = db._get_connection()
     try:
         rows = conn.execute('''
             SELECT id, finding_type, entity_type, entity_id FROM repair_findings
             WHERE job_id = 'library_reconciliation' AND status = 'pending'
-        ''').fetchall()
+              AND (? IS NULL OR (json_valid(details_json) AND
+                   json_extract(details_json, '$.album_folder') = ?))
+        ''', (target_folder, target_folder)).fetchall()
         stale = [row[0] for row in rows if tuple(str(part) for part in row[1:4])
                  not in observed]
         if stale:
@@ -348,6 +365,7 @@ def _normalize_slot(item: dict, source: str) -> dict:
         'track_number': positive_int(item.get('track_number')),
         'disc_number': positive_int(item.get('disc_number'), 1),
         'duration_ms': positive_int(item.get('duration_ms'), 0),
+        'preview_url': item.get('preview_url') or item.get('previewUrl') or '',
         'source_track_id': item.get('id') or '',
         'recording_mbid': item.get('id') if source == 'musicbrainz' else '',
         'recording_disambiguation': (
@@ -419,6 +437,35 @@ def _complete_collection_fit(files: list[dict], scored: tuple) -> int:
                len(slots) == len(files))
 
 
+def _distinctive_position_conflict(files: list[dict], selected: tuple,
+                                   candidates: list[tuple]) -> bool:
+    """Hold metadata when a plausible edition preserves a version's position.
+
+    A short, completely matched release can otherwise win over a longer
+    edition that puts a distinct live/remix file at its existing track number.
+    The missing opener is an edition question, not proof that track 16 is #1.
+    """
+    selected_pairs = {pair['file_index']: selected[5][pair['slot_index']]
+                      for pair in selected[6]['pairs']}
+    for file_index, selected_slot in selected_pairs.items():
+        file = files[file_index]
+        tags = file.get('tags') or {}
+        current_number = tags.get('track_number')
+        markers = file_version_markers(file)
+        if not markers or not current_number or current_number == selected_slot.get('track_number'):
+            continue
+        for candidate in candidates:
+            if candidate is selected or candidate[0] < selected[0] - 1 or candidate[1] < selected[1] - 1:
+                continue
+            alternate = next((candidate[5][pair['slot_index']]
+                              for pair in candidate[6]['pairs']
+                              if pair['file_index'] == file_index), None)
+            if (alternate and alternate.get('track_number') == current_number and
+                    slot_version_markers(alternate) == markers):
+                return True
+    return False
+
+
 def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str,
                     preferred_source: str = '') -> tuple:
     rank = (*scored[:3], _complete_collection_fit(files, scored))
@@ -478,6 +525,18 @@ def _release_metadata(scored: tuple, cache: dict, exact_releases: set[str]) -> d
         cache[key] = ((get_album_for_source(source, release_id, exact_release=True)
                        if exact else get_album_for_source(source, release_id)) or {})
     return cache[key]
+
+
+def _edition_preference(meta: dict, numbering_mode: str) -> tuple[int, int]:
+    media = meta.get('media') or []
+    formats = ' '.join(str(row.get('format') or '') for row in media
+                       if isinstance(row, dict))
+    formats += ' ' + str(meta.get('format') or '')
+    country = str(meta.get('country') or '').casefold()
+    digital = int(numbering_mode == 'digital' and
+                  any(word in formats.casefold() for word in ('digital', 'download', 'stream')))
+    international = int(country in ('xw', 'worldwide', 'international', 'world'))
+    return digital, international
 
 
 def _has_unexplained_identified_extras(files: list[dict], scored: tuple) -> bool:
@@ -647,9 +706,10 @@ def _display_album_title(files: list[dict], library_title: str,
     """Prefer one consistent, clean local title over catalog-only qualifiers."""
     if policy == 'exact_release':
         return release_title
+    library_title = _clean_album_display_title(library_title or '')
     tag_titles = [str((file.get('tags') or {}).get('album') or '').strip()
                   for file in files]
-    tag_titles = [title for title in tag_titles if title]
+    tag_titles = [_clean_album_display_title(title) for title in tag_titles if title]
     if tag_titles:
         normalized = {re.sub(r'\s+', ' ', title).casefold() for title in tag_titles}
         library_qualifier = (
@@ -764,6 +824,7 @@ def _candidate_evidence(files: list[dict], scored: tuple,
             'slot_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number'),
             'slot_duration_ms': slot.get('duration_ms') or 0,
+            'slot_preview_url': slot.get('preview_url') or '',
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'confidence': pair['confidence'],
             'reasons': pair['reasons'],
@@ -846,6 +907,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
             'file_duration_ms': tags.get('duration_ms') or file.get('duration_ms') or 0,
             'slot_duration_ms': slot.get('duration_ms') or 0,
+            'slot_preview_url': slot.get('preview_url') or '',
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'audio_title': audio.get('title') or '',
             'audio_artist': audio.get('artist') or '',
@@ -890,6 +952,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) ->
 
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            *, candidates: list[tuple] | None = None,
+                           candidate_metadata: dict[tuple[str, str], dict] | None = None,
                            state: str = '', intent_scope: str = '',
                            action_changes: dict[str, dict] | None = None,
                            numbering_mode: str = '',
@@ -942,16 +1005,30 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
     candidate_rows = candidates or [scored]
     def candidate_preview(row: tuple) -> dict:
         release_slots, candidate_plan = row[5], row[6]
+        release_meta = (candidate_metadata or {}).get((row[3], row[4])) or {}
+        media = release_meta.get('media') or []
+        formats = [str(medium.get('format') or '') for medium in media
+                   if isinstance(medium, dict) and medium.get('format')]
         return {
             'source': row[3], 'release_id': row[4], 'clear': row[0],
+            'release_title': release_meta.get('name') or release_meta.get('title') or '',
+            'country': release_meta.get('country') or '',
+            'date': release_meta.get('date') or release_meta.get('release_date') or '',
+            'disambiguation': release_meta.get('disambiguation') or '',
+            'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
+            'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
             'matched': row[1], 'total_slots': len(release_slots),
             'missing': len(candidate_plan['missing_slots']),
             'extra': len(candidate_plan['extra_files']),
             'continuous_numbering': bool(_continuous_numbering(row)),
             'pairs': [{
                 'file': os.path.basename(files[pair['file_index']]['path']),
+                'file_path': files[pair['file_index']]['path'],
                 'local_title': (files[pair['file_index']].get('tags') or {}).get('title') or '',
+                'file_duration_ms': (files[pair['file_index']].get('tags') or {}).get('duration_ms') or 0,
                 'slot_title': release_slots[pair['slot_index']].get('title') or '',
+                'slot_duration_ms': release_slots[pair['slot_index']].get('duration_ms') or 0,
+                'slot_preview_url': release_slots[pair['slot_index']].get('preview_url') or '',
                 'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
                 'track_number': release_slots[pair['slot_index']].get('track_number'),
                 'confidence': pair.get('confidence') or '',
@@ -1091,17 +1168,33 @@ def _same_recording_copies(files: list[dict], indexes: list[int]) -> bool:
 
 def _duplicate_copy(file: dict) -> dict:
     row = file.get('db') or {}
+    path = file.get('path') or ''
+    quality = {'format': os.path.splitext(path)[1].lstrip('.').upper()}
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(path)
+        info = getattr(audio, 'info', None)
+        if info:
+            quality.update({
+                'sample_rate': getattr(info, 'sample_rate', None),
+                'bits_per_sample': getattr(info, 'bits_per_sample', None),
+                'channels': getattr(info, 'channels', None),
+                'bitrate': getattr(info, 'bitrate', None),
+            })
+    except Exception as exc:
+        logger.debug('Could not read duplicate audio quality for %s: %s', path, exc)
     return {
         'track_id': row.get('id'),
         'title': row.get('title') or file.get('tags', {}).get('title') or '',
         'artist': row.get('artist_name') or file.get('tags', {}).get('artist') or '',
         'album': row.get('album_title') or file.get('tags', {}).get('album') or '',
-        'file_path': file.get('path') or '',
+        'file_path': path,
         'fingerprint_key': file.get('acoustid', {}).get('fingerprint_key'),
         'size_bytes': file.get('size_bytes'),
         'mtime_ns': file.get('mtime_ns'),
         'bitrate': row.get('bitrate') or 0,
-        'duration': row.get('duration') or 0,
+        'duration': (file.get('tags') or {}).get('duration_ms') or row.get('duration') or 0,
+        'quality': quality,
         'track_number': row.get('track_number'),
         'recording_disambiguation': row.get('recording_disambiguation') or '',
         'playlists': list(file.get('playlists') or []),
@@ -1386,7 +1479,7 @@ class LibraryReconciliationJob(RepairJob):
         finally:
             conn.close()
 
-    def scan(self, context: JobContext) -> JobResult:
+    def scan(self, context: JobContext, *, target_folder: str | None = None) -> JobResult:
         scan_started = time.perf_counter()
         result = JobResult()
         client = context.acoustid_client
@@ -1432,6 +1525,13 @@ class LibraryReconciliationJob(RepairJob):
                         folders[dirpath].append(os.path.join(dirpath, name))
         folders = _group_disc_folders(folders, tracks, roots)
         folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+        if target_folder is not None:
+            target_folder = os.path.normpath(target_folder)
+            # Logical groups can have a parent folder that is not an audio
+            # directory. Only an already inventoried group may be rescanned.
+            if target_folder not in folders:
+                result.stopped_early = 'The album folder was moved; run a library scan'
+                return result
         inventory_seconds = time.perf_counter() - scan_started
         observed: set[tuple[str, str, str]] = set()
         observed_plans: set[str] = set()
@@ -1442,6 +1542,8 @@ class LibraryReconciliationJob(RepairJob):
             album_folder_counts.update({tracks[os.path.normpath(path)]['album_id']
                 for path in paths if os.path.normpath(path) in tracks and
                 tracks[os.path.normpath(path)].get('album_id') is not None})
+        if target_folder is not None:
+            folders = {target_folder: folders[target_folder]}
         release_cache = {}
         release_meta_cache = {}
         release_search_cache = {}
@@ -1619,6 +1721,18 @@ class LibraryReconciliationJob(RepairJob):
                     cache.checkpoint()
                     continue
                 scored.sort(key=rank_candidate, reverse=True)
+                # Consult release metadata only for equally fitting editions.
+                # Otherwise this would make an extra remote call for every
+                # poor candidate in every album.
+                leading_rank = rank_candidate(scored[0])
+                leading_count = sum(rank_candidate(row) == leading_rank for row in scored)
+                if leading_count > 1:
+                    scored[:leading_count] = sorted(
+                        scored[:leading_count],
+                        key=lambda row: _edition_preference(
+                            _release_metadata(row, release_meta_cache,
+                                              exact_musicbrainz_releases), numbering_mode),
+                        reverse=True)
                 # A single fingerprint proves the recording, but that same
                 # recording can occur on an original album and many later
                 # compilations. If the best audio-derived release contradicts
@@ -1711,10 +1825,15 @@ class LibraryReconciliationJob(RepairJob):
                     len(plan['extra_files']) >= 2 and
                     len(plan['missing_slots']) >= 2
                 )
+                position_conflict = bool(
+                    not (album and album.get('canonical_locked')) and
+                    _distinctive_position_conflict(files, scored[0], scored[1:]))
                 if (locked_conflict or tied or edition_conflict or symmetric_mismatch or
+                        position_conflict or
                         (matched == 0 and not pinned)):
                     issue_type = ('reconciliation_release' if album_id is not None and
-                                  (tied or locked_conflict or edition_conflict or symmetric_mismatch)
+                                  (tied or locked_conflict or edition_conflict or
+                                   symmetric_mismatch or position_conflict)
                                   else 'reconciliation_unresolved')
                     if locked_conflict:
                         description = ('The locked release does not fit as well as another candidate.'
@@ -1728,6 +1847,9 @@ class LibraryReconciliationJob(RepairJob):
                     elif symmetric_mismatch:
                         description = ('Several local files and release tracks remain unmatched. '
                                        'Compare the assignments before choosing this edition.')
+                    elif position_conflict:
+                        description = ('Another edition preserves the position of a distinct '
+                                       'recording. Choose the release before changing track numbers.')
                     else:
                         description = 'No release track could be assigned confidently.'
                     choice_common = {
@@ -1739,12 +1861,22 @@ class LibraryReconciliationJob(RepairJob):
                         'locked_release': {'source': album.get('canonical_source'),
                                            'release_id': str(album.get('canonical_album_id') or '')}
                         if locked_conflict else None,
+                        'current_release': {
+                            'source': album.get('canonical_source') or '',
+                            'release_id': str(album.get('canonical_album_id') or ''),
+                            'locked': bool(album.get('canonical_locked')),
+                        } if album else None,
                         'evidence_signature': _evidence_signature(
                             files, [(row[3], row[4], row[0], row[1]) for row in scored]),
                     }
                     case_id = _persist_selected_plan(
                         context.db, choice_common, files, scored[0],
                         candidates=scored, state='release_conflict',
+                        candidate_metadata={
+                            (row[3], row[4]): _release_metadata(
+                                row, release_meta_cache, exact_musicbrainz_releases)
+                            for row in scored[:6]
+                        },
                         numbering_mode=numbering_mode,
                     )
                     if case_id:
@@ -1841,6 +1973,8 @@ class LibraryReconciliationJob(RepairJob):
                     'key': _wanted_slot_key(slot), 'title': slot['title'],
                     'disc_number': slot.get('disc_number') or 1,
                     'track_number': slot.get('track_number'),
+                    'duration_ms': slot.get('duration_ms') or 0,
+                    'preview_url': slot.get('preview_url') or '',
                 } for slot in slots]
                 raw_duplicate_groups = []
                 for extra_index, rivals in plan.get('competing_files', {}).items():
@@ -1890,6 +2024,9 @@ class LibraryReconciliationJob(RepairJob):
                             details={**common, 'current_tags': tags, 'acoustid': file['acoustid'],
                                      'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                      'expected_title': slot['title'], 'match_reasons': pair['reasons'],
+                                     'file_duration_ms': tags.get('duration_ms') or 0,
+                                     'expected_duration_ms': slot.get('duration_ms') or 0,
+                                     'expected_preview_url': slot.get('preview_url') or '',
                                      'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
                                      'expected_recording_disambiguation':
                                      slot.get('recording_disambiguation') or '',
@@ -2136,10 +2273,12 @@ class LibraryReconciliationJob(RepairJob):
                                 }
                     details = {**common, 'current_title': file['tags'].get('title'),
                                'current_tags': file['tags'], 'acoustid': audio,
+                               'file_duration_ms': file['tags'].get('duration_ms') or 0,
                                'fingerprint_key': audio.get('fingerprint_key'),
                                'size_bytes': file['size_bytes'], 'mtime_ns': file['mtime_ns'],
                                'track_id': file['db']['id'] if file.get('db') else None,
                                'competing_copies': competing_paths,
+                               'same_audio_copies': same_audio_paths,
                                'duplicate_copies': duplicate_copies,
                                'resolution_kind': ('duplicate_copies'
                                                    if duplicate_copies else ''),
@@ -2225,6 +2364,11 @@ class LibraryReconciliationJob(RepairJob):
                                 result.findings_created += 1
                 case_id = _persist_selected_plan(
                     context.db, common, files, scored[0], candidates=scored,
+                    candidate_metadata={
+                        (row[3], row[4]): _release_metadata(
+                            row, release_meta_cache, exact_musicbrainz_releases)
+                        for row in scored[:6]
+                    },
                     intent_scope=intent_scope, action_changes=plan_action_changes,
                     numbering_mode=numbering_mode, wanted_slots=wanted_slots,
                 )
@@ -2237,9 +2381,10 @@ class LibraryReconciliationJob(RepairJob):
                     context.update_progress(folder_index + 1, len(folders))
             if completed and not context.check_stop() and context.create_finding:
                 cache.checkpoint()
-                _retire_stale_findings(context.db, observed)
+                _retire_stale_findings(context.db, observed, target_folder)
                 if plans_complete:
-                    retire_unseen_plans(context.db, observed_plans)
+                    retire_unseen_plans(context.db, observed_plans,
+                                        target_folder=target_folder)
         finally:
             elapsed_seconds = time.perf_counter() - scan_started
             cache.metrics['inventory_seconds'] = round(inventory_seconds, 3)

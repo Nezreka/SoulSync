@@ -35,6 +35,19 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_worker")
 
+
+def _same_reviewed_file(current_path: str, reviewed_path: str) -> bool:
+    """Accept alternate library mounts only when they identify the same inode.
+
+    Reconciliation scans /app/Music while library rows may use /music. A
+    normalized string comparison rejects valid repairs on that deployment.
+    Never treat merely similar path strings as proof of file identity.
+    """
+    try:
+        return os.path.samefile(current_path, reviewed_path)
+    except (OSError, ValueError):
+        return False
+
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 # How long a RESOLVED finding keeps suppressing its own recurrence. See
@@ -469,6 +482,9 @@ class RepairWorker:
         self._bulk_fix_stop_event = threading.Event()
         self._bulk_fix_state: Dict[str, Any] = {'running': False}
         self._review_apply_lock = threading.Lock()
+        self._reconciliation_scan_lock = threading.Lock()
+        self._album_refresh_lock = threading.Lock()
+        self._album_refreshes: Dict[str, dict] = {}
 
         # Config manager (set externally after init)
         self._config_manager = None
@@ -1080,7 +1096,11 @@ class RepairWorker:
 
         try:
             if run_status != 'failed':
-                result = job.scan(context)
+                if job_id == 'library_reconciliation':
+                    with self._reconciliation_scan_lock:
+                        result = job.scan(context)
+                else:
+                    result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
             result.errors += 1
@@ -1608,11 +1628,75 @@ class RepairWorker:
 
     def get_review_case(self, case_id: str, *, status: str = 'pending',
                         job_id: str = '') -> Optional[dict]:
-        return repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
+        case = repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
+        if case is not None:
+            if hasattr(self, '_album_refresh_lock'):
+                with self._album_refresh_lock:
+                    case['refresh'] = dict(self._album_refreshes.get(case_id) or
+                                           {'state': 'idle'})
+            else:
+                case['refresh'] = {'state': 'idle'}
+        return case
+
+    def _schedule_album_refresh(self, case_id: str, folder: str) -> bool:
+        """Replan only the changed logical album after a review action."""
+        if not folder:
+            return False
+        with self._album_refresh_lock:
+            current = self._album_refreshes.get(case_id) or {}
+            if current.get('state') == 'running':
+                current['again'] = True
+                return True
+            self._album_refreshes[case_id] = {'state': 'running', 'again': False}
+
+        def refresh_one_album():
+            from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
+            while True:
+                error = ''
+                try:
+                    transfer = self.transfer_folder
+                    if self._config_manager:
+                        transfer = self._resolve_path(self._config_manager.get(
+                            'soulseek.transfer_path', './Transfer'))
+                    context = JobContext(
+                        db=self.db, transfer_folder=transfer,
+                        config_manager=self._config_manager,
+                        spotify_client=self.spotify_client, itunes_client=self.itunes_client,
+                        mb_client=self.mb_client, acoustid_client=self.acoustid_client,
+                        metadata_cache=self.metadata_cache,
+                        create_finding=self._create_finding,
+                        stop_event=self._stop_event,
+                        is_paused=lambda: False,
+                        playlist_membership=_server_playlist_membership,
+                    )
+                    with self._reconciliation_scan_lock:
+                        outcome = LibraryReconciliationJob().scan(
+                            context, target_folder=folder)
+                    error = outcome.stopped_early or ''
+                except Exception as exc:
+                    logger.error('Album reconciliation failed for %s: %s',
+                                 case_id, exc, exc_info=True)
+                    error = str(exc)[:300]
+                with self._album_refresh_lock:
+                    state = self._album_refreshes.get(case_id) or {}
+                    if state.get('again'):
+                        self._album_refreshes[case_id] = {'state': 'running',
+                                                          'again': False}
+                        continue
+                    self._album_refreshes[case_id] = {
+                        'state': 'error' if error else 'complete',
+                        'error': error,
+                    }
+                break
+
+        threading.Thread(target=refresh_one_album, daemon=True,
+                         name='reconcile-album-review').start()
+        return True
 
     def apply_review_decision(self, case_id: str, finding_id: int, *,
                               evidence_token: str, action: str,
-                              fix_action: str = None) -> dict:
+                              fix_action: str = None,
+                              schedule_refresh: bool = True) -> dict:
         """Apply one current decision through the existing finding handlers.
 
         A case may be rescanned while someone is reviewing it. Reject the stale
@@ -1630,11 +1714,18 @@ class RepairWorker:
                         'error': 'The evidence changed since this card was opened. Review it again.'}
             if action == 'dismiss':
                 ok = self.dismiss_finding(finding_id)
+                queued = (self._schedule_album_refresh(case_id, case.get('folder') or '')
+                          if ok and schedule_refresh else False)
                 return {'success': ok, 'action': 'dismiss',
+                        'refresh_queued': queued,
                         'error': None if ok else 'Could not dismiss this finding'}
             if action == 'fix':
-                return self.fix_finding(finding_id, fix_action=fix_action,
-                                        review_approved=True)
+                result = self.fix_finding(finding_id, fix_action=fix_action,
+                                          review_approved=True)
+                if (result.get('success') or result.get('partial')) and schedule_refresh:
+                    result['refresh_queued'] = self._schedule_album_refresh(
+                        case_id, case.get('folder') or '')
+                return result
             return {'success': False, 'error': 'Unsupported review action'}
 
     def apply_review_decision_group(self, case_id: str, category: str, *,
@@ -1652,17 +1743,24 @@ class RepairWorker:
         applied = 0
         for item in findings:
             result = self.apply_review_decision(
-                case_id, item['id'], evidence_token=item['evidence_token'], action=action)
+                case_id, item['id'], evidence_token=item['evidence_token'],
+                action=action, schedule_refresh=False)
             if not result.get('success'):
-                return {**result, 'applied': applied, 'total': len(findings)}
+                queued = self._schedule_album_refresh(case_id, case.get('folder') or '') if applied else False
+                return {**result, 'applied': applied, 'total': len(findings),
+                        'refresh_queued': queued}
             applied += 1
-        return {'success': True, 'applied': applied, 'total': len(findings)}
+        queued = self._schedule_album_refresh(case_id, case.get('folder') or '') if applied else False
+        return {'success': True, 'applied': applied, 'total': len(findings),
+                'refresh_queued': queued}
 
     def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
         """Apply the planner-approved reconciliation subset in the background."""
         ids, cases = repair_review_queue.safe_finding_ids(self.db, case_id=case_id)
         if not ids:
             return {'started': False, 'error': 'No ready reconciliation changes match'}
+        refresh_cases = [(key, (self.get_review_case(key) or {}).get('folder') or '')
+                         for key in cases]
         organize_album_ids = []
         if organize:
             for key in cases:
@@ -1674,6 +1772,7 @@ class RepairWorker:
         return self.start_bulk_fix(
             finding_ids=ids, allow_review_ids=True, review_approved=True,
             organize_album_ids=organize_album_ids,
+            review_case_folders=refresh_cases,
         )
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
@@ -3916,6 +4015,7 @@ class RepairWorker:
         if not track_id or not (db_data or db_track_updates or album_title or target_path):
             return {'success': False, 'error': 'No file or metadata changes in this proposal'}
         renamed = False
+        wrote_tags = False
         if target_path:
             if (os.path.dirname(target_path) != os.path.dirname(file_path) or
                     os.path.splitext(target_path)[1].lower() !=
@@ -3949,7 +4049,7 @@ class RepairWorker:
                 return {'success': False, 'error': 'Track metadata changed; rescan before applying'}
             resolved = _resolve_file_path(stored, self.transfer_folder,
                                           config_manager=self._config_manager)
-            if not resolved or os.path.normpath(resolved) != os.path.normpath(file_path):
+            if not resolved or not _same_reviewed_file(resolved, file_path):
                 return {'success': False, 'error': 'Track now points to another file'}
             new_stored_path = ''
             if target_path:
@@ -3971,13 +4071,15 @@ class RepairWorker:
                                               'db_data': db_data}])
                 if outcome['written'] != 1 or outcome['failed'] or outcome['skipped']:
                     return {'success': False, 'error': 'Tag writer did not complete', **outcome}
+                wrote_tags = True
             if target_path:
                 from core.repair_jobs.track_number_repair import _rename_to_basename
                 renamed_path = _rename_to_basename(
                     file_path, os.path.basename(file_path),
                     os.path.splitext(os.path.basename(target_path))[0])
                 if renamed_path != target_path:
-                    return {'success': False, 'error': 'File rename did not complete'}
+                    return {'success': False, 'partial': wrote_tags,
+                            'error': 'Tags were written, but the file rename did not complete'}
                 renamed = True
             updates = dict(db_track_updates)
             for key in ('title', 'track_number', 'disc_number'):
@@ -4008,7 +4110,9 @@ class RepairWorker:
                 except Exception:
                     logger.error('Could not restore file name after database failure', exc_info=True)
             logger.error('Reconciliation tag repair failed: %s', exc, exc_info=True)
-            return {'success': False, 'error': str(exc)}
+            return {'success': False, 'partial': wrote_tags,
+                    'error': ('Tags were written, but the metadata update failed: '
+                              if wrote_tags else '') + str(exc)}
         finally:
             conn.close()
 
@@ -4278,7 +4382,7 @@ class RepairWorker:
             stored_path = row[0]
             resolved = _resolve_file_path(stored_path, self.transfer_folder,
                                           config_manager=self._config_manager)
-            if not resolved or os.path.normpath(resolved) != os.path.normpath(file_path):
+            if not resolved or not _same_reviewed_file(resolved, file_path):
                 return {'success': False, 'error': 'The track now points to another file'}
             if action != 'request_missing':
                 playlists = _server_playlist_membership()
@@ -4338,7 +4442,7 @@ class RepairWorker:
             config_manager=self._config_manager)
         if not moved:
             if action == 'replace':
-                return {'success': False,
+                return {'success': False, 'partial': True,
                         'error': (f'{replacement_name} was requested, but the wrong file '
                                   f'could not be quarantined: {note or "unknown error"}')}
             return {'success': False, 'error': note or 'Could not quarantine file'}
@@ -4353,7 +4457,7 @@ class RepairWorker:
             except Exception as exc:
                 prefix = (f'{replacement_name} was requested and the file was quarantined '
                           if action == 'replace' else 'File quarantined ')
-                return {'success': False, 'error':
+                return {'success': False, 'partial': True, 'error':
                         f'{prefix}at {dest}, but track row could not be removed: {exc}'}
             finally:
                 conn.close()
@@ -4390,12 +4494,7 @@ class RepairWorker:
                 if not current_path:
                     return {'success': False,
                             'error': 'A duplicate track changed; rescan before applying'}
-                try:
-                    same_file = os.path.samefile(current_path, reviewed_path)
-                except OSError:
-                    same_file = (os.path.normcase(os.path.normpath(current_path)) ==
-                                 os.path.normcase(os.path.normpath(reviewed_path)))
-                if not same_file:
+                if not _same_reviewed_file(current_path, reviewed_path):
                     return {'success': False,
                             'error': 'A duplicate track changed; rescan before applying'}
                 error = self._reconciliation_file_guard(reviewed_path, copy)
@@ -6692,7 +6791,8 @@ class RepairWorker:
                        finding_type: str = None, safe_only: bool = False,
                        allow_review_ids: bool = False,
                        review_approved: bool = False,
-                       organize_album_ids: List[str] = None) -> dict:
+                       organize_album_ids: List[str] = None,
+                       review_case_folders: List[Tuple[str, str]] = None) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
         ``fix_action`` may only reach ONE finding type per run. The string is
@@ -6751,6 +6851,7 @@ class RepairWorker:
                 'safe_only': bool(safe_only),
                 'review_approved': bool(review_approved),
                 'organize_album_ids': list(organize_album_ids or []),
+                'reconciliation_queued': False,
                 'organize_queued': 0,
                 'errors': [],
                 'error': None,
@@ -6761,7 +6862,8 @@ class RepairWorker:
             self._bulk_fix_thread = threading.Thread(
                 target=self._run_bulk_fix,
                 args=(list(ids), fix_action, review_approved,
-                      list(organize_album_ids or [])),
+                      list(organize_album_ids or []),
+                      list(review_case_folders or [])),
                 daemon=True, name='repair-bulk-fix')
             self._bulk_fix_thread.start()
             logger.info("Background bulk fix started: %d finding(s)%s",
@@ -6791,7 +6893,8 @@ class RepairWorker:
 
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None,
                       review_approved: bool = False,
-                      organize_album_ids: List[str] = None):
+                      organize_album_ids: List[str] = None,
+                      review_case_folders: List[Tuple[str, str]] = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
         try:
@@ -6848,6 +6951,15 @@ class RepairWorker:
                     )
                     if queued.get('queued') or queued.get('reason') == 'already_queued':
                         state['organize_queued'] += 1
+            if state['fixed'] and review_case_folders:
+                valid_cases = [(key, folder) for key, folder in review_case_folders if folder]
+                if len(valid_cases) <= 3:
+                    queued = [self._schedule_album_refresh(key, folder)
+                              for key, folder in valid_cases]
+                    state['reconciliation_queued'] = any(queued)
+                else:
+                    state['reconciliation_queued'] = self.run_job_now(
+                        'library_reconciliation')
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)

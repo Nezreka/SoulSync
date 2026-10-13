@@ -580,6 +580,16 @@
   opacity: 0.5;
   cursor: default;
 }
+.releaseChoiceList article > button:last-child {
+  grid-column: 4;
+  grid-row: 1;
+}
+.releaseChoiceList article > .compareCandidate {
+  grid-column: 4;
+  grid-row: 2;
+  background: #292d40;
+  border-color: #505771;
+}
 .releaseChoiceList .candidatePreview {
   grid-column: 3;
   min-width: 0;
@@ -629,6 +639,26 @@
   gap: 9px;
   align-items: end;
   margin: 0 0 12px;
+}
+.trackViewSwitch {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid #41475c;
+  border-radius: 9px;
+  background: #171b29;
+}
+.trackViewSwitch button {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  color: #abb5ca;
+  background: transparent;
+  cursor: pointer;
+}
+.trackViewSwitch button[aria-pressed='true'] {
+  color: #f3efff;
+  background: #393052;
 }
 .trackFilters label {
   display: grid;
@@ -686,6 +716,145 @@
 .assignmentCorrection small {
   flex-basis: 100%;
   color: #aeb6c9;
+}
+.assignmentCorrection button {
+  padding: 9px 12px;
+  border: 1px solid #7560b1;
+  border-radius: 7px;
+  color: #f2ecff;
+  background: #49386e;
+  cursor: pointer;
+}
+.assignmentCorrection button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.reviewAudio {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0;
+  padding: 13px;
+  border: 1px solid #48516a;
+  border-radius: 10px;
+  background: #1b2132;
+}
+.reviewAudioChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.reviewAudioChoices button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 1px solid #4a536b;
+  border-radius: 7px;
+  color: #d8deeb;
+  background: #292e40;
+  cursor: pointer;
+}
+.reviewAudioChoices button[data-active='true'] {
+  color: #efeaff;
+  border-color: #9b80dd;
+  background: #392f57;
+}
+.reviewAudioChoices small {
+  color: #aeb9ce;
+}
+.reviewAudioTimeline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.reviewAudioTimeline strong {
+  flex: 0 1 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.reviewAudioTimeline input {
+  flex: 1 1 auto;
+  min-width: 80px;
+  accent-color: #ae91f1;
+}
+.reviewAudioTimeline span {
+  flex: none;
+  color: #acb6c9;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.durationWarning {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 15px;
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid #a07436;
+  border-radius: 8px;
+  color: #f1d49d;
+  background: #302616;
+  font-size: 13px;
+}
+.durationWarning span {
+  color: #d8c6a9;
+}
+.audioFacts {
+  color: #d9c899;
+  font-size: 12px;
+}
+.competingIdentities {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+.competingIdentities small {
+  display: block;
+  color: #d0c5af;
+}
+.prominentEvidence {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+.prominentEvidence .evidenceColumns {
+  margin: 0;
+}
+.assignmentGroup {
+  min-width: 0;
+}
+.assignmentGroup > button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid #343849;
+  color: #c7ddff;
+  background: #1b2637;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.assignmentGroup[data-tone='danger'] > button {
+  color: #f0c6d5;
+  background: #291f25;
+}
+.assignmentGroup[data-tone='good'] > button {
+  color: #b9e8cf;
+  background: #1b2923;
+}
+.assignmentGroup > p {
+  margin: 0;
+  padding: 10px 12px;
+  color: #d1b7be;
+  font-size: 12px;
+}
+.assignmentGroup > .findingDetail {
+  margin: 0;
+  border-radius: 0;
 }
 .missingAssignments {
   border-top: 1px solid #4a3743;
@@ -1845,6 +2014,122 @@
 .albumCandidates article small {
   color: #a6aec0;
 }
+.releaseSelector {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0;
+}
+.releaseSelector > button {
+  display: grid;
+  grid-template-columns: 26px 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #42485e;
+  border-radius: 9px;
+  background: #1d2130;
+  color: #e9edf7;
+  text-align: left;
+  cursor: pointer;
+}
+.releaseSelector > button[data-selected='true'] {
+  border-color: #a58be4;
+  background: #25223b;
+}
+.releaseSelector > button > span:nth-child(3) {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.releaseSelector strong {
+  font-size: 13px;
+}
+.releaseSelector small {
+  color: #aeb8cb;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.releaseDetail {
+  border: 1px solid #454b60;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #191d2b;
+}
+.releaseDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #3d4358;
+}
+.releaseDetailHeader > div {
+  display: grid;
+  gap: 4px;
+}
+.releaseDetailHeader small {
+  color: #aeb7ca;
+}
+.releaseDetailHeader button {
+  padding: 8px 11px;
+  border: 1px solid #7963b2;
+  border-radius: 7px;
+  background: #3d305d;
+  color: #f3edff;
+  cursor: pointer;
+}
+.candidateTrackList {
+  max-height: 560px;
+  overflow: auto;
+}
+.candidateTrackList > div {
+  display: grid;
+  grid-template-columns: 55px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-top: 1px solid #353b4d;
+}
+.candidateTrackList > div:first-child {
+  border-top: 0;
+}
+.candidateTrackList b {
+  color: #aeb6ca;
+  font-size: 12px;
+}
+.candidateTrackList > div > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.candidateTrackList small {
+  color: #aab4c7;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+.candidateExceptions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid #454b60;
+}
+.candidateExceptions section {
+  padding: 10px;
+  border: 1px solid #614651;
+  border-radius: 8px;
+  background: #281e25;
+}
+.candidateExceptions strong {
+  font-size: 13px;
+}
+.candidateExceptions ul {
+  margin: 7px 0 0;
+  padding-left: 20px;
+  font-size: 12px;
+}
 .evidencePicker {
   display: grid;
   gap: 6px;
@@ -1967,6 +2252,15 @@
   }
   .albumCandidates article small {
     grid-column: 2;
+  }
+  .releaseSelector > button {
+    grid-template-columns: 26px 48px minmax(0, 1fr);
+  }
+  .releaseSelector .candidateStats {
+    grid-column: 3;
+  }
+  .candidateExceptions {
+    grid-template-columns: 1fr;
   }
   .decisionSelect {
     grid-template-columns: auto minmax(0, 1fr);

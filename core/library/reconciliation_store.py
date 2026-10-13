@@ -125,13 +125,16 @@ def load_album_plan(conn, case_id: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def retire_unseen_plans(db, observed_case_ids: set[str]) -> None:
+def retire_unseen_plans(db, observed_case_ids: set[str], *,
+                        target_folder: str | None = None) -> None:
     """Remove snapshots for albums absent from a completed scan."""
     conn = db._get_connection()
     try:
         ensure_schema(conn)
         existing = {str(row[0]) for row in conn.execute(
-            'SELECT case_id FROM reconcile_album_plans')}
+            'SELECT case_id FROM reconcile_album_plans '
+            'WHERE (? IS NULL OR album_folder = ?)',
+            (target_folder, target_folder))}
         stale = existing - observed_case_ids
         if stale:
             # Avoid SQLite's host-parameter limit on large libraries.

@@ -63,6 +63,9 @@ export interface AlbumAssignment {
   audio_artist?: string;
   audio_score?: number | null;
   duration_delta_ms?: number | null;
+  file_duration_ms?: number | null;
+  slot_duration_ms?: number | null;
+  slot_preview_url?: string;
   playlists?: string[];
 }
 
@@ -100,8 +103,12 @@ export interface AlbumReconciliationPlan {
     date?: string;
     pairs?: Array<{
       file: string;
+      file_path?: string;
       local_title: string;
+      file_duration_ms?: number;
       slot_title: string;
+      slot_duration_ms?: number;
+      slot_preview_url?: string;
       disc_number?: number;
       track_number?: number;
       confidence: string;
@@ -157,6 +164,7 @@ export interface ReviewCase {
   plan?: ReviewPlan;
   decisions?: ReviewDecision[];
   album_plan?: AlbumReconciliationPlan | null;
+  refresh?: { state: 'idle' | 'running' | 'complete' | 'error'; error?: string };
   items: ReviewFinding[];
 }
 
@@ -216,17 +224,30 @@ export async function applyReviewDecisionGroup(
   caseId: string,
   category: string,
   action: 'fix' | 'dismiss',
-): Promise<{ success: boolean; applied?: number; total?: number; error?: string }> {
-  return readJson(
-    await fetch(
-      `/api/repair/review-queue/${encodeURIComponent(caseId)}/decisions/${encodeURIComponent(category)}/apply`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action }),
-      },
-    ),
+): Promise<{
+  success: boolean;
+  applied?: number;
+  total?: number;
+  error?: string;
+  refresh_queued?: boolean;
+}> {
+  const response = await fetch(
+    `/api/repair/review-queue/${encodeURIComponent(caseId)}/decisions/${encodeURIComponent(category)}/apply`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    },
   );
+  // A grouped action can partially succeed before a later item fails. Keep
+  // the counts from a non-2xx response so the queue can report that outcome.
+  return (await response.json()) as {
+    success: boolean;
+    applied?: number;
+    total?: number;
+    error?: string;
+    refresh_queued?: boolean;
+  };
 }
 
 export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {
@@ -259,21 +280,27 @@ export async function applyReviewDecision(
   finding: ReviewFinding,
   action: 'fix' | 'dismiss',
   fixAction?: string | null,
-): Promise<{ success: boolean; message?: string; error?: string; stale?: boolean }> {
-  return readJson(
-    await fetch(
-      `/api/repair/review-queue/${encodeURIComponent(caseId)}/findings/${finding.id}/apply`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action,
-          fix_action: fixAction,
-          evidence_token: finding.evidence_token,
-        }),
-      },
-    ),
+): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+  stale?: boolean;
+  partial?: boolean;
+  refresh_queued?: boolean;
+}> {
+  const response = await fetch(
+    `/api/repair/review-queue/${encodeURIComponent(caseId)}/findings/${finding.id}/apply`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        fix_action: fixAction,
+        evidence_token: finding.evidence_token,
+      }),
+    },
   );
+  return response.json();
 }
 
 export async function startReadyChanges(

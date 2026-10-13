@@ -159,6 +159,7 @@ export interface BulkFixStatus {
   stopped?: boolean;
   error?: string | null;
   organize_queued?: number;
+  reconciliation_queued?: boolean;
   errors?: Array<{ error: string }> | null;
 }
 

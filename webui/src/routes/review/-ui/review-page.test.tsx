@@ -318,26 +318,14 @@ describe('library reconciliation review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    await screen.findByRole('heading', { name: 'Compared releases' });
+    await screen.findByRole('heading', { name: 'Ashes of the Wake' });
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    await screen.findByRole('heading', { name: 'Compare 2 release candidates' });
     const images = [...document.querySelectorAll('img')];
     expect(images.some((image) => image.src.includes('local-ashes'))).toBe(true);
     expect(images.some((image) => image.src.includes('release-one'))).toBe(true);
-    expect(screen.getByText('Candidate 1 · musicbrainz')).toBeTruthy();
-    expect(screen.getByText('Candidate 2 · musicbrainz')).toBeTruthy();
-    expect(screen.getByText('AcoustID recording ID matches release slot')).toBeTruthy();
-    expect(screen.getByText('Exact')).toBeTruthy();
-    expect(screen.getByText(/Δ 0.01s/)).toBeTruthy();
-    expect(screen.getByText(/AcoustID alternate ruled out: Hourglass/)).toBeTruthy();
-    expect(screen.getAllByText('Recording: acoustic')).toHaveLength(2);
+    expect(screen.getByText('Strong match')).toBeTruthy();
     expect(screen.getByText('US deluxe edition')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: /Why this needs review/ })).toBeTruthy();
-    expect(
-      screen.getByText(/competing identities not resolved by the other evidence/),
-    ).toBeTruthy();
-    expect(screen.getByText('Other recordings linked to this fingerprint')).toBeTruthy();
-    expect(screen.getAllByText('Hourglass · Lamb of God · 98%')).toHaveLength(2);
-    expect(screen.getByText('1 confirmed match')).toBeTruthy();
-    expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
   });
 
@@ -494,8 +482,9 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
-    expect(screen.getAllByText('No action')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /1 proposed track changes/ }));
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
+    fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
     expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
@@ -503,6 +492,7 @@ describe('library reconciliation review queue', () => {
     fireEvent.click(selectedRow);
     expect(screen.queryByLabelText('Selected action detail')).toBeNull();
     expect(selectedRow.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByRole('row', { name: /Hourglass/ })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Show tracks'), { target: { value: 'numbering' } });
     expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('numbering');
     expect(screen.queryByText(/3 settled release slots/)).toBeNull();
@@ -1076,7 +1066,7 @@ describe('library reconciliation review queue', () => {
         const body = JSON.parse(options?.body as string) as Record<string, unknown>;
         expect(body).toMatchObject({
           action: 'fix',
-          fix_action: '1',
+          fix_action: '0',
           evidence_token: 'current-evidence',
         });
         applied = true;
@@ -1099,11 +1089,11 @@ describe('library reconciliation review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
-    const buttons = await screen.findAllByRole('button', {
-      name: 'Pin this release',
-    });
-    fireEvent.click(buttons[1]);
-    await screen.findByText('Release pinned');
+    await screen.findByRole('heading', { name: 'Ashes of the Wake' });
+    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    const button = await screen.findByRole('button', { name: 'Use this release' });
+    fireEvent.click(button);
+    await waitFor(() => expect(applied).toBe(true));
   });
 
   it('shows edition artwork and colored fit in the album plan', async () => {
