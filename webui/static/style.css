@@ -12110,19 +12110,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(12px);
 }
 
 .auto-sync-modal {
     width: calc(100vw - 96px);
     height: calc(100vh - 64px);
-    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-    border-radius: 20px;
-    box-shadow:
-        0 25px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(var(--accent-rgb), 0.1);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -12133,27 +12125,17 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
-    padding: 24px 28px 20px;
-    border-bottom: 1px solid var(--white-a08);
     flex-shrink: 0;
-    position: relative;
 }
 
 .auto-sync-eyebrow {
     margin-bottom: 4px;
-    color: rgba(var(--accent-rgb), 0.85);
     font-size: 10px;
-    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
 }
 
 .auto-sync-header h3 {
     margin: 0 0 4px;
-    color: #fff;
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
 }
 
 .auto-sync-header p {
@@ -12192,21 +12174,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-close {
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--white-a12);
     border-radius: var(--radius-circle);
-    background: var(--white-a06);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 22px;
     line-height: 1;
-}
-
-.auto-sync-close:hover {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.4);
-    color: #ef4444;
 }
 
 /* Auto-fit rather than a fixed four: the strip is three tiles now, and the
@@ -12214,41 +12186,21 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--white-a06);
     flex-shrink: 0;
-}
-
-.auto-sync-summary div {
-    padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid var(--white-a05);
-    border-radius: 10px;
 }
 
 .auto-sync-summary span {
     display: block;
-    color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
 }
 
 .auto-sync-summary small {
     display: block;
-    margin-top: 2px;
-    color: var(--white-a45);
-    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-monitor {
     flex-shrink: 0;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--white-a06);
 }
 
 .auto-sync-monitor-head {
@@ -12271,10 +12223,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-monitor-kicker {
     margin-bottom: 3px;
-    color: rgba(var(--accent-rgb), 0.85);
     font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
     text-transform: uppercase;
 }
 
@@ -12293,25 +12242,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-monitor-head button,
 .auto-sync-board-intro button,
 .auto-sync-history-intro button {
-    height: 30px;
-    padding: 0 14px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a04);
-    color: var(--white-a65);
     cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    transition: all 0.2s ease;
-}
-
-.auto-sync-monitor-head button:hover,
-.auto-sync-board-intro button:hover,
-.auto-sync-history-intro button:hover {
-    background: rgba(var(--accent-rgb), 0.18);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
 }
 
 .auto-sync-monitor-list {
@@ -12324,9 +12255,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-monitor-card,
 .auto-sync-monitor-empty {
     min-width: 0;
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    background: rgba(22, 22, 22, 0.95);
 }
 
 .auto-sync-monitor-card {
@@ -12338,13 +12266,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-monitor-card.running {
-    border-color: rgba(var(--accent-rgb), 0.34);
     background: rgba(var(--accent-rgb), 0.08);
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08), 0 8px 24px rgba(var(--accent-rgb), 0.08);
 }
 
 .auto-sync-monitor-card.error {
-    border-color: rgba(239, 68, 68, 0.28);
     background: rgba(239, 68, 68, 0.07);
 }
 
@@ -12443,7 +12368,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: fit-content;
     max-width: 100%;
     margin-top: 8px;
-    padding: 8px 12px;
 }
 
 .auto-sync-monitor-empty span,
@@ -12468,35 +12392,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-tabs {
     display: flex;
-    gap: 0;
-    padding: 0 20px;
-    border-bottom: 1px solid var(--white-a06);
     flex-shrink: 0;
 }
 
 .auto-sync-tabs button {
     height: 40px;
-    padding: 0 18px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--white-a50);
     cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    transition: color 0.2s ease, border-color 0.2s ease;
-    position: relative;
     top: 1px;
-}
-
-.auto-sync-tabs button:hover {
-    color: var(--white-a85);
-}
-
-.auto-sync-tabs button.active {
-    color: rgb(var(--accent-light-rgb));
-    border-bottom-color: rgb(var(--accent-rgb));
 }
 
 .auto-sync-tab-panel {
@@ -12550,19 +12452,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-sidebar {
     min-height: 0;
-    border-right: 1px solid var(--white-a06);
-    background: rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
 }
 
 .auto-sync-sidebar-title {
     padding: 14px 18px 8px;
-    color: var(--white-a55);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-sidebar-filter {
@@ -12574,19 +12469,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 100%;
     height: 30px;
     padding: 0 28px 0 10px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    background: rgba(0, 0, 0, 0.3);
     color: #fff;
     font-size: 12px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.auto-sync-sidebar-search:focus {
-    border-color: rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.04);
 }
 
 .auto-sync-sidebar-search::placeholder {
@@ -12631,14 +12517,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     justify-content: space-between;
     gap: 6px;
     padding: 6px 4px 4px;
-}
-
-.auto-sync-source-title {
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-source-bulk-btn {
@@ -12748,10 +12626,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     z-index: 10001;
     min-width: 220px;
     padding: 8px;
-    background: linear-gradient(135deg, #1f1f1f 0%, #161616 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: 10px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -12759,11 +12633,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-bulk-menu-title {
     padding: 6px 8px 4px;
-    color: var(--white-a55);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-bulk-menu-buckets {
@@ -12774,22 +12643,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-bulk-menu button {
     padding: 6px 10px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-sm);
-    background: var(--white-a03);
     color: var(--white-a75);
     cursor: pointer;
     font-size: 11px;
     font-weight: 600;
     text-align: left;
     font-family: inherit;
-    transition: all 0.15s ease;
-}
-
-.auto-sync-bulk-menu button:hover {
-    background: rgba(var(--accent-rgb), 0.16);
-    border-color: rgba(var(--accent-rgb), 0.35);
-    color: rgb(var(--accent-light-rgb));
 }
 
 /* Tap-to-schedule popover (AutoSyncPickMenu): the bulk menu's chrome for
@@ -12863,20 +12722,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     line-height: 1.3;
 }
 
-.auto-sync-bulk-menu-unschedule {
-    color: var(--white-a55) !important;
-}
-
-.auto-sync-bulk-menu-unschedule:hover {
-    background: rgba(239, 68, 68, 0.18) !important;
-    border-color: rgba(239, 68, 68, 0.4) !important;
-    color: #ef4444 !important;
-}
-
 /* Custom-interval column tag */
-.auto-sync-column.custom {
-    border-style: dashed;
-}
 
 .auto-sync-column-head em {
     font-style: normal;
@@ -12890,11 +12736,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-playlist,
 .auto-sync-scheduled-card {
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    background: rgba(22, 22, 22, 0.95);
     cursor: grab;
-    transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .auto-sync-playlist {
@@ -12910,7 +12752,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 8px;
     height: 8px;
     border-radius: var(--radius-circle);
-    background: var(--white-a18);
     flex-shrink: 0;
     /* Pin the status dot to the first line of the name so multi-line
      * playlist titles flow underneath it instead of pushing it down. */
@@ -12929,12 +12770,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-playlist:hover,
 .auto-sync-scheduled-card:hover {
-    border-color: rgba(var(--accent-rgb), 0.25);
     background: rgba(28, 28, 28, 0.98);
-}
-
-.auto-sync-playlist.scheduled {
-    border-color: rgba(var(--accent-rgb), 0.22);
 }
 
 /* The one number in this strip you would act on. */
@@ -13048,16 +12884,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.auto-sync-scheduled-timing span {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: rgb(var(--accent-light-rgb));
-}
-
-.auto-sync-scheduled-timing small {
-    background: var(--white-a05);
-    color: var(--white-a45);
 }
 
 /* ── Hourly board: interval LANES (horizontal rows — Concept 1) ───────────── */
@@ -13230,37 +13056,26 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 20px;
     display: grid;
     grid-template-columns: repeat(10, minmax(220px, 1fr));
     grid-auto-rows: minmax(0, 1fr);
-    gap: 12px;
 }
 
 .auto-sync-column {
     min-height: 0;
     max-height: 100%;
-    overflow: hidden;
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-lg);
-    background: rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .auto-sync-column.drag-over {
-    border-color: rgba(var(--accent-rgb), 0.5);
     background: rgba(var(--accent-rgb), 0.06);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3), 0 6px 18px rgba(var(--accent-rgb), 0.12);
 }
 
 .auto-sync-column-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--white-a05);
     color: var(--white-a85);
     font-size: 13px;
     font-weight: 700;
@@ -13268,11 +13083,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-column-head small {
-    color: var(--white-a40);
-    font-size: 10px;
-    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-column-list {
@@ -13317,29 +13128,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-align: center;
 }
 
-.auto-sync-drop-hint {
-    border: 1px dashed var(--white-a10);
-    border-radius: 10px;
-    padding: 20px 12px;
-}
-
-.auto-sync-drop-hint strong,
-.auto-sync-drop-hint span {
-    display: block;
-}
-
 .auto-sync-drop-hint strong {
-    color: var(--white-a50);
-    font-size: 11px;
-    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-drop-hint span {
     margin-top: 4px;
-    color: var(--white-a30);
-    font-size: 11px;
 }
 
 .auto-sync-loading,
@@ -13371,15 +13165,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    padding: 12px;
     margin-bottom: 8px;
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.auto-sync-scheduled-card.disabled {
-    opacity: 0.52;
 }
 
 .auto-sync-scheduled-main {
@@ -13414,34 +13203,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     min-width: 0;
     height: 26px;
     flex: 1;
-    padding: 0 10px;
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.auto-sync-scheduled-card button.run:disabled {
-    cursor: default;
-    opacity: 0.62;
-}
-
 .auto-sync-scheduled-card button.run:not(:disabled):hover {
     color: rgb(var(--accent-neon-rgb));
-    background: rgba(var(--accent-rgb), 0.2);
     border-color: rgba(var(--accent-rgb), 0.4);
-}
-
-.auto-sync-scheduled-card button:not(.run):hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.4);
 }
 
 .auto-sync-scheduled-card.failing {
@@ -13697,12 +13466,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-weekly-editor {
-    background: linear-gradient(160deg,
-        rgba(15, 20, 32, 0.96) 0%,
-        rgba(10, 14, 24, 0.96) 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.4);
-    border-radius: 20px;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
     width: 100%;
     max-width: 460px;
     padding: 24px;
@@ -13720,7 +13483,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-weekly-editor-head h4 {
     margin: 0;
     font-size: 16px;
-    color: rgba(255, 255, 255, 0.95);
 }
 
 .auto-sync-weekly-editor-playlist {
@@ -13753,26 +13515,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-weekly-day-toggle {
     height: 36px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a04);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 11px;
     font-weight: 600;
     font-family: inherit;
-    transition: all 0.15s ease;
-}
-
-.auto-sync-weekly-day-toggle:hover {
-    border-color: rgba(var(--accent-rgb), 0.35);
-    background: rgba(var(--accent-rgb), 0.08);
-}
-
-.auto-sync-weekly-day-toggle.active {
-    border-color: rgba(var(--accent-rgb), 0.65);
-    background: rgba(var(--accent-rgb), 0.2);
-    color: rgb(var(--accent-light-rgb));
 }
 
 .auto-sync-weekly-editor-section input[type="time"],
@@ -13821,19 +13568,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-weekly-editor-save {
     height: 34px;
     padding: 0 16px;
-    border-radius: var(--radius-md);
     border: 1px solid var(--white-a10);
     background: var(--white-a04);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 12px;
-    font-weight: 600;
     font-family: inherit;
     transition: all 0.15s ease;
 }
 
 .auto-sync-weekly-editor-save {
-    background: rgba(var(--accent-rgb), 0.2);
     border-color: rgba(var(--accent-rgb), 0.5);
     color: rgb(var(--accent-light-rgb));
 }
@@ -14119,20 +13863,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-history-status {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    padding: 2px 8px;
-    border-radius: 10px;
     background: rgba(148, 163, 184, 0.14);
     color: #94a3b8;
 }
-
-.auto-sync-history-status.completed,
-.auto-sync-history-status.finished { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
-.auto-sync-history-status.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.auto-sync-history-status.skipped { background: rgba(250, 204, 21, 0.15); color: #facc15; }
 
 .auto-sync-history-duration {
     background: var(--white-a05);
