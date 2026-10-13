@@ -9,8 +9,10 @@
 /* ---- Theater shell: much bigger than the old 880px modal ----------------- */
 
 #np-modal-overlay .np-modal {
-    /* v1 pins width/background with !important — the theater intentionally
-       overrides them here (this file loads for the theater only). */
+    /* The Now Playing redesign in style.css pins width/background with
+       !important — the theater intentionally overrides them here. This file
+       loads on every page (index.html), not just with the theater, so the
+       override has to be scoped by the #np-modal-overlay selector above. */
     width: min(1280px, 96vw) !important;
     height: min(920px, 94vh);
     max-width: 96vw !important;
