@@ -1696,7 +1696,16 @@ function showPinDialog(profile, mode = 'pin') {
             autocomplete: 'current-password', maxlength: '200', 'aria-label': `${profile.name}'s password`,
             'aria-describedby': 'profile-pin-error',
         });
-        card.append(input, error);
+        input.name = 'password';
+        // password managers pair a password with the username in its form. there's
+        // no visible username here, so carry the profile name hidden beside it
+        const login = pfEl('input', {
+            type: 'text', name: 'username', autocomplete: 'username', value: profile.name,
+            readonly: true, hidden: true, tabindex: '-1', 'aria-hidden': 'true',
+        });
+        const form = pfEl('form', { action: '/api/profiles/select', method: 'post', autocomplete: 'on', style: 'width:100%' }, [login, input]);
+        form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+        card.append(form, error);
         const go = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Continue', style: 'margin-top:8px;width:100%' });
         go.addEventListener('click', () => submit());
         keys.push(go);

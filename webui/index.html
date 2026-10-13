@@ -201,12 +201,16 @@
                 <div class="launch-pin-icon">🔐</div>
                 <h2 class="launch-pin-title">Sign in to SoulSync</h2>
                 <p class="launch-pin-subtitle">Enter your account name and password</p>
-                <input type="text" id="login-username" class="launch-pin-input" placeholder="Username"
-                    autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
-                <input type="password" id="login-password" class="launch-pin-input" placeholder="Password"
-                    autocomplete="current-password" maxlength="200" style="letter-spacing: normal;"
-                    onkeydown="if(event.key==='Enter') submitLogin()">
-                <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <!-- a real form with named fields so password managers pair the username
+                     with this password, not the hidden recovery / pin fields -->
+                <form id="login-form" action="/api/auth/login" method="post" autocomplete="on"
+                    onsubmit="event.preventDefault(); submitLogin()">
+                    <input type="text" id="login-username" name="username" class="launch-pin-input" placeholder="Username"
+                        autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="login-password" name="password" class="launch-pin-input" placeholder="Password"
+                        autocomplete="current-password" maxlength="200" style="letter-spacing: normal;">
+                    <button type="submit" id="login-submit" class="launch-pin-submit">Sign in</button>
+                </form>
                 <!-- shown when sign in with plex is on (webui/src/shell/plex-signin.ts) -->
                 <div id="login-plex" class="login-plex" hidden>
                     <span class="login-plex-or">or</span>
@@ -220,23 +224,26 @@
                 <div class="launch-pin-icon">🔑</div>
                 <h2 class="launch-pin-title">Reset your password</h2>
                 <p class="launch-pin-subtitle">Answer your recovery question</p>
-                <input type="text" id="recovery-username" class="launch-pin-input" placeholder="Username"
+                <form id="login-recovery-form" action="/api/auth/recovery-reset" method="post" autocomplete="on"
+                    onsubmit="event.preventDefault()">
+                <input type="text" id="recovery-username" name="username" class="launch-pin-input" placeholder="Username"
                     autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
-                <button id="recovery-fetch-btn" class="launch-pin-submit"
+                <button type="button" id="recovery-fetch-btn" class="launch-pin-submit"
                     onclick="fetchRecoveryQuestion()">Continue</button>
                 <div id="recovery-answer-section" style="display: none;">
                     <p id="recovery-question-text" class="launch-pin-subtitle"
                         style="margin-top: 12px; font-weight: 600;"></p>
                     <input type="text" id="recovery-answer" class="launch-pin-input" placeholder="Your answer"
                         autocomplete="off" maxlength="120" style="margin-bottom: 8px; letter-spacing: normal;">
-                    <input type="password" id="recovery-new-password" class="launch-pin-input"
+                    <input type="password" id="recovery-new-password" name="new-password" class="launch-pin-input"
                         placeholder="New password (min 6)" autocomplete="new-password" maxlength="200"
                         style="margin-bottom: 8px; letter-spacing: normal;">
                     <input type="password" id="recovery-new-password-confirm" class="launch-pin-input"
                         placeholder="Confirm new password" autocomplete="new-password" maxlength="200"
                         style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
-                    <button class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
+                    <button type="button" class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
                 </div>
+                </form>
                 <p id="recovery-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginEntry()">← Back to sign in</button>
             </div>
