@@ -71,7 +71,7 @@ def _client(handler, authenticate):
     c._auth_retry_wait = 0.0
     c._reauth_lock = threading.Lock()
     c._reauth_thread = None
-    c._heal_failed_token = None
+    c._auth_generation = 0
     c._config = _FakeConfig()
     if authenticate is not None:
         c._authenticate = authenticate
@@ -229,50 +229,117 @@ def test_heal_composes_with_the_real_login():
 
 
 def test_a_failed_heal_is_shared_until_the_backoff_expires():
-    auth_calls = []
+    """With the REAL login: a failed heal clears the cached token, so later
+    calls present no token at all — the sharing must come from the backoff
+    timestamp itself, not from matching the dead token's string."""
+    logins = {"n": 0}
 
-    def dead_auth(arl):
-        auth_calls.append(arl)
-        return False
+    def dead_arl_handler(method, token):
+        if method == "deezer.getUserData":
+            logins["n"] += 1
+            return {"results": {"USER": {"USER_ID": 0}}}  # dead ARL: no user
+        return {"error": {"VALID_TOKEN_REQUIRED": "valid token required"}}
 
-    c = _client(_track_handler, dead_auth)
+    c = _client(dead_arl_handler, None)  # None = keep the real _authenticate
     for _ in range(3):
-        assert c._get_track_data("42") is None
-    assert auth_calls == ["arl-123"]  # one login attempt, not one per download
+        assert c._gw_call("song.getData", {"sng_id": "42"}) is None
+    assert logins["n"] == 1  # one login attempt, not one per call
+    assert c._api_token is None  # the seam the stub-based version missed
     assert c._pending_arl == "arl-123"
     assert c._auth_retry_at > time.time()
 
 
-def test_a_successful_reconnect_clears_the_heal_failure_marker():
-    """Round-2 minor: a heal fails (marker + backoff set), then a settings
-    save reconnects successfully. If that login re-issues the same token
-    string and it is rejected again inside the old backoff window, the
-    stale marker must not suppress the next heal."""
-    auth_calls = []
+def test_a_successful_reconnect_reopens_the_heal_gate():
+    """A heal fails and the backoff is running; a settings save then logs in
+    fine. The successful login clears the backoff, so when the new session
+    is rejected later the heal is attempted — not suppressed by the stale
+    failure."""
+    state = {"arl_dead": True, "logins": 0}
 
-    def dead_auth(arl):
-        auth_calls.append(arl)
-        return False
+    def handler(method, token):
+        if method == "deezer.getUserData":
+            state["logins"] += 1
+            if state["arl_dead"]:
+                return {"results": {"USER": {"USER_ID": 0}}}
+            return {"results": {
+                "USER": {"USER_ID": 7, "BLOG_NAME": "Tester",
+                         "OPTIONS": {"license_token": "lic", "web_hq": True}},
+                "checkForm": "new-token",
+            }}
+        if token == "new-token" and not state["arl_dead"]:
+            return {"results": {"SNG_ID": "42", "TRACK_TOKEN": "tt"}}
+        return {"error": {"VALID_TOKEN_REQUIRED": "valid token required"}}
 
-    c = _client(_track_handler, dead_auth)
-    assert c._get_track_data("42") is None
-    assert c._heal_failed_token == "old-token"
+    c = _client(handler, None)  # real login throughout
+    assert c._gw_call("song.getData", {"sng_id": "42"}) is None
+    assert state["logins"] == 1
     assert c._auth_retry_at > time.time()
 
-    def same_token_auth(arl):
-        auth_calls.append(arl)
-        c._api_token = "old-token"  # Deezer re-issues the same session token
+    state["arl_dead"] = False
+    assert c.reconnect() is True  # the settings save
+    assert c._auth_retry_at == 0.0
+
+    state["arl_dead"] = True  # the new session gets rejected too
+    assert c._gw_call("song.getData", {"sng_id": "42"}) is None
+    assert state["logins"] == 3  # heal attempted again (save + heal), not gated
+
+
+def test_login_bootstrap_never_triggers_a_heal():
+    """deezer.getUserData IS the login: when a settings-save login's own
+    bootstrap is token-rejected, healing it would just be a second login
+    before giving up. Exactly one login post may happen."""
+    posts = {"n": 0}
+
+    def rejecting_handler(method, token):
+        if method == "deezer.getUserData":
+            posts["n"] += 1
+            return {"error": {"VALID_TOKEN_REQUIRED": "valid token required"}}
+        return {"results": {}}
+
+    c = _client(rejecting_handler, None)  # real login
+    assert c.reconnect() is False
+    assert posts["n"] == 1
+
+
+def test_concurrent_heal_shared_when_token_string_unchanged():
+    """Deezer may re-issue the same token string on re-login (the session
+    cookies persist). Waiting callers must still share the one heal — the
+    auth generation, not the token string, is what proves the refresh."""
+    state = {"valid": False}
+    auth_calls = []
+    auth_lock = threading.Lock()
+
+    def handler(method, token):
+        if state["valid"]:
+            return {"results": {"SNG_ID": "42", "TRACK_TOKEN": "tt"}}
+        return {"error": {"VALID_TOKEN_REQUIRED": "valid token required"}}
+
+    def same_string_auth(arl):
+        with auth_lock:
+            auth_calls.append(arl)
+        time.sleep(0.05)
+        state["valid"] = True
+        c._api_token = "old-token"  # the SAME string comes back
         c._authenticated = True
         return True
 
-    c._authenticate = same_token_auth
-    assert c.reconnect() is True
-    assert c._heal_failed_token is None
+    c = _client(handler, same_string_auth)
+    results = []
+    barrier = threading.Barrier(3)
 
-    c._authenticate = dead_auth
-    assert c._get_track_data("42") is None
-    # the heal was attempted (third login overall), not marker-suppressed
-    assert auth_calls == ["arl-123", "arl-123", "arl-123"]
+    def worker():
+        barrier.wait()
+        results.append(c._get_track_data("42"))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads:
+        t.start()
+    barrier.wait()
+    for t in threads:
+        t.join()
+
+    assert results == [{"SNG_ID": "42", "TRACK_TOKEN": "tt"}] * 2
+    assert len(auth_calls) == 1
 
 
 def test_a_write_is_healed_but_never_reexecuted():

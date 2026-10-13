@@ -138,12 +138,12 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._auth_retry_at = 0.0
         self._auth_retry_wait = 0.0
         # session-token heals (#1677): one re-login at a time, and the login's
-        # own gateway call must never trigger a nested heal
+        # own gateway call must never trigger a nested heal. The generation
+        # counts reconnects so a caller holding a rejected token can tell the
+        # session was refreshed even when the new token string matches the old.
         self._reauth_lock = threading.Lock()
         self._reauth_thread = None
-        # the token a heal already failed on — a burst of calls carrying it
-        # shares that failure until the retry backoff expires, not a login each
-        self._heal_failed_token = None
+        self._auth_generation = 0
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -257,10 +257,13 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         VALID_TOKEN_REQUIRED the session is dead, not the ARL — re-login
         once with the configured ARL and retry the call, instead of failing
         every download until the container restarts."""
+        generation_used = getattr(self, '_auth_generation', 0)
         results, token_required, token_used = self._gw_call_once(method, params)
         if not token_required:
             return results
-        if not self._reauthenticate_session(token_used):
+        if method == 'deezer.getUserData':
+            return None  # the login itself: a rejected bootstrap has no heal
+        if not self._reauthenticate_session(token_used, generation_used):
             return None
         if method not in _GW_READ_METHODS:
             # healed for the next call, but never re-execute a write: if the
@@ -310,7 +313,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             logger.error(f"Deezer API call failed ({method}): {e}")
             return None, False, token_used
 
-    def _reauthenticate_session(self, failed_token) -> bool:
+    def _reauthenticate_session(self, failed_token, failed_generation=None) -> bool:
         """Re-login after the gateway rejected the session token (#1677).
 
         One heal at a time: a burst of downloads hitting the same dead token
@@ -325,22 +328,23 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         if is_boot_phase():
             return False  # logins stay deferred until boot is over
         with self._reauth_lock:
-            if self._authenticated and self._api_token != failed_token:
+            if self._authenticated and (
+                    self._api_token != failed_token
+                    or (failed_generation is not None
+                        and getattr(self, '_auth_generation', 0) != failed_generation)):
                 return True  # another thread already refreshed the session
-            if (failed_token is not None
-                    and failed_token == getattr(self, '_heal_failed_token', None)
-                    and time.time() < self._auth_retry_at):
-                return False  # this token already failed a heal; backoff owns it
+            if time.time() < getattr(self, '_auth_retry_at', 0.0):
+                # a login already failed and its backoff is still running —
+                # shared by every caller, whatever token (or none) they hold
+                return False
             self._reauth_thread = threading.get_ident()
             try:
-                ok = self.reconnect()
+                return self.reconnect()
             except Exception as e:  # noqa: BLE001 — a heal must never break the caller
                 logger.error(f"Deezer session re-login raised: {e}")
-                ok = False
+                return False
             finally:
                 self._reauth_thread = None
-            self._heal_failed_token = None if ok else failed_token
-            return ok
 
     # ─── Status & Config ─────────────────────────────────────────
 
@@ -451,11 +455,12 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         else:
             self._pending_arl = None
             self._auth_retry_wait = 0.0
-            # a successful login supersedes any heal failure recorded against
-            # an earlier session — its marker and backoff must not suppress
-            # a future heal if this token is ever the one rejected (#1677)
-            self._heal_failed_token = None
+            # a successful login supersedes any earlier failure: clear its
+            # backoff so it can't suppress a future heal, and bump the
+            # generation so callers holding the rejected token can tell the
+            # session was refreshed even if the token string is unchanged
             self._auth_retry_at = 0.0
+            self._auth_generation = getattr(self, '_auth_generation', 0) + 1
         return ok
 
     def get_quality_label(self) -> str:
