@@ -215,7 +215,56 @@
   padding: 10px 12px;
   cursor: pointer;
   display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+.caseCopy {
+  display: grid;
   gap: 3px;
+  min-width: 0;
+}
+.caseCopy strong,
+.caseCopy span,
+.caseCopy small {
+  overflow-wrap: anywhere;
+}
+.reviewArtwork {
+  display: block;
+  position: relative;
+  flex: 0 0 auto;
+  width: 48px;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid #4b5063;
+  border-radius: 8px;
+  background: #222638;
+}
+.reviewArtwork[data-size='list'] {
+  width: 42px;
+  border-radius: 6px;
+}
+.reviewArtwork[data-size='header'] {
+  width: clamp(64px, 7vw, 84px);
+  border-radius: 11px;
+}
+.reviewArtwork img,
+.reviewArtworkFallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.reviewArtworkFallback {
+  font-size: 24px;
+  font-weight: 750;
+}
+.reviewArtwork[data-size='list'] .reviewArtworkFallback {
+  font-size: 18px;
+}
+.reviewArtwork[data-size='header'] .reviewArtworkFallback {
+  font-size: 35px;
 }
 .caseButton:hover {
   background: #25283a;
@@ -488,7 +537,7 @@
 }
 .releaseChoiceList article {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 26px 48px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -510,12 +559,12 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.releaseChoiceFit {
-  grid-column: 2;
-  white-space: nowrap;
+.releaseChoiceList .candidateStats {
+  grid-column: 3;
+  display: flex;
 }
 .releaseChoiceList button {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1 / span 2;
   justify-self: end;
   min-width: max-content;
@@ -536,39 +585,6 @@
   gap: 6px;
   flex-wrap: wrap;
   justify-content: flex-end;
-}
-.matrixCounts span {
-  border: 1px solid #4a5064;
-  border-radius: 999px;
-  padding: 5px 8px;
-  font-size: 11px;
-}
-.matrixCounts span[data-status='confirmed'] {
-  color: #bdf0d2;
-  border-color: #38775e;
-}
-.matrixCounts span[data-status='settled'] {
-  color: #c8cddd;
-  border-color: #646b82;
-}
-.matrixCounts span[data-status='uncertain'] {
-  color: #ffe0a3;
-  border-color: #856a38;
-  background: #2c2416;
-}
-.matrixCounts span[data-status='change'] {
-  color: #c7ddff;
-  border-color: #4d6d9d;
-  background: #19273a;
-}
-.matrixCounts span[data-status='missing'],
-.matrixCounts span[data-status='extra'] {
-  color: #ffc4d0;
-  border-color: #925163;
-}
-.matrixCounts span[data-status='not-owned'] {
-  color: #bdc5d7;
-  border-color: #596075;
 }
 .releaseContext {
   display: flex;
@@ -779,6 +795,15 @@
   padding-bottom: 20px;
   align-items: flex-start;
 }
+.albumIdentity {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+.albumIdentity > div {
+  min-width: 0;
+}
 .albumPlan {
   margin-top: 20px;
   padding: 16px;
@@ -820,32 +845,6 @@
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
-}
-.planBadges span {
-  border: 1px solid #4c5267;
-  border-radius: 999px;
-  padding: 5px 9px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.planBadges span[data-tone='good'] {
-  border-color: #3b765f;
-  color: #bff5d8;
-  background: #193329;
-}
-.planBadges span[data-tone='warning'] {
-  border-color: #8b6c37;
-  color: #ffe0a3;
-  background: #3a2d19;
-}
-.planBadges span[data-tone='danger'] {
-  border-color: #9a5262;
-  color: #ffd1da;
-  background: #40232b;
-}
-.planBadges span[data-tone='muted'] {
-  color: #abb2c4;
-  background: #252938;
 }
 .planActions {
   border-top: 1px solid #303547;
@@ -1118,6 +1117,11 @@
   border-color: #4d6d9d;
   color: #c8ddff;
   background: #1c2c43;
+}
+.statusChip[data-tone='muted'] {
+  border-color: #596075;
+  color: #c8cddd;
+  background: #272b3a;
 }
 .trackSection,
 .releaseSection,
@@ -1865,11 +1869,13 @@
     border-bottom: 1px solid #363b4d;
   }
   .releaseChoiceList article {
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: 26px 48px minmax(0, 1fr);
   }
-  .releaseChoiceFit,
+  .releaseChoiceList .candidateStats {
+    grid-column: 3;
+  }
   .releaseChoiceList article > button {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: auto;
     justify-self: start;
   }

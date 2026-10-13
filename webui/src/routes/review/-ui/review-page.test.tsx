@@ -27,6 +27,7 @@ const finding = {
       {
         source: 'musicbrainz',
         release_id: 'release-one',
+        image_url: '/api/image-cache/release-one',
         matched: 1,
         clear: 1,
         total_slots: 1,
@@ -177,6 +178,7 @@ describe('library reconciliation review queue', () => {
                 case_id: 'album:1:ashes',
                 album: 'Ashes of the Wake',
                 artist: 'Lamb of God',
+                album_thumb_url: '/api/image-cache/local-ashes',
                 pending: 1,
                 priority: 1,
                 finding_types: ['reconciliation_unresolved'],
@@ -194,6 +196,7 @@ describe('library reconciliation review queue', () => {
             case_id: 'album:1:ashes',
             album: 'Ashes of the Wake',
             artist: 'Lamb of God',
+            album_thumb_url: '/api/image-cache/local-ashes',
             folder: '/music/Lamb of God/Ashes of the Wake',
             count: 1,
             status: 'pending',
@@ -204,6 +207,9 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Compared releases' });
+    const images = [...document.querySelectorAll('img')];
+    expect(images.some((image) => image.src.includes('local-ashes'))).toBe(true);
+    expect(images.some((image) => image.src.includes('release-one'))).toBe(true);
     expect(screen.getByText('Candidate 1 · musicbrainz')).toBeTruthy();
     expect(screen.getByText('Candidate 2 · musicbrainz')).toBeTruthy();
     expect(screen.getByText('AcoustID recording ID matches release slot')).toBeTruthy();
@@ -372,8 +378,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
     expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
-    expect(screen.getByText('○ 1 outside collection')).toBeTruthy();
-    expect(screen.getByText('✓ 3 settled release slots')).toBeTruthy();
+    expect(screen.getByText('1 outside collection')).toBeTruthy();
+    expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
     expect(screen.getAllByText('No action')).toHaveLength(1);
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
     const selectedDetail = screen.getByLabelText('Selected action detail');
@@ -635,7 +641,7 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
 
     expect(await screen.findByText('Various Artists → Lamb of God')).toBeTruthy();
-    expect(screen.getAllByText('✓ 1 ready').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1 ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
@@ -975,5 +981,114 @@ describe('library reconciliation review queue', () => {
     });
     fireEvent.click(buttons[1]);
     await screen.findByText('Release pinned');
+  });
+
+  it('shows edition artwork and colored fit in the album plan', async () => {
+    const releaseFinding = {
+      ...finding,
+      finding_type: 'reconciliation_release',
+      details: {
+        ...finding.details,
+        candidates: [
+          {
+            source: 'musicbrainz',
+            release_id: 'first-release',
+            release_title: 'Album',
+            image_url: '/api/image-cache/first-release',
+            matched: 12,
+            total_slots: 12,
+            missing: [],
+            extra: [],
+          },
+          {
+            source: 'musicbrainz',
+            release_id: 'second-release',
+            release_title: 'Album (deluxe)',
+            matched: 10,
+            total_slots: 12,
+            missing: ['Bonus 1', 'Bonus 2'],
+            extra: ['local.flac'],
+          },
+        ],
+      },
+    };
+    const decision = {
+      id: 'release_conflicts',
+      category: 'release_conflicts',
+      label: 'Release or edition',
+      risk: 'manual',
+      summary: 'Multiple releases fit equally well.',
+      finding_ids: [7],
+      action_count: 1,
+    };
+    const plan = {
+      ready: 0,
+      manual: 1,
+      destructive: 0,
+      blocked: 0,
+      total: 1,
+      status: 'needs_review',
+      blocker_reasons: [],
+      can_apply_ready: false,
+      can_organize: false,
+      decisions: [decision],
+    };
+    fetchMock.mockImplementation((url: string) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:ashes',
+                album: 'Album',
+                artist: 'Artist',
+                album_thumb_url: '/api/image-cache/local-album',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_release'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3Aashes?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:ashes',
+            album: 'Album',
+            artist: 'Artist',
+            album_thumb_url: '/api/image-cache/local-album',
+            folder: '/music/Album',
+            count: 1,
+            status: 'pending',
+            plan,
+            decisions: [decision],
+            items: [releaseFinding],
+          }),
+        );
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ReviewPage />);
+    expect(
+      await screen.findByRole('heading', { name: 'Compare the editions that fit this folder' }),
+    ).toBeTruthy();
+    const images = [...document.querySelectorAll('img')];
+    expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(2);
+    expect(images.some((image) => image.src.includes('first-release'))).toBe(true);
+    expect(
+      screen.getByText('12/12 assigned').closest('[data-tone]')?.getAttribute('data-tone'),
+    ).toBe('good');
+    expect(screen.getByText('2 missing').closest('[data-tone]')?.getAttribute('data-tone')).toBe(
+      'danger',
+    );
+    expect(screen.getByText('1 extra').closest('[data-tone]')?.getAttribute('data-tone')).toBe(
+      'warning',
+    );
   });
 });

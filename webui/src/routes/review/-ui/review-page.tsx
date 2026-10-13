@@ -27,7 +27,8 @@ import {
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
 import { ProviderReleaseId } from './provider-release-id';
-import { ReconciliationEvidence } from './reconciliation-evidence';
+import { CandidateFit, ReconciliationEvidence, StatusChip } from './reconciliation-evidence';
+import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
 
 const requireChoice = new Set([
@@ -1197,12 +1198,19 @@ export function ReviewPage() {
                 className={item.case_id === caseId ? styles.selectedCase : styles.caseButton}
                 onClick={() => selectCase(item.case_id)}
               >
-                <strong>{item.album || 'Unassigned files'}</strong>
-                <span>{item.artist || item.case_id.split(':')[0]}</span>
-                <small>
-                  {caseStatusSummary(item)}
-                  {item.error_count ? ` · ${item.error_count} failed` : ''}
-                </small>
+                <ReviewArtwork
+                  title={item.album || 'Unassigned files'}
+                  url={item.album_thumb_url}
+                  size="list"
+                />
+                <span className={styles.caseCopy}>
+                  <strong>{item.album || 'Unassigned files'}</strong>
+                  <span>{item.artist || item.case_id.split(':')[0]}</span>
+                  <small>
+                    {caseStatusSummary(item)}
+                    {item.error_count ? ` · ${item.error_count} failed` : ''}
+                  </small>
+                </span>
               </button>
             ))}
           </div>
@@ -1251,15 +1259,22 @@ export function ReviewPage() {
           {reviewCase ? (
             <>
               <div className={styles.albumHeader}>
-                <div>
-                  <div className={styles.eyebrow}>
-                    Album {albumNumber ?? '—'} of {queue?.total ?? '—'}
-                    {' · '}
-                    {reviewCase.count} pending action
-                    {reviewCase.count === 1 ? '' : 's'}
+                <div className={styles.albumIdentity}>
+                  <ReviewArtwork
+                    title={reviewCase.album || 'Unassigned files'}
+                    url={reviewCase.album_thumb_url}
+                    size="header"
+                  />
+                  <div>
+                    <div className={styles.eyebrow}>
+                      Album {albumNumber ?? '—'} of {queue?.total ?? '—'}
+                      {' · '}
+                      {reviewCase.count} pending action
+                      {reviewCase.count === 1 ? '' : 's'}
+                    </div>
+                    <h2>{reviewCase.album || 'Unassigned files'}</h2>
+                    <p>{reviewCase.artist || 'Artist not established'}</p>
                   </div>
-                  <h2>{reviewCase.album || 'Unassigned files'}</h2>
-                  <p>{reviewCase.artist || 'Artist not established'}</p>
                 </div>
                 <div className={styles.nav}>
                   <button
@@ -1331,7 +1346,9 @@ export function ReviewPage() {
                       </p>
                     </div>
                     <div className={styles.planBadges}>
-                      <span data-tone="good">✓ {plan.ready} ready</span>
+                      <StatusChip tone="good" icon="check">
+                        {plan.ready} ready
+                      </StatusChip>
                     </div>
                   </div>
                   {readySummaryList}
@@ -1440,12 +1457,6 @@ export function ReviewPage() {
                               <div className={styles.releaseChoiceList}>
                                 {records(record(active.details).candidates).map(
                                   (candidate, candidateIndex) => {
-                                    const missing = Array.isArray(candidate.missing)
-                                      ? candidate.missing.length
-                                      : Number(candidate.missing || 0);
-                                    const extra = Array.isArray(candidate.extra)
-                                      ? candidate.extra.length
-                                      : Number(candidate.extra || 0);
                                     const context = candidateContext(candidate);
                                     return (
                                       <article
@@ -1454,6 +1465,11 @@ export function ReviewPage() {
                                         <span className={styles.candidateRank}>
                                           {candidateIndex + 1}
                                         </span>
+                                        <ReviewArtwork
+                                          title={textValue(candidate.release_title) || 'Release'}
+                                          url={textValue(candidate.image_url)}
+                                          size="release"
+                                        />
                                         <div>
                                           <strong>
                                             {textValue(candidate.release_title) ||
@@ -1468,11 +1484,7 @@ export function ReviewPage() {
                                           </small>
                                           {context && <small>{context}</small>}
                                         </div>
-                                        <small className={styles.releaseChoiceFit}>
-                                          {textValue(candidate.matched)}/
-                                          {textValue(candidate.total_slots) || '?'} assigned ·{' '}
-                                          {missing} missing · {extra} extra
-                                        </small>
+                                        <CandidateFit candidate={candidate} />
                                         <button
                                           type="button"
                                           disabled={busy}
@@ -1585,7 +1597,9 @@ export function ReviewPage() {
                       <p>These can be applied without resolving the decisions above.</p>
                     </div>
                     <div className={styles.planBadges}>
-                      <span data-tone="good">✓ {plan.ready} ready</span>
+                      <StatusChip tone="good" icon="check">
+                        {plan.ready} ready
+                      </StatusChip>
                     </div>
                   </div>
                   {readySummaryList}
@@ -1616,39 +1630,39 @@ export function ReviewPage() {
                     </div>
                     <div className={styles.matrixCounts}>
                       {(reviewCase.album_plan?.counts.confirmed || 0) > 0 && (
-                        <span data-status="confirmed">
-                          ✓ {reviewCase.album_plan?.counts.confirmed} confirmed
-                        </span>
+                        <StatusChip tone="good" icon="check">
+                          {reviewCase.album_plan?.counts.confirmed} confirmed
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.changed || 0) > 0 && (
-                        <span data-status="change">
-                          ↻ {reviewCase.album_plan?.counts.changed} changes
-                        </span>
+                        <StatusChip tone="info" icon="arrow">
+                          {reviewCase.album_plan?.counts.changed} changes
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.uncertain || 0) > 0 && (
-                        <span data-status="uncertain">
-                          ! {reviewCase.album_plan?.counts.uncertain} uncertain
-                        </span>
+                        <StatusChip tone="warning" icon="warning">
+                          {reviewCase.album_plan?.counts.uncertain} uncertain
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.missing || 0) > 0 && (
-                        <span data-status="missing">
-                          − {reviewCase.album_plan?.counts.missing} missing
-                        </span>
+                        <StatusChip tone="danger" icon="x">
+                          {reviewCase.album_plan?.counts.missing} missing
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.not_owned || 0) > 0 && (
-                        <span data-status="not-owned">
-                          ○ {reviewCase.album_plan?.counts.not_owned} outside collection
-                        </span>
+                        <StatusChip tone="muted" icon="info">
+                          {reviewCase.album_plan?.counts.not_owned} outside collection
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.settled || 0) > 0 && (
-                        <span data-status="settled">
-                          ✓ {reviewCase.album_plan?.counts.settled} already reviewed
-                        </span>
+                        <StatusChip tone="muted" icon="check">
+                          {reviewCase.album_plan?.counts.settled} already reviewed
+                        </StatusChip>
                       )}
                       {(reviewCase.album_plan?.counts.extra || 0) > 0 && (
-                        <span data-status="extra">
-                          + {reviewCase.album_plan?.counts.extra} extra
-                        </span>
+                        <StatusChip tone="danger" icon="warning">
+                          {reviewCase.album_plan?.counts.extra} extra
+                        </StatusChip>
                       )}
                     </div>
                   </div>

@@ -35,6 +35,21 @@ _RECORDING_ID_CHANGE_KEYS = frozenset({
 })
 
 
+def _album_art_by_id(conn, album_ids: set[str]) -> dict[str, str]:
+    """Read local covers by album identity, never by a possibly shared title."""
+    if not album_ids:
+        return {}
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='albums'").fetchone():
+        return {}
+    if 'thumb_url' not in {row[1] for row in conn.execute('PRAGMA table_info(albums)')}:
+        return {}
+    ids = sorted(album_ids)
+    placeholders = ','.join('?' for _ in ids)
+    return {str(album_id): url for album_id, url in conn.execute(
+        f"SELECT id, thumb_url FROM albums WHERE id IN ({placeholders}) "
+        "AND thumb_url IS NOT NULL AND thumb_url != ''", ids)}
+
+
 def _change_value(change: Any, key: str) -> str:
     value = change.get(key) if isinstance(change, dict) else None
     return str(value or '').strip()
@@ -531,6 +546,17 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 })
             for item in items:
                 item['plan'] = classify_case(grouped.get(item['case_id'], []))
+            album_ids = {
+                str(finding['details']['album_id'])
+                for findings in grouped.values() for finding in findings
+                if finding['details'].get('album_id') is not None
+            }
+            artwork = _album_art_by_id(conn, album_ids)
+            for item in items:
+                album_id = next((str(finding['details']['album_id'])
+                                 for finding in grouped.get(item['case_id'], [])
+                                 if finding['details'].get('album_id') is not None), None)
+                item['album_thumb_url'] = artwork.get(album_id) if album_id else None
         return {'items': items, 'total': total, 'ready_total': ready_total,
                 'page': page, 'limit': limit}
     finally:
@@ -574,6 +600,9 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         first = items[0]
         label = next((item['details'] for item in items
                       if item['details'].get('album_title') or item['details'].get('album')), {})
+        album_id = next((item['details'].get('album_id') for item in items
+                         if item['details'].get('album_id') is not None), None)
+        album_art = _album_art_by_id(conn, {str(album_id)}).get(str(album_id)) if album_id is not None else None
         album_plan = load_album_plan(conn, case_id)
         if album_plan:
             finding_by_path = {item.get('file_path'): item for item in items
@@ -698,8 +727,8 @@ def get_case(db, case_id: str, *, status: str = 'pending',
             'items': items,
             'count': len(items),
             'status': first['status'],
-            'album_id': next((item['details'].get('album_id') for item in items
-                              if item['details'].get('album_id') is not None), None),
+            'album_id': album_id,
+            'album_thumb_url': album_art,
             'plan': plan,
             'album_plan': album_plan,
             'decisions': plan['decisions'],

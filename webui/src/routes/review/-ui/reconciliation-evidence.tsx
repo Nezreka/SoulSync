@@ -3,6 +3,7 @@ import type { ReactNode, SVGProps } from 'react';
 import type { ReviewFinding } from '../-review.api';
 
 import { ProviderReleaseId } from './provider-release-id';
+import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
 
 type Data = Record<string, unknown>;
@@ -86,12 +87,42 @@ function EvidenceIcon({ name, ...props }: SVGProps<SVGSVGElement> & { name: Icon
   );
 }
 
-function StatusChip({ tone, icon, children }: { tone: Tone; icon: IconName; children: ReactNode }) {
+export function StatusChip({
+  tone,
+  icon,
+  children,
+}: {
+  tone: Tone;
+  icon: IconName;
+  children: ReactNode;
+}) {
   return (
     <span className={styles.statusChip} data-tone={tone}>
       <EvidenceIcon name={icon} />
       {children}
     </span>
+  );
+}
+
+export function CandidateFit({ candidate }: { candidate: Data }) {
+  const matched = count(candidate.matched);
+  const total = count(candidate.total_slots);
+  const missing = Array.isArray(candidate.missing)
+    ? candidate.missing.length
+    : count(candidate.missing);
+  const extra = Array.isArray(candidate.extra) ? candidate.extra.length : count(candidate.extra);
+  return (
+    <div className={styles.candidateStats} aria-label="Release track fit">
+      <StatusChip tone={matched === total && total > 0 ? 'good' : 'warning'} icon="check">
+        {matched}/{total || '?'} assigned
+      </StatusChip>
+      <StatusChip tone={missing ? 'danger' : 'good'} icon={missing ? 'x' : 'check'}>
+        {missing} missing
+      </StatusChip>
+      <StatusChip tone={extra ? 'warning' : 'good'} icon={extra ? 'warning' : 'check'}>
+        {extra} extra
+      </StatusChip>
+    </div>
   );
 }
 
@@ -476,7 +507,6 @@ function ReleaseCandidates({
           const pairs = objects(candidate.pairs);
           const missing = Array.isArray(candidate.missing) ? candidate.missing.map(label) : [];
           const extra = Array.isArray(candidate.extra) ? candidate.extra.map(label) : [];
-          const total = count(candidate.total_slots);
           return (
             <article
               className={styles.releaseCard}
@@ -484,6 +514,11 @@ function ReleaseCandidates({
             >
               <header>
                 <span className={styles.candidateRank}>{index + 1}</span>
+                <ReviewArtwork
+                  title={label(candidate.release_title) || 'Release'}
+                  url={label(candidate.image_url)}
+                  size="release"
+                />
                 <div>
                   <strong>
                     Candidate {index + 1} · {label(candidate.source) || 'Unknown source'}
@@ -516,28 +551,7 @@ function ReleaseCandidates({
                   )}
                 </div>
               </header>
-              {candidate.matched !== undefined && (
-                <div className={styles.candidateStats}>
-                  <StatusChip
-                    tone={count(candidate.matched) === total ? 'good' : 'warning'}
-                    icon="check"
-                  >
-                    {count(candidate.matched)}/{total || '?'} assigned
-                  </StatusChip>
-                  <StatusChip
-                    tone={missing.length ? 'danger' : 'good'}
-                    icon={missing.length ? 'x' : 'check'}
-                  >
-                    {missing.length} missing
-                  </StatusChip>
-                  <StatusChip
-                    tone={extra.length ? 'warning' : 'good'}
-                    icon={extra.length ? 'warning' : 'check'}
-                  >
-                    {extra.length} extra
-                  </StatusChip>
-                </div>
-              )}
+              {candidate.matched !== undefined && <CandidateFit candidate={candidate} />}
               {sameAssignments && pairs.length > 0 && (
                 <p className={styles.sameMapping}>
                   <EvidenceIcon name="check" /> Same track mapping

@@ -756,6 +756,11 @@ def _candidate_evidence(files: list[dict], scored: tuple,
     return {
         'source': source, 'release_id': release_id,
         'release_title': release_meta.get('name') or release_meta.get('title') or '',
+        'image_url': (release_meta.get('image_url') or release_meta.get('thumb_url') or
+                      next((image.get('url') for image in (release_meta.get('images') or [])
+                            if isinstance(image, dict) and image.get('url')), '') or
+                      (f'https://coverartarchive.org/release/{release_id}/front-250'
+                       if source == 'musicbrainz' else '')),
         'country': release_meta.get('country') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
         'format': ', '.join(value for value in formats if value),

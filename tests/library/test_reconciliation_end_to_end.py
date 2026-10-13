@@ -101,8 +101,11 @@ def test_candidate_evidence_displays_the_acoustid_recording_that_supports_the_sl
         'duration_delta_ms': 0, 'ambiguity_reasons': [],
     }], 'missing_slots': [], 'extra_files': []}
 
-    pair = _candidate_evidence(
-        files, (1, 1, 0, 'musicbrainz', 'release-id', slots, plan))['pairs'][0]
+    evidence = _candidate_evidence(
+        files, (1, 1, 0, 'musicbrainz', 'release-id', slots, plan))
+    pair = evidence['pairs'][0]
+
+    assert evidence['image_url'] == 'https://coverartarchive.org/release/release-id/front-250'
 
     assert pair['audio_title'] == 'Tautou'
     assert pair['audio_alternatives'] == [
@@ -126,7 +129,8 @@ def test_candidate_evidence_keeps_release_context_for_human_comparison():
     evidence = _candidate_evidence(
         files, (0, 0, -1, 'musicbrainz', 'release-id', slots, plan),
         {'name': 'Album', 'country': 'US', 'disambiguation': 'deluxe',
-         'date': '2024-01-02', 'media': [{'format': 'CD'}, {'format': 'CD'}]},
+         'date': '2024-01-02', 'media': [{'format': 'CD'}, {'format': 'CD'}],
+         'image_url': 'https://example.org/deluxe-cover.jpg'},
     )
 
     assert evidence['release_title'] == 'Album'
@@ -134,6 +138,7 @@ def test_candidate_evidence_keeps_release_context_for_human_comparison():
     assert evidence['disambiguation'] == 'deluxe'
     assert evidence['date'] == '2024-01-02'
     assert evidence['format'] == 'CD'
+    assert evidence['image_url'] == 'https://example.org/deluxe-cover.jpg'
 
 
 def test_candidate_shape_sorts_numbered_and_unnumbered_missing_slots():

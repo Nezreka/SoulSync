@@ -64,12 +64,16 @@ def repair_review_queue_list():
     if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
         return jsonify({'error': 'Invalid finding status'}), 400
     try:
-        return jsonify(worker.get_review_cases(
+        page = worker.get_review_cases(
             status=status, page=_safe_int(request.args.get('page')),
             limit=_safe_int(request.args.get('limit'), 30),
             q=request.args.get('q') or '', job_id=request.args.get('job_id') or '',
             category=request.args.get('category') or '',
-            risk=request.args.get('risk') or ''))
+            risk=request.args.get('risk') or '')
+        for item in page['items']:
+            if item.get('album_thumb_url'):
+                item['album_thumb_url'] = fix_artist_image_url(item['album_thumb_url'])
+        return jsonify(page)
     except Exception as exc:
         logger.error('Error loading review queue: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not load review queue'}), 500
@@ -92,6 +96,8 @@ def repair_review_queue_case(case_id):
             for key in ('album_thumb_url', 'artist_thumb_url'):
                 if item['details'].get(key):
                     item['details'][key] = fix_artist_image_url(item['details'][key])
+        if case.get('album_thumb_url'):
+            case['album_thumb_url'] = fix_artist_image_url(case['album_thumb_url'])
         return jsonify(case)
     except Exception as exc:
         logger.error('Error loading review case: %s', exc, exc_info=True)

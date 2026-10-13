@@ -93,6 +93,7 @@ export interface AlbumReconciliationPlan {
     extra: number;
     continuous_numbering: boolean;
     release_title?: string;
+    image_url?: string;
     country?: string;
     disambiguation?: string;
     format?: string;
@@ -104,6 +105,7 @@ export interface ReviewCaseSummary {
   case_id: string;
   album: string | null;
   artist: string | null;
+  album_thumb_url?: string | null;
   pending: number;
   priority: number;
   finding_types: string[];
@@ -137,6 +139,7 @@ export interface ReviewCase {
   case_id: string;
   album: string | null;
   artist: string | null;
+  album_thumb_url?: string | null;
   folder: string | null;
   count: number;
   status: string;

@@ -61,6 +61,28 @@ def test_same_title_different_release_and_owner_never_merge():
     assert all(case['pending'] == 1 for case in cases['items'])
 
 
+def test_queue_artwork_uses_album_identity_not_shared_title():
+    db = _Database()
+    db.conn.execute('CREATE TABLE albums (id TEXT PRIMARY KEY, title TEXT, thumb_url TEXT)')
+    db.conn.executemany('INSERT INTO albums VALUES (?, ?, ?)', [
+        ('10', 'Greatest Hits', '/api/image-cache/album-ten'),
+        ('11', 'Greatest Hits', '/api/image-cache/album-eleven'),
+    ])
+    for album_id in (10, 11):
+        db.add(album_id, f'/music/{album_id}/01.flac', {
+            'album_id': album_id, 'album_title': 'Greatest Hits',
+            'artist_name': 'Various Artists',
+        }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    cases = list_cases(db, job_id='library_reconciliation')
+    assert len(cases['items']) == 2
+    for summary in cases['items']:
+        detail = get_case(db, summary['case_id'], job_id='library_reconciliation')
+        album_id = str(detail['album_id'])
+        expected = f'/api/image-cache/album-{"ten" if album_id == "10" else "eleven"}'
+        assert summary['album_thumb_url'] == expected
+        assert detail['album_thumb_url'] == expected
+
+
 def test_one_album_row_in_two_physical_folders_is_two_scan_cases():
     db = _Database()
     db.add(1, '/music/Disc One/01.flac',
