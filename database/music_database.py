@@ -4536,24 +4536,87 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             try:
-                stale = self._tables_missing_planner_stats(conn.cursor())
+                cursor = conn.cursor()
+                upgrades = self._match_status_indexes_to_upgrade(cursor)
+                big_upgrades = [u for u in upgrades if self._table_is_big(cursor, u[1])]
+                stale = self._tables_missing_planner_stats(cursor)
             finally:
                 conn.close()
         except Exception as e:
             logger.debug(f"planner stats check skipped: {e}")
             return
-        if not stale:
+        if upgrades and not big_upgrades:
+            # small tables: a rebuild is instant, no thread needed
+            self.upgrade_match_status_indexes(upgrades)
+        if not stale and not big_upgrades:
             return
         key = str(self.database_path)
         with _planner_stats_lock:
             t = _planner_stats_threads.get(key)
             if t is not None and t.is_alive():
                 return
-            t = threading.Thread(target=self.refresh_planner_stats, args=(stale,),
+            t = threading.Thread(target=self._boot_index_maintenance, args=(big_upgrades, stale),
                                  name="planner-stats", daemon=True)
             _planner_stats_threads[key] = t
-        logger.info(f"planner stats: analyzing {len(stale)} table(s) with unanalyzed indexes: {', '.join(stale)}")
+        if big_upgrades:
+            logger.info(f"enrichment queue indexes: rebuilding {len(big_upgrades)} as (status, id)")
+        if stale:
+            logger.info(f"planner stats: analyzing {len(stale)} table(s) with unanalyzed indexes: {', '.join(stale)}")
         t.start()
+
+    def _boot_index_maintenance(self, upgrades, stale) -> None:
+        self.upgrade_match_status_indexes(upgrades)
+        tables = list(dict.fromkeys(list(stale) + [u[1] for u in upgrades]))
+        if tables:
+            self.refresh_planner_stats(tables)
+
+    @staticmethod
+    def _table_is_big(cursor, table) -> bool:
+        return cursor.execute(
+            f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_NORM_STATS_MIN_ROWS - 1}').fetchone() is not None
+
+    # every enrichment worker asks for its next item with
+    # `WHERE <svc>_match_status IS NULL ORDER BY id LIMIT 1`. on an index of
+    # the status alone sqlite has to sort every pending row to return one:
+    # 120-240 ms per item while a big library's queue is full, for each of 13
+    # workers. on (status, id) the first index entry is the answer. same rows,
+    # and the old index is a prefix of the new one, so nothing else loses it.
+    _MATCH_STATUS_TABLES = ('artists', 'albums', 'tracks')
+    _SINGLE_STATUS_INDEX = re.compile(r'CREATE INDEX "?\w+"? ON "?\w+"? ?\((\w+_match_status)\)\s*$', re.I)
+
+    @classmethod
+    def _match_status_indexes_to_upgrade(cls, cursor) -> list:
+        """(index, table, column) for every match_status index still built on
+        the status alone."""
+        out = []
+        for name, table, sql in cursor.execute(
+                "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' "
+                f"AND tbl_name IN ({','.join('?' * len(cls._MATCH_STATUS_TABLES))}) AND sql IS NOT NULL",
+                cls._MATCH_STATUS_TABLES):
+            m = cls._SINGLE_STATUS_INDEX.match(sql.strip())
+            if m:
+                out.append((name, table, m.group(1)))
+        return out
+
+    def upgrade_match_status_indexes(self, upgrades) -> None:
+        """rebuild each as (status, id), one transaction each so a reader never
+        finds the index missing. re-checked inside the transaction, so two
+        processes booting at once don't rebuild the same one twice."""
+        for name, table, column in upgrades:
+            try:
+                conn = self._get_connection()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                                       (name,)).fetchone()
+                    if row and self._SINGLE_STATUS_INDEX.match((row[0] or '').strip()):
+                        conn.execute(f'DROP INDEX "{name}"')
+                        conn.execute(f'CREATE INDEX "{name}" ON "{table}" ({column}, id)')
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"could not rebuild {name} as ({column}, id): {e}")
 
     def _kick_norm_backfill_thread(self):
         """one background backfill per db path per process. a big library's
@@ -4861,11 +4924,11 @@ class MusicDatabase:
             
             # Create indexes (safe even if columns were already present)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists (musicbrainz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums (musicbrainz_release_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks (musicbrainz_recording_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status, id)")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
@@ -4935,7 +4998,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status, id)")
 
             if 'style' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN style TEXT")
@@ -4958,7 +5021,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status, id)")
 
             if 'style' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN style TEXT")
@@ -4977,7 +5040,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status, id)")
 
             if 'style' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
@@ -5003,7 +5066,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN discogs_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_id ON artists (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5021,7 +5084,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating_count INTEGER")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_id ON albums (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status, id)")
 
             logger.info("Discogs enrichment columns added/verified successfully")
 
@@ -5046,7 +5109,7 @@ class MusicDatabase:
             if 'similar_artists_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status, id)")
         except Exception as e:
             logger.error(f"Error adding similar-artists worker columns: {e}")
 
@@ -5065,7 +5128,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5079,7 +5142,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -5093,7 +5156,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status, id)")
 
             logger.info("Amazon columns added/verified successfully")
         except Exception as e:
@@ -5128,7 +5191,7 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_label TEXT")
 
                 cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_id ON {table} (bandcamp_id)")
-                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status)")
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status, id)")
 
             logger.info("Bandcamp columns added/verified successfully")
         except Exception as e:
@@ -5204,7 +5267,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5218,7 +5281,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status, id)")
 
             if 'label' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN label TEXT")
@@ -5239,7 +5302,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status, id)")
 
             if 'bpm' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
@@ -5285,7 +5348,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_id ON artists (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status, id)")
 
             cursor.execute("PRAGMA table_info(albums)")
             albums_columns = [column[1] for column in cursor.fetchall()]
@@ -5298,7 +5361,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_id ON albums (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status, id)")
 
             cursor.execute("PRAGMA table_info(tracks)")
             tracks_columns = [column[1] for column in cursor.fetchall()]
@@ -5311,7 +5374,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_id ON tracks (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status, id)")
 
             logger.info("JioSaavn columns added/verified successfully")
         except Exception as e:
@@ -5333,8 +5396,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5349,8 +5412,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -5365,8 +5428,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status, id)")
 
         except Exception as e:
             logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
@@ -5411,9 +5474,9 @@ class MusicDatabase:
             if 'genius_url' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN genius_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_id ON artists (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5435,7 +5498,7 @@ class MusicDatabase:
             if 'lastfm_url' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -5469,9 +5532,9 @@ class MusicDatabase:
             if 'genius_url' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN genius_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_id ON tracks (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status, id)")
 
             # One-time reset: clear all Genius matches due to blind-fallback bug in search
             # The old search_artist/search_song returned the first result with no name validation,
@@ -5521,9 +5584,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_id ON artists (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_id ON artists (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5543,9 +5606,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_id ON albums (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_id ON albums (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status, id)")
 
             # --- Albums (extra metadata columns) ---
             if 'upc' not in albums_columns:
@@ -5575,9 +5638,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN copyright TEXT")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_id ON tracks (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc_nocase ON tracks (isrc COLLATE NOCASE)")
 
