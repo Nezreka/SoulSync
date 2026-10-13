@@ -777,7 +777,7 @@
                 if (k.episode === 'unconfigured') missing.push('TV');
                 if (typeof showToast === 'function') {
                     showToast(going.length
-                        ? 'Searching wishlist ' + going.join(' + ') + ' now — grabs land in Downloads'
+                        ? 'Searching wishlist ' + going.join(' + ') + ' now — up to your Max downloads per run land in Downloads'
                         : (missing.length
                             ? 'Set the ' + missing.join(' and ') + ' library folder' + (missing.length === 1 ? '' : 's') + ' in Video Settings first'
                             : (k.movie === 'busy' || k.episode === 'busy'
