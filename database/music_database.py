@@ -6,6 +6,7 @@ import string
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from functools import lru_cache
@@ -39,6 +40,16 @@ _NORM_STATS_MIN_ROWS = 1000
 _PLANNER_ANALYSIS_LIMIT = 1000
 _planner_stats_lock = threading.Lock()
 _planner_stats_threads = {}
+
+
+def _calling_functions(depth: int = 3) -> str:
+    """'caller <- its caller <- ...' from just above _get_connection."""
+    names = []
+    frame = sys._getframe(2)
+    while frame is not None and len(names) < depth:
+        names.append(frame.f_code.co_name)
+        frame = frame.f_back
+    return " <- ".join(names)
 
 # a per-track credit like "A feat. B" or "A; B" is one string in the tracks
 # row; track_credits holds each credited name separately, indexed, so "is B
@@ -539,10 +550,13 @@ class MusicDatabase:
                 # diagnostic: say so when an open is still slow.
                 _elapsed = time.perf_counter() - _t_open
                 if _elapsed > 0.2:
+                    # who was waiting. without it the log says something is
+                    # slow ~2,000 times a day and nothing about where.
                     logger.warning(
-                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s",
+                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s, from %s [%s]",
                         _elapsed * 1000, (_t_connected - _t_open) * 1000,
-                        (time.perf_counter() - _t_connected) * 1000, self.database_path)
+                        (time.perf_counter() - _t_connected) * 1000, self.database_path,
+                        _calling_functions(), threading.current_thread().name)
                 return connection
             except sqlite3.OperationalError as e:
                 last_error = e
