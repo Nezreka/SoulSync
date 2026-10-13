@@ -4400,18 +4400,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
-    border: 1px solid var(--white-a10);
     white-space: nowrap;
-    background: var(--white-a06);
-    color: var(--white-a80);
 }
 
 .test-button:hover,
 .detect-button:hover {
-    background: rgba(var(--accent-rgb), 0.15);
     border-color: rgba(var(--accent-rgb), 0.3);
     color: rgb(var(--accent-light-rgb));
-    transform: translateY(-1px);
 }
 
 /* ===== QUALITY PROFILE STYLES ===== */
@@ -5406,7 +5401,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: none;
 }
 
 .reset-button {
@@ -60116,36 +60110,25 @@ tr.tag-diff-same {
 #settings-page .settings-content {
     flex-direction: column;
     align-items: center;
-    max-width: 100% !important;
-    margin: 0 auto;
     padding-bottom: 10vh;
 }
 
 /* Tab bar + save action sit on one control row. */
 #settings-page .settings-nav-row {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 14px;
     width: 100%;
     /* Was 920px. That is what actually set the page width — the earlier
-       .settings-content cap never applied, this override sets it to 100%
-       !important and caps the CHILDREN instead. 920px also made the tab bar
-       wrap: the tabs fit fine, the row they sit in did not. */
+       .settings-content cap never applied (settings-premier.css sets its
+       max-width with !important), so the page caps the CHILDREN instead.
+       920px also made the tab bar wrap: the tabs fit fine, the row they sit
+       in did not. */
     max-width: var(--settings-max-width);
     margin: 0 auto 28px;
-    padding: 0 2px;
 }
 
 #settings-page .stg-tabbar {
-    display: flex;
     flex: 0 1 auto;
-    margin: 0;
-    width: fit-content;
     max-width: 100%;
     min-width: 0;
-    background: rgba(0, 0, 0, 0.34);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.045);
 }
 
 #settings-page .settings-nav-row .header-actions {
@@ -60154,8 +60137,6 @@ tr.tag-diff-same {
     justify-content: flex-end;
     align-items: center;
     flex-wrap: nowrap;
-    width: auto;
-    margin: 0 0 0 auto;
     margin-top: 0;
 }
 
@@ -60169,11 +60150,9 @@ tr.tag-diff-same {
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
-    flex-direction: column;
+    /* settings-premier.css overrides this with max-width: none !important.
+       It stays because test_the_page_width_is_one_number pins it. */
     max-width: var(--settings-max-width);
-    width: 100%;
-    gap: 0;
-    margin: 0 auto;
     margin-bottom: 0;
 }
 /* The Logs tab uses the full available width — the log terminal benefits from
@@ -60250,22 +60229,8 @@ tr.tag-diff-same {
     gap: 10px;
 }
 
-#settings-page .settings-left-column,
-#settings-page .settings-right-column,
-#settings-page .settings-third-column {
-    min-width: unset;
-    width: 100%;
-    gap: 0;
-}
-
 /* Kill glassmorphic cards — flat, no bg, no borders, no shadows */
 #settings-page .settings-group {
-    background: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin-bottom: 0;
     position: relative;
     overflow: visible;
 }
@@ -60283,16 +60248,12 @@ tr.tag-diff-same {
 #settings-page .settings-group > h3 {
     /* the sub-heading INSIDE a card. deliberately between the card title and a
        field label: it groups rows, it does not title the card. */
-    font-size: 0.72rem;
-    font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--white-a55);
     /* more air above than below, so the label belongs to what follows it */
     padding: 24px 0 8px 2px;
-    margin: 0;
     border: none;
-    border-bottom: 1px solid var(--white-a07);
     border-left: none;
     position: relative;
     transition: color 240ms cubic-bezier(0.2, 0, 0, 1);
@@ -60338,9 +60299,7 @@ tr.tag-diff-same {
 #settings-page .form-group[hidden] { display: none !important; }
 
 #settings-page .form-group > label {
-    font-size: var(--stg-t-label, 0.78rem);
     color: rgba(255, 255, 255, 0.74);
-    font-weight: 450;
     margin: 0;
     /* Grow to fill the left so the control aligns to a consistent right edge. */
     flex: 1 1 auto;
@@ -60436,7 +60395,6 @@ tr.tag-diff-same {
     border-color: rgba(var(--accent-rgb), 0.4);
     outline: none;
     background-color: var(--white-a06);
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
 }
 #settings-page select option {
     background: #1a1a1e;
@@ -60727,9 +60685,6 @@ tr.tag-diff-same {
     flex-basis: 100%;
     display: block;
     padding: 2px 0 4px;
-    font-size: var(--stg-t-sub, 0.75rem);
-    color: rgba(255, 255, 255, 0.42);
-    line-height: 1.55;
     margin: 0;
     background: none;
     border-radius: 0;
