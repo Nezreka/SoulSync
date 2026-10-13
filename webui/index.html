@@ -6597,6 +6597,7 @@
                                                         <select id="stream-source" class="form-select">
                                                             <option value="youtube">YouTube (Instant)</option>
                                                             <option value="active">Active Download Source</option>
+                                                            <option value="deezer_preview">Deezer 30s Preview (Instant)</option>
                                                         </select>
                                                         <span class="info-icon" role="button" tabindex="0"
                                                             title="What's this?" onclick="toggleSettingHelp(this)"
@@ -6607,6 +6608,11 @@
                                                             "Active Download Source" uses your configured source (Tidal,
                                                             Qobuz, etc.) — if that's Soulseek, YouTube is used
                                                             automatically.
+                                                            "Deezer 30s Preview" plays Deezer's 30 second clip of the
+                                                            song straight away, no Deezer account needed. Songs Deezer
+                                                            has no clip for use YouTube. With queue auto-download off,
+                                                            missing queue songs play their clip instead of being
+                                                            skipped.
                                                         </div>
                                                     </div>
                                                     <div class="form-group">
@@ -12492,6 +12498,7 @@
             <div class="media-info">
                 <div class="track-title" id="track-title"><span class="title-text">No track</span></div>
                 <div class="artist-name" id="artist-name">Unknown Artist</div>
+                <span class="player-preview-badge" id="player-preview-badge" hidden>30s preview</span>
             </div>
             <div class="mini-player-controls">
                 <button class="mini-toggle-btn" id="mini-shuffle-btn" title="Shuffle">

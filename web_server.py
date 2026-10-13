@@ -2845,6 +2845,7 @@ _EDITION_BARE_RE = _re.compile(
 
 # Stream-prep worker logic lives in core/streaming/prepare.py.
 from core.streaming import prepare as _streaming_prepare
+from core.streaming import deezer_preview as _deezer_preview
 
 
 def _build_prepare_stream_deps(sess, sid):
@@ -6396,6 +6397,8 @@ def stream_enhanced_search_track():
     artist_name = data.get('artist_name', '').strip()
     album_name = data.get('album_name', '').strip()
     duration_ms = data.get('duration_ms', 0)
+    # the player queue asking for a deezer clip in place of a skip (#1312)
+    preview_only = bool(data.get('preview_only'))
 
     if not track_name or not artist_name:
         return jsonify({"error": "Track name and artist name are required"}), 400
@@ -6412,8 +6415,13 @@ def stream_enhanced_search_track():
             download_orchestrator=download_orchestrator,
             matching_engine=matching_engine,
             run_async=run_async,
+            deezer_client=(_get_deezer_client()
+                           if _search_stream.is_deezer_preview_source(config_manager) else None),
+            preview_only=preview_only,
         )
         if result is None:
+            if preview_only:
+                return jsonify({"success": False, "error": "No preview available"}), 404
             return jsonify({
                 "success": False,
                 "error": "No suitable track found after trying multiple search strategies",
@@ -12517,9 +12525,25 @@ def stream_start():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                # a library track played through the media server (#809) or
+                # a deezer preview left this set, and /stream/audio serves
+                # stream_url first, so the new track would play the old one
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })
+
+        # deezer preview (#1312): nothing to download, the clip is ready now.
+        # resolved here, not in the search, because preview urls expire.
+        if _deezer_preview.is_preview_request(data):
+            track_id = _deezer_preview.preview_track_id(data)
+            client = _get_deezer_client() if track_id else None
+            preview_url = client.get_track_preview_url(track_id) if client else None
+            if not preview_url:
+                return jsonify({"success": False, "error": "Deezer preview unavailable"}), 404
+            with sess.lock:
+                sess.update(_deezer_preview.session_state_for(data, preview_url))
+            return jsonify({"success": True, "message": "Preview ready", "preview": True})
 
         # Start new background streaming task for this session.
         fut = stream_executor.submit(_prepare_stream_task, data, sess, sid)
@@ -12769,6 +12793,7 @@ def stream_stop():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })

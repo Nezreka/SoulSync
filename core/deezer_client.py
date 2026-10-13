@@ -1843,6 +1843,24 @@ class DeezerClient:
             return None
 
     @rate_limited
+    def get_track_preview_url(self, track_id) -> Optional[str]:
+        """the track's 30s preview url, fresh from /track/{id}.
+
+        never from the metadata cache: preview urls are signed and expire,
+        so a cached one plays nothing. None when deezer has no preview."""
+        try:
+            response = self.session.get(f"{self.BASE_URL}/track/{track_id}", timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if 'error' in data:
+                logger.warning(f"Deezer API error getting preview for track {track_id}: {data['error']}")
+                return None
+            return data.get('preview') or None
+        except Exception as e:
+            logger.error(f"Error getting preview for track {track_id}: {e}")
+            return None
+
+    @rate_limited
     def get_playlist(self, playlist_id, progress_cb=None) -> Optional[Dict[str, Any]]:
         """
         Get a playlist with all its tracks by ID.

@@ -1221,6 +1221,26 @@ body.max-performance .nav-button.active:hover {
     margin: 0;
 }
 
+/* a deezer 30s clip is playing, not the song (#1312) */
+.player-preview-badge {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.player-preview-badge[hidden] {
+    display: none;
+}
+
 .album-name.header-album {
     font-family: -apple-system, 'Segoe UI', sans-serif;
     font-size: 10px;
@@ -53206,6 +53226,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     background: rgba(var(--accent-rgb), 0.08);
     border-color: rgba(var(--accent-rgb), 0.15);
 }
+.np-format-badge.preview {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.3);
+}
 
 /* Progress Section */
 .np-progress-section {
@@ -53920,6 +53945,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     color: rgb(var(--accent-light-rgb)) !important;
     border-color: rgba(var(--accent-rgb),0.4) !important;
     background: rgba(var(--accent-rgb),0.12) !important;
+}
+.np-format-badge.preview {
+    color: #fbbf24 !important;
+    border-color: rgba(251, 191, 36, 0.4) !important;
+    background: rgba(251, 191, 36, 0.12) !important;
 }
 
 /* ── Progress / volume: thicker track, accent gradient fill, glow on hover ── */
