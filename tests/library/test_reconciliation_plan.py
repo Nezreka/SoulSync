@@ -66,6 +66,52 @@ def test_unmatched_adjacent_track_also_flags_its_confirmed_neighbor():
     assert 'boundary' in result['pairs'][0]['ambiguity_reasons'][0]
 
 
+def test_large_duration_error_remains_unsettled_after_neighbor_is_removed():
+    files = [_file('Faith', '/album/03 - Faith.flac', 239560,
+                   {'mbid': 'faith', 'title': 'Faith', 'artist': 'Ghost', 'score': 0.99})]
+    slots = [
+        {'title': 'Faith', 'artist': 'Ghost', 'recording_mbid': 'faith',
+         'disc_number': 1, 'track_number': 3, 'duration_ms': 269707},
+        {'title': 'See the Light', 'artist': 'Ghost', 'recording_mbid': 'light',
+         'disc_number': 1, 'track_number': 4, 'duration_ms': 245160},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert result['pairs'][0]['confidence'] == 'ambiguous'
+    assert any('30.1 seconds' in reason for reason in result['pairs'][0]['ambiguity_reasons'])
+
+
+def test_tied_fingerprint_can_be_settled_by_artist_position_and_duration():
+    file = _file('TV Dinners - 2008 Remaster',
+                 '/album/02 - TV Dinners - 2008 Remaster.mp3', 230616,
+                 {'mbid': 'tv', 'title': 'TV Dinners', 'artist': 'ZZ Top', 'score': 0.99})
+    file['tags'].update({'artist': 'ZZ Top', 'track_number': 2, 'disc_number': 1})
+    file['acoustid']['recordings'].append(
+        {'mbid': 'gun', 'title': 'Gun Love', 'artist': 'ZZ Top', 'score': 0.99})
+    slots = [{'title': 'TV Dinners', 'artist': 'ZZ Top', 'recording_mbid': 'tv',
+              'track_number': 2, 'disc_number': 1, 'duration_ms': 230573}]
+
+    result = reconcile_folder([file], slots)
+
+    assert result['pairs'][0]['confidence'] == 'clear'
+
+
+def test_verified_recording_length_filters_an_unrelated_fingerprint_link():
+    file = _file('TV Dinners', '/album/02 - TV Dinners.mp3', 230616,
+                 {'mbid': 'tv', 'title': 'TV Dinners', 'artist': 'ZZ Top',
+                  'score': 0.99, 'duration_ms': 230573})
+    file['acoustid']['recordings'].append(
+        {'mbid': 'gun', 'title': 'Gun Love', 'artist': 'ZZ Top',
+         'score': 0.99, 'duration_ms': 180000})
+    slot = {'title': 'TV Dinners', 'artist': 'ZZ Top', 'recording_mbid': 'tv',
+            'track_number': 2, 'disc_number': 1, 'duration_ms': 230573}
+
+    result = reconcile_folder([file], [slot])
+
+    assert result['pairs'][0]['confidence'] == 'clear'
+
+
 def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_length():
     files = [
         _file('The Tourist', '/Radiohead/OK Computer/12 - The Tourist.flac', 323000),

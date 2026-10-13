@@ -231,6 +231,16 @@ def _duration_delta_ms(file: dict, slot: dict) -> int | None:
     return abs(file_duration - slot_duration)
 
 
+def _recording_duration_fits(recording: dict, local_duration: int) -> bool:
+    if not local_duration:
+        return True
+    try:
+        length = int(recording.get('duration_ms') or recording.get('length') or 0)
+    except (TypeError, ValueError):
+        return True
+    return not length or abs(local_duration - length) <= 15000
+
+
 def _duration_weight(delta_ms: int) -> int:
     """Reward precise duration fits without letting duration outrank identity.
 
@@ -383,10 +393,19 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         recordings = evidence.get('recordings') or []
         slot = slots[slot_index]
         tags = files[file_index].get('tags') or {}
+        local_duration = int(tags.get('duration_ms') or
+                             files[file_index].get('duration_ms') or 0)
+        # Some providers attach a verified MusicBrainz recording length. A
+        # large mismatch rules out that linked identity, while an absent
+        # length provides no evidence either way.
+        plausible_recordings = [recording for recording in recordings
+                                if _recording_duration_fits(recording, local_duration)]
+        if not plausible_recordings:
+            plausible_recordings = recordings
         top_score = max((float(recording.get('score') or 0)
-                         for recording in recordings), default=0)
+                         for recording in plausible_recordings), default=0)
         top_recordings = [
-            recording for recording in recordings
+            recording for recording in plausible_recordings
             if float(recording.get('score') or 0) >= top_score
         ]
         # Multiple MusicBrainz rows can describe the same named recording.
@@ -398,11 +417,11 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             for recording in top_recordings
         )
         ambiguous_fingerprint = (
-            fingerprint_is_ambiguous(recordings) and not one_slot_identity)
+            fingerprint_is_ambiguous(plausible_recordings) and not one_slot_identity)
         top_supports_slot = any(
             float(recording.get('score') or 0) >= top_score
             and _recording_supports_slot(recording, slot)
-            for recording in recordings
+            for recording in plausible_recordings
         )
         corroborating_metadata = sum((
             _title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= 0.83,
@@ -411,6 +430,17 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             bool(tags.get('mbid') and _recording_id(slot)
                  and tags['mbid'] == _recording_id(slot)),
         ))
+        artist_agrees = bool(tags.get('artist') and slot.get('artist')) and _artist_credit_supports(
+            str(tags.get('artist') or ''), str(slot.get('artist') or ''))
+        position_agrees = (
+            bool(tags.get('track_number') and slot.get('track_number'))
+            and
+            int(tags.get('disc_number') or 1) == int(slot.get('disc_number') or 1)
+            and int(tags.get('track_number') or 0) == int(slot.get('track_number') or 0)
+        )
+        top_recording_id_agrees = bool(_recording_id(slot)) and any(
+            str(recording.get('mbid') or '') == _recording_id(slot)
+            for recording in top_recordings)
         assigned_duration_delta = _duration_delta_ms(files[file_index], slot)
         def unresolved_alternative(
             other_index: int, other: dict, *, assigned_slot_index=slot_index,
@@ -467,7 +497,9 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             ambiguous_fingerprint and top_supports_slot
             and not competing_release_slot
             and assigned_duration_delta is not None and assigned_duration_delta <= 3000
-            and corroborating_metadata >= 2
+            and (corroborating_metadata >= 2 or
+                 (artist_agrees and position_agrees and
+                  (corroborating_metadata >= 1 or top_recording_id_agrees)))
         )
         ambiguous = ambiguous_fingerprint and not fingerprint_context_resolves
         alternatives = sorted((w for j, (w, _) in enumerate(weighted[file_index])
@@ -618,6 +650,23 @@ def reconcile_folder(files: list[dict], slots: list[dict],
                           f'{neighbor.get("title") or "the next track"}')
                 if reason not in pair['ambiguity_reasons']:
                     pair['ambiguity_reasons'].append(reason)
+    # Keep a large mismatch on its own track even when the neighbouring file
+    # was removed. The absence of complementary evidence cannot confirm audio.
+    for pair in pairs:
+        if pair['confidence'] == 'manual':
+            continue
+        slot = slots[pair['slot_index']]
+        file = files[pair['file_index']]
+        actual = int((file.get('tags') or {}).get('duration_ms') or
+                     file.get('duration_ms') or 0)
+        expected = int(slot.get('duration_ms') or 0)
+        if not actual or not expected or abs(actual - expected) < max(20000, expected * 0.06):
+            continue
+        pair['confidence'] = 'ambiguous'
+        pair['ambiguity_reasons'].append(
+            f'Audio length differs from the release track by '
+            f'{abs(actual - expected) / 1000:.1f} seconds; listen for a '
+            'different version or a track boundary error')
     competing_files = {
         extra_index: [
             pair['file_index'] for pair in pairs

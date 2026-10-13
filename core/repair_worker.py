@@ -1622,13 +1622,45 @@ class RepairWorker:
     def get_review_cases(self, *, status: str = 'pending', page: int = 0,
                          limit: int = 30, q: str = '', job_id: str = '',
                          category: str = '', risk: str = '') -> dict:
-        return repair_review_queue.list_cases(
+        result = repair_review_queue.list_cases(
             self.db, status=status, page=page, limit=limit, q=q, job_id=job_id,
             category=category, risk=risk)
+        if (status == 'pending' and page == 0 and
+                job_id in ('', 'library_reconciliation') and
+                hasattr(self, '_album_refresh_lock')):
+            with self._album_refresh_lock:
+                running = [(key, state.get('snapshot')) for key, state in self._album_refreshes.items()
+                           if state.get('state') == 'running' and state.get('snapshot')]
+            existing = {item['case_id'] for item in result['items']}
+            for key, snapshot in running:
+                if key in existing or (q and q.casefold() not in
+                        f"{snapshot.get('album') or ''} {snapshot.get('artist') or ''}".casefold()):
+                    continue
+                if category and not any(item.get('category') == category
+                                        for item in snapshot['items']):
+                    continue
+                if risk and not any(item.get('review_tier') == risk
+                                    for item in snapshot['items']):
+                    continue
+                result['items'].insert(0, {
+                    'case_id': key, 'album': snapshot.get('album'),
+                    'artist': snapshot.get('artist'),
+                    'album_thumb_url': snapshot.get('album_thumb_url'),
+                    'pending': 0, 'priority': 0, 'finding_types': [],
+                    'error_count': 0, 'plan': snapshot.get('plan'),
+                    'refreshing': True,
+                })
+                result['total'] += 1
+        return result
 
     def get_review_case(self, case_id: str, *, status: str = 'pending',
                         job_id: str = '') -> Optional[dict]:
         case = repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
+        if case is None and status == 'pending' and hasattr(self, '_album_refresh_lock'):
+            with self._album_refresh_lock:
+                state = self._album_refreshes.get(case_id) or {}
+                if state.get('state') == 'running' and state.get('snapshot'):
+                    case = dict(state['snapshot'])
         if case is not None:
             if hasattr(self, '_album_refresh_lock'):
                 with self._album_refresh_lock:
@@ -1638,16 +1670,27 @@ class RepairWorker:
                 case['refresh'] = {'state': 'idle'}
         return case
 
+    def _schedule_review_refresh(self, case_id: str, folder: str,
+                                 snapshot: dict) -> bool:
+        if not hasattr(self, '_review_refresh_snapshots'):
+            self._review_refresh_snapshots = {}
+        self._review_refresh_snapshots[case_id] = snapshot
+        return self._schedule_album_refresh(case_id, folder)
+
     def _schedule_album_refresh(self, case_id: str, folder: str) -> bool:
         """Replan only the changed logical album after a review action."""
+        snapshot = getattr(self, '_review_refresh_snapshots', {}).pop(case_id, None)
         if not folder:
             return False
         with self._album_refresh_lock:
             current = self._album_refreshes.get(case_id) or {}
             if current.get('state') == 'running':
                 current['again'] = True
+                if snapshot:
+                    current['snapshot'] = snapshot
                 return True
-            self._album_refreshes[case_id] = {'state': 'running', 'again': False}
+            self._album_refreshes[case_id] = {
+                'state': 'running', 'again': False, 'snapshot': snapshot}
 
         def refresh_one_album():
             from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
@@ -1680,8 +1723,9 @@ class RepairWorker:
                 with self._album_refresh_lock:
                     state = self._album_refreshes.get(case_id) or {}
                     if state.get('again'):
-                        self._album_refreshes[case_id] = {'state': 'running',
-                                                          'again': False}
+                        self._album_refreshes[case_id] = {
+                            'state': 'running', 'again': False,
+                            'snapshot': state.get('snapshot')}
                         continue
                     self._album_refreshes[case_id] = {
                         'state': 'error' if error else 'complete',
@@ -1714,7 +1758,7 @@ class RepairWorker:
                         'error': 'The evidence changed since this card was opened. Review it again.'}
             if action == 'dismiss':
                 ok = self.dismiss_finding(finding_id)
-                queued = (self._schedule_album_refresh(case_id, case.get('folder') or '')
+                queued = (self._schedule_review_refresh(case_id, case.get('folder') or '', case)
                           if ok and schedule_refresh else False)
                 return {'success': ok, 'action': 'dismiss',
                         'refresh_queued': queued,
@@ -1723,8 +1767,8 @@ class RepairWorker:
                 result = self.fix_finding(finding_id, fix_action=fix_action,
                                           review_approved=True)
                 if (result.get('success') or result.get('partial')) and schedule_refresh:
-                    result['refresh_queued'] = self._schedule_album_refresh(
-                        case_id, case.get('folder') or '')
+                    result['refresh_queued'] = self._schedule_review_refresh(
+                        case_id, case.get('folder') or '', case)
                 return result
             return {'success': False, 'error': 'Unsupported review action'}
 
@@ -1752,7 +1796,7 @@ class RepairWorker:
             if not self.db.set_album_canonical(album_id, source, release_id,
                                                score=score, locked=True):
                 return {'success': False, 'error': 'Could not pin that album release'}
-            queued = self._schedule_album_refresh(case_id, case.get('folder') or '')
+            queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case)
             return {'success': True, 'message': 'Release pinned; updating this album plan',
                     'refresh_queued': queued}
 
@@ -1774,11 +1818,11 @@ class RepairWorker:
                 case_id, item['id'], evidence_token=item['evidence_token'],
                 action=action, schedule_refresh=False)
             if not result.get('success'):
-                queued = self._schedule_album_refresh(case_id, case.get('folder') or '') if applied else False
+                queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case) if applied else False
                 return {**result, 'applied': applied, 'total': len(findings),
                         'refresh_queued': queued}
             applied += 1
-        queued = self._schedule_album_refresh(case_id, case.get('folder') or '') if applied else False
+        queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case) if applied else False
         return {'success': True, 'applied': applied, 'total': len(findings),
                 'refresh_queued': queued}
 

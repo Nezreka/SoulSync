@@ -128,6 +128,7 @@ export interface ReviewCaseSummary {
   finding_types: string[];
   error_count: number;
   plan?: ReviewPlan;
+  refreshing?: boolean;
 }
 
 export interface ReviewQueuePage {

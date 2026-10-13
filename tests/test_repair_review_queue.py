@@ -856,3 +856,24 @@ def test_existing_findings_are_backfilled_into_exact_cases(tmp_path):
         assert 'idx_rf_review_job_case' in indexes
     finally:
         conn.close()
+
+
+def test_album_stays_in_review_queue_during_scoped_reanalysis(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._album_refresh_lock = threading.Lock()
+    snapshot = {
+        'case_id': 'album:1:10', 'album': 'The Wall', 'artist': 'Pink Floyd',
+        'album_thumb_url': None, 'items': [], 'plan': {'status': 'needs_review'},
+    }
+    worker._album_refreshes = {
+        'album:1:10': {'state': 'running', 'snapshot': snapshot}
+    }
+
+    queue = worker.get_review_cases(job_id='library_reconciliation')
+    case = worker.get_review_case('album:1:10')
+
+    assert queue['items'][0]['refreshing'] is True
+    assert queue['items'][0]['album'] == 'The Wall'
+    assert case['refresh']['state'] == 'running'

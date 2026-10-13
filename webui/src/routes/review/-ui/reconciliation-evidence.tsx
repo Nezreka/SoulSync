@@ -648,6 +648,13 @@ export function ReleaseComparison({
                     {label(pair.file)}
                     {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
                   </small>
+                  {label(pair.confidence) !== 'clear' && (
+                    <small className={styles.reason}>
+                      {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
+                        ? label(pair.ambiguity_reasons[0])
+                        : 'The assignment has a competing match; inspect the evidence.'}
+                    </small>
+                  )}
                 </span>
                 <StatusChip
                   tone={label(pair.confidence) === 'clear' ? 'good' : 'warning'}
@@ -758,7 +765,8 @@ function CheckedFiles({ details }: { details: Data }) {
 function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) {
   const tags = object(details.current_tags);
   const currentTitle = label(tags.title || details.current_title);
-  const expectedTitle = label(details.expected_title);
+  const replacement = object(details.replacement_track);
+  const expectedTitle = label(details.expected_title || replacement.title || replacement.name);
   const currentDisambiguation = label(details.current_recording_disambiguation);
   const expectedDisambiguation = label(details.expected_recording_disambiguation);
   const folder = label(details.album_folder);
@@ -812,8 +820,20 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
         </dl>
       </section>
       <section className={styles.technicalCard}>
-        <h5>Expected release</h5>
+        <h5>Release track</h5>
         <dl className={styles.factList}>
+          {expectedTitle && (
+            <div>
+              <dt>Title</dt>
+              <dd>{expectedTitle}</dd>
+            </div>
+          )}
+          {Boolean(details.expected_duration_ms || replacement.duration_ms) && (
+            <div>
+              <dt>Length</dt>
+              <dd>{formatDuration(details.expected_duration_ms || replacement.duration_ms)}</dd>
+            </div>
+          )}
           {Boolean(details.album_title) && (
             <div>
               <dt>Album</dt>
@@ -830,12 +850,6 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
             <div>
               <dt>Artist</dt>
               <dd>{label(details.artist_name)}</dd>
-            </div>
-          )}
-          {expectedTitle && (
-            <div>
-              <dt>Track</dt>
-              <dd>{expectedTitle}</dd>
             </div>
           )}
           {expectedDisambiguation && (
@@ -901,6 +915,8 @@ export function ReconciliationEvidence({
         library_title: 'title',
         library_track_artist: 'track_artist',
         library_recording_mbid: 'musicbrainz_recording_id',
+        library_disc_number: 'disc_number',
+        library_track_number: 'track_number',
       }[field] || field;
     const existing = rows.find(
       (row) => row.field === semantic && row.old === old && row.next === next,
@@ -951,6 +967,16 @@ export function ReconciliationEvidence({
   const expectedDuration = count(details.expected_duration_ms);
   const durationDelta =
     localDuration && expectedDuration ? Math.abs(localDuration - expectedDuration) : 0;
+  const expectedTitle = label(
+    details.expected_title ||
+      object(details.replacement_track).title ||
+      object(details.replacement_track).name,
+  )
+    .toLocaleLowerCase()
+    .trim();
+  const audioSupportsExpected = objects(audio.recordings).some(
+    (recording) => label(recording.title).toLocaleLowerCase().trim() === expectedTitle,
+  );
 
   return (
     <div className={styles.reconciliationEvidence}>
@@ -1047,28 +1073,41 @@ export function ReconciliationEvidence({
         )}
       {prominent && (
         <div className={styles.prominentEvidence}>
+          {label(audio.status) === 'ok' && expectedTitle && !audioSupportsExpected && (
+            <section className={styles.problemCard} data-tone="warning">
+              <h4>
+                <EvidenceIcon name="warning" /> No AcoustID candidate names this release track
+              </h4>
+              <p>
+                The fingerprint returned other recording identities. Compare the audio before
+                choosing this assignment.
+              </p>
+            </section>
+          )}
           <Facts finding={finding} details={details} />
           <AudioEvidence details={details} />
         </div>
       )}
-      <details className={styles.technicalEvidence}>
-        <summary>
-          <EvidenceIcon name="info" /> Technical evidence
-          <span>Files, tags, IDs, and scoring details</span>
-        </summary>
-        <div className={styles.technicalGrid}>
-          {!prominent && <Facts finding={finding} details={details} />}
-          {!prominent && <AudioEvidence details={details} />}
-          <CheckedFiles details={details} />
-          {reasons.length > 0 && (
-            <section className={styles.technicalCard}>
-              <h5>Why this track was paired</h5>
-              <p>{reasons.join(' · ')}</p>
-              {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
-            </section>
-          )}
-        </div>
-      </details>
+      {(!prominent || Boolean(details.checked_files) || reasons.length > 0) && (
+        <details className={styles.technicalEvidence}>
+          <summary>
+            <EvidenceIcon name="info" /> Technical evidence
+            <span>Files, tags, IDs, and scoring details</span>
+          </summary>
+          <div className={styles.technicalGrid}>
+            {!prominent && <Facts finding={finding} details={details} />}
+            {!prominent && <AudioEvidence details={details} />}
+            <CheckedFiles details={details} />
+            {reasons.length > 0 && (
+              <section className={styles.technicalCard}>
+                <h5>Why this track was paired</h5>
+                <p>{reasons.join(' · ')}</p>
+                {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
+              </section>
+            )}
+          </div>
+        </details>
+      )}
       {finding.last_error && <p className={styles.error}>Last attempt: {finding.last_error}</p>}
     </div>
   );

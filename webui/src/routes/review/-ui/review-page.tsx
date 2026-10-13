@@ -28,12 +28,7 @@ import {
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
 import { ProviderReleaseId } from './provider-release-id';
-import {
-  CandidateFit,
-  ReconciliationEvidence,
-  ReleaseComparison,
-  StatusChip,
-} from './reconciliation-evidence';
+import { ReconciliationEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
@@ -71,7 +66,7 @@ const categoryOptions = [
 ] as const;
 
 type QueueMode = 'review' | 'ready' | 'files' | 'all';
-type AlbumView = 'plan' | 'tracks' | 'evidence';
+type AlbumView = 'plan' | 'release' | 'tracks' | 'evidence';
 type TrackView = 'issues' | 'release';
 
 function shortDuration(value: number | null | undefined): string {
@@ -103,6 +98,7 @@ const decisionOrder: Record<string, number> = {
 };
 
 function caseStatusSummary(item: ReviewCaseSummary): string {
+  if (item.refreshing) return 'Reanalyzing this album · updated decisions will appear here';
   if (!item.plan) {
     return `${item.pending} pending action${item.pending === 1 ? '' : 's'}`;
   }
@@ -158,6 +154,7 @@ function decisionInstruction(decision: ReviewDecision, numberingMode?: string): 
     case 'album_completeness':
       return 'Choose whether this folder represents the complete album';
     case 'numbering':
+      if (decision.label === 'Disc numbering') return decision.summary || 'Update disc numbering';
       return numberingMode === 'digital'
         ? 'Switch this album to continuous track numbering'
         : "Use the selected release's disc and track numbering";
@@ -238,6 +235,8 @@ function AssignmentRow({
       library_album_title: 'album',
       library_title: 'title',
       library_track_artist: 'track_artist',
+      library_disc_number: 'disc_number',
+      library_track_number: 'track_number',
     }[field];
     if (!fileField) return true;
     const fileChange = changes[fileField];
@@ -342,7 +341,7 @@ function readyFieldGroup(field: string): { key: string; label: string } {
   if (
     ['track_number', 'disc_number', 'library_track_number', 'library_disc_number'].includes(field)
   ) {
-    return { key: 'numbering', label: 'Track numbering' };
+    return { key: 'numbering', label: 'Numbering' };
   }
   return { key: field, label: changeFieldLabel(field) };
 }
@@ -385,6 +384,19 @@ function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChang
   return [...groups.values()].map(({ values, findingIdSet, ...group }) => {
     const findingIds = [...findingIdSet];
     const count = findingIds.length;
+    if (group.key === 'numbering') {
+      const fields = items
+        .filter((item) => findingIdSet.has(item.id))
+        .flatMap((item) => Object.keys((item.details?.changes || {}) as Record<string, unknown>));
+      const hasDisc = fields.some((field) => field.includes('disc_number'));
+      const hasTrack = fields.some((field) => field.includes('track_number'));
+      group.label =
+        hasDisc && hasTrack
+          ? 'Disc and track numbering'
+          : hasDisc
+            ? 'Disc numbering'
+            : 'Track numbering';
+    }
     if (group.key === 'track_artist' && values.every((value) => !String(value.old ?? '').trim())) {
       return {
         ...group,
@@ -508,17 +520,6 @@ function records(value: unknown): Array<Record<string, unknown>> {
 
 function textValue(value: unknown): string {
   return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
-
-function candidateContext(candidate: Record<string, unknown>): string {
-  return [
-    textValue(candidate.country),
-    textValue(candidate.format),
-    textValue(candidate.date),
-    textValue(candidate.disambiguation),
-  ]
-    .filter(Boolean)
-    .join(' · ');
 }
 
 function SelectedActionDetail({
@@ -1100,6 +1101,13 @@ export function ReviewPage() {
     (decision) => decision.category === 'album_completeness',
   );
   const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
+  const readyIncludedInGroup = reviewDecisions.some(
+    (decision) =>
+      ['metadata', 'numbering', 'title_conventions'].includes(decision.category) &&
+      decision.finding_ids.some((id) =>
+        reviewCase?.items.some((item) => item.id === id && item.review_tier === 'ready'),
+      ),
+  );
   const reviewActionCount = reviewDecisions.reduce(
     (total, decision) => total + decision.action_count,
     0,
@@ -1181,11 +1189,6 @@ export function ReviewPage() {
     } else {
       setActiveId(findingId);
       setActiveRowKey(rowKey);
-      window.setTimeout(
-        () =>
-          document.getElementById('selected-review-action')?.scrollIntoView?.({ block: 'start' }),
-        0,
-      );
     }
   };
 
@@ -1506,25 +1509,22 @@ export function ReviewPage() {
         row={row}
         selected={selected}
         onSelect={(findingId, rowKey) => {
-          if (row.status === 'missing' && hasIntentDecision) {
-            const intent = reviewDecisions.find(
-              (decision) => decision.category === 'album_completeness',
-            );
-            if (intent) openDecision(intent);
-          } else selectAssignment(findingId, rowKey);
+          selectAssignment(findingId, rowKey);
         }}
       />
     );
   };
 
-  const releaseOrderedAssignments = [...assignments].sort(
-    (left, right) =>
-      Number(left.slot_disc_number || left.current_disc_number || 1) -
-        Number(right.slot_disc_number || right.current_disc_number || 1) ||
-      Number(left.slot_track_number || left.current_track_number || 0) -
-        Number(right.slot_track_number || right.current_track_number || 0) ||
-      (left.file || '').localeCompare(right.file || ''),
-  );
+  const releaseOrderedAssignments = assignments
+    .filter((row) => !(row.status === 'missing' && row.relationship === 'version_conflict'))
+    .sort(
+      (left, right) =>
+        Number(left.slot_disc_number || left.current_disc_number || 1) -
+          Number(right.slot_disc_number || right.current_disc_number || 1) ||
+        Number(left.slot_track_number || left.current_track_number || 0) -
+          Number(right.slot_track_number || right.current_track_number || 0) ||
+        (left.file || '').localeCompare(right.file || ''),
+    );
 
   return (
     <main className={`page-shell ${styles.page}`}>
@@ -1747,7 +1747,11 @@ export function ReviewPage() {
           </div>
         </aside>
 
-        <section className={styles.review} aria-label="Current review case">
+        <section
+          className={styles.review}
+          aria-label="Current review case"
+          data-refresh={reviewCase?.refresh?.state === 'running' ? 'running' : undefined}
+        >
           {reviewCase ? (
             <>
               <div className={styles.albumHeader}>
@@ -1797,6 +1801,13 @@ export function ReviewPage() {
                 </button>
                 <button
                   type="button"
+                  aria-current={albumView === 'release' ? 'page' : undefined}
+                  onClick={() => setAlbumView('release')}
+                >
+                  Release
+                </button>
+                <button
+                  type="button"
                   aria-current={albumView === 'tracks' ? 'page' : undefined}
                   onClick={() => setAlbumView('tracks')}
                 >
@@ -1814,6 +1825,99 @@ export function ReviewPage() {
                   Evidence
                 </button>
               </nav>
+
+              {reviewCase.refresh?.state === 'running' && (
+                <div className={styles.refreshBanner} role="status">
+                  Reanalyzing this album. The previous decisions remain visible while dependent
+                  track actions are recalculated.
+                </div>
+              )}
+
+              {albumView === 'plan' && reviewCase.album_plan && (
+                <section className={styles.workflowSteps} aria-label="Album review steps">
+                  <button
+                    type="button"
+                    data-state={
+                      reviewDecisions.some((step) => step.category === 'release_conflicts')
+                        ? 'needs-review'
+                        : 'settled'
+                    }
+                    onClick={() => setAlbumView('release')}
+                  >
+                    <span>1 · Release</span>
+                    <strong>
+                      {reviewDecisions.some((step) => step.category === 'release_conflicts')
+                        ? 'Choose or confirm the edition'
+                        : 'Release selected'}
+                    </strong>
+                    <small>Compare editions or change this choice →</small>
+                  </button>
+                  <button
+                    type="button"
+                    data-state={
+                      reviewDecisions.some((step) =>
+                        ['album_completeness', 'numbering'].includes(step.category),
+                      )
+                        ? 'needs-review'
+                        : 'settled'
+                    }
+                    onClick={() => {
+                      const step = reviewDecisions.find((item) =>
+                        ['album_completeness', 'numbering'].includes(item.category),
+                      );
+                      if (step) openDecision(step);
+                    }}
+                  >
+                    <span>2 · Scope and numbering</span>
+                    <strong>
+                      {reviewDecisions.some((step) =>
+                        ['album_completeness', 'numbering'].includes(step.category),
+                      )
+                        ? 'Choice needed'
+                        : 'Scheme established'}
+                    </strong>
+                    <small>
+                      {reviewCase.album_plan.numbering_mode === 'digital'
+                        ? 'Continuous album sequence'
+                        : 'Release disc and track sequence'}
+                    </small>
+                  </button>
+                  <button
+                    type="button"
+                    data-state={
+                      (reviewCase.album_plan.counts.uncertain || 0) +
+                      (reviewCase.album_plan.counts.missing || 0) +
+                      (reviewCase.album_plan.counts.extra || 0)
+                        ? 'needs-review'
+                        : 'settled'
+                    }
+                    onClick={() => setAlbumView('tracks')}
+                  >
+                    <span>3 · Track assignments</span>
+                    <strong>
+                      {(reviewCase.album_plan.counts.uncertain || 0) +
+                        (reviewCase.album_plan.counts.missing || 0) +
+                        (reviewCase.album_plan.counts.extra || 0)}{' '}
+                      need attention
+                    </strong>
+                    <small>Inspect the local files and release tracks →</small>
+                  </button>
+                  <button
+                    type="button"
+                    data-state={plan.ready || plan.manual ? 'needs-review' : 'settled'}
+                    onClick={() => {
+                      setTrackFilter('change');
+                      setAlbumView('tracks');
+                    }}
+                  >
+                    <span>4 · Proposed edits</span>
+                    <strong>
+                      {plan.ready} ready · {plan.manual} awaiting review
+                    </strong>
+                    <small>See every affected field and file →</small>
+                  </button>
+                </section>
+              )}
 
               {albumView === 'plan' && plan.status === 'ready' && (
                 <section
@@ -1917,7 +2021,7 @@ export function ReviewPage() {
                                       ? 'Apply title conventions'
                                       : decision.label === 'Confirm album artist'
                                         ? 'Use proposed album artist'
-                                        : `Apply ${decision.label.toLowerCase()}`}
+                                        : `Apply all ${decision.action_count} proposed changes`}
                                 </button>
                                 <button
                                   type="button"
@@ -1958,102 +2062,15 @@ export function ReviewPage() {
                             ) &&
                             selectedActionDetail}
                           {selected && active?.finding_type === 'reconciliation_release' && (
-                            <section
-                              className={styles.releaseDecision}
-                              id="selected-review-action"
-                              aria-label="Release decision"
-                            >
-                              <div>
-                                <div className={styles.eyebrow}>Release options</div>
-                                <h4>Compare the editions that fit this folder</h4>
-                                <p>
-                                  Choose using the edition details below. Open Evidence when you
-                                  need the file-by-file comparison.
-                                </p>
-                                <p>
-                                  Choosing a release pins its track list. It does not replace the
-                                  album artwork.
-                                </p>
-                              </div>
-                              <div className={styles.releaseChoiceList}>
-                                {records(record(active.details).candidates).map(
-                                  (candidate, candidateIndex) => {
-                                    const context = candidateContext(candidate);
-                                    const current = record(record(active.details).current_release);
-                                    const isCurrent =
-                                      Boolean(current.release_id) &&
-                                      current.source === candidate.source &&
-                                      String(current.release_id) === String(candidate.release_id);
-                                    return (
-                                      <article
-                                        key={`${textValue(candidate.source)}-${textValue(candidate.release_id)}-${candidateIndex}`}
-                                      >
-                                        <span className={styles.candidateRank}>
-                                          {candidateIndex + 1}
-                                        </span>
-                                        <ReviewArtwork
-                                          title={textValue(candidate.release_title) || 'Release'}
-                                          url={textValue(candidate.image_url)}
-                                          fallbackUrl={reviewCase.album_thumb_url}
-                                          size="release"
-                                        />
-                                        <div>
-                                          <strong>
-                                            {textValue(candidate.release_title) ||
-                                              `Candidate ${candidateIndex + 1}`}
-                                          </strong>
-                                          <small>
-                                            {textValue(candidate.source) || 'catalog'}{' '}
-                                            <ProviderReleaseId
-                                              source={textValue(candidate.source)}
-                                              releaseId={textValue(candidate.release_id)}
-                                            />
-                                          </small>
-                                          {context && <small>{context}</small>}
-                                          {isCurrent && (
-                                            <StatusChip tone="info" icon="disc">
-                                              Current library release
-                                            </StatusChip>
-                                          )}
-                                        </div>
-                                        <CandidateFit candidate={candidate} />
-                                        <button
-                                          type="button"
-                                          className={styles.compareCandidate}
-                                          onClick={() => {
-                                            setAlbumView('evidence');
-                                            setPreviewCandidate(candidateIndex);
-                                          }}
-                                        >
-                                          Compare tracks
-                                        </button>
-                                        <button
-                                          type="button"
-                                          disabled={busy}
-                                          onClick={() =>
-                                            void act(active, 'fix', String(candidateIndex))
-                                          }
-                                        >
-                                          Use this release
-                                        </button>
-                                      </article>
-                                    );
-                                  },
-                                )}
-                              </div>
-                              <div className={styles.actions}>
-                                <button type="button" onClick={() => setAlbumView('evidence')}>
-                                  Compare full evidence
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void act(active, 'dismiss')}
-                                >
-                                  Keep current release
-                                </button>
-                              </div>
-                            </section>
+                            <div className={styles.releaseStepLink}>
+                              <p>
+                                Compare the available editions before choosing this album's track
+                                list.
+                              </p>
+                              <button type="button" onClick={() => setAlbumView('release')}>
+                                Compare releases →
+                              </button>
+                            </div>
                           )}
                         </Fragment>
                       );
@@ -2159,33 +2176,36 @@ export function ReviewPage() {
                   </section>
                 )}
 
-              {albumView === 'plan' && plan.status !== 'ready' && plan.ready > 0 && (
-                <section
-                  className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
-                  data-state="supporting"
-                  aria-label="Independent safe changes"
-                >
-                  <div className={styles.planSummary}>
-                    <div>
-                      <div className={styles.eyebrow}>Safe changes</div>
-                      <strong>
-                        {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'} ready
-                      </strong>
-                      <p>These can be applied without resolving the decisions above.</p>
+              {albumView === 'plan' &&
+                plan.status !== 'ready' &&
+                plan.ready > 0 &&
+                !readyIncludedInGroup && (
+                  <section
+                    className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
+                    data-state="supporting"
+                    aria-label="Independent safe changes"
+                  >
+                    <div className={styles.planSummary}>
+                      <div>
+                        <div className={styles.eyebrow}>Safe changes</div>
+                        <strong>
+                          {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'} ready
+                        </strong>
+                        <p>These can be applied without resolving the decisions above.</p>
+                      </div>
+                      <div className={styles.planBadges}>
+                        <StatusChip tone="good" icon="check">
+                          {plan.ready} ready
+                        </StatusChip>
+                      </div>
                     </div>
-                    <div className={styles.planBadges}>
-                      <StatusChip tone="good" icon="check">
-                        {plan.ready} ready
-                      </StatusChip>
-                    </div>
-                  </div>
-                  {readyActionControls}
-                  {active &&
-                    activeDecision?.risk === 'ready' &&
-                    !activeAssignment &&
-                    selectedActionDetail}
-                </section>
-              )}
+                    {readyActionControls}
+                    {active &&
+                      activeDecision?.risk === 'ready' &&
+                      !activeAssignment &&
+                      selectedActionDetail}
+                  </section>
+                )}
 
               {albumView === 'plan' && !showDecisionBoard && plan.ready === 0 && (
                 <div className={styles.empty}>No album-level action is pending.</div>
@@ -2328,80 +2348,147 @@ export function ReviewPage() {
                       </button>
                     )}
                   </div>
-                  {activeAssignment && activeRowKey && compactSelectedActionDetail && (
-                    <div className={styles.trackDetailPanel}>{compactSelectedActionDetail}</div>
-                  )}
-                  <div className={styles.trackTable} role="table">
-                    <div className={styles.trackTableHead} role="row">
-                      <span>Review state</span>
-                      <span>Disc · track</span>
-                      <span>Local file → release track</span>
-                      <span>Proposed action</span>
-                    </div>
-                    {trackView === 'release' ? (
-                      releaseOrderedAssignments.filter(matchingFilter).map(renderAssignmentRow)
-                    ) : (
-                      <>
-                        {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                        {changeAssignments.filter(matchingFilter).length > 0 && (
-                          <div className={styles.assignmentGroup} data-tone="info">
-                            <div className={styles.assignmentGroupTitle}>
-                              ↻ {changeAssignments.filter(matchingFilter).length} proposed track
-                              changes
+                  <div className={styles.trackWorkspace}>
+                    <div className={styles.trackTable} role="table">
+                      <div className={styles.trackTableHead} role="row">
+                        <span>Review state</span>
+                        <span>Disc · track</span>
+                        <span>Local file → release track</span>
+                        <span>Proposed action</span>
+                      </div>
+                      {trackView === 'release' ? (
+                        releaseOrderedAssignments.filter(matchingFilter).map(renderAssignmentRow)
+                      ) : (
+                        <>
+                          {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
+                          {changeAssignments.filter(matchingFilter).length > 0 && (
+                            <div className={styles.assignmentGroup} data-tone="info">
+                              <div className={styles.assignmentGroupTitle}>
+                                ↻ {changeAssignments.filter(matchingFilter).length} proposed track
+                                changes
+                              </div>
+                              {changeAssignments.filter(matchingFilter).map(renderAssignmentRow)}
                             </div>
-                            {changeAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                          </div>
-                        )}
-                        {missingAssignments.filter(matchingFilter).length > 0 && (
-                          <div className={styles.assignmentGroup} data-tone="danger">
-                            <button
-                              type="button"
-                              aria-expanded={openGroups.includes('missing')}
-                              onClick={() => toggleGroup('missing')}
-                            >
-                              {openGroups.includes('missing') ? '▾' : '▸'}{' '}
-                              {missingAssignments.filter(matchingFilter).length} absent release
-                              tracks
-                            </button>
-                            {openGroups.includes('missing') && (
-                              <>
-                                {hasIntentDecision && (
-                                  <p>
-                                    Choose album completeness on Plan; each absent track is listed
-                                    here for context.
-                                  </p>
-                                )}
-                                {missingAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                              </>
-                            )}
-                          </div>
-                        )}
-                        {settledAssignments.filter(matchingFilter).length > 0 && (
-                          <div className={styles.assignmentGroup} data-tone="good">
-                            <button
-                              type="button"
-                              aria-expanded={openGroups.includes('settled')}
-                              onClick={() => toggleGroup('settled')}
-                            >
-                              {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
-                              {settledAssignments.filter(matchingFilter).length} settled release
-                              slots
-                            </button>
-                            {openGroups.includes('settled') &&
-                              settledAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                          </div>
-                        )}
-                      </>
-                    )}
+                          )}
+                          {missingAssignments.filter(matchingFilter).length > 0 && (
+                            <div className={styles.assignmentGroup} data-tone="danger">
+                              <button
+                                type="button"
+                                aria-expanded={openGroups.includes('missing')}
+                                onClick={() => toggleGroup('missing')}
+                              >
+                                {openGroups.includes('missing') ? '▾' : '▸'}{' '}
+                                {missingAssignments.filter(matchingFilter).length} absent release
+                                tracks
+                              </button>
+                              {openGroups.includes('missing') && (
+                                <>
+                                  {hasIntentDecision && (
+                                    <p>
+                                      Choose album completeness on Plan; each absent track is listed
+                                      here for context.
+                                    </p>
+                                  )}
+                                  {missingAssignments
+                                    .filter(matchingFilter)
+                                    .map(renderAssignmentRow)}
+                                </>
+                              )}
+                            </div>
+                          )}
+                          {settledAssignments.filter(matchingFilter).length > 0 && (
+                            <div className={styles.assignmentGroup} data-tone="good">
+                              <button
+                                type="button"
+                                aria-expanded={openGroups.includes('settled')}
+                                onClick={() => toggleGroup('settled')}
+                              >
+                                {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
+                                {settledAssignments.filter(matchingFilter).length} settled release
+                                slots
+                              </button>
+                              {openGroups.includes('settled') &&
+                                settledAssignments.filter(matchingFilter).map(renderAssignmentRow)}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    <aside className={styles.trackInspector} aria-label="Selected track details">
+                      {activeRowKey && active ? (
+                        <>
+                          {assignments.find((row) => assignmentKey(row) === activeRowKey)
+                            ?.status === 'missing' && (
+                            <p>
+                              This release track has no assigned local file. Review the album scope
+                              if you do not own it.
+                            </p>
+                          )}
+                          {compactSelectedActionDetail}
+                        </>
+                      ) : (
+                        <p>Select a track to inspect its evidence and decisions.</p>
+                      )}
+                    </aside>
                   </div>
-                  {active && !activeAssignment && selectedActionDetail}
                 </section>
               )}
 
               {albumView === 'tracks' && assignments.length === 0 && (
-                <div className={styles.empty}>
-                  No track assignment data is available for this album.
-                </div>
+                <>
+                  <div className={styles.empty}>
+                    No track assignment data is available for this album.
+                  </div>
+                  {active && selectedActionDetail}
+                </>
+              )}
+
+              {albumView === 'release' && (
+                <section className={styles.evidenceView} aria-label="Release comparison">
+                  <div className={styles.sectionHeading}>
+                    <div>
+                      <div className={styles.eyebrow}>Release selection</div>
+                      <h3>Choose the edition for this album</h3>
+                      <p>
+                        The chosen release sets the track list. You can change it after reviewing
+                        individual tracks.
+                      </p>
+                    </div>
+                  </div>
+                  {active?.details?.release_disambiguation && (
+                    <p>Edition note: {textValue(active.details.release_disambiguation)}</p>
+                  )}
+                  <ReleaseComparison
+                    candidates={
+                      (reviewCase.album_plan?.candidates ||
+                        records(record(active?.details).candidates)) as Array<
+                        Record<string, unknown>
+                      >
+                    }
+                    selected={previewCandidate}
+                    onSelect={setPreviewCandidate}
+                    currentRelease={{
+                      source: reviewCase.album_plan?.source,
+                      release_id: reviewCase.album_plan?.release_id,
+                    }}
+                    fallbackArtwork={reviewCase.album_thumb_url || ''}
+                    onPin={(index) =>
+                      active?.finding_type === 'reconciliation_release'
+                        ? void act(active, 'fix', String(index))
+                        : void pinCandidate(index)
+                    }
+                    busy={busy}
+                  />
+                  {active?.finding_type === 'reconciliation_release' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void act(active, 'dismiss')}
+                    >
+                      Keep current release
+                    </button>
+                  )}
+                </section>
               )}
 
               {albumView === 'evidence' && (
@@ -2450,27 +2537,6 @@ export function ReviewPage() {
                       </dd>
                     </div>
                   </dl>
-                  <ReleaseComparison
-                    candidates={
-                      (reviewCase.album_plan?.candidates ||
-                        records(record(active?.details).candidates)) as Array<
-                        Record<string, unknown>
-                      >
-                    }
-                    selected={previewCandidate}
-                    onSelect={setPreviewCandidate}
-                    currentRelease={{
-                      source: reviewCase.album_plan?.source,
-                      release_id: reviewCase.album_plan?.release_id,
-                    }}
-                    fallbackArtwork={reviewCase.album_thumb_url || ''}
-                    onPin={(index) =>
-                      active?.finding_type === 'reconciliation_release'
-                        ? void act(active, 'fix', String(index))
-                        : void pinCandidate(index)
-                    }
-                    busy={busy}
-                  />
                   {reviewCase.items.length > 0 && (
                     <label className={styles.evidencePicker}>
                       Evidence for action
@@ -2486,9 +2552,7 @@ export function ReviewPage() {
                       </select>
                     </label>
                   )}
-                  {active && active.finding_type !== 'reconciliation_release'
-                    ? selectedActionDetail
-                    : null}
+                  {active && <ReconciliationEvidence finding={active} prominent />}
                 </section>
               )}
 

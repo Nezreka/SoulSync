@@ -406,6 +406,55 @@
 .trackMatrix {
   background: #141620;
 }
+.refreshBanner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid #b58a3d;
+  border-radius: 10px;
+  background: #302719;
+  color: #ffe0a4;
+}
+.workflowSteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+.workflowSteps button {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid #49725d;
+  border-radius: 10px;
+  background: #1a3027;
+  color: #e7f3eb;
+  text-align: left;
+  cursor: pointer;
+}
+.workflowSteps button[data-state='needs-review'] {
+  border-color: #987846;
+  background: #30291d;
+}
+.workflowSteps span {
+  color: #bca8ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.workflowSteps strong {
+  font-size: 13px;
+}
+.workflowSteps small {
+  color: #bec3d0;
+}
+.review[data-refresh='running'] .decisionActions button,
+.review[data-refresh='running'] .actions button,
+.review[data-refresh='running'] .releaseCard button,
+.review[data-refresh='running'] .planActions button,
+.review[data-refresh='running'] .assignmentCorrection button {
+  pointer-events: none;
+  opacity: 0.55;
+}
 .sectionHeading {
   display: flex;
   justify-content: space-between;
@@ -971,6 +1020,62 @@
   margin: 0;
   border: 0;
   border-radius: 0;
+}
+.trackWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(330px, 0.9fr);
+  gap: 14px;
+  align-items: start;
+}
+.trackInspector {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid #454a60;
+  border-radius: 11px;
+  background: #171b29;
+}
+.trackInspector > p {
+  padding: 16px;
+  color: #b7bed0;
+}
+.trackInspector .findingDetail {
+  margin: 0;
+  padding: 14px;
+  border: 0;
+}
+.trackInspector .evidenceColumns,
+.trackInspector .technicalGrid {
+  grid-template-columns: 1fr;
+}
+.trackInspector .actions {
+  position: static;
+}
+.trackWorkspace .trackTableHead {
+  display: none;
+}
+.trackWorkspace .matrixRow {
+  grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+  gap: 7px 10px;
+}
+.trackWorkspace .rowPosition {
+  justify-self: end;
+}
+.trackWorkspace .trackComparison,
+.trackWorkspace .rowResult {
+  grid-column: 1 / -1;
+}
+.releaseStepLink {
+  padding: 12px 16px;
+  border: 1px solid #50496c;
+  border-radius: 10px;
+}
+.releaseStepLink p {
+  margin: 0 0 10px;
+}
+.releaseStepLink button {
+  cursor: pointer;
 }
 .trackTableHead,
 .matrixRow {
@@ -1703,6 +1808,11 @@
   display: grid;
   grid-template-columns: minmax(100px, 28%) minmax(0, 1fr);
   gap: 12px;
+  padding: 5px 7px;
+  border-radius: 5px;
+}
+.factList div:nth-child(even) {
+  background: #222738;
 }
 .factList dt,
 .technicalCard small,
@@ -2279,6 +2389,16 @@
 }
 
 @media (max-width: 900px) {
+  .workflowSteps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .trackWorkspace {
+    grid-template-columns: 1fr;
+  }
+  .trackInspector {
+    position: static;
+    max-height: none;
+  }
   .workspace {
     grid-template-columns: 1fr;
   }

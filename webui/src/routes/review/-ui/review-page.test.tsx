@@ -319,13 +319,13 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Ashes of the Wake' });
-    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
     await screen.findByRole('heading', { name: 'Compare 2 release candidates' });
     const images = [...document.querySelectorAll('img')];
     expect(images.some((image) => image.src.includes('local-ashes'))).toBe(true);
     expect(images.some((image) => image.src.includes('release-one'))).toBe(true);
     expect(screen.getByText('Strong match')).toBeTruthy();
-    expect(screen.getByText('US deluxe edition')).toBeTruthy();
+    expect(screen.getByText(/US deluxe edition/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
   });
 
@@ -475,7 +475,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
-    expect(screen.getByLabelText('Selected action detail')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Why this plan was chosen' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
@@ -604,7 +604,7 @@ describe('library reconciliation review queue', () => {
     await screen.findByText(
       '1 local file contains different audio than the expected release track.',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: /Confirm 1 uncertain track assignment/ }));
 
     expect(screen.getByRole('button', { name: 'Replace with correct track' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Quarantine wrong file' })).toBeTruthy();
@@ -1090,7 +1090,7 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Ashes of the Wake' });
-    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
     const button = await screen.findByRole('button', { name: 'Use this release' });
     fireEvent.click(button);
     await waitFor(() => expect(applied).toBe(true));
@@ -1188,8 +1188,10 @@ describe('library reconciliation review queue', () => {
       throw new Error(`Unexpected request: ${url}`);
     });
     render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'Album' });
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
     expect(
-      await screen.findByRole('heading', { name: 'Compare the editions that fit this folder' }),
+      await screen.findByRole('heading', { name: 'Choose the edition for this album' }),
     ).toBeTruthy();
     const images = [...document.querySelectorAll('img')];
     expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(3);

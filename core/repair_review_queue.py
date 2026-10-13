@@ -146,6 +146,25 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
 
 def _numbering_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str]:
     """Describe the resulting numbering scheme, rather than its implementation."""
+    changed_fields = {
+        field for row in rows
+        for field in ((row.get('details') or {}).get('changes') or {})
+    }
+    disc_changed = bool({'disc_number', 'library_disc_number'} & changed_fields)
+    track_changed = bool({'track_number', 'library_track_number'} & changed_fields)
+    count = len(rows)
+    tracks = f'{count} track{"s" if count != 1 else ""}'
+    if disc_changed and not track_changed:
+        values = [
+            _change_value(change, 'new')
+            for row in rows
+            for field, change in ((row.get('details') or {}).get('changes') or {}).items()
+            if field in ('disc_number', 'library_disc_number') and isinstance(change, dict)
+        ]
+        target = values[0] if values and all(value == values[0] for value in values) else ''
+        return ('Disc numbering',
+                f'Set disc number to {target} on {tracks}.' if target
+                else f'Update disc numbers on {tracks}.')
     modes = {
         str(row.get('details', {}).get('numbering_mode') or '')
         for row in rows if isinstance(row.get('details'), dict)
@@ -168,8 +187,6 @@ def _numbering_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str]:
             mode = 'digital'
         elif any(value not in ('', '1') for value in new_discs) and old_discs <= {'', '1'}:
             mode = 'release'
-    count = len(rows)
-    tracks = f'{count} track{"s" if count != 1 else ""}'
     if mode == 'digital':
         return (
             'Use continuous track numbering',

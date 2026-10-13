@@ -26,7 +26,7 @@ from core.library.reconciliation_evidence import (
 from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, _title_score,
     display_title_compatible, file_version_markers, semantic_title_key,
-    title_difference_kind, slot_version_markers,
+    title_difference_kind, slot_version_markers, _version_markers,
 )
 from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
 from core.library.retag_planner import plan_track, _artist_credit_includes
@@ -452,17 +452,43 @@ def _distinctive_position_conflict(files: list[dict], selected: tuple,
         tags = file.get('tags') or {}
         current_number = tags.get('track_number')
         markers = file_version_markers(file)
+        local_key = semantic_title_key({'title': tags.get('title') or ''})[0]
+        if not markers and local_key:
+            recordings = (file.get('acoustid') or {}).get('recordings') or []
+            best = max((float(row.get('score') or 0) for row in recordings), default=0)
+            markers = frozenset().union(*(
+                _version_markers(str(row.get('title') or ''))
+                for row in recordings
+                if float(row.get('score') or 0) >= best and
+                semantic_title_key({'title': row.get('title') or ''})[0] == local_key
+            ))
         if not markers or not current_number or current_number == selected_slot.get('track_number'):
             continue
         for candidate in candidates:
             if candidate is selected or candidate[0] < selected[0] - 1 or candidate[1] < selected[1] - 1:
                 continue
-            alternate = next((candidate[5][pair['slot_index']]
-                              for pair in candidate[6]['pairs']
-                              if pair['file_index'] == file_index), None)
-            if (alternate and alternate.get('track_number') == current_number and
-                    slot_version_markers(alternate) == markers):
+            alternate = next((slot for slot in candidate[5]
+                              if slot.get('track_number') == current_number and
+                              semantic_title_key(slot)[0] == local_key and
+                              slot_version_markers(slot) == markers), None)
+            if alternate:
                 return True
+        if (current_number >= len(files) + 2 and
+                not slot_version_markers(selected_slot)):
+            # The catalog search may not contain that edition, but the
+            # fingerprint still contradicts renumbering a versioned #16 to #1.
+            return True
+    return False
+
+
+def _single_position_outlier(files: list[dict], scored: tuple) -> bool:
+    """One high-numbered version can signal an edition beyond a complete short list."""
+    for pair in scored[6]['pairs']:
+        file = files[pair['file_index']]
+        number = int((file.get('tags') or {}).get('track_number') or 0)
+        slot_number = int(scored[5][pair['slot_index']].get('track_number') or 0)
+        if number >= len(files) + 2 and number != slot_number:
+            return True
     return False
 
 
@@ -610,10 +636,11 @@ def _release_group_candidates(release_id: str, files: list[dict], context: JobCo
     releases.sort(key=lambda row: (
         media_shape(row)[0] == wanted,
         media_shape(row)[2],
+        str(row.get('country') or '').casefold() in ('xw', 'worldwide', 'international'),
         media_shape(row)[1] == 1,
         str(row.get('status') or '').casefold() == 'official',
     ), reverse=True)
-    cache[release_id] = [('musicbrainz', str(row['id'])) for row in releases[:6]]
+    cache[release_id] = [('musicbrainz', str(row['id'])) for row in releases[:12]]
     return cache[release_id]
 
 
@@ -1681,8 +1708,17 @@ class LibraryReconciliationJob(RepairJob):
                         (best_expanded[6]['extra_files'] or
                          best_expanded[6]['missing_slots'] or
                          _systematic_numbering_drift(files, best_expanded) or
+                         _single_position_outlier(files, best_expanded) or
                          (numbering_mode == 'digital' and
-                          not _continuous_numbering(best_expanded)))):
+                          (not _continuous_numbering(best_expanded) or
+                           # A perfectly matching physical release does not
+                           # establish the intended edition. Include its
+                           # digital siblings before asking the user to pin.
+                           not _edition_preference(
+                               _release_metadata(best_expanded,
+                                                 release_meta_cache,
+                                                 exact_musicbrainz_releases),
+                               numbering_mode)[0])))):
                     editions = [candidate for candidate in _release_group_candidates(
                         group_seed[4], files, context, release_group_cache)
                         if candidate not in candidates]
@@ -1786,21 +1822,23 @@ class LibraryReconciliationJob(RepairJob):
                             result.findings_created += 1
                         cache.checkpoint()
                         continue
+                ranked_candidates = list(scored)
                 pinned_row = None
+                best_unpinned_rank = _candidate_rank(files, scored[0], numbering_mode)
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored
                                        if (row[3], row[4]) ==
                                        (album.get('canonical_source'),
                                         str(album.get('canonical_album_id') or ''))), None)
-                    if (pinned_row and _candidate_rank(files, pinned_row, numbering_mode) ==
-                            _candidate_rank(files, scored[0], numbering_mode)):
+                    if pinned_row:
                         scored.remove(pinned_row)
                         scored.insert(0, pinned_row)
                 clear, matched, _extras, source, release_id, slots, plan = scored[0]
                 locked_conflict = bool(album and album.get('canonical_locked') and
                                        (not pinned_row or
-                                        _candidate_rank(files, pinned_row, numbering_mode) !=
-                                        _candidate_rank(files, scored[0], numbering_mode)))
+                                        (pinned_row[1] == 0 and
+                                         _candidate_rank(files, pinned_row, numbering_mode) !=
+                                         best_unpinned_rank)))
                 tied_rows = [row for row in scored
                              if _candidate_rank(files, row, numbering_mode) ==
                              _candidate_rank(files, scored[0], numbering_mode)]
@@ -1858,6 +1896,8 @@ class LibraryReconciliationJob(RepairJob):
                         'profile_id': album.get('owner_profile_id') if album else 1,
                         'artist_name': album.get('artist_name') if album else '',
                         'album_folder': folder,
+                        'source': source,
+                        'release_id': release_id,
                         'locked_release': {'source': album.get('canonical_source'),
                                            'release_id': str(album.get('canonical_album_id') or '')}
                         if locked_conflict else None,
@@ -1867,15 +1907,16 @@ class LibraryReconciliationJob(RepairJob):
                             'locked': bool(album.get('canonical_locked')),
                         } if album else None,
                         'evidence_signature': _evidence_signature(
-                            files, [(row[3], row[4], row[0], row[1]) for row in scored]),
+                            files, [(row[3], row[4], row[0], row[1])
+                                    for row in ranked_candidates]),
                     }
                     case_id = _persist_selected_plan(
                         context.db, choice_common, files, scored[0],
-                        candidates=scored, state='release_conflict',
+                        candidates=ranked_candidates, state='release_conflict',
                         candidate_metadata={
                             (row[3], row[4]): _release_metadata(
                                 row, release_meta_cache, exact_musicbrainz_releases)
-                            for row in scored[:6]
+                            for row in ranked_candidates[:6]
                         },
                         numbering_mode=numbering_mode,
                     )
@@ -1895,7 +1936,7 @@ class LibraryReconciliationJob(RepairJob):
                                      files, row, _release_metadata(
                                          row, release_meta_cache,
                                          exact_musicbrainz_releases))
-                                                for row in scored[:6]]}):
+                                                for row in ranked_candidates[:6]]}):
                         result.findings_created += 1
                     cache.checkpoint()
                     continue
