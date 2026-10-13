@@ -9,6 +9,7 @@ actual files on disk. Creates actionable findings that can be fixed:
 
 import os
 import re
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -49,7 +50,9 @@ class AcoustIDScannerJob(RepairJob):
         '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0–1.0)\n'
         '- Title Similarity: How closely the identified title must match\n'
         '- Artist Similarity: How closely the identified artist must match\n'
-        '- Batch Size: Tracks scanned between 2 s API pauses (checkpoint saved between batches)'
+        '- Batch Size: Tracks scanned between 2 s API pauses (checkpoint saved between batches)\n'
+        '- Skip Verified: Off by default. When on, tracks already marked verified are '
+        'not fingerprinted again unless the file changed since the last clean run'
     )
     icon = 'repair-icon-acoustid'
     default_enabled = True
@@ -59,6 +62,7 @@ class AcoustIDScannerJob(RepairJob):
         'title_similarity': 0.70,
         'artist_similarity': 0.60,
         'batch_size': 200,
+        'skip_verified': False,
     }
     auto_fix = False  # User chooses fix action per finding
 
@@ -70,6 +74,9 @@ class AcoustIDScannerJob(RepairJob):
         title_threshold = settings.get('title_similarity', 0.70)
         artist_threshold = settings.get('artist_similarity', 0.60)
         batch_size = settings.get('batch_size', 200)
+        verified_cutoff = None
+        if settings.get('skip_verified'):
+            verified_cutoff = self._last_clean_run_epoch(context)
 
         # Get AcoustID client
         acoustid_client = context.acoustid_client
@@ -177,6 +184,18 @@ class AcoustIDScannerJob(RepairJob):
 
             if track_info.get('metadata_locked') or is_hand_tagged_path(resolved, hand_tagged):
                 track_info['hand_tagged'] = True
+
+            # Opt-in: a verified file that has not been touched since the last
+            # clean run has nothing new to check. A file written after that
+            # run started (re-download, retag, replacement) is scanned again.
+            if (verified_cutoff is not None
+                    and track_info.get('db_verification_status') == 'verified'
+                    and not self._modified_since(resolved, verified_cutoff)):
+                result.skipped += 1
+                last_completed_id = track_id
+                if context.update_progress and (i + 1) % 10 == 0:
+                    context.update_progress(i + 1, total)
+                continue
 
             result.scanned += 1
             batch_count += 1
@@ -719,6 +738,47 @@ class AcoustIDScannerJob(RepairJob):
             context.config_manager.set(
                 f'repair.jobs.{self.job_id}.checkpoint_id', track_id
             )
+
+    def _last_clean_run_epoch(self, context: JobContext) -> Optional[float]:
+        """Start time (epoch seconds) of this job's last run that finished
+        without errors, or None when there is none.
+
+        ``skip_verified`` only trusts a run that looked at every file it was
+        given, so a run that was stopped, failed or logged errors does not
+        count. None means "scan everything". ``repair_job_runs`` stamps UTC
+        with CURRENT_TIMESTAMP.
+        """
+        conn = None
+        try:
+            conn = context.db._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT started_at FROM repair_job_runs "
+                "WHERE job_id = ? AND status = 'completed' AND errors = 0 "
+                "ORDER BY started_at DESC LIMIT 1",
+                (self.job_id,),
+            )
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+            started = datetime.strptime(str(row[0])[:19], '%Y-%m-%d %H:%M:%S')
+            return started.replace(tzinfo=timezone.utc).timestamp()
+        except Exception as e:
+            logger.debug("Could not read the last clean AcoustID run: %s", e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    @staticmethod
+    def _modified_since(path: str, epoch: float) -> bool:
+        """True when the file's mtime or ctime is after ``epoch``, or it
+        cannot be stat'ed (so it gets scanned rather than silently skipped)."""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return True
+        return max(st.st_mtime, st.st_ctime) > epoch
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:

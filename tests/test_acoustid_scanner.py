@@ -982,3 +982,110 @@ def test_scan_skip_does_not_downgrade_verified(monkeypatch):
     assert captured == []
     assert tag_writes == []
     assert any('tracks' in q and p == ('verified', '9') for q, p in updates)
+
+
+# ---------------------------------------------------------------------------
+# Opt-in skip_verified
+# ---------------------------------------------------------------------------
+
+def _skip_verified_scan(monkeypatch, tmp_path, *, setting, db_status,
+                        last_run_age_s):
+    """Run scan() over one track and return (scanned_ids, result).
+
+    ``last_run_age_s`` is how long ago the last clean run started, or None for
+    no clean run on record. The file is created now, so a run that started an
+    hour ago predates it (changed) and one "started" an hour from now does not.
+    """
+    import time
+
+    audio = tmp_path / "song.flac"
+    audio.write_bytes(b"x")
+    last_run = None
+    if last_run_age_s is not None:
+        last_run = time.strftime(
+            '%Y-%m-%d %H:%M:%S', time.gmtime(time.time() - last_run_age_s))
+
+    class _Cursor:
+        def execute(self, query, params=None):
+            return self
+
+        def fetchone(self):
+            return (last_run,) if last_run else None
+
+        def fetchall(self):
+            return [(42, "Good Track", "Artist", str(audio), 1, "Album", None, None,
+                     "", "Artist", 240000, 7, db_status)]
+
+    cursor = _Cursor()
+    conn = SimpleNamespace(cursor=lambda: cursor, close=lambda: None)
+    context = _make_context([])
+    context.db = SimpleNamespace(_get_connection=lambda: conn)
+    context.config_manager = SimpleNamespace(
+        get=lambda key, default=None: (
+            {'skip_verified': setting} if key.endswith('.settings') else default),
+        set=lambda *a, **k: None,
+    )
+
+    job = AcoustIDScannerJob()
+    monkeypatch.setattr(job, "_resolve_path", lambda file_path, _c: file_path)
+    scanned = []
+    monkeypatch.setattr(
+        job, "_scan_file",
+        lambda fpath, track_id, *a, **k: scanned.append(track_id))
+    result = job.scan(context)
+    return scanned, result
+
+
+def test_skip_verified_is_off_by_default():
+    assert AcoustIDScannerJob.default_settings['skip_verified'] is False
+
+
+def test_skip_verified_off_still_scans_verified(monkeypatch, tmp_path):
+    scanned, result = _skip_verified_scan(
+        monkeypatch, tmp_path, setting=False, db_status='verified',
+        last_run_age_s=-3600)
+    assert scanned == ["42"]
+    assert result.skipped == 0
+
+
+def test_skip_verified_skips_unchanged_verified_file(monkeypatch, tmp_path):
+    scanned, result = _skip_verified_scan(
+        monkeypatch, tmp_path, setting=True, db_status='verified',
+        last_run_age_s=-3600)
+    assert scanned == []
+    assert result.scanned == 0
+    assert result.skipped == 1
+
+
+def test_skip_verified_rescans_verified_file_modified_after_last_run(monkeypatch, tmp_path):
+    scanned, result = _skip_verified_scan(
+        monkeypatch, tmp_path, setting=True, db_status='verified',
+        last_run_age_s=3600)
+    assert scanned == ["42"]
+
+
+def test_skip_verified_scans_everything_without_a_clean_run(monkeypatch, tmp_path):
+    scanned, result = _skip_verified_scan(
+        monkeypatch, tmp_path, setting=True, db_status='verified', last_run_age_s=None)
+    assert scanned == ["42"]
+
+
+@pytest.mark.parametrize("status", [None, "unverified", "force_imported"])
+def test_skip_verified_only_skips_verified(monkeypatch, tmp_path, status):
+    scanned, result = _skip_verified_scan(
+        monkeypatch, tmp_path, setting=True, db_status=status,
+        last_run_age_s=-3600)
+    assert scanned == ["42"]
+
+
+def test_last_clean_run_epoch_reads_started_at_as_utc():
+    from datetime import datetime, timezone
+
+    cursor = SimpleNamespace(
+        execute=lambda q, p=None: cursor,
+        fetchone=lambda: ("2026-10-12 08:00:00",))
+    context = SimpleNamespace(db=SimpleNamespace(
+        _get_connection=lambda: SimpleNamespace(
+            cursor=lambda: cursor, close=lambda: None)))
+    expected = datetime(2026, 10, 12, 8, 0, 0, tzinfo=timezone.utc).timestamp()
+    assert AcoustIDScannerJob()._last_clean_run_epoch(context) == expected
