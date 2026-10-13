@@ -1,6 +1,6 @@
 # soulsync 3.5.4: `dev` → `main`
 
-subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge and plex-safe staging, one downloads page for music and video, usenet pulls a track out of an album release, scrobbling leaves the stats toggle alone, plus mirror safety and a stack of library, watchlist and import fixes. scope: everything on dev since 3.5.3.
+subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge and plex-safe staging, one downloads page for music and video, usenet pulls a track out of an album release, scrobbling leaves the stats toggle alone, plus mirror safety, covers for your own playlists, a full phone-layout pass and a stack of library, watchlist and import fixes. scope: everything on dev since 3.5.3.
 
 ## subtitles, minus bazarr
 
@@ -8,6 +8,7 @@ subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge
 - phase 2: a wanted-loop worker retries misses with backoff and a daily provider quota (20/day). hash-first scoring: the file hash wins, then the filename, and weak matches never download. every attempt lands in a history table for the upgrade loop (#1638).
 - phase 3: per-movie and per-show language overrides, set from the detail page, episodes inherit the show's. proper .hi.srt / .forced.srt / .hi.forced.srt names so plex and jellyfin pick them up. the worker upgrades a subtitle it has when a clearly better one shows up, never touching your manual picks. manual search: see the scored candidates, download the one you want, your pick is marked and never auto-replaced. a path traversal hole the review caught is closed, language codes are validated everywhere (#1643).
 - phase 4: whisper, as a last resort and totally optional. pick a model (tiny/base/small, default small at ~486MB), download it once, flip the toggle. the worker transcribes locally only when every network provider misses, burns no quota, and a transcript can never replace a real subtitle (#1644).
+- the finish: the provider chain is a settings widget now, drag to reorder it, and a backfill runs the existing library (admins only) with its progress shown instead of riding the shared library load. the review rounds folded in a settings escape crash, a preference filter the chain could bypass, and zip/season/quota/drag fixes (#1668).
 
 ## audiobooks
 
@@ -16,11 +17,16 @@ subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge
 - the merge no longer leaves ghosts in plex. the book is built in a hidden staging folder next to the library and revealed with one atomic rename, so plex only ever sees the finished book. docker/nas mounts that can't rename across filesystems copy each file over atomically instead, mounts that can't create the folder stage inside the library. a scan nudge goes out after the import lands, and a folder claimed by a different release is refused before the merge instead of after (thanks SeadogsBooty on discord) (#1664).
 - complete books stop being held for being a different narration than the wishlisted edition. the check confirms the edition's narration first (release and folder titles, then the files' tags); a confidently different complete reading skips the edition's runtime gate, an unidentifiable one gets a loose 0.6x floor instead of the strict check, so samples and truncated downloads still get caught. holds now say which narration and which check applied (thanks SeadogsBooty on discord) (#1647, #1655).
 - clicking audiobooks/podcasts in the sidebar from a detail page goes back to the section home instead of doing nothing (#1648).
+- the audiobook wishlist wears the music design now: same hero, stat strip (wanted / looking / in flight / in library, plus the amber not found yet), a triage banner for failed titles and one sticky command bar. status badges got a solid backing so they stay readable over bright covers (#1675).
 
 ## one downloads page
 
 - music and video share one downloads page now. a music | video switcher on top of /active-downloads, deep-linkable (?media=video), and the old /video-downloads redirects to the video view. review, history and the clients tab carry over, cards expand the same as before. no backend changes (thanks @c5pie) (#1651).
 - video wishlist drains stop handing every found item to the clients in one run. new "max downloads per run" on both wishlist automations, default 3: once the budget is spent the rest stay wishlisted for the next run, no searches wasted, no attempts recorded, and the slot goes back if a client refuses a grab. per run, per media type; rss and manual grabs aren't capped (thanks @c5pie) (#1650).
+
+## your playlists grow up
+
+- your own playlists get a cover, a description and a duplicate button. covers upload (re-encoded square), pick from a track's art, paste a url, or remove; a user playlist's cover pushes to the media server on every sync, and duplicating copies the tracks, cover and description (#1666).
 
 ## usenet finds the album for the song
 
@@ -46,6 +52,7 @@ subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge
 - playlist sync matches again when the candidate pool comes back empty: empty now means "no info" and falls through to the old search path instead of "no match". the pool also catches compilation credits via the per-track artist, and the wishlist step logs when it adds 0 of N instead of dropping everything silently (thanks @zikasak) (#1624).
 - three matching/verification fixes from zikasak's reports: the soulseek scorer vetoes a wrong song that only shares a version qualifier ("damnation flame (orchestral version)" accepted for "crystalline (orchestral version)"); the acoustid verifier handles subtitles wrapped in dashes ("perfect world - blue forest version-") and tilde patterns; a same-title cross-script recording skips instead of failing, so correct files stop landing in quarantine (thanks @zikasak) (#1630).
 - album_release_year findings apply on navidrome libraries now: the handler cast text soul ids to int and every finding 400'd. the id passes through unchanged (thanks @Logan-Selley) (#1634).
+- the album you pinned as canonical is the one everything uses now: the artist page returns the pinned source and edition before the provider priority walk, so redownload pulls the pinned edition too (thanks @kiwijar) (#1670).
 - the album picker stops grabbing tribute albums: the release title needs an artist token and tribute/cover/salute markers are rejected for original wishlist items (a wishlisted tribute still passes). and a track canonically titled "live again" no longer flips the version flag so correct candidates eat the version penalty; the pre-download duration check grants the 15s longer-side allowance the post-download check already gave (thanks @TheJimmerJammer123) (#1641).
 
 ## watchlist
@@ -60,17 +67,28 @@ subtitles grow up to replace bazarr, audiobooks get series follows, an m4b merge
 - slowed, sped up and nightcore are their own versions now. "devil eyes - slowed" and plain "devil eyes" both counted as original, so the studio cut landed in the library as the slowed track. the scorer rejects the mismatch both ways and the acoustid gate reads the same labels (thanks @nick2000713) (#1653).
 - approving a file from quarantine counts as replace intent. approve re-ran the import and the metadata protection deleted the approved file as redundant at the destination; it gets forced-redownload semantics now, still through the short file guard (thanks @nick2000713) (#1653).
 - discogs dates keep their precision, and a correct full date in the file isn't a mismatch when the provider only knows the year (thanks @nick2000713) (#1653).
+- imports skip what you already own. each file is checked against the library before any transcoding, tagging or moving: an exact id match on the same release, already on disk, is skipped and the queue says so; anything that's really an upgrade still routes through the upgrade path (thanks SeadogsBooty on discord) (#1667).
+- the import inbox stays honest while the staging scan runs: files mid-scan stop wearing the wrong status, and the review fold-ins fixed cross-mount paths and pathless duplicates (#1679).
 - the backup rotation can't throw away the last real backup anymore. an interrupted backup leaves a 0-byte file, sqlite calls it a healthy empty database, and the rotation protected it as newest. empty files aren't healthy now, and a failed copy removes the file it created (thanks @nick2000713) (#1653).
 
 ## webui (@Thundernerd)
 
 - the ui follows your accent instead of hardcoded spotify greens: 184 accent-green literals became var(--accent), and status greens (owned, matched, success, running) became the --success token so they stay green under a purple accent. spotify-brand marks keep their green (thanks @Thundernerd) (#1617).
 - the per-feature palettes collapse onto the global tokens, and 9,656 white-alpha and 4,583 border-radius literals swap onto the token ramp. a dead declaration that would have broken the issues filter dropdowns is fixed first (thanks @Thundernerd) (#1625).
-- a class-reference checker hardens dead-css deletion against string-built class names, then deletes the retired enhanced-search views (652 lines) and the unused wishlist overview modal, artists page and hydrabase rules (1,062 lines). every deletion verified invisible by screenshot compare (thanks @Thundernerd) (#1631, #1649).
+- a class-reference checker hardens dead-css deletion against string-built class names, then deletes the retired enhanced-search views (652 lines) and the unused wishlist overview modal, artists page and hydrabase rules (1,062 lines). a follow-up deletes the retired dashboard quick-actions lane, the legacy rate gauges and the enrichment chips. every deletion verified invisible by screenshot compare (thanks @Thundernerd) (#1631, #1649, #1669).
+
+## phones, second pass
+
+- a full phone pass from 22 screenshots: buttons stop stretching into ovals, the watchlist rail scrolls, tools, downloads, logs and quality fit the screen, settings titles and open modals clear the menu button, the player's play button is round and the eq is reachable, and the dashboard listen cards stack instead of clipping mid-word. measured at 390/360/320, desktop untouched (thanks @Thibs, @c5pie and gzetk) (#1683).
 
 ## more fixes
 
 - horizontal scrollbars read as slidable now: every horizontal rail gets an edge fade, the main rails get brighter thumbs, accent-tinted designs untouched (#1637).
+- scrollbars fade now: thumbs brighten while you scroll and fade back a second after you stop, app-wide on desktop and pwa windows. designed and hidden bars are untouched (thanks @Thibs) (#1673).
+- deezer sessions heal themselves: a dead session token re-logins instead of downloads failing while the arl takes the blame (#1681).
+- standalone library scans work: the scan library button and the auto-scan after downloads automation silently failed with no media server connected; the built-in client runs a real rescan of the transfer folder now (thanks Spectro on discord) (#1682).
+- acoustid keys apply live: a changed key is picked up without a restart, a bad key is caught before the scan and stops it instead of burning thousands of lookups a night, and the log says plainly when the key is the problem (thanks @splitsec2) (#1672).
+- automations can notify through ntfy and gotify, with a send-test button (thanks @SimpleSimonLA) (#1674), and an api key can manage invites while login mode is on (thanks @splitsec2) (#1676).
 - bpm backfill: dismissed findings reopen in bulk with a new "reopen all" on findings groups. deezer lookup failures and "no confident bpm" log at info/warning instead of silent debug, so the log explains skips. and deezer.tags.bpm now only gates deezer-sourced bpm writes: locally analyzed bpm always writes to the file (thanks Specialmed on discord) (#1646).
 - the nav drawer scrolls in landscape on phones: the header compacts under 500px of height and the drawer tracks the visible viewport (thanks @Thibs) (#1661).
 - spotify's https redirect uri requirement is documented for nas/docker: loopback stays http, anything else needs an https proxy in front of soulsync, with the tailscale recipe and a new troubleshooting entry. docs only (thanks @Thibs) (#1663).
