@@ -357,6 +357,22 @@ export function AutoSyncWeeklyBoard({
           onFilterChange={setFilter}
           expandedKinds={expandedKinds}
           onToggleKind={toggleKind}
+          onPickPlaylist={(_anchor, playlist) => {
+            // Tap-to-schedule on this board opens the weekly editor for
+            // the playlist — days and time need the editor anyway, and a
+            // scheduled card's click already opens the same draft. The
+            // schedulable re-check mirrors the drop handler's.
+            if (!autoSyncCanSchedulePlaylist(playlist)) {
+              window.showToast?.('That playlist source cannot be refreshed by Auto-Sync.', 'info');
+              return;
+            }
+            setDraft(
+              autoSyncWeeklyEditorDraft(
+                parseInt(String(playlist.id), 10),
+                weeklySchedules[String(playlist.id)],
+              ),
+            );
+          }}
         />
         <main className="auto-sync-lanes auto-sync-weekly-lanes">
           {AUTO_SYNC_WEEKDAYS.map((day) => {

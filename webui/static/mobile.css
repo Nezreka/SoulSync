@@ -4359,3 +4359,268 @@ body:has([data-audiobook-overlay]) .hamburger-btn {
         order: 3;
     }
 }
+
+/* --- Auto-Sync Manager on phones: the whole modal, not just its header ---
+   The header wrap above was batch #2; the rest of the modal never got a
+   phone layout at all (Boulder's screenshot, Oct 13). Measured in Chromium
+   at 390px against the real stylesheets, replica markup:
+   - The <=1100px block in style.css tries to stack .auto-sync-body into
+     one column (280px sidebar over lanes), but the streamlined board rules
+     are scoped .auto-sync-modal .auto-sync-body (0,2,0) and beat it — so
+     the sidebar kept 280px, the lanes got the leftover 90px, filled lanes
+     (365px of content) clipped off the modal's right edge, and the grid's
+     second row stood empty: the board area rendered 150px tall in a 421px
+     slot, over half the modal dead space.
+   - The four tabs total 454px in a 370px modal with no scroll or wrap:
+     Run History clipped at the edge, mid-word.
+   - Header + idle monitor + tabs + board intro ate 403px of the 844px
+     screen before the first playlist appeared.
+   - At <=1100px the source list becomes a horizontal flex strip (groups
+     min-width 220px side by side), so the playlist list was a 69px tall
+     sideways scroller showing one group at a time.
+   The rules below are scoped to match the selectors they override
+   (.auto-sync-modal …) and this file loads after style.css, so they win
+   ties. Desktop is untouched: everything sits inside max-width: 768px. */
+@media (max-width: 768px) {
+    /* The modal takes the screen instead of floating in it. dvh so the
+       phone browser chrome doesn't crop the bottom; vh first as fallback. */
+    .auto-sync-modal {
+        width: calc(100vw - 12px);
+        height: calc(100vh - 12px);
+        height: calc(100dvh - 12px);
+        border-radius: 18px;
+    }
+
+    /* Header: one compact block. Title + actions share the first row, the
+       summary chips split the second row evenly instead of sizing to
+       their text and clipping. */
+    .auto-sync-modal .auto-sync-header {
+        padding: 14px 16px 12px;
+        gap: 8px 12px;
+        align-items: flex-start;
+    }
+    .auto-sync-modal .auto-sync-header h3 {
+        font-size: 19px;
+    }
+    /* The blurb goes on phones: style.css already hides it on short
+       screens (max-height: 760px) for the same reason — the board is the
+       content, and two lines of explanation cost two playlist rows.
+       Without it the title shrinks to its text and the actions share
+       its row again instead of wrapping onto a row of their own. */
+    .auto-sync-modal .auto-sync-header p {
+        display: none;
+    }
+    .auto-sync-modal .auto-sync-header > div:first-child {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-header-actions {
+        margin-left: auto;
+    }
+    .auto-sync-modal .auto-sync-close {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 auto;
+    }
+    .auto-sync-modal .auto-sync-refresh {
+        padding: 8px 10px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary {
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-left: 0;
+        padding: 0;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary > div {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 6px 10px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary span {
+        font-size: 15px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary small {
+        font-size: 9px;
+        letter-spacing: 0.2px;
+    }
+
+    /* Idle monitor: kicker + state on one line. The detail sentence is
+       hidden only while idle — it repeats what the board intro says, and
+       the board needs the room more. A running monitor keeps it. */
+    .auto-sync-modal .auto-sync-monitor {
+        padding: 10px 16px;
+    }
+    .auto-sync-modal .auto-sync-monitor.auto-sync-monitor--idle {
+        padding: 8px 16px;
+    }
+    .auto-sync-monitor--idle .auto-sync-monitor-head small {
+        display: none;
+    }
+    .auto-sync-monitor-list {
+        grid-template-columns: 1fr;
+    }
+
+    /* Tabs: a scroll strip, every tab reachable, nothing wraps mid-word
+       and nothing clips. */
+    .auto-sync-tabs {
+        padding: 0 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+    .auto-sync-tabs::-webkit-scrollbar {
+        display: none;
+    }
+    .auto-sync-tabs button {
+        flex: 0 0 auto;
+        height: 44px;
+        padding: 0 12px;
+        white-space: nowrap;
+    }
+
+    .auto-sync-modal .auto-sync-board-intro,
+    .auto-sync-automation-intro,
+    .auto-sync-history-intro {
+        padding: 10px 16px;
+    }
+
+    /* The board stacks: playlists on top (capped, own scroll), lanes
+       below filling what's left (own scroll). display:flex replaces the
+       grid outright, which is what finally retires the 280px column and
+       the phantom second row. */
+    .auto-sync-modal .auto-sync-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+    .auto-sync-modal .auto-sync-sidebar {
+        flex: 0 0 auto;
+        width: auto;
+        max-height: 40%;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .auto-sync-sidebar-title {
+        padding: 10px 16px 6px;
+    }
+    .auto-sync-sidebar-filter {
+        padding: 2px 12px 8px;
+    }
+    .auto-sync-sidebar-search {
+        height: 36px;
+        font-size: 13px;
+    }
+    /* Undo the <=1100px horizontal strip: back to a vertical list that
+       scrolls inside the sidebar's cap. */
+    .auto-sync-modal .auto-sync-source-list {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0 12px 12px;
+    }
+    .auto-sync-modal .auto-sync-source-group {
+        min-width: 0;
+        margin-bottom: 12px;
+    }
+
+    /* Lanes: one column. A filled lane is a header strip (interval +
+       cadence + count) over full-width cards; an empty lane is a
+       full-width dashed row that says what it's for, not a 59px sliver
+       of a chip at the screen's edge. */
+    .auto-sync-modal .auto-sync-lanes {
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-content: stretch;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        gap: 8px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled {
+        flex: 0 0 auto;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge {
+        flex: 0 0 auto;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 8px;
+        padding: 0 2px 6px;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge b {
+        font-size: 16px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-track {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 0;
+    }
+    .auto-sync-modal .auto-sync-lane .auto-sync-scheduled-card {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        margin: 0;
+    }
+    .auto-sync-modal .auto-sync-lane.empty {
+        flex: 0 0 auto;
+        width: auto;
+        border-radius: 12px;
+    }
+    .auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge {
+        flex: 1;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    .auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge span {
+        display: inline;
+    }
+
+    /* The automation intro is a bare strong + span in a flex row, so on a
+       phone the heading was crushed into a 140px column beside its own
+       explanation. Stack them. The history intro has the same shape
+       (text block + filter controls) and stacks the same way. */
+    .auto-sync-automation-intro,
+    .auto-sync-history-intro {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    /* The read-only panels ride the same panel column; give their lists
+       the leftover height and phone padding. */
+    .auto-sync-automation-list,
+    .auto-sync-history-list {
+        flex: 1;
+        min-height: 0;
+        padding: 12px;
+    }
+    .auto-sync-automation-card {
+        flex-wrap: wrap;
+    }
+
+    /* Bulk popover + weekly editor: stay on screen, real tap targets. */
+    .auto-sync-bulk-menu {
+        max-width: calc(100vw - 16px);
+    }
+    .auto-sync-bulk-menu button {
+        min-height: 40px;
+    }
+    .auto-sync-weekly-editor-backdrop {
+        padding: 12px;
+    }
+    .auto-sync-weekly-editor {
+        padding: 18px;
+    }
+}
