@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   analyseRules,
+  atRuleKey,
   isLive,
   refsFromTexts,
   removedSelectors,
   selectorClasses,
+  selectorKey,
 } from '../../scripts/css-class-refs.mjs';
 
 /**
@@ -189,5 +191,50 @@ describe('css-class-refs: selectors', () => {
       '.used',
       '@media (max-width: 9px) | .used',
     ]);
+  });
+
+  it('layout-only changes are not removals: @media and selectors are keyed after normalising', () => {
+    const refs = refsFromTexts([`el.className = 'used';`]);
+    const minified = [
+      {
+        name: 'a.css',
+        text: '@media (max-width:900px){.used>.used,.used .used{flex:1}}@media (min-resolution:1.5dppx) and (max-width:.5px){.used{color:red}}',
+      },
+    ];
+    const reflowed = [
+      {
+        name: 'a.css',
+        text: `@media ( max-width: 900px ) {
+    .used > .used,
+    .used  .used {
+        flex: 1;
+    }
+}
+
+@media (min-resolution: 1.5dppx) and (max-width: 0.5px) {
+    .used {
+        color: red;
+    }
+}`,
+      },
+    ];
+    expect(removedSelectors(minified, reflowed, refs)).toEqual({ gone: [], live: [] });
+    expect(removedSelectors(reflowed, minified, refs)).toEqual({ gone: [], live: [] });
+    // A real change of context still counts.
+    const narrower = [
+      { name: 'a.css', text: '@media (max-width: 899px) { .used > .used { flex: 1 } }' },
+    ];
+    expect(removedSelectors(minified, narrower, refs).live).toContain(
+      '@media (max-width: 900px) | .used > .used',
+    );
+  });
+
+  it('keys keep what layout cannot change: descendant spaces, quotes and [attr] text', () => {
+    expect(atRuleKey('MEDIA', '(max-width:.5px)')).toBe('@media (max-width: 0.5px)');
+    expect(selectorKey('.a>.b+.c~.d')).toBe('.a > .b + .c ~ .d');
+    expect(selectorKey(':is( .a ,.b )')).toBe(':is(.a, .b)');
+    expect(selectorKey('.a :hover')).not.toBe(selectorKey('.a:hover'));
+    expect(selectorKey('[class~="x>y"]')).toBe('[class~="x>y"]');
+    expect(selectorKey('.a[data-x="a  b"]')).toBe('.a[data-x="a  b"]');
   });
 });
