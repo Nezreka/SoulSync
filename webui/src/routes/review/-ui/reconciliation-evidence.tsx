@@ -853,18 +853,13 @@ export function ReconciliationEvidence({
           <h4>
             <EvidenceIcon name="warning" /> Why this needs review
           </h4>
-          <ul>
-            {ambiguityReasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-          <p>
-            The release slot is the best overall fit, but AcoustID links this fingerprint to
-            competing recording identities at the same top score.
-          </p>
+          <p>{ambiguityReasons.join(' · ')}</p>
           {competingAudioIdentities.length > 0 && (
             <>
-              <strong>Equal-score alternatives</strong>
+              <strong>Other recordings linked to this fingerprint</strong>
+              <small>
+                These scores measure fingerprint similarity, not certainty about the track.
+              </small>
               <ul>
                 {competingAudioIdentities.slice(0, 3).map((recording) => (
                   <li key={`${label(recording.title)}-${label(recording.artist)}`}>

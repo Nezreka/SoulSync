@@ -29,6 +29,21 @@ def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_lengt
     assert result['missing_slots'] == []
 
 
+def test_manual_assignment_is_one_to_one_and_requires_followup_review():
+    files = [_file('Studio Song', '/album/studio.flac', 200000,
+                   {'mbid': 'studio', 'title': 'Studio Song', 'score': 0.99}),
+             _file('Live Song', '/album/live.flac', 210000,
+                   {'mbid': 'live', 'title': 'Live Song', 'score': 0.99})]
+    slots = [{'title': 'Studio Song', 'recording_mbid': 'studio', 'duration_ms': 200000},
+             {'title': 'Live Song', 'recording_mbid': 'live', 'duration_ms': 210000}]
+    result = reconcile_folder(files, slots, forced_pairs={0: 1})
+    assert any(pair['file_index'] == 0 and pair['slot_index'] == 1 and
+               pair['confidence'] == 'manual' for pair in result['pairs'])
+    assert all(pair['slot_index'] != 1 or pair['file_index'] == 0
+               for pair in result['pairs'])
+    assert 1 in result['extra_files']
+
+
 def test_ashes_of_the_wake_swapped_tags_do_not_override_audio_and_filename():
     files = [
         _file('Laid to Rest', '/Lamb of God/Ashes of the Wake/02 - Hourglass.flac',

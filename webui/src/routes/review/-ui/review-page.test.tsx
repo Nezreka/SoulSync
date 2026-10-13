@@ -92,6 +92,118 @@ afterEach(() => {
 });
 
 describe('library reconciliation review queue', () => {
+  it('offers one album completeness choice with individually wanted tracks', async () => {
+    const intent = {
+      ...finding,
+      finding_type: 'reconciliation_intent',
+      title: 'Is Album meant to be complete?',
+      details: {
+        album_id: 10,
+        album_title: 'Album',
+        missing_tracks: [
+          {
+            title: 'First',
+            source_track_id: 'first',
+            disc_number: 1,
+            track_number: 2,
+            wanted_key: 'id:first:1:2',
+          },
+          {
+            title: 'Second',
+            source_track_id: 'second',
+            disc_number: 1,
+            track_number: 3,
+            wanted_key: 'id:second:1:3',
+          },
+        ],
+      },
+      review_tier: 'manual',
+    };
+    const decision = {
+      id: 'album_completeness',
+      category: 'album_completeness',
+      label: 'Album completeness',
+      risk: 'manual',
+      summary: 'Choose album scope',
+      finding_ids: [7],
+      action_count: 1,
+    };
+    const plan = {
+      ready: 0,
+      manual: 1,
+      destructive: 0,
+      blocked: 0,
+      total: 1,
+      status: 'needs_review',
+      can_apply_ready: false,
+      can_organize: false,
+      blocker_reasons: [],
+      decisions: [decision],
+    };
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const common = auxiliary(url);
+      if (common) return Promise.resolve(common);
+      if (url.startsWith('/api/repair/review-queue?'))
+        return Promise.resolve(
+          reply({
+            items: [
+              {
+                case_id: 'album:1:10',
+                album: 'Album',
+                artist: 'Artist',
+                pending: 1,
+                priority: 1,
+                finding_types: ['reconciliation_intent'],
+                error_count: 0,
+                plan,
+              },
+            ],
+            total: 1,
+            page: 0,
+            limit: 30,
+          }),
+        );
+      if (url.startsWith('/api/repair/review-queue/album%3A1%3A10?'))
+        return Promise.resolve(
+          reply({
+            case_id: 'album:1:10',
+            album: 'Album',
+            artist: 'Artist',
+            folder: '/music/Album',
+            count: 1,
+            status: 'pending',
+            items: [intent],
+            plan,
+            decisions: [decision],
+            album_plan: {
+              state: 'review',
+              counts: { confirmed: 0, changed: 0, uncertain: 0, missing: 2, extra: 0 },
+              assignments: [
+                { status: 'missing', slot_title: 'First', finding_id: 7 },
+                { status: 'missing', slot_title: 'Second', finding_id: 7 },
+              ],
+            },
+          }),
+        );
+      if (url.includes('/findings/7/apply') && init?.method === 'POST')
+        return Promise.resolve(reply({ success: true, message: 'Partial album saved' }));
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    render(<ReviewPage />);
+    await screen.findByText('Choose whether this folder represents the complete album');
+    fireEvent.click(screen.getByLabelText('First'));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep as partial · 1 wanted' }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes('/findings/7/apply') &&
+            JSON.parse(String((init as RequestInit).body)).fix_action ===
+              'partial:["id:first:1:2"]',
+        ),
+      ).toBe(true),
+    );
+  });
   it('filters both APIs and lets the reader jump between pages', async () => {
     fetchMock.mockImplementation((url: string) => {
       const common = auxiliary(url);
@@ -219,8 +331,10 @@ describe('library reconciliation review queue', () => {
     expect(screen.getAllByText('Recording: acoustic')).toHaveLength(2);
     expect(screen.getByText('US deluxe edition')).toBeTruthy();
     expect(screen.getByRole('heading', { name: /Why this needs review/ })).toBeTruthy();
-    expect(screen.getByText(/competing recording identities at the same top score/)).toBeTruthy();
-    expect(screen.getByText('Equal-score alternatives')).toBeTruthy();
+    expect(
+      screen.getByText(/competing identities not resolved by the other evidence/),
+    ).toBeTruthy();
+    expect(screen.getByText('Other recordings linked to this fingerprint')).toBeTruthy();
     expect(screen.getAllByText('Hourglass · Lamb of God · 98%')).toHaveLength(2);
     expect(screen.getByText('1 confirmed match')).toBeTruthy();
     expect(screen.getByText(/Track comparisons were not saved/)).toBeTruthy();
@@ -386,6 +500,15 @@ describe('library reconciliation review queue', () => {
     expect(selectedRow.nextElementSibling).toBe(selectedDetail);
     expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
+    fireEvent.click(selectedRow);
+    expect(screen.queryByLabelText('Selected action detail')).toBeNull();
+    expect(selectedRow.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.change(screen.getByLabelText('Show tracks'), { target: { value: 'numbering' } });
+    expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('numbering');
+    expect(screen.queryByText(/3 settled release slots/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+    expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('');
+    expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
   });
 
   it('offers an exact replacement and recoverable quarantine for verified wrong audio', async () => {
@@ -640,7 +763,7 @@ describe('library reconciliation review queue', () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText('Various Artists → Lamb of God')).toBeTruthy();
+    expect((await screen.findAllByText('Various Artists → Lamb of God')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 ready').length).toBeGreaterThan(0);
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();

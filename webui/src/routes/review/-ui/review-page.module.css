@@ -580,6 +580,131 @@
   opacity: 0.5;
   cursor: default;
 }
+.releaseChoiceList .candidatePreview {
+  grid-column: 3;
+  min-width: 0;
+}
+.candidatePreview {
+  color: #bac3d6;
+  font-size: 12px;
+}
+.candidatePreview > summary {
+  cursor: pointer;
+  color: #cfc6ff;
+}
+.candidatePreview > div {
+  max-height: 240px;
+  overflow: auto;
+}
+.candidatePreview p {
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+.completenessChoice {
+  padding: 0 16px 16px 52px;
+}
+.completenessChoice p {
+  margin: 0 0 10px;
+  color: #b4bdd0;
+  font-size: 13px;
+}
+.wantedTracks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 7px;
+  margin-bottom: 12px;
+}
+.wantedTracks label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e7eaf2;
+  font-size: 13px;
+}
+.completenessChoice .decisionActions {
+  padding: 0;
+}
+.trackFilters {
+  display: flex;
+  gap: 9px;
+  align-items: end;
+  margin: 0 0 12px;
+}
+.trackFilters label {
+  display: grid;
+  gap: 5px;
+  color: #aeb6c9;
+  font-size: 12px;
+}
+.trackFilters select {
+  padding: 7px 9px;
+  border: 1px solid #495069;
+  border-radius: 7px;
+  background: #1c2030;
+  color: #e8ebf3;
+}
+.versionExplanation {
+  margin: 0 0 12px;
+  color: #dabd8b;
+  font-size: 13px;
+}
+.audioPreview {
+  display: grid;
+  gap: 7px;
+  max-width: 420px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.audioPreview audio {
+  width: 100%;
+}
+.assignmentCorrection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #4f536b;
+  border-radius: 9px;
+  background: #1d2030;
+}
+.assignmentCorrection label {
+  display: grid;
+  flex: 1 1 280px;
+  gap: 6px;
+  font-size: 13px;
+}
+.assignmentCorrection select {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #565e77;
+  border-radius: 7px;
+  background: #151824;
+  color: #eff0f8;
+}
+.assignmentCorrection small {
+  flex-basis: 100%;
+  color: #aeb6c9;
+}
+.missingAssignments {
+  border-top: 1px solid #4a3743;
+}
+.missingAssignments > summary {
+  padding: 10px 12px;
+  background: #291f25;
+  color: #f0c6d5;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+}
+.missingSummary {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  color: #d2c8cd;
+  font-size: 13px;
+}
 .matrixCounts {
   display: flex;
   gap: 6px;

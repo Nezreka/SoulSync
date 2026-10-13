@@ -98,6 +98,16 @@ export interface AlbumReconciliationPlan {
     disambiguation?: string;
     format?: string;
     date?: string;
+    pairs?: Array<{
+      file: string;
+      local_title: string;
+      slot_title: string;
+      disc_number?: number;
+      track_number?: number;
+      confidence: string;
+    }>;
+    missing_tracks?: string[];
+    extra_files?: string[];
   }>;
 }
 

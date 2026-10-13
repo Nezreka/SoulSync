@@ -65,6 +65,30 @@ def test_album_title_keeps_clean_name_when_source_adds_catalog_qualifier():
         [{'tags': {'album': 'Rio'}}, {'tags': {'album': 'Rio'}}],
         'Rio (Columbia House)', 'Rio (Columbia House)',
     ) == 'Rio'
+
+
+def test_album_title_policy_keeps_clean_display_but_can_follow_exact_release():
+    files = [{'tags': {'album': 'Greatest Hits'}} for _ in range(3)]
+    assert _display_album_title(files, 'Greatest Hits',
+                                'Greatest Hits (Deluxe Edition)') == 'Greatest Hits'
+    assert _display_album_title(files, 'Greatest Hits',
+                                'Greatest Hits (Deluxe Edition)',
+                                'exact_release') == 'Greatest Hits (Deluxe Edition)'
+
+
+def test_preferred_source_breaks_equal_coverage_but_not_a_better_match():
+    files = [{'path': '/a'}, {'path': '/b'}]
+    slots = [{'title': 'A'}, {'title': 'B'}]
+    plan = {'pairs': [{'file_index': 0, 'slot_index': 0},
+                      {'file_index': 1, 'slot_index': 1}],
+            'missing_slots': [], 'extra_files': []}
+    itunes = (2, 2, 0, 'itunes', 'i', slots, plan)
+    musicbrainz = (2, 2, 0, 'musicbrainz', 'm', slots, plan)
+    assert _candidate_rank(files, musicbrainz, 'release', 'musicbrainz') > \
+        _candidate_rank(files, itunes, 'release', 'musicbrainz')
+    weaker = (1, 2, 0, 'musicbrainz', 'm', slots, plan)
+    assert _candidate_rank(files, itunes, 'release', 'musicbrainz') > \
+        _candidate_rank(files, weaker, 'release', 'musicbrainz')
     # A current provider title can carry real edition detail while the stored
     # library title still carries an obsolete catalog label. Unanimous file
     # tags remain the clean display title; the exact provider ID preserves the
@@ -336,6 +360,55 @@ def _album(db, path):
             (id, album_id, artist_id, title, track_number, file_path)
             VALUES (1, 10, 1, 'Laid to Rest', 1, ?)""", (str(path),))
         conn.commit()
+
+
+def test_partial_album_can_mark_only_selected_missing_slots_wanted(tmp_path):
+    path = tmp_path / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db, transfer_folder=str(tmp_path))
+    slots = [
+        {'title': 'Hourglass', 'source_track_id': 'hourglass', 'disc_number': 1,
+         'track_number': 2},
+        {'title': 'Now You Have Something to Die For', 'source_track_id': 'now',
+         'disc_number': 1, 'track_number': 3},
+    ]
+    result = worker._fix_reconciliation_intent('album', '10', None, {
+        'album_id': 10, 'source': 'spotify', 'release_id': 'ashes-release',
+        'missing_tracks': slots, '_fix_action': 'partial:["id:hourglass:1:2"]',
+    })
+    assert result['success'], result
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT scope FROM reconcile_album_intent').fetchone()[0] == 'partial'
+        assert json.loads(conn.execute(
+            'SELECT slots_json FROM reconcile_wanted_slots').fetchone()[0]) == ['id:hourglass:1:2']
+        missing = conn.execute('''SELECT details_json FROM repair_findings
+                                  WHERE finding_type = 'reconciliation_missing' ''').fetchall()
+    assert len(missing) == 1
+    assert json.loads(missing[0][0])['missing_tracks'][0]['source_track_id'] == 'hourglass'
+
+
+def test_manual_assignment_is_saved_only_for_current_release_and_file(tmp_path):
+    path = tmp_path / '01 - Laid to Rest.flac'
+    path.write_bytes(b'audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db, transfer_folder=str(tmp_path))
+    stat = path.stat()
+    details = {
+        'album_id': 10, 'source': 'spotify', 'release_id': 'ashes-release',
+        'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
+        'assignment_options': [{'key': 'id:alternate', 'title': 'Alternate'}],
+        '_fix_action': 'assign:id:alternate',
+    }
+    result = worker._fix_reconciliation_assignment('track', '1', str(path), details)
+    assert result['success'], result
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT slot_key, release_id FROM reconcile_track_assignment').fetchone()
+    assert tuple(row) == ('id:alternate', 'ashes-release')
+    path.write_bytes(b'changed audio')
+    assert not worker._fix_reconciliation_assignment('track', '1', str(path), details)['success']
 
 
 def _minimal_flac(path, tags):
@@ -1441,6 +1514,37 @@ def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, m
     source_info = json.loads(row['source_info'])
     assert source_info['source_album_id'] == 'ashes-release'
     assert source_info['reason'] == 'library_reconciliation_wrong_audio'
+
+
+def test_version_request_keeps_local_file_and_playlist_membership(tmp_path, monkeypatch):
+    path = tmp_path / '17 - Jamie (live acoustic).flac'
+    path.write_bytes(b'local version')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db, transfer_folder=str(tmp_path))
+    monkeypatch.setattr('core.repair_worker._server_playlist_membership',
+                        lambda: {'1': ['Keep this version']})
+    stat = path.stat()
+
+    result = worker._fix_reconciliation_extra('track', '1', str(path), {
+        '_fix_action': 'request_missing', 'album_id': 10, 'track_id': 1,
+        'source': 'spotify', 'release_id': 'ashes-release',
+        'album_title': 'Ashes of the Wake', 'artist_name': 'Lamb of God',
+        'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns,
+        'version_conflict': True,
+        'replacement_track': {
+            'source_track_id': 'release-version', 'name': 'Jamie (take 6 - live at LMU)',
+            'artist': 'Lamb of God', 'track_number': 4, 'disc_number': 2,
+        },
+    })
+
+    assert result['success'], result
+    assert path.exists()
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT id FROM tracks WHERE id = 1').fetchone() is not None
+        requested = conn.execute(
+            'SELECT spotify_track_id FROM wishlist_tracks').fetchone()
+    assert requested['spotify_track_id'] == 'release-version'
 
 
 def test_locked_release_with_better_fitting_edition_requires_release_review(tmp_path, monkeypatch):

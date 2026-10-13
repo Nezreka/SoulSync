@@ -343,12 +343,22 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
     return weight, reasons
 
 
-def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
+def reconcile_folder(files: list[dict], slots: list[dict],
+                     forced_pairs: dict[int, int] | None = None) -> dict[str, Any]:
     """Assign every file at most one slot and explain uncertain leftovers."""
     if not files:
         return {'pairs': [], 'extra_files': [], 'competing_files': {},
                 'missing_slots': list(range(len(slots)))}
     weighted = [[_pair_weight(file, slot, slots) for slot in slots] for file in files]
+    forced_pairs = forced_pairs or {}
+    if len(set(forced_pairs.values())) != len(forced_pairs):
+        raise ValueError('Two manual assignments cannot use the same release slot')
+    for file_index, slot_index in forced_pairs.items():
+        if not (0 <= file_index < len(files) and 0 <= slot_index < len(slots)):
+            raise ValueError('Manual assignment is outside this release')
+        weighted[file_index] = [((1_000_000, ['Manually assigned after review'])
+                                 if index == slot_index else (0, []))
+                                for index in range(len(slots))]
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
     assigned_by_slot = {slot_index: file_index for file_index, slot_index in assigned}
     assigned_by_file = {file_index: slot_index for file_index, slot_index in assigned}
@@ -507,7 +517,8 @@ def reconcile_folder(files: list[dict], slots: list[dict]) -> dict[str, Any]:
             'score': weight, 'reasons': reasons,
             'duration_delta_ms': assigned_duration_delta,
             'ambiguity_reasons': ambiguity_reasons,
-            'confidence': 'ambiguous' if ambiguous or close_alternative or competing_file
+            'confidence': 'manual' if forced_pairs.get(file_index) == slot_index else
+                          'ambiguous' if ambiguous or close_alternative or competing_file
                           else 'clear' if weight >= 4500 else 'likely',
         })
     used_files = {pair['file_index'] for pair in pairs}

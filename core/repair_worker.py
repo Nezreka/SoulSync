@@ -2236,6 +2236,7 @@ class RepairWorker:
             'reconciliation_intent': self._fix_reconciliation_intent,
             'reconciliation_missing': self._fix_reconciliation_missing,
             'reconciliation_release': self._fix_reconciliation_release,
+            'reconciliation_unresolved': self._fix_reconciliation_assignment,
             'dead_file': self._fix_dead_file,
             'orphan_file': self._fix_orphan_file,
             'track_number_mismatch': self._fix_track_number,
@@ -4014,6 +4015,22 @@ class RepairWorker:
     def _fix_reconciliation_intent(self, entity_type, entity_id, file_path, details):
         choice = details.get('_fix_action')
         album_id = details.get('album_id')
+        from core.repair_jobs.library_reconciliation import _wanted_slot_key
+        missing_tracks = details.get('missing_tracks') or []
+        allowed_keys = {_wanted_slot_key(slot) for slot in missing_tracks}
+        wanted_keys = set()
+        if isinstance(choice, str) and choice.startswith('partial:'):
+            try:
+                requested = json.loads(choice[len('partial:'):])
+            except (TypeError, ValueError):
+                return {'success': False, 'error': 'Invalid wanted-track selection'}
+            if (not isinstance(requested, list) or
+                    any(not isinstance(key, str) for key in requested)):
+                return {'success': False, 'error': 'Invalid wanted-track selection'}
+            wanted_keys = set(requested)
+            if not wanted_keys <= allowed_keys:
+                return {'success': False, 'error': 'Wanted tracks changed; rescan before choosing'}
+            choice = 'partial'
         if choice not in ('complete', 'partial') or album_id is None:
             return {'success': False, 'error': 'Choose complete album or playlist/partial'}
         error = self._reconciliation_release_guard(details)
@@ -4035,13 +4052,28 @@ class RepairWorker:
                     release_id = excluded.release_id, updated_at = CURRENT_TIMESTAMP
             ''', (str(album_id), choice, details.get('source') or '',
                   details.get('release_id') or ''))
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS reconcile_wanted_slots (
+                    album_id TEXT PRIMARY KEY, source TEXT NOT NULL,
+                    release_id TEXT NOT NULL, slots_json TEXT NOT NULL
+                )
+            ''')
+            conn.execute('''
+                INSERT INTO reconcile_wanted_slots (album_id, source, release_id, slots_json)
+                VALUES (?, ?, ?, ?) ON CONFLICT(album_id) DO UPDATE SET
+                    source = excluded.source, release_id = excluded.release_id,
+                    slots_json = excluded.slots_json
+            ''', (str(album_id), details.get('source') or '',
+                  details.get('release_id') or '', json.dumps(sorted(wanted_keys))))
             conn.commit()
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        if choice == 'complete':
+        if choice == 'complete' or wanted_keys:
             for slot in details.get('missing_tracks') or []:
+                if choice == 'partial' and _wanted_slot_key(slot) not in wanted_keys:
+                    continue
                 if not slot.get('title') and not slot.get('name'):
                     continue
                 name = slot.get('title') or slot.get('name')
@@ -4083,6 +4115,62 @@ class RepairWorker:
         return {'success': True, 'action': 'reconciliation_release',
                 'message': 'Release pinned. Run reconciliation again to refresh file decisions.'}
 
+    def _fix_reconciliation_assignment(self, entity_type, entity_id, file_path, details):
+        choice = details.get('_fix_action') or ''
+        if not isinstance(choice, str) or not choice.startswith('assign:'):
+            return {'success': False, 'error': 'Choose a release track for this file'}
+        slot_key = choice[len('assign:'):]
+        options = details.get('assignment_options') or []
+        if not slot_key or slot_key not in {row.get('key') for row in options
+                                            if isinstance(row, dict)}:
+            return {'success': False, 'error': 'That release track is no longer available'}
+        album_id = details.get('album_id')
+        source = details.get('source')
+        release_id = details.get('release_id')
+        if album_id is None or not source or not release_id:
+            return {'success': False, 'error': 'Select an album release first'}
+        error = (self._reconciliation_release_guard(details) or
+                 self._reconciliation_file_guard(file_path, details))
+        if error:
+            return {'success': False, 'error': error}
+        conn = self.db._get_connection()
+        try:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS reconcile_track_assignment (
+                    album_id TEXT NOT NULL, source TEXT NOT NULL,
+                    release_id TEXT NOT NULL, file_path TEXT NOT NULL,
+                    slot_key TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+                    mtime_ns INTEGER NOT NULL, fingerprint_key TEXT NOT NULL,
+                    PRIMARY KEY (album_id, source, release_id, file_path)
+                )
+            ''')
+            other = conn.execute('''
+                SELECT file_path FROM reconcile_track_assignment
+                WHERE album_id = ? AND source = ? AND release_id = ?
+                  AND slot_key = ? AND file_path != ?
+            ''', (str(album_id), source, release_id, slot_key, file_path)).fetchone()
+            if other:
+                return {'success': False, 'error': 'Another reviewed file already uses this release track'}
+            conn.execute('''
+                INSERT INTO reconcile_track_assignment (
+                    album_id, source, release_id, file_path, slot_key,
+                    size_bytes, mtime_ns, fingerprint_key
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(album_id, source, release_id, file_path) DO UPDATE SET
+                    slot_key = excluded.slot_key, size_bytes = excluded.size_bytes,
+                    mtime_ns = excluded.mtime_ns,
+                    fingerprint_key = excluded.fingerprint_key
+            ''', (str(album_id), source, release_id, file_path, slot_key,
+                  details['size_bytes'], details['mtime_ns'],
+                  details.get('fingerprint_key') or ''))
+            conn.commit()
+        except Exception as exc:
+            return {'success': False, 'error': str(exc)}
+        finally:
+            conn.close()
+        return {'success': True, 'action': 'reconciliation_assignment',
+                'message': 'Track assignment saved. Run reconciliation to update the album plan.'}
+
     def _fix_reconciliation_missing(self, entity_type, entity_id, file_path, details):
         album_id = details.get('album_id')
         if album_id is None:
@@ -4096,9 +4184,9 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        if (not row or tuple(row) != ('complete', details.get('source'),
-                                       details.get('release_id'))):
-            return {'success': False, 'error': 'Complete-album intent is no longer active'}
+        if (not row or row[1] != details.get('source') or
+                row[2] != details.get('release_id') or row[0] not in ('complete', 'partial')):
+            return {'success': False, 'error': 'Album intent is no longer active'}
         from core.library.reconciliation_evidence import (
             album_folders_audio_path_digest, folder_audio_path_digest,
         )
@@ -4112,6 +4200,20 @@ class RepairWorker:
         if len(slots) != 1:
             return {'success': False, 'error': 'Expected exactly one release slot'}
         slot = slots[0]
+        if row[0] == 'partial':
+            from core.repair_jobs.library_reconciliation import _wanted_slot_key
+            conn = self.db._get_connection()
+            try:
+                wanted_row = conn.execute('''
+                    SELECT slots_json FROM reconcile_wanted_slots
+                    WHERE album_id = ? AND source = ? AND release_id = ?
+                ''', (str(album_id), details.get('source'),
+                      details.get('release_id'))).fetchone()
+            finally:
+                conn.close()
+            if (not wanted_row or
+                    _wanted_slot_key(slot) not in set(json.loads(wanted_row[0] or '[]'))):
+                return {'success': False, 'error': 'This track is not marked wanted'}
         source_track_id = slot.get('source_track_id')
         if not source_track_id:
             return {'success': False, 'error': 'This release slot has no exact source track ID'}
@@ -4153,9 +4255,11 @@ class RepairWorker:
 
     def _fix_reconciliation_extra(self, entity_type, entity_id, file_path, details):
         action = details.get('_fix_action')
-        if action not in ('quarantine', 'replace'):
+        if isinstance(action, str) and action.startswith('assign:'):
+            return self._fix_reconciliation_assignment(entity_type, entity_id, file_path, details)
+        if action not in ('quarantine', 'replace', 'request_missing'):
             return {'success': False,
-                    'error': 'Choose Replace with Correct Track or Quarantine File explicitly'}
+                    'error': 'Choose a version action explicitly'}
         error = (self._reconciliation_release_guard(details) or
                  self._reconciliation_file_guard(file_path, details))
         if error:
@@ -4176,14 +4280,16 @@ class RepairWorker:
                                           config_manager=self._config_manager)
             if not resolved or os.path.normpath(resolved) != os.path.normpath(file_path):
                 return {'success': False, 'error': 'The track now points to another file'}
-            playlists = _server_playlist_membership()
-            if playlists.get(str(track_id)) or playlists.get(track_id):
-                return {'success': False,
-                        'error': 'This copy is in a playlist; review that reference first'}
+            if action != 'request_missing':
+                playlists = _server_playlist_membership()
+                if playlists.get(str(track_id)) or playlists.get(track_id):
+                    return {'success': False,
+                            'error': 'This copy is in a playlist; review that reference first'}
         replacement_name = ''
-        if action == 'replace':
-            if details.get('audio_conflict') != 'different_recording':
-                return {'success': False, 'error': 'This file is not verified as wrong audio'}
+        if action in ('replace', 'request_missing'):
+            if (details.get('audio_conflict') != 'different_recording' and
+                    not details.get('version_conflict')):
+                return {'success': False, 'error': 'No reviewed version conflict is available'}
             slot = details.get('replacement_track')
             if not isinstance(slot, dict) or not slot.get('source_track_id'):
                 return {'success': False,
@@ -4224,6 +4330,9 @@ class RepairWorker:
             if not outcome.get('applied'):
                 return {'success': False, 'error': outcome.get('reason') or
                         f'Replacement request was not accepted ({outcome.get("status")})'}
+            if action == 'request_missing':
+                return {'success': True, 'action': 'version_requested',
+                        'message': f'{replacement_name} requested; the local version was kept'}
         moved, note, dest = _quarantine_file_if_present(
             file_path, self.transfer_folder, 'library_reconciliation',
             config_manager=self._config_manager)

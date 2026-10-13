@@ -100,6 +100,9 @@ function caseStatusSummary(item: ReviewCaseSummary): string {
 
 function findingHeading(finding: ReviewFinding): string {
   const details = finding.details && typeof finding.details === 'object' ? finding.details : {};
+  if (details.version_conflict) {
+    return `Compare versions: ${String(details.current_title || finding.title.replace(/^Unassigned audio:\s*/i, ''))}`;
+  }
   const changes =
     details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
       ? Object.keys(details.changes as Record<string, unknown>)
@@ -219,6 +222,7 @@ function AssignmentRow({
       className={styles.matrixRow}
       data-status={row.status}
       data-selected={selected || undefined}
+      aria-expanded={row.finding_id ? selected : undefined}
       onClick={() => row.finding_id && onSelect(row.finding_id)}
       disabled={!row.finding_id}
     >
@@ -248,6 +252,9 @@ function AssignmentRow({
         <strong>{action}</strong>
         {evidence ? <small>{evidence}</small> : null}
         {row.playlists?.length ? <small>Playlist: {row.playlists.join(', ')}</small> : null}
+        {row.finding_id ? (
+          <small>{selected ? '▾ Hide review' : '▸ Review this track'}</small>
+        ) : null}
       </span>
     </button>
   );
@@ -295,7 +302,7 @@ function readyFieldGroup(field: string): { key: string; label: string } {
   return { key: field, label: changeFieldLabel(field) };
 }
 
-function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
+function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChangeGroup[] {
   const groups = new Map<
     string,
     ReadyChangeGroup & {
@@ -304,7 +311,11 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
       rawFields: Set<string>;
     }
   >();
-  for (const item of items.filter((finding) => finding.review_tier === 'ready')) {
+  for (const item of items.filter(
+    (finding) =>
+      finding.finding_type === 'reconciliation_metadata' &&
+      (!readyOnly || finding.review_tier === 'ready'),
+  )) {
     const details = item.details && typeof item.details === 'object' ? item.details : {};
     const changes =
       details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
@@ -381,6 +392,73 @@ function groupReadyChanges(items: ReviewFinding[]): ReadyChangeGroup[] {
   });
 }
 
+function slotKey(slot: Record<string, unknown>): string {
+  if (typeof slot.wanted_key === 'string' && slot.wanted_key) return slot.wanted_key;
+  const id = textValue(slot.source_track_id).trim();
+  if (id)
+    return `id:${id}:${textValue(slot.disc_number || 1)}:${textValue(slot.track_number || 0)}`;
+  const title = textValue(slot.title || slot.name)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `position:${textValue(slot.disc_number || 1)}:${textValue(slot.track_number || 0)}:${title}`;
+}
+
+function CompletenessChoice({
+  finding,
+  busy,
+  onChoose,
+}: {
+  finding: ReviewFinding;
+  busy: boolean;
+  onChoose: (choice: string) => void;
+}) {
+  const missing = records(record(finding.details).missing_tracks);
+  const [wanted, setWanted] = useState<string[]>([]);
+  return (
+    <div className={styles.completenessChoice}>
+      <p>
+        {missing.length} tracks are absent from this folder. Mark any you want to collect if this is
+        a partial album.
+      </p>
+      <div className={styles.wantedTracks}>
+        {missing.map((slot, index) => {
+          const key = slotKey(slot);
+          return (
+            <label key={`${key}-${index}`}>
+              <input
+                type="checkbox"
+                checked={wanted.includes(key)}
+                onChange={(event) =>
+                  setWanted((current) =>
+                    event.target.checked
+                      ? [...current, key]
+                      : current.filter((value) => value !== key),
+                  )
+                }
+              />
+              <span>{textValue(slot.title || slot.name) || `Track ${index + 1}`}</span>
+            </label>
+          );
+        })}
+      </div>
+      <div className={styles.decisionActions}>
+        <button type="button" disabled={busy} onClick={() => onChoose('complete')}>
+          I want the complete album
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onChoose(`partial:${JSON.stringify(wanted)}`)}
+        >
+          Keep as partial{wanted.length ? ` · ${wanted.length} wanted` : ''}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -432,8 +510,11 @@ function SelectedActionDetail({
   compact?: boolean;
 }) {
   const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
+  const [assignmentSlot, setAssignmentSlot] = useState('');
+  const assignmentOptions = records(record(finding.details).assignment_options);
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
   const wrongAudio = finding.details?.audio_conflict === 'different_recording';
+  const versionConflict = finding.details?.version_conflict === true;
   const replacement = record(finding.details?.replacement_track);
   const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
   const suggested = finding.review_tier === 'ready';
@@ -456,10 +537,23 @@ function SelectedActionDetail({
       )}
       <h3>{findingHeading(finding)}</h3>
       <p className={styles.description}>
-        {compact
-          ? compactReason || 'Review the supporting evidence.'
-          : finding.description || 'Review the evidence below.'}
+        {versionConflict
+          ? 'The local audio and release track may be different versions. Listen before choosing how to keep them.'
+          : compact
+            ? compactReason || 'Review the supporting evidence.'
+            : finding.description || 'Review the evidence below.'}
       </p>
+      {finding.file_path &&
+        ['reconciliation_unresolved', 'reconciliation_extra'].includes(finding.finding_type) && (
+          <div className={styles.audioPreview}>
+            <strong>Listen to the local file</strong>
+            <audio
+              controls
+              preload="none"
+              src={`/stream/library-audio?path=${encodeURIComponent(finding.file_path)}`}
+            />
+          </div>
+        )}
       {!compact && (
         <section
           className={styles.suggestion}
@@ -504,20 +598,59 @@ function SelectedActionDetail({
         onPin={onPin}
         onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
       />
-      <div className={styles.actions}>
-        {finding.finding_type === 'reconciliation_intent' ? (
-          <>
-            <button
-              type="button"
-              disabled={busy}
-              className={styles.primary}
-              onClick={() => onAct('fix', 'complete')}
+      {finding.finding_type === 'reconciliation_intent' && (
+        <CompletenessChoice
+          key={finding.id}
+          finding={finding}
+          busy={busy}
+          onChoose={(choice) => onAct('fix', choice)}
+        />
+      )}
+      {finding.file_path && assignmentOptions.length > 0 && (
+        <div className={styles.assignmentCorrection}>
+          <label>
+            Assign this file to another release track
+            <select
+              value={assignmentSlot}
+              onChange={(event) => setAssignmentSlot(event.target.value)}
             >
-              I want the complete album
-            </button>
-            <button type="button" disabled={busy} onClick={() => onAct('fix', 'partial')}>
-              Playlist tracks or partial album
-            </button>
+              <option value="">Choose a release track…</option>
+              {assignmentOptions.map((slot, index) => (
+                <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
+                  {textValue(slot.disc_number)}.{textValue(slot.track_number)}{' '}
+                  {textValue(slot.title)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={busy || !assignmentSlot}
+            onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
+          >
+            Save assignment
+          </button>
+          <small>The album will be rescanned before any metadata edit is offered.</small>
+        </div>
+      )}
+      <div className={styles.actions}>
+        {finding.finding_type === 'reconciliation_intent' ? null : versionConflict && canApply ? (
+          <>
+            {replacement.source_track_id && (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  className={styles.primary}
+                  onClick={() => onAct('fix', 'request_missing')}
+                >
+                  Keep local and request release version
+                </button>
+                <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
+                  Replace local with release version
+                </button>
+              </>
+            )}
           </>
         ) : wrongAudio && canApply ? (
           <>
@@ -538,7 +671,8 @@ function SelectedActionDetail({
         ) : (
           canApply &&
           finding.finding_type !== 'reconciliation_release' &&
-          finding.finding_type !== 'reconciliation_duplicate' && (
+          finding.finding_type !== 'reconciliation_duplicate' &&
+          finding.finding_type !== 'reconciliation_unresolved' && (
             <button
               type="button"
               disabled={busy}
@@ -556,7 +690,7 @@ function SelectedActionDetail({
           )
         )}
         <button type="button" disabled={busy} onClick={() => onAct('dismiss')}>
-          Accept as-is
+          {versionConflict ? 'Keep local version' : 'Accept as-is'}
         </button>
         <button
           type="button"
@@ -586,6 +720,7 @@ export function ReviewPage() {
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
+  const [trackFilter, setTrackFilter] = useState('');
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
@@ -765,7 +900,12 @@ export function ReviewPage() {
   const attentionAssignments = [
     ...versionConflictAssignments,
     ...pendingAssignments
-      .filter((row) => row.relationship !== 'version_conflict' && row.status !== 'change')
+      .filter(
+        (row) =>
+          row.relationship !== 'version_conflict' &&
+          row.status !== 'change' &&
+          row.status !== 'missing',
+      )
       .sort((left, right) => {
         const order: Record<string, number> = {
           uncertain: 0,
@@ -779,6 +919,12 @@ export function ReviewPage() {
       }),
   ];
   const changeAssignments = pendingAssignments.filter((row) => row.status === 'change');
+  const missingAssignments = pendingAssignments.filter(
+    (row) => row.status === 'missing' && row.relationship !== 'version_conflict',
+  );
+  const pairedConflictCount = versionConflictAssignments.filter(
+    (row) => row.status === 'extra',
+  ).length;
   const settledAssignments = assignments.filter((row) =>
     ['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
@@ -786,10 +932,26 @@ export function ReviewPage() {
     () => groupReadyChanges(reviewCase?.items || []),
     [reviewCase?.items],
   );
+  const proposedChangeGroups = useMemo(
+    () => groupReadyChanges(reviewCase?.items || [], false),
+    [reviewCase?.items],
+  );
+  const matchingFilter = (row: AlbumAssignment) =>
+    !trackFilter ||
+    (trackFilter === 'missing'
+      ? row.status === 'missing'
+      : trackFilter === 'version_conflict'
+        ? row.relationship === 'version_conflict'
+        : Object.keys(row.changes || {}).some(
+            (field) => readyFieldGroup(field).key === trackFilter,
+          ));
   const activeDecision = active
     ? decisions.find((decision) => decision.finding_ids.includes(active.id))
     : undefined;
   const reviewDecisions = decisions.filter((decision) => decision.risk !== 'ready');
+  const hasIntentDecision = reviewDecisions.some(
+    (decision) => decision.category === 'album_completeness',
+  );
   const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
   const reviewActionCount = reviewDecisions.reduce(
     (total, decision) => total + decision.action_count,
@@ -808,7 +970,7 @@ export function ReviewPage() {
     (reviewCase?.album_plan?.counts.confirmed || 0) + (reviewCase?.album_plan?.counts.settled || 0);
 
   const selectFinding = (findingId: number | null) => {
-    setActiveId(findingId);
+    setActiveId((current) => (current === findingId ? null : findingId));
     window.setTimeout(
       () => document.getElementById('selected-review-action')?.scrollIntoView({ block: 'nearest' }),
       0,
@@ -818,6 +980,7 @@ export function ReviewPage() {
   const selectCase = (next: string) => {
     setNotice('');
     setAlbumView('plan');
+    setTrackFilter('');
     setCaseId(next);
   };
 
@@ -909,6 +1072,8 @@ export function ReviewPage() {
     if (action === 'fix' && requireChoice.has(finding.finding_type) && !fixAction) return;
     if (
       action === 'fix' &&
+      !fixAction?.startsWith('assign:') &&
+      fixAction !== 'request_missing' &&
       (typeInfo?.destructive || finding.finding_type === 'reconciliation_extra')
     ) {
       const confirmed = window.showConfirmDialog
@@ -1008,13 +1173,16 @@ export function ReviewPage() {
     ) : null;
 
   const readySummaryList =
-    readyChangeGroups.length > 1 ? (
+    readyChangeGroups.length > 0 ? (
       <div className={styles.readySummaryList} aria-label="Ready change summary">
         {readyChangeGroups.map((group) => (
           <button
             key={group.key}
             type="button"
-            onClick={() => selectFinding(group.findingIds[0] ?? null)}
+            onClick={() => {
+              setTrackFilter(group.key);
+              setAlbumView('tracks');
+            }}
           >
             <span>
               <strong>{group.label}</strong>
@@ -1031,6 +1199,7 @@ export function ReviewPage() {
   const selectedActionDetail =
     active && reviewCase ? (
       <SelectedActionDetail
+        key={active.id}
         finding={active}
         itemIndex={itemIndex}
         itemCount={reviewCase.count}
@@ -1050,6 +1219,7 @@ export function ReviewPage() {
   const compactSelectedActionDetail =
     active && reviewCase ? (
       <SelectedActionDetail
+        key={active.id}
         finding={active}
         itemIndex={itemIndex}
         itemCount={reviewCase.count}
@@ -1435,9 +1605,26 @@ export function ReviewPage() {
                                 </button>
                               </div>
                             )}
+                            {decision.category === 'album_completeness' &&
+                              (() => {
+                                const intent = reviewCase.items.find(
+                                  (item) =>
+                                    item.finding_type === 'reconciliation_intent' &&
+                                    decision.finding_ids.includes(item.id),
+                                );
+                                return intent ? (
+                                  <CompletenessChoice
+                                    key={intent.id}
+                                    finding={intent}
+                                    busy={busy}
+                                    onChoose={(choice) => void act(intent, 'fix', choice)}
+                                  />
+                                ) : null;
+                              })()}
                           </article>
                           {selected &&
                             !activeAssignment &&
+                            active?.finding_type !== 'reconciliation_intent' &&
                             active?.finding_type !== 'reconciliation_release' &&
                             selectedActionDetail}
                           {selected && active?.finding_type === 'reconciliation_release' && (
@@ -1452,6 +1639,10 @@ export function ReviewPage() {
                                 <p>
                                   Choose using the edition details below. Open Evidence when you
                                   need the file-by-file comparison.
+                                </p>
+                                <p>
+                                  Choosing a release pins its track list. It does not replace the
+                                  album artwork.
                                 </p>
                               </div>
                               <div className={styles.releaseChoiceList}>
@@ -1485,6 +1676,33 @@ export function ReviewPage() {
                                           {context && <small>{context}</small>}
                                         </div>
                                         <CandidateFit candidate={candidate} />
+                                        <details className={styles.candidatePreview}>
+                                          <summary>Preview track assignments</summary>
+                                          <div>
+                                            {records(candidate.pairs).map((pair, pairIndex) => (
+                                              <p key={`${textValue(pair.file)}-${pairIndex}`}>
+                                                {textValue(pair.file)} →{' '}
+                                                {textValue(pair.slot_title)}
+                                                {' · '}
+                                                {textValue(pair.confidence)}
+                                              </p>
+                                            ))}
+                                            {Array.isArray(candidate.missing) &&
+                                              candidate.missing.length > 0 && (
+                                                <p>
+                                                  Absent:{' '}
+                                                  {candidate.missing.map(textValue).join(', ')}
+                                                </p>
+                                              )}
+                                            {Array.isArray(candidate.extra) &&
+                                              candidate.extra.length > 0 && (
+                                                <p>
+                                                  Unassigned:{' '}
+                                                  {candidate.extra.map(textValue).join(', ')}
+                                                </p>
+                                              )}
+                                          </div>
+                                        </details>
                                         <button
                                           type="button"
                                           disabled={busy}
@@ -1582,6 +1800,38 @@ export function ReviewPage() {
                   </section>
                 )}
 
+              {albumView === 'plan' &&
+                plan.status !== 'ready' &&
+                proposedChangeGroups.length > 0 && (
+                  <section className={styles.planContext} aria-label="Proposed metadata by field">
+                    <div>
+                      <div className={styles.eyebrow}>Proposed metadata</div>
+                      <h4>Changes by field</h4>
+                      <p>Choose a field to see the affected tracks and exact values.</p>
+                    </div>
+                    <div className={styles.readySummaryList}>
+                      {proposedChangeGroups.map((group) => (
+                        <button
+                          key={group.key}
+                          type="button"
+                          onClick={() => {
+                            setTrackFilter(group.key);
+                            setAlbumView('tracks');
+                          }}
+                        >
+                          <span>
+                            <strong>{group.label}</strong>
+                            <small>{group.valueSummary}</small>
+                          </span>
+                          <b>
+                            {group.count} track{group.count === 1 ? '' : 's'} →
+                          </b>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
               {albumView === 'plan' && plan.status !== 'ready' && plan.ready > 0 && (
                 <section
                   className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
@@ -1602,7 +1852,6 @@ export function ReviewPage() {
                       </StatusChip>
                     </div>
                   </div>
-                  {readySummaryList}
                   {readyActionControls}
                   {active &&
                     activeDecision?.risk === 'ready' &&
@@ -1685,6 +1934,42 @@ export function ReviewPage() {
                       </span>
                     )}
                   </div>
+                  {pairedConflictCount > 0 && (
+                    <p className={styles.versionExplanation}>
+                      {pairedConflictCount} version conflict{pairedConflictCount === 1 ? '' : 's'}{' '}
+                      pair a local file with an unmatched release slot. Each pair contributes one
+                      extra file and one missing slot to the counts above.
+                    </p>
+                  )}
+                  <div className={styles.trackFilters}>
+                    <label>
+                      Show tracks
+                      <select
+                        value={trackFilter}
+                        onChange={(event) => setTrackFilter(event.target.value)}
+                      >
+                        <option value="">All tracks</option>
+                        {proposedChangeGroups.map((group) => (
+                          <option value={group.key} key={group.key}>
+                            {group.label} ({group.count})
+                          </option>
+                        ))}
+                        {missingAssignments.length > 0 && (
+                          <option value="missing">Missing ({missingAssignments.length})</option>
+                        )}
+                        {pairedConflictCount > 0 && (
+                          <option value="version_conflict">
+                            Version conflicts ({pairedConflictCount})
+                          </option>
+                        )}
+                      </select>
+                    </label>
+                    {trackFilter && (
+                      <button type="button" onClick={() => setTrackFilter('')}>
+                        Clear filter
+                      </button>
+                    )}
+                  </div>
                   <div className={styles.trackTable} role="table">
                     <div className={styles.trackTableHead} role="row">
                       <span>Status</span>
@@ -1692,7 +1977,7 @@ export function ReviewPage() {
                       <span>Local file → release slot</span>
                       <span>Result</span>
                     </div>
-                    {attentionAssignments.map((row, index) => (
+                    {attentionAssignments.filter(matchingFilter).map((row, index) => (
                       <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
                         <AssignmentRow
                           row={row}
@@ -1702,16 +1987,16 @@ export function ReviewPage() {
                         {row.finding_id === active?.id && compactSelectedActionDetail}
                       </Fragment>
                     ))}
-                    {changeAssignments.length > 0 && (
+                    {changeAssignments.filter(matchingFilter).length > 0 && (
                       <details
                         className={styles.proposedAssignments}
                         open={activeAssignment?.status === 'change' || undefined}
                       >
                         <summary>
-                          ↻ {changeAssignments.length} proposed track change
-                          {changeAssignments.length === 1 ? '' : 's'}
+                          ↻ {changeAssignments.filter(matchingFilter).length} proposed track change
+                          {changeAssignments.filter(matchingFilter).length === 1 ? '' : 's'}
                         </summary>
-                        {changeAssignments.map((row, index) => (
+                        {changeAssignments.filter(matchingFilter).map((row, index) => (
                           <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
                             <AssignmentRow
                               row={row}
@@ -1723,10 +2008,40 @@ export function ReviewPage() {
                         ))}
                       </details>
                     )}
-                    {settledAssignments.length > 0 && (
+                    {missingAssignments.filter(matchingFilter).length > 0 && (
+                      <details className={styles.missingAssignments}>
+                        <summary>
+                          {missingAssignments.filter(matchingFilter).length} absent release tracks
+                        </summary>
+                        {hasIntentDecision ? (
+                          <div className={styles.missingSummary}>
+                            {missingAssignments.filter(matchingFilter).map((row, index) => (
+                              <span key={`${row.slot_title}-${index}`}>{row.slot_title}</span>
+                            ))}
+                            <button type="button" onClick={() => setAlbumView('plan')}>
+                              Choose album completeness on Plan
+                            </button>
+                          </div>
+                        ) : (
+                          missingAssignments.filter(matchingFilter).map((row, index) => (
+                            <Fragment key={`${row.slot_title}-${index}`}>
+                              <AssignmentRow
+                                row={row}
+                                onSelect={selectFinding}
+                                selected={row.finding_id === active?.id}
+                              />
+                              {row.finding_id === active?.id && compactSelectedActionDetail}
+                            </Fragment>
+                          ))
+                        )}
+                      </details>
+                    )}
+                    {settledAssignments.filter(matchingFilter).length > 0 && (
                       <details className={styles.confirmedAssignments}>
-                        <summary>✓ {settledAssignments.length} settled release slots</summary>
-                        {settledAssignments.map((row, index) => (
+                        <summary>
+                          ✓ {settledAssignments.filter(matchingFilter).length} settled release slots
+                        </summary>
+                        {settledAssignments.filter(matchingFilter).map((row, index) => (
                           <Fragment key={`${row.file_path || row.slot_title}-${index}`}>
                             <AssignmentRow
                               row={row}
@@ -1772,7 +2087,11 @@ export function ReviewPage() {
                     </div>
                     <div>
                       <dt>Album scope</dt>
-                      <dd>{reviewCase.album_plan?.intent_scope || 'Complete'} album</dd>
+                      <dd>
+                        {reviewCase.album_plan?.intent_scope
+                          ? `${reviewCase.album_plan.intent_scope} album`
+                          : 'Not decided'}
+                      </dd>
                     </div>
                     <div>
                       <dt>Numbering</dt>
@@ -1811,6 +2130,24 @@ export function ReviewPage() {
                                 {candidate.matched}/{candidate.total_slots} assigned ·{' '}
                                 {candidate.missing} missing · {candidate.extra} extra
                               </small>
+                              {candidate.pairs?.length ||
+                              candidate.missing_tracks?.length ||
+                              candidate.extra_files?.length ? (
+                                <details className={styles.candidatePreview}>
+                                  <summary>Preview this release's assignments</summary>
+                                  {candidate.pairs?.map((pair, pairIndex) => (
+                                    <p key={`${pair.file}-${pairIndex}`}>
+                                      {pair.file} → {pair.slot_title} · {pair.confidence}
+                                    </p>
+                                  ))}
+                                  {candidate.missing_tracks?.length ? (
+                                    <p>Absent: {candidate.missing_tracks.join(', ')}</p>
+                                  ) : null}
+                                  {candidate.extra_files?.length ? (
+                                    <p>Unassigned: {candidate.extra_files.join(', ')}</p>
+                                  ) : null}
+                                </details>
+                              ) : null}
                             </article>
                           ))}
                         </div>
