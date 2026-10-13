@@ -21976,6 +21976,9 @@ _DISCOVER_WARM_PATHS = [
 ]
 
 
+from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
+
+
 def _discover_warm_sweep(paths=None):
     """one pass over the discover shelves, as every profile.
 
@@ -22010,7 +22013,11 @@ def _discover_warm_sweep(paths=None):
                 sess['launch_pin_verified'] = True
             for p in (paths or _DISCOVER_WARM_PATHS):
                 try:
-                    status = client.get(p).status_code
+                    # recompute, don't read. a sweep inside the 30 min ttl
+                    # otherwise finds every answer still valid and refreshes
+                    # nothing, so every other sweep was a no-op
+                    with refresh_discover_caches():
+                        status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
                     status = 'error'
