@@ -322,6 +322,19 @@ describe('AutoSyncWeeklyBoard (861-977)', () => {
     );
   });
 
+  it('tapping a sidebar card opens the weekly editor for that playlist', () => {
+    // Tap-to-schedule (NEW): drag does not fire on touch, so the tap is
+    // how a phone schedules at all. It opens the same draft a scheduled
+    // card's click opens.
+    const { container } = renderBoard([row({ id: 1, name: 'Late Night' })]);
+    fireEvent.click(container.querySelector('.auto-sync-playlist') as HTMLElement);
+    const editor = container.querySelector('.auto-sync-weekly-editor');
+    expect(editor).not.toBeNull();
+    expect(container.querySelector('.auto-sync-weekly-editor-playlist')?.textContent).toBe(
+      'Late Night',
+    );
+  });
+
   it('puts one playlist under each of its scheduled days', () => {
     const { container } = renderBoard([row({ id: 1, name: 'Late Night' })], {
       '1': weekly({ days: ['mon', 'fri'] }),

@@ -12764,6 +12764,30 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: rgb(var(--accent-light-rgb));
 }
 
+/* Tap-to-schedule popover (AutoSyncPickMenu): the bulk menu's chrome for
+   one playlist. The name is the menu's subject, not an eyebrow; the
+   current bucket reads as selected, not hovered. */
+.auto-sync-pick-menu-name {
+    padding: 6px 8px 0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-bulk-menu-buckets button.current {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* A sidebar card that can be tapped to schedule, not only dragged. */
+.auto-sync-playlist.pickable {
+    cursor: pointer;
+}
+
 .auto-sync-bulk-menu-custom {
     margin-top: 2px;
 }

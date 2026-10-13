@@ -350,4 +350,29 @@ describe('AutoSyncBoard (741-859)', () => {
     renderBoard([]);
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
   });
+
+  describe('tap-to-schedule (NEW — drag does not fire on touch)', () => {
+    it('tapping a sidebar card opens the interval menu; a pick drops it', () => {
+      const { container, actions } = renderBoard([row({ id: 1, name: 'Late Night' })]);
+      fireEvent.click(container.querySelector('.auto-sync-playlist') as HTMLElement);
+      const menu = container.querySelector('.auto-sync-pick-menu');
+      expect(menu).not.toBeNull();
+      expect(menu?.querySelector('.auto-sync-pick-menu-name')?.textContent).toBe('Late Night');
+      const pick = [...menu!.querySelectorAll('.auto-sync-bulk-menu-buckets button')].find(
+        (b) => b.textContent === 'Every 4 hours',
+      ) as HTMLElement;
+      fireEvent.click(pick);
+      // The tap lands on the same handler a drop would call.
+      expect(actions.onDrop).toHaveBeenCalledWith(1, 4);
+      expect(container.querySelector('.auto-sync-pick-menu')).toBeNull();
+    });
+
+    it('a scheduled playlist can be unscheduled from the same menu', () => {
+      const { container, actions } = renderBoard([row({ id: 1 })], { '1': hourly({ hours: 24 }) });
+      fireEvent.click(container.querySelector('.auto-sync-playlist') as HTMLElement);
+      fireEvent.click(container.querySelector('.auto-sync-bulk-menu-unschedule') as HTMLElement);
+      expect(actions.onUnschedule).toHaveBeenCalledWith(1);
+      expect(container.querySelector('.auto-sync-pick-menu')).toBeNull();
+    });
+  });
 });
