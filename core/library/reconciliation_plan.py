@@ -23,6 +23,18 @@ _EDITORIAL_TITLE_SUFFIX = re.compile(
     r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
 
 
+def _version_markers(value: str) -> frozenset[str]:
+    """Fold equivalent catalogue wording without erasing real versions."""
+    markers = set(recording_version_markers(value))
+    if markers.intersection({'alt', 'alternate', 'alternative'}):
+        markers.difference_update({'alt', 'alternate', 'alternative'})
+        markers.add('alternate')
+    if 'acoustic' in markers:
+        # Catalogues commonly call the same acoustic take an acoustic session.
+        markers.difference_update({'session', 'sessions'})
+    return frozenset(markers)
+
+
 def _title_score(a: str, b: str) -> float:
     left, right = normalize(a), normalize(b)
     if not left or not right:
@@ -32,7 +44,7 @@ def _title_score(a: str, b: str) -> float:
         return 0.0
     if numeric_tokens_differ(a, b):
         return 0.0
-    left_versions, right_versions = recording_version_markers(a), recording_version_markers(b)
+    left_versions, right_versions = _version_markers(a), _version_markers(b)
     if left_versions != right_versions:
         return 0.0
     return ratio
@@ -58,7 +70,7 @@ def _disambiguation_markers(value: object) -> frozenset[str]:
     matching.
     """
     text = str(value or '').strip()
-    return recording_version_markers(f'({text})') if text else frozenset()
+    return _version_markers(f'({text})') if text else frozenset()
 
 
 def _identity_text(value: object) -> str:
@@ -70,15 +82,15 @@ def file_version_markers(file: dict) -> frozenset[str]:
     """Known performance/version markers from independent local layers."""
     tags = file.get('tags') or {}
     row = file.get('db') or {}
-    markers = set(recording_version_markers(str(tags.get('title') or '')))
-    markers.update(recording_version_markers(_filename_title(str(file.get('path') or ''))))
-    markers.update(recording_version_markers(str(row.get('title') or '')))
+    markers = set(_version_markers(str(tags.get('title') or '')))
+    markers.update(_version_markers(_filename_title(str(file.get('path') or ''))))
+    markers.update(_version_markers(str(row.get('title') or '')))
     markers.update(_disambiguation_markers(row.get('recording_disambiguation')))
     return frozenset(markers)
 
 
 def slot_version_markers(slot: dict) -> frozenset[str]:
-    markers = set(recording_version_markers(
+    markers = set(_version_markers(
         str(slot.get('title') or slot.get('name') or '')))
     markers.update(_disambiguation_markers(slot.get('recording_disambiguation')))
     return frozenset(markers)
@@ -103,7 +115,7 @@ def display_title_compatible(local_title: str, slot: dict) -> bool:
         return False
     if numeric_tokens_differ(local_title, slot_title):
         return False
-    return recording_version_markers(local_title) == slot_version_markers(slot)
+    return _version_markers(local_title) == slot_version_markers(slot)
 
 
 def title_difference_kind(local_title: str, slot: dict) -> str:
@@ -116,7 +128,7 @@ def title_difference_kind(local_title: str, slot: dict) -> str:
         return 'typography'
     local_clean = _EDITORIAL_TITLE_SUFFIX.sub('', str(local_title or '')).strip()
     slot_clean = _EDITORIAL_TITLE_SUFFIX.sub('', slot_title).strip()
-    local_versions = recording_version_markers(local_clean)
+    local_versions = _version_markers(local_clean)
     slot_versions = slot_version_markers({**slot, 'title': slot_clean})
     if local_versions != slot_versions:
         return 'version'
@@ -464,12 +476,15 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         # A duplicate copy can have a poorer filename or stale tags while
         # sharing the same strong AcoustID identity. Leave room for those
         # weaker metadata layers before declaring either copy the keeper.
-        def unresolved_competing_file(other_index: int) -> bool:
-            contender_weight = weighted[other_index][slot_index][0]
-            if other_index == file_index or contender_weight < weight * 0.80:
+        def unresolved_competing_file(other_index: int, *,
+                                      assigned_slot_index=slot_index,
+                                      assigned_file_index=file_index,
+                                      assigned_weight=weight) -> bool:
+            contender_weight = weighted[other_index][assigned_slot_index][0]
+            if other_index == assigned_file_index or contender_weight < assigned_weight * 0.80:
                 return False
             owner_slot_index = assigned_by_file.get(other_index)
-            if owner_slot_index is None or owner_slot_index == slot_index:
+            if owner_slot_index is None or owner_slot_index == assigned_slot_index:
                 return True
             owner_slot = slots[owner_slot_index]
             owner = files[other_index]
@@ -521,9 +536,88 @@ def reconcile_folder(files: list[dict], slots: list[dict],
                           'ambiguous' if ambiguous or close_alternative or competing_file
                           else 'clear' if weight >= 4500 else 'likely',
         })
+    # A fingerprint can still name the predominant song when audio from the
+    # neighbouring track was appended to it. Opposite, near-equal duration
+    # errors on adjacent slots are stronger evidence of a bad boundary than
+    # either recording ID alone. Ask for both recordings to be heard.
+    for left in pairs:
+        if left['confidence'] == 'manual':
+            continue
+        left_slot = slots[left['slot_index']]
+        left_file = files[left['file_index']]
+        left_duration = int((left_file.get('tags') or {}).get('duration_ms') or
+                            left_file.get('duration_ms') or 0)
+        left_expected = int(left_slot.get('duration_ms') or 0)
+        left_diff = left_duration - left_expected
+        if not left_duration or not left_expected or abs(left_diff) < 20000:
+            continue
+        for right in pairs:
+            if right is left or right['confidence'] == 'manual':
+                continue
+            right_slot = slots[right['slot_index']]
+            if (int(left_slot.get('disc_number') or 1) !=
+                    int(right_slot.get('disc_number') or 1) or
+                    abs(int(left_slot.get('track_number') or 0) -
+                        int(right_slot.get('track_number') or 0)) != 1):
+                continue
+            right_file = files[right['file_index']]
+            right_duration = int((right_file.get('tags') or {}).get('duration_ms') or
+                                 right_file.get('duration_ms') or 0)
+            right_expected = int(right_slot.get('duration_ms') or 0)
+            if not right_duration or not right_expected:
+                continue
+            right_diff = right_duration - right_expected
+            if left_diff * right_diff >= 0 or abs(left_diff + right_diff) > 3000:
+                continue
+            for pair, neighbor in ((left, right_slot), (right, left_slot)):
+                pair['confidence'] = 'ambiguous'
+                reason = ('Adjacent tracks have complementary length differences; '
+                          f'listen for audio crossing the boundary with '
+                          f'{neighbor.get("title") or neighbor.get("name") or "the next track"}')
+                if reason not in pair['ambiguity_reasons']:
+                    pair['ambiguity_reasons'].append(reason)
     used_files = {pair['file_index'] for pair in pairs}
     used_slots = {pair['slot_index'] for pair in pairs}
     extra_files = [i for i in range(len(files)) if i not in used_files]
+    missing_slots = [i for i in range(len(slots)) if i not in used_slots]
+    for pair in pairs:
+        if pair['confidence'] == 'manual':
+            continue
+        slot = slots[pair['slot_index']]
+        file = files[pair['file_index']]
+        file_length = int((file.get('tags') or {}).get('duration_ms') or
+                          file.get('duration_ms') or 0)
+        slot_length = int(slot.get('duration_ms') or 0)
+        difference = file_length - slot_length
+        if not file_length or not slot_length or abs(difference) < 20000:
+            continue
+        for missing_index in missing_slots:
+            neighbor = slots[missing_index]
+            if (int(slot.get('disc_number') or 1) !=
+                    int(neighbor.get('disc_number') or 1) or
+                    abs(int(slot.get('track_number') or 0) -
+                        int(neighbor.get('track_number') or 0)) != 1):
+                continue
+            for extra_index in extra_files:
+                extra = files[extra_index]
+                extra_title = str((extra.get('tags') or {}).get('title') or
+                                  _filename_title(extra.get('path') or ''))
+                if _title_score(extra_title, str(neighbor.get('title') or '')) < 0.83:
+                    continue
+                extra_length = int((extra.get('tags') or {}).get('duration_ms') or
+                                   extra.get('duration_ms') or 0)
+                neighbor_length = int(neighbor.get('duration_ms') or 0)
+                if not extra_length or not neighbor_length:
+                    continue
+                other_difference = extra_length - neighbor_length
+                if difference * other_difference >= 0 or abs(difference + other_difference) > 3000:
+                    continue
+                pair['confidence'] = 'ambiguous'
+                reason = ('Adjacent unmatched track has an opposite length error; '
+                          f'listen for audio crossing the boundary with '
+                          f'{neighbor.get("title") or "the next track"}')
+                if reason not in pair['ambiguity_reasons']:
+                    pair['ambiguity_reasons'].append(reason)
     competing_files = {
         extra_index: [
             pair['file_index'] for pair in pairs
@@ -534,5 +628,5 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         'pairs': pairs,
         'extra_files': extra_files,
         'competing_files': {index: rivals for index, rivals in competing_files.items() if rivals},
-        'missing_slots': [i for i in range(len(slots)) if i not in used_slots],
+        'missing_slots': missing_slots,
     }

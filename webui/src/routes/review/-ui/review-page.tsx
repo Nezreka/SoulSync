@@ -10,6 +10,7 @@ import {
   fetchReviewApplyStatus,
   fetchReviewQueue,
   fetchReviewQueueModeTotals,
+  pinReviewRelease,
   fetchReconciliationScanStatus,
   runReconciliationScan,
   startReadyChanges,
@@ -58,7 +59,7 @@ const emptyPlan: ReviewPlan = {
 
 const categoryOptions = [
   ['', 'All categories'],
-  ['metadata', 'Safe metadata'],
+  ['metadata', 'Metadata changes'],
   ['title_conventions', 'Title conventions'],
   ['title_issues', 'Title identity'],
   ['numbering', 'Numbering schemes'],
@@ -231,6 +232,17 @@ function AssignmentRow({
                   : row.title_difference === 'version_detail'
                     ? 'Version detail preserved'
                     : 'No metadata edit';
+  const changes = row.changes || {};
+  const visibleChanges = Object.entries(changes).filter(([field, change]) => {
+    const fileField = {
+      library_album_title: 'album',
+      library_title: 'title',
+      library_track_artist: 'track_artist',
+    }[field];
+    if (!fileField) return true;
+    const fileChange = changes[fileField];
+    return !fileChange || fileChange.old !== change.old || fileChange.new !== change.new;
+  });
   return (
     <button
       type="button"
@@ -270,10 +282,19 @@ function AssignmentRow({
       </span>
       <span className={styles.rowResult}>
         <strong>{action}</strong>
+        {visibleChanges.slice(0, 2).map(([field, change]) => (
+          <small className={styles.rowChange} key={field}>
+            {changeFieldLabel(field)}: {String(change.old ?? 'empty')} →{' '}
+            {String(change.new ?? 'empty')}
+          </small>
+        ))}
+        {visibleChanges.length > 2 && <small>+{visibleChanges.length - 2} more changes</small>}
         {evidence ? <small>{evidence}</small> : null}
         {row.playlists?.length ? <small>Playlist: {row.playlists.join(', ')}</small> : null}
         {row.finding_id ? (
-          <small>{selected ? '▾ Hide review' : '▸ Review this track'}</small>
+          <em className={styles.rowAction}>
+            {selected ? 'Close details' : 'View details'} {selected ? '⌃' : '›'}
+          </em>
         ) : null}
       </span>
     </button>
@@ -283,9 +304,12 @@ function AssignmentRow({
 function changeFieldLabel(field: string): string {
   return (
     {
-      artist: 'Artist',
+      artist: 'Album artist · file tag',
       album_artist: 'Album artist',
-      album: 'Album title',
+      track_artist: 'Track artist · file tag',
+      library_track_artist: 'Track artist · library',
+      album: 'Album title · file tag',
+      library_album_title: 'Album title · library',
       title: 'Track title',
       filename: 'Filename',
       musicbrainz_recording_id: 'Recording ID',
@@ -303,9 +327,10 @@ interface ReadyChangeGroup {
 }
 
 function readyFieldGroup(field: string): { key: string; label: string } {
-  if (['artist', 'album_artist', 'library_track_artist', 'track_artist'].includes(field)) {
-    return { key: 'artist', label: 'Artist credits' };
-  }
+  if (['artist', 'album_artist'].includes(field))
+    return { key: 'album_artist', label: 'Album artist' };
+  if (['library_track_artist', 'track_artist'].includes(field))
+    return { key: 'track_artist', label: 'Track artist credits' };
   if (field === 'filename') return { key: 'filename', label: 'Filenames' };
   if (['library_recording_mbid', 'musicbrainz_recording_id'].includes(field)) {
     return { key: 'recording_ids', label: 'Recording IDs' };
@@ -328,7 +353,6 @@ function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChang
     ReadyChangeGroup & {
       values: Array<{ old?: unknown; new?: unknown }>;
       findingIdSet: Set<number>;
-      rawFields: Set<string>;
     }
   >();
   for (const item of items.filter(
@@ -352,28 +376,21 @@ function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChang
         findingIds: [],
         values: [],
         findingIdSet: new Set<number>(),
-        rawFields: new Set<string>(),
       };
       group.findingIdSet.add(item.id);
-      group.rawFields.add(field);
       group.values.push(changes[field] || {});
       groups.set(semantic.key, group);
     }
   }
-  return [...groups.values()].map(({ values, findingIdSet, rawFields, ...group }) => {
+  return [...groups.values()].map(({ values, findingIdSet, ...group }) => {
     const findingIds = [...findingIdSet];
     const count = findingIds.length;
-    const fields = [...rawFields];
-    if (
-      group.key === 'artist' &&
-      fields.some((field) => ['track_artist', 'library_track_artist'].includes(field)) &&
-      fields.every((field) => ['artist', 'library_track_artist', 'track_artist'].includes(field))
-    ) {
+    if (group.key === 'track_artist' && values.every((value) => !String(value.old ?? '').trim())) {
       return {
         ...group,
         count,
         findingIds,
-        label: 'Featured artist credits',
+        label: 'Track artist credits',
         valueSummary: 'Adding missing featured artists to metadata',
       };
     }
@@ -574,6 +591,22 @@ function SelectedActionDetail({
             ? compactReason || 'Review the supporting evidence.'
             : finding.description || 'Review the evidence below.'}
       </p>
+      {wrongAudio && Boolean(details.acoustid_title) && (
+        <div className={styles.identityWarning}>
+          <strong>
+            Fingerprint identifies {textValue(details.acoustid_title)}
+            {details.acoustid_artist ? ` by ${textValue(details.acoustid_artist)}` : ''}
+            {typeof details.acoustid_score === 'number'
+              ? ` · ${Math.round(details.acoustid_score * 100)}%`
+              : ''}
+          </strong>
+          <span>
+            Expected release track:{' '}
+            {textValue(details.expected_title || replacement.name) || 'No matching slot'}. Review
+            the audio before changing this file.
+          </span>
+        </div>
+      )}
       {durationDifference > 3000 && (
         <div className={styles.durationWarning}>
           <strong>Length differs by {(durationDifference / 1000).toFixed(1)} seconds</strong>
@@ -765,6 +798,7 @@ export function ReviewPage() {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialMode = initialParams.get('mode');
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
+  const caseListRef = useRef<HTMLDivElement | null>(null);
   const [queueTotals, setQueueTotals] = useState<ReviewQueueModeTotals | null>(null);
   const [caseId, setCaseId] = useState(() => initialParams.get('case') || '');
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
@@ -795,6 +829,10 @@ export function ReviewPage() {
   const [lastRun, setLastRun] = useState<ReconciliationRun | null>(null);
   const wasScanning = useRef(false);
   const risk = queueModes.find((mode) => mode.value === queueMode)?.risk || '';
+
+  useEffect(() => {
+    if (caseListRef.current) caseListRef.current.scrollTop = 0;
+  }, [page, queueMode, category]);
 
   useEffect(() => {
     let live = true;
@@ -969,6 +1007,11 @@ export function ReviewPage() {
   const pendingAssignments = assignments.filter(
     (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
   );
+  const duplicateExtraFindings = new Set(
+    pendingAssignments
+      .filter((row) => row.status === 'duplicate' && row.finding_id != null)
+      .map((row) => row.finding_id),
+  );
   const versionConflictAssignments = pendingAssignments
     .filter(
       (row) =>
@@ -990,7 +1033,8 @@ export function ReviewPage() {
         (row) =>
           row.relationship !== 'version_conflict' &&
           row.status !== 'change' &&
-          row.status !== 'missing',
+          row.status !== 'missing' &&
+          !(row.status === 'uncertain' && duplicateExtraFindings.has(row.finding_id)),
       )
       .sort((left, right) => {
         const order: Record<string, number> = {
@@ -1137,6 +1181,11 @@ export function ReviewPage() {
     } else {
       setActiveId(findingId);
       setActiveRowKey(rowKey);
+      window.setTimeout(
+        () =>
+          document.getElementById('selected-review-action')?.scrollIntoView?.({ block: 'start' }),
+        0,
+      );
     }
   };
 
@@ -1291,6 +1340,27 @@ export function ReviewPage() {
     }
   };
 
+  const pinCandidate = async (index: number) => {
+    if (!reviewCase?.album_plan) return;
+    const candidate = reviewCase.album_plan.candidates?.[index];
+    if (!candidate) return;
+    const current = reviewCase.album_plan;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await pinReviewRelease(reviewCase.case_id, candidate, current);
+      if (!result.success) throw new Error(result.error || 'Could not select this release');
+      setNotice(result.message || 'Release selected; updating this album plan');
+      const updated = await fetchReviewCase(reviewCase.case_id);
+      setReviewCase(updated);
+      await refreshQueue();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const actGroup = async (decision: ReviewDecision, action: 'fix' | 'dismiss') => {
     const verb = action === 'fix' ? 'apply' : 'keep the current values for';
     const confirmed = window.showConfirmDialog
@@ -1431,21 +1501,19 @@ export function ReviewPage() {
     const key = assignmentKey(row);
     const selected = row.finding_id === active?.id && key === activeRowKey;
     return (
-      <Fragment key={`${key}-${index}`}>
-        <AssignmentRow
-          row={row}
-          selected={selected}
-          onSelect={(findingId, rowKey) => {
-            if (row.status === 'missing' && hasIntentDecision) {
-              const intent = reviewDecisions.find(
-                (decision) => decision.category === 'album_completeness',
-              );
-              if (intent) openDecision(intent);
-            } else selectAssignment(findingId, rowKey);
-          }}
-        />
-        {selected && compactSelectedActionDetail}
-      </Fragment>
+      <AssignmentRow
+        key={`${key}-${index}`}
+        row={row}
+        selected={selected}
+        onSelect={(findingId, rowKey) => {
+          if (row.status === 'missing' && hasIntentDecision) {
+            const intent = reviewDecisions.find(
+              (decision) => decision.category === 'album_completeness',
+            );
+            if (intent) openDecision(intent);
+          } else selectAssignment(findingId, rowKey);
+        }}
+      />
     );
   };
 
@@ -1580,7 +1648,7 @@ export function ReviewPage() {
               ))}
             </select>
           </label>
-          <div className={styles.caseList}>
+          <div className={styles.caseList} ref={caseListRef}>
             {queue?.items.map((item) => (
               <button
                 key={item.case_id}
@@ -1603,6 +1671,38 @@ export function ReviewPage() {
                 </span>
               </button>
             ))}
+            {queue && queue.total === 0 && (
+              <div className={styles.queueEmpty}>
+                <strong>No albums in this view</strong>
+                <p>
+                  {category
+                    ? `There are no ${categoryOptions.find(([value]) => value === category)?.[1].toLowerCase() || 'matching'} albums in ${queueModes.find((mode) => mode.value === queueMode)?.label.toLowerCase()}.`
+                    : 'No albums match the current search and queue view.'}
+                </p>
+                {queueMode !== 'all' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueueMode('all');
+                      setPage(0);
+                    }}
+                  >
+                    Show all {category ? 'albums of this type' : 'albums'}
+                  </button>
+                )}
+                {query && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchInput('');
+                      setQuery('');
+                    }}
+                  >
+                    Clear search
+                  </button>
+                )}
+              </div>
+            )}
           </div>
           <div className={styles.pagination}>
             <button
@@ -1615,23 +1715,25 @@ export function ReviewPage() {
             >
               Previous
             </button>
-            <span>
-              Page {page + 1} of {pageCount}
+            <span className={styles.paginationCenter}>
+              <span>
+                Page {page + 1} of {pageCount}
+              </span>
+              <select
+                aria-label="Jump to page"
+                value={page}
+                onChange={(event) => {
+                  setCaseId('');
+                  setPage(Number(event.target.value));
+                }}
+              >
+                {Array.from({ length: pageCount }, (_, index) => (
+                  <option key={index} value={index}>
+                    Page {index + 1}
+                  </option>
+                ))}
+              </select>
             </span>
-            <select
-              aria-label="Jump to page"
-              value={page}
-              onChange={(event) => {
-                setCaseId('');
-                setPage(Number(event.target.value));
-              }}
-            >
-              {Array.from({ length: pageCount }, (_, index) => (
-                <option key={index} value={index}>
-                  Page {index + 1}
-                </option>
-              ))}
-            </select>
             <button
               type="button"
               disabled={!queue || (page + 1) * queue.limit >= queue.total}
@@ -1813,7 +1915,9 @@ export function ReviewPage() {
                                       : 'Use release numbering'
                                     : decision.category === 'title_conventions'
                                       ? 'Apply title conventions'
-                                      : `Apply ${decision.label.toLowerCase()}`}
+                                      : decision.label === 'Confirm album artist'
+                                        ? 'Use proposed album artist'
+                                        : `Apply ${decision.label.toLowerCase()}`}
                                 </button>
                                 <button
                                   type="button"
@@ -1822,7 +1926,9 @@ export function ReviewPage() {
                                 >
                                   {decision.category === 'numbering'
                                     ? 'Keep current numbering'
-                                    : 'Keep current values'}
+                                    : decision.label === 'Confirm album artist'
+                                      ? 'Keep current album artist'
+                                      : 'Keep current values'}
                                 </button>
                               </div>
                             )}
@@ -1888,6 +1994,7 @@ export function ReviewPage() {
                                         <ReviewArtwork
                                           title={textValue(candidate.release_title) || 'Release'}
                                           url={textValue(candidate.image_url)}
+                                          fallbackUrl={reviewCase.album_thumb_url}
                                           size="release"
                                         />
                                         <div>
@@ -2221,12 +2328,15 @@ export function ReviewPage() {
                       </button>
                     )}
                   </div>
+                  {activeAssignment && activeRowKey && compactSelectedActionDetail && (
+                    <div className={styles.trackDetailPanel}>{compactSelectedActionDetail}</div>
+                  )}
                   <div className={styles.trackTable} role="table">
                     <div className={styles.trackTableHead} role="row">
-                      <span>Status</span>
-                      <span>Position</span>
-                      <span>Local file → release slot</span>
-                      <span>Result</span>
+                      <span>Review state</span>
+                      <span>Disc · track</span>
+                      <span>Local file → release track</span>
+                      <span>Proposed action</span>
                     </div>
                     {trackView === 'release' ? (
                       releaseOrderedAssignments.filter(matchingFilter).map(renderAssignmentRow)
@@ -2235,17 +2345,11 @@ export function ReviewPage() {
                         {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
                         {changeAssignments.filter(matchingFilter).length > 0 && (
                           <div className={styles.assignmentGroup} data-tone="info">
-                            <button
-                              type="button"
-                              aria-expanded={openGroups.includes('changes')}
-                              onClick={() => toggleGroup('changes')}
-                            >
-                              {openGroups.includes('changes') ? '▾' : '▸'} ↻{' '}
-                              {changeAssignments.filter(matchingFilter).length} proposed track
+                            <div className={styles.assignmentGroupTitle}>
+                              ↻ {changeAssignments.filter(matchingFilter).length} proposed track
                               changes
-                            </button>
-                            {openGroups.includes('changes') &&
-                              changeAssignments.filter(matchingFilter).map(renderAssignmentRow)}
+                            </div>
+                            {changeAssignments.filter(matchingFilter).map(renderAssignmentRow)}
                           </div>
                         )}
                         {missingAssignments.filter(matchingFilter).length > 0 && (
@@ -2355,11 +2459,15 @@ export function ReviewPage() {
                     }
                     selected={previewCandidate}
                     onSelect={setPreviewCandidate}
-                    currentRelease={record(record(active?.details).current_release)}
-                    onPin={
+                    currentRelease={{
+                      source: reviewCase.album_plan?.source,
+                      release_id: reviewCase.album_plan?.release_id,
+                    }}
+                    fallbackArtwork={reviewCase.album_thumb_url || ''}
+                    onPin={(index) =>
                       active?.finding_type === 'reconciliation_release'
-                        ? (index) => void act(active, 'fix', String(index))
-                        : undefined
+                        ? void act(active, 'fix', String(index))
+                        : void pinCandidate(index)
                     }
                     busy={busy}
                   />

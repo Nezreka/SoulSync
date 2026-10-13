@@ -239,9 +239,8 @@ def plan_track(current_tags: Dict[str, Any], source_track: Any, album_meta: Dict
             db_data['title'] = new_val
         elif field == 'artist':
             db_data['artist_name'] = new_val           # = album artist for the writer
-            ta = target.get('track_artist')
-            if ta and ta != new_val:
-                db_data['track_artist'] = ta
+            # Track credits are decided separately below. Carrying the source's
+            # abbreviated credit here bypassed the fuller-local-credit guard.
         elif field == 'album':
             db_data['album_title'] = new_val
         elif field == 'year':

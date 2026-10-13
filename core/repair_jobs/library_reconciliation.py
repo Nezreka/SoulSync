@@ -29,7 +29,7 @@ from core.library.reconciliation_plan import (
     title_difference_kind, slot_version_markers,
 )
 from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
-from core.library.retag_planner import plan_track
+from core.library.retag_planner import plan_track, _artist_credit_includes
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.metadata.album_tracks import get_album_for_source, get_album_tracks_for_source
 from core.repair_jobs import register_job
@@ -2054,9 +2054,13 @@ class LibraryReconciliationJob(RepairJob):
                     # join phrases in this adapter. Keep a complete local
                     # collaboration credit rather than reducing it to one
                     # artist or inventing punctuation.
-                    current_album_artist = tags.get('album_artist') or ''
+                    current_album_artist = (tags.get('album_artist') or
+                                            tags.get('artist') or '')
                     metadata_artist = (current_album_artist
-                        if len(release_artist_names) > 1 and current_album_artist
+                        if current_album_artist and (
+                            len(release_artist_names) > 1 or
+                            _artist_credit_includes(current_album_artist,
+                                                    common['artist_name']))
                         else common['artist_name'])
                     meta = {'name': metadata_album_title, 'artists':
                             [{'name': metadata_artist}] if metadata_artist else [],

@@ -1728,6 +1728,34 @@ class RepairWorker:
                 return result
             return {'success': False, 'error': 'Unsupported review action'}
 
+    def pin_review_release(self, case_id: str, *, source: str, release_id: str,
+                           expected_source: str, expected_release_id: str) -> dict:
+        """Pin a displayed candidate even when no release ambiguity was emitted."""
+        with self._review_apply_lock:
+            case = self.get_review_case(case_id, job_id='library_reconciliation')
+            plan = (case or {}).get('album_plan') or {}
+            album_id = (case or {}).get('album_id')
+            if not case or album_id is None or not plan:
+                return {'success': False, 'stale': True,
+                        'error': 'This album plan changed; refresh before choosing a release'}
+            if (plan.get('source'), str(plan.get('release_id') or '')) != (
+                    expected_source, expected_release_id):
+                return {'success': False, 'stale': True,
+                        'error': 'The selected release changed; review the candidates again'}
+            candidate = next((row for row in plan.get('candidates') or []
+                              if row.get('source') == source and
+                              str(row.get('release_id') or '') == release_id), None)
+            if not candidate:
+                return {'success': False, 'stale': True,
+                        'error': 'That release is no longer a candidate for this album'}
+            score = int(candidate.get('clear') or 0) / max(1, int(candidate.get('matched') or 0))
+            if not self.db.set_album_canonical(album_id, source, release_id,
+                                               score=score, locked=True):
+                return {'success': False, 'error': 'Could not pin that album release'}
+            queued = self._schedule_album_refresh(case_id, case.get('folder') or '')
+            return {'success': True, 'message': 'Release pinned; updating this album plan',
+                    'refresh_queued': queued}
+
     def apply_review_decision_group(self, case_id: str, category: str, *,
                                     action: str) -> dict:
         """Apply one album-level convention decision to its current actions."""
@@ -4221,6 +4249,11 @@ class RepairWorker:
 
     def _fix_reconciliation_assignment(self, entity_type, entity_id, file_path, details):
         choice = details.get('_fix_action') or ''
+        if (choice in ('replace', 'request_missing') and
+                details.get('version_conflict') and
+                isinstance(details.get('replacement_track'), dict)):
+            return self._fix_reconciliation_extra(entity_type, entity_id,
+                                                  file_path, details)
         if not isinstance(choice, str) or not choice.startswith('assign:'):
             return {'success': False, 'error': 'Choose a release track for this file'}
         slot_key = choice[len('assign:'):]

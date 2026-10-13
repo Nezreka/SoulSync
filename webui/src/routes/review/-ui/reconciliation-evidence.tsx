@@ -1,9 +1,10 @@
-import type { ReactNode, SVGProps } from 'react';
+import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 
 import type { ReviewFinding } from '../-review.api';
 
 import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
+import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
 
 type Data = Record<string, unknown>;
@@ -25,6 +26,31 @@ function label(value: unknown): string {
 function count(value: unknown): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+}
+
+function baseVersionTitle(value: string): string {
+  return value
+    .replace(/\.[^.]+$/, '')
+    .replace(/^\d+\s*[-_.]\s*/, '')
+    .split(/\s+[-–]\s+|\s*\(/, 1)[0]
+    .toLocaleLowerCase()
+    .trim();
+}
+
+function proposedFieldLabel(field: string): string {
+  return (
+    {
+      artist: 'Album artist',
+      track_artist: 'Track artist',
+      library_track_artist: 'Track artist in library',
+      album: 'Album title',
+      library_album_title: 'Album title in library',
+      title: 'Track title',
+      library_title: 'Track title in library',
+      musicbrainz_recording_id: 'Recording ID',
+      library_recording_mbid: 'Recording ID in library',
+    }[field] || field.replaceAll('_', ' ')
+  );
 }
 
 function percent(value: unknown): string {
@@ -493,6 +519,7 @@ export function ReleaseComparison({
   onPin,
   busy = false,
   currentRelease,
+  fallbackArtwork,
 }: {
   candidates: Data[];
   selected: number;
@@ -500,7 +527,10 @@ export function ReleaseComparison({
   onPin?: (index: number) => void;
   busy?: boolean;
   currentRelease?: Data;
+  fallbackArtwork?: string;
 }) {
+  const [inspectedPair, setInspectedPair] = useState<number | null>(null);
+  useEffect(() => setInspectedPair(null), [selected]);
   if (!candidates.length) return null;
   const active = candidates[Math.min(selected, candidates.length - 1)];
   const pairs = objects(active.pairs).sort(
@@ -518,6 +548,11 @@ export function ReleaseComparison({
     : Array.isArray(active.extra_files)
       ? active.extra_files.map(label)
       : [];
+  const possibleVersionPairs = missing.flatMap((releaseName) =>
+    extra
+      .filter((file) => baseVersionTitle(file) === baseVersionTitle(releaseName))
+      .map((file) => ({ releaseName, file })),
+  );
   const firstShape = candidateAssignments(candidates[0]);
   const allEquivalent = candidates.every(
     (candidate) => candidateAssignments(candidate) === firstShape,
@@ -553,6 +588,7 @@ export function ReleaseComparison({
               <ReviewArtwork
                 title={label(candidate.release_title) || 'Release'}
                 url={label(candidate.image_url)}
+                fallbackUrl={fallbackArtwork}
                 size="release"
               />
               <span>
@@ -576,6 +612,11 @@ export function ReleaseComparison({
           );
         })}
       </div>
+      {fallbackArtwork && (
+        <p className={styles.muted}>
+          Candidates without catalog artwork show the current library cover.
+        </p>
+      )}
       <div className={styles.releaseDetail}>
         <div className={styles.releaseDetailHeader}>
           <div>
@@ -614,34 +655,70 @@ export function ReleaseComparison({
                 >
                   {label(pair.confidence) === 'clear' ? 'Strong match' : 'Needs review'}
                 </StatusChip>
+                {label(pair.confidence) !== 'clear' && (
+                  <button type="button" onClick={() => setInspectedPair(index)}>
+                    Inspect match
+                  </button>
+                )}
               </div>
             ))}
           </div>
         ) : (
           <p className={styles.muted}>No local files could be assigned to this release.</p>
         )}
+        {inspectedPair !== null && pairs[inspectedPair] && (
+          <div className={styles.candidateInspection}>
+            <h5>Candidate track evidence</h5>
+            <TrackRows pairs={[pairs[inspectedPair]]} />
+            {Boolean(pairs[inspectedPair].file_path) && (
+              <ReviewAudio
+                localPath={label(pairs[inspectedPair].file_path)}
+                localTitle={label(pairs[inspectedPair].local_title || pairs[inspectedPair].file)}
+                localDurationMs={count(pairs[inspectedPair].file_duration_ms)}
+                comparisonTitle={label(pairs[inspectedPair].slot_title)}
+                comparisonDurationMs={count(pairs[inspectedPair].slot_duration_ms)}
+                previewUrl={label(pairs[inspectedPair].slot_preview_url)}
+              />
+            )}
+            <p className={styles.muted}>
+              Choose this release to create its actionable track review.
+            </p>
+          </div>
+        )}
         {(missing.length > 0 || extra.length > 0) && (
-          <div className={styles.candidateExceptions}>
-            {missing.length > 0 && (
-              <section>
-                <strong>{missing.length} absent release tracks</strong>
-                <ul>
-                  {missing.map((name, index) => (
-                    <li key={`${name}-${index}`}>{name}</li>
-                  ))}
-                </ul>
-              </section>
+          <div>
+            {possibleVersionPairs.length > 0 && (
+              <div className={styles.versionPairNotice}>
+                <strong>Possible version difference</strong>
+                {possibleVersionPairs.map(({ releaseName, file }) => (
+                  <span key={`${releaseName}-${file}`}>
+                    {file} may be a different version of the release track “{releaseName}”.
+                  </span>
+                ))}
+              </div>
             )}
-            {extra.length > 0 && (
-              <section>
-                <strong>{extra.length} unassigned local files</strong>
-                <ul>
-                  {extra.map((name, index) => (
-                    <li key={`${name}-${index}`}>{name}</li>
-                  ))}
-                </ul>
-              </section>
-            )}
+            <div className={styles.candidateExceptions}>
+              {missing.length > 0 && (
+                <section>
+                  <strong>{missing.length} absent release tracks</strong>
+                  <ul>
+                    {missing.map((name, index) => (
+                      <li key={`${name}-${index}`}>{name}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+              {extra.length > 0 && (
+                <section>
+                  <strong>{extra.length} unassigned local files</strong>
+                  <ul>
+                    {extra.map((name, index) => (
+                      <li key={`${name}-${index}`}>{name}</li>
+                    ))}
+                  </ul>
+                </section>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -812,6 +889,32 @@ export function ReconciliationEvidence({
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
+  const shownChanges = Object.entries(changes).reduce<
+    Array<{ field: string; old: string; next: string; locations: string[] }>
+  >((rows, [field, raw]) => {
+    const value = object(raw);
+    const old = label(value.old);
+    const next = label(value.new);
+    const semantic =
+      {
+        library_album_title: 'album',
+        library_title: 'title',
+        library_track_artist: 'track_artist',
+        library_recording_mbid: 'musicbrainz_recording_id',
+      }[field] || field;
+    const existing = rows.find(
+      (row) => row.field === semantic && row.old === old && row.next === next,
+    );
+    if (existing) existing.locations.push(field.startsWith('library_') ? 'library' : 'file tag');
+    else
+      rows.push({
+        field: semantic,
+        old,
+        next,
+        locations: [field.startsWith('library_') ? 'library' : 'file tag'],
+      });
+    return rows;
+  }, []);
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
   const ambiguityReasons = Array.isArray(details.ambiguity_reasons)
@@ -867,14 +970,16 @@ export function ReconciliationEvidence({
             <EvidenceIcon name="check" /> Proposed changes
           </h4>
           <div className={styles.changeList}>
-            {Object.entries(changes).map(([name, raw]) => {
-              const change = object(raw);
+            {shownChanges.map((change) => {
               return (
-                <div key={name}>
-                  <strong>{name.replaceAll('_', ' ')}</strong>
-                  <span className={styles.oldValue}>{label(change.old) || '—'}</span>
+                <div key={`${change.field}-${change.old}-${change.next}`}>
+                  <strong>
+                    {proposedFieldLabel(change.field)}
+                    {change.locations.length > 1 ? ' · file and library' : ''}
+                  </strong>
+                  <span className={styles.oldValue}>{change.old || '—'}</span>
                   <EvidenceIcon name="arrow" />
-                  <span className={styles.newValue}>{label(change.new) || '—'}</span>
+                  <span className={styles.newValue}>{change.next || '—'}</span>
                 </div>
               );
             })}

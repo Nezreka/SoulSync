@@ -2,6 +2,7 @@
 
 from core.library.reconciliation_plan import (
     audio_contradicts_local_title, reconcile_folder, title_difference_kind,
+    file_version_markers, slot_version_markers,
 )
 
 
@@ -9,6 +10,60 @@ def _file(title, path, duration_ms, recording=None):
     return {'path': path, 'tags': {'title': title, 'duration_ms': duration_ms},
             'acoustid': {'status': 'ok', 'recordings': [recording]} if recording else
                         {'status': 'no_match', 'recordings': []}}
+
+
+def test_acoustic_session_and_alternative_wording_match_equivalent_versions():
+    assert file_version_markers(_file('Acts of Man - Acoustic',
+                                      '/album/Acts of Man - Acoustic.flac', 200000)) == (
+        slot_version_markers({'title': 'Acts of Man (Acoustic Session)'})
+    )
+    assert file_version_markers(_file('Fortune - Alternative Version',
+                                      '/album/Fortune - Alternative Version.flac', 200000)) == (
+        slot_version_markers({'title': 'Fortune (Alternate Version)'})
+    )
+
+
+def test_adjacent_complementary_length_errors_require_review_of_both_tracks():
+    files = [
+        _file('Faith', '/album/03 - Faith.flac', 239560,
+              {'mbid': 'faith', 'title': 'Faith', 'artist': 'Ghost', 'score': 0.99}),
+        _file('See the Light', '/album/04 - See the Light.flac', 275240,
+              {'mbid': 'light', 'title': 'See the Light', 'artist': 'Ghost', 'score': 0.99}),
+    ]
+    slots = [
+        {'title': 'Faith', 'artist': 'Ghost', 'recording_mbid': 'faith',
+         'disc_number': 1, 'track_number': 3, 'duration_ms': 269707},
+        {'title': 'See the Light', 'artist': 'Ghost', 'recording_mbid': 'light',
+         'disc_number': 1, 'track_number': 4, 'duration_ms': 245160},
+    ]
+
+    pairs = reconcile_folder(files, slots)['pairs']
+
+    assert len(pairs) == 2
+    assert all(pair['confidence'] == 'ambiguous' for pair in pairs)
+    assert all(any('boundary' in reason for reason in pair['ambiguity_reasons'])
+               for pair in pairs)
+
+
+def test_unmatched_adjacent_track_also_flags_its_confirmed_neighbor():
+    files = [
+        _file('Faith', '/album/03 - Faith.flac', 239560,
+              {'mbid': 'faith', 'title': 'Faith', 'artist': 'Ghost', 'score': 0.99}),
+        _file('See the Light', '/album/04 - See the Light.flac', 275240),
+    ]
+    slots = [
+        {'title': 'Faith', 'artist': 'Ghost', 'recording_mbid': 'faith',
+         'disc_number': 1, 'track_number': 3, 'duration_ms': 269707},
+        {'title': 'See the Light', 'artist': 'Ghost', 'recording_mbid': 'light',
+         'disc_number': 1, 'track_number': 4, 'duration_ms': 245160},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert result['missing_slots'] == [1]
+    assert result['extra_files'] == [1]
+    assert result['pairs'][0]['confidence'] == 'ambiguous'
+    assert 'boundary' in result['pairs'][0]['ambiguity_reasons'][0]
 
 
 def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_length():

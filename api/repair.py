@@ -122,6 +122,24 @@ def repair_review_queue_apply(case_id, finding_id):
         return jsonify({'error': 'Could not apply review decision'}), 500
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/release', methods=['POST'])
+def repair_review_queue_pin_release(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        result = worker.pin_review_release(
+            case_id, source=str(data.get('source') or ''),
+            release_id=str(data.get('release_id') or ''),
+            expected_source=str(data.get('expected_source') or ''),
+            expected_release_id=str(data.get('expected_release_id') or ''))
+        return jsonify(result), 200 if result.get('success') else (409 if result.get('stale') else 400)
+    except Exception as exc:
+        logger.error('Error pinning review release: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not pin review release'}), 500
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/decisions/<category>/apply', methods=['POST'])
 def repair_review_queue_apply_decision(case_id, category):
     worker = _repair_worker()

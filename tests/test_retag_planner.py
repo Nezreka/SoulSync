@@ -76,6 +76,21 @@ def test_overwrite_writes_album_artist_via_artist_name_key():
     assert plan['db_data']['artist_name'] == 'Real Artist'      # writer uses artist_name = album artist
 
 
+def test_album_artist_update_does_not_shorten_full_track_performer_credit():
+    current = {'title': 'When I Kissed the Teacher', 'album': 'Soundtrack',
+               'album_artist': 'Benny Andersson, Björn Ulvaeus, Lily James',
+               'track_artist': 'Lily James, Jessica Keenan Wynn, Alexa Davies & Celia Imrie'}
+    source = {'name': 'When I Kissed the Teacher',
+              'artists': [{'name': 'Lily James'}]}
+    album = {'name': 'Soundtrack', 'artists': [{'name': 'Cast of Mamma Mia! The Movie'}]}
+
+    plan = rp.plan_track(current, source, album)
+
+    assert 'artist' in plan['changes']
+    assert 'track_artist' not in plan['changes']
+    assert 'track_artist' not in plan['db_data']
+
+
 def test_track_number_write_carries_track_count():
     current = {'title': 'Real Title', 'album_artist': 'Real Artist', 'album': 'Real Album',
                'year': '2021', 'genre': 'Rock, Indie', 'track_number': 99, 'disc_number': 1}

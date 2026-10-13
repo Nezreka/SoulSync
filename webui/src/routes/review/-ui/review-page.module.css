@@ -297,7 +297,38 @@
 .pagination {
   font-size: 12px;
   color: #abb2c4;
-  flex-wrap: wrap;
+  gap: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.paginationCenter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+.paginationCenter span {
+  white-space: nowrap;
+}
+.queueEmpty {
+  padding: 16px;
+  border: 1px solid #474d63;
+  border-radius: 10px;
+  color: #bdc6da;
+  font-size: 12px;
+}
+.queueEmpty strong {
+  color: #eef0f7;
+}
+.queueEmpty button {
+  margin: 4px 6px 0 0;
+  border: 1px solid #68608b;
+  border-radius: 8px;
+  background: #302b49;
+  color: #f0eafa;
+  padding: 8px 10px;
+  cursor: pointer;
 }
 .pagination select {
   color: #f5f5fa;
@@ -798,6 +829,20 @@
   background: #302616;
   font-size: 13px;
 }
+.identityWarning {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  margin: 12px 0;
+  border: 1px solid #a65f6d;
+  border-radius: 9px;
+  background: #47242d;
+  color: #f7e5e9;
+}
+.identityWarning span {
+  color: #e5c6cc;
+  font-size: 12px;
+}
 .durationWarning span {
   color: #d8c6a9;
 }
@@ -825,7 +870,8 @@
 .assignmentGroup {
   min-width: 0;
 }
-.assignmentGroup > button {
+.assignmentGroup > button,
+.assignmentGroupTitle {
   display: block;
   width: 100%;
   padding: 10px 12px;
@@ -837,6 +883,9 @@
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
+}
+.assignmentGroupTitle {
+  cursor: default;
 }
 .assignmentGroup[data-tone='danger'] > button {
   color: #f0c6d5;
@@ -911,10 +960,22 @@
   border-radius: 11px;
   overflow: hidden;
 }
+.trackDetailPanel {
+  margin: 14px 0;
+  border: 1px solid #555b74;
+  border-radius: 11px;
+  background: #171b29;
+  overflow: hidden;
+}
+.trackDetailPanel .findingDetail {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
 .trackTableHead,
 .matrixRow {
   display: grid;
-  grid-template-columns: 88px 70px minmax(280px, 1.8fr) minmax(170px, 0.8fr);
+  grid-template-columns: 98px 84px minmax(280px, 1.7fr) minmax(190px, 1fr);
   gap: 10px;
   align-items: center;
   min-width: 0;
@@ -976,6 +1037,20 @@
   display: block;
   color: #8f98ad;
   margin-top: 2px;
+}
+.rowChange {
+  color: #c7d9d0 !important;
+  line-height: 1.35;
+}
+.rowAction {
+  display: inline-block;
+  margin-top: 7px;
+  padding: 5px 9px;
+  border: 1px solid #6b6790;
+  border-radius: 7px;
+  color: #d8ccfa;
+  font-size: 11px;
+  font-style: normal;
 }
 .matrixRow i {
   display: inline-block;
@@ -2086,11 +2161,38 @@
 }
 .candidateTrackList > div {
   display: grid;
-  grid-template-columns: 55px minmax(0, 1fr) auto;
+  grid-template-columns: 55px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   padding: 9px 14px;
   border-top: 1px solid #353b4d;
+}
+.candidateTrackList button {
+  border: 1px solid #6b6790;
+  border-radius: 7px;
+  padding: 6px 9px;
+  background: #302b49;
+  color: #eee6ff;
+  cursor: pointer;
+}
+.candidateInspection {
+  padding: 14px;
+  border-top: 1px solid #4a4e66;
+  background: #171b2a;
+}
+.candidateInspection h5 {
+  margin: 0 0 12px;
+}
+.versionPairNotice {
+  display: grid;
+  gap: 5px;
+  margin: 12px 14px 0;
+  padding: 11px 13px;
+  border: 1px solid #a07634;
+  border-radius: 8px;
+  background: #2e271b;
+  color: #f5dfb7;
+  font-size: 12px;
 }
 .candidateTrackList > div:first-child {
   border-top: 0;
@@ -2225,7 +2327,7 @@
     display: none;
   }
   .matrixRow {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: minmax(98px, auto) minmax(0, 1fr);
     gap: 8px 12px;
     padding: 13px;
   }

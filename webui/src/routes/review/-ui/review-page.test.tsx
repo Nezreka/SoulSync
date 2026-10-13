@@ -482,11 +482,11 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /1 proposed track changes/ }));
+    expect(screen.getByText(/1 proposed track changes/)).toBeTruthy();
     const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
     fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');
-    expect(selectedRow.nextElementSibling).toBe(selectedDetail);
+    expect(selectedDetail.closest('[role="table"]')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
     fireEvent.click(selectedRow);
@@ -1192,7 +1192,7 @@ describe('library reconciliation review queue', () => {
       await screen.findByRole('heading', { name: 'Compare the editions that fit this folder' }),
     ).toBeTruthy();
     const images = [...document.querySelectorAll('img')];
-    expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(2);
+    expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(3);
     expect(images.some((image) => image.src.includes('first-release'))).toBe(true);
     expect(
       screen.getByText('12/12 assigned').closest('[data-tone]')?.getAttribute('data-tone'),

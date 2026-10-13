@@ -28,6 +28,62 @@ def test_reviewed_file_accepts_mount_alias_but_rejects_different_inode(tmp_path)
     assert not _same_reviewed_file(str(scanned), str(other))
 
 
+def test_existing_artist_credit_replacement_is_not_bulk_ready():
+    finding = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'clear',
+        'changes': {'artist': {'old': 'Benny Andersson, Björn Ulvaeus, Lily James',
+                               'new': 'Cast of Mamma Mia! The Movie'}},
+    }}
+    assert classify_case([finding])['manual'] == 1
+
+
+def test_metadata_filter_keeps_credit_replacement_in_needs_input():
+    db = _Database()
+    db.add(1, '/music/album/01.flac', {
+        'album_id': 1, 'album_title': 'Soundtrack',
+        'changes': {'artist': {'old': 'Three performers', 'new': 'Cast'}},
+        'confidence': 'clear',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    assert list_cases(db, job_id='library_reconciliation', category='metadata',
+                      risk='manual')['total'] == 1
+    assert list_cases(db, job_id='library_reconciliation', category='metadata',
+                      risk='ready')['total'] == 0
+    assert safe_finding_ids(db)[0] == []
+
+
+def test_release_candidate_can_be_pinned_without_release_finding():
+    class AlbumDatabase:
+        selected = None
+
+        def set_album_canonical(self, album_id, source, release_id, *, score, locked):
+            self.selected = (album_id, source, release_id, locked)
+            return True
+
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = AlbumDatabase()
+    worker._review_apply_lock = threading.RLock()
+    worker.get_review_case = lambda *_args, **_kwargs: {
+        'album_id': 7, 'folder': '/music/album',
+        'album_plan': {
+            'source': 'itunes', 'release_id': 'old',
+            'candidates': [{'source': 'musicbrainz', 'release_id': 'new',
+                            'clear': 10, 'matched': 10}],
+        },
+    }
+    worker._schedule_album_refresh = lambda *_args: True
+
+    result = worker.pin_review_release(
+        'case', source='musicbrainz', release_id='new',
+        expected_source='itunes', expected_release_id='old')
+
+    assert result['success'] and result['refresh_queued']
+    assert worker.db.selected == (7, 'musicbrainz', 'new', True)
+    stale = worker.pin_review_release(
+        'case', source='musicbrainz', release_id='new',
+        expected_source='itunes', expected_release_id='stale')
+    assert stale['stale']
+
+
 def test_album_title_cleanup_keeps_edition_and_drops_pressing_plant():
     from core.repair_jobs.library_reconciliation import _clean_album_display_title
 

@@ -258,6 +258,29 @@ export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {
   );
 }
 
+export async function pinReviewRelease(
+  caseId: string,
+  candidate: { source: string; release_id: string },
+  current: { source?: string; release_id?: string },
+): Promise<{ success: boolean; message?: string; error?: string; refresh_queued?: boolean }> {
+  const response = await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/release`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source: candidate.source,
+      release_id: candidate.release_id,
+      expected_source: current.source,
+      expected_release_id: current.release_id,
+    }),
+  });
+  return (await response.json()) as {
+    success: boolean;
+    message?: string;
+    error?: string;
+    refresh_queued?: boolean;
+  };
+}
+
 export async function runReconciliationScan(): Promise<void> {
   await readJson<{ success: boolean }>(
     await fetch('/api/repair/jobs/library_reconciliation/run', { method: 'POST' }),

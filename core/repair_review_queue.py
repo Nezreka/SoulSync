@@ -19,6 +19,15 @@ from core.text.fold import fold_title
 _SEVERITY = "CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END"
 _DETAILS = "CASE WHEN json_valid(details_json) THEN details_json ELSE '{}' END"
 
+
+def _artist_replacement_sql(details: str = _DETAILS) -> str:
+    return '(' + ' OR '.join(
+        f"(COALESCE(json_extract({details}, '$.changes.{field}.old'), '') != '' "
+        f"AND lower(COALESCE(json_extract({details}, '$.changes.{field}.old'), '')) "
+        f"!= lower(COALESCE(json_extract({details}, '$.changes.{field}.new'), '')))"
+        for field in ('artist', 'track_artist', 'library_track_artist')
+    ) + ')'
+
 _DESTRUCTIVE_TYPES = frozenset({
     'reconciliation_extra', 'reconciliation_duplicate',
 })
@@ -33,6 +42,16 @@ _TRACK_ARTIST_CHANGE_KEYS = frozenset({
 _RECORDING_ID_CHANGE_KEYS = frozenset({
     'musicbrainz_recording_id', 'library_recording_mbid',
 })
+
+
+def _replaces_artist_credit(changes: dict[str, Any]) -> bool:
+    """An unrelated nonempty credit needs a person, even on a clear match."""
+    for field in _TRACK_ARTIST_CHANGE_KEYS:
+        change = changes.get(field)
+        old, new = _change_value(change, 'old'), _change_value(change, 'new')
+        if old and new and old.casefold() != new.casefold():
+            return True
+    return False
 
 
 def _album_art_by_id(conn, album_ids: set[str]) -> dict[str, str]:
@@ -98,9 +117,9 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
     if any(next(iter(change)) != field for change in changes[1:]):
         return None
     labels = {
-        'artist': 'Artist', 'album_artist': 'Album artist', 'album': 'Album title',
-        'library_track_artist': 'Library artist',
-        'library_album_title': 'Library album title',
+        'artist': 'Album artist', 'album_artist': 'Album artist', 'album': 'Album title',
+        'library_track_artist': 'Track artist in library',
+        'library_album_title': 'Album title in library',
         'musicbrainz_recording_id': 'Recording ID',
         'library_recording_mbid': 'Library recording ID', 'filename': 'Filename',
     }
@@ -113,6 +132,11 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
         if field == 'library_album_title':
             return ('Update library album title',
                     f'Rename the library album: {old or "empty"} → {new or "empty"}.')
+        if field == 'artist':
+            if old.casefold() == new.casefold():
+                return ('Artist update', f'{count} tracks: {old} → {new}.')
+            return ('Confirm album artist',
+                    f'{old or "empty"} → {new or "empty"} on {count} file tags.')
         return (f'{label} update',
                 f'{count} track{"s" if count != 1 else ""}: '
                 f'{old or "empty"} → {new or "empty"}.')
@@ -190,7 +214,7 @@ def finding_category(item: dict[str, Any]) -> str:
 
 
 _CATEGORY_LABELS = {
-    'metadata': 'Safe metadata', 'title_conventions': 'Title conventions',
+    'metadata': 'Metadata changes', 'title_conventions': 'Title conventions',
     'title_issues': 'Title identity',
     'numbering': 'Numbering convention', 'release_conflicts': 'Release or edition',
     'audio_conflicts': 'Audio assignment',
@@ -229,7 +253,9 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if uniform:
                 decision_label, summary = uniform
             else:
-                summary = f'{len(rows)} evidence-supported metadata actions are ready.'
+                summary = (f'{len(rows)} metadata action'
+                           f'{"s" if len(rows) != 1 else ""} '
+                           f'{"need review" if risk != "ready" else "are ready"}.')
         elif category == 'audio_conflicts':
             wrong_audio = [
                 row for row in rows
@@ -305,6 +331,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'manual', 'The release uses a different disc or track numbering scheme'
     if details.get('confidence') not in (None, '', 'clear'):
         return 'manual', 'The file-to-track assignment is not clear'
+    if _replaces_artist_credit(changes):
+        return 'manual', 'Confirm the artist credit before replacing an existing credit'
     return 'ready', 'Audio and release evidence support this metadata repair'
 
 
@@ -418,6 +446,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             json_type(%s, '$.changes.library_track_number') IS NOT NULL OR
             json_type(%s, '$.changes.library_disc_number') IS NOT NULL)""" %
             (_DETAILS, _DETAILS, _DETAILS, _DETAILS))
+        artist_replacement = _artist_replacement_sql()
         if risk == 'ready':
             search += (" AND finding_type = 'reconciliation_metadata' AND NOT " +
                        position_condition +
@@ -426,12 +455,16 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                        " AND COALESCE(json_extract(" + _DETAILS +
                        ", '$.title_difference_kind'), '') NOT IN ('material','version')" +
                        " AND COALESCE(last_error, '') = ''" +
+                       " AND NOT " + artist_replacement +
                        " AND NOT EXISTS (SELECT 1 FROM repair_findings blocker "
                        "WHERE blocker.status = repair_findings.status "
                        "AND blocker.job_id = repair_findings.job_id "
                        "AND blocker.review_case_key = repair_findings.review_case_key "
                        "AND (blocker.finding_type != 'reconciliation_metadata' "
                        "OR COALESCE(blocker.last_error, '') != '' "
+                       "OR " + _artist_replacement_sql(
+                           "CASE WHEN json_valid(blocker.details_json) "
+                           "THEN blocker.details_json ELSE '{}' END") + " "
                        "OR json_type(CASE WHEN json_valid(blocker.details_json) "
                        "THEN blocker.details_json ELSE '{}' END, '$.changes.track_number') IS NOT NULL "
                        "OR json_type(CASE WHEN json_valid(blocker.details_json) "
@@ -450,8 +483,17 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         elif risk == 'manual':
             search += (" AND (finding_type NOT IN ('reconciliation_metadata',"
                        "'reconciliation_extra','reconciliation_duplicate') OR " +
-                       position_condition + " OR json_extract(" + _DETAILS +
-                       ", '$.title_difference_kind') IN ('material','version'))")
+                       position_condition + " OR " + artist_replacement +
+                       " OR COALESCE(last_error, '') != '' OR "
+                       "COALESCE(json_extract(" + _DETAILS +
+                       ", '$.confidence'), 'clear') NOT IN ('','clear') OR json_extract(" + _DETAILS +
+                       ", '$.title_difference_kind') IN ('material','version') OR "
+                       "(finding_type = 'reconciliation_metadata' AND EXISTS ("
+                       "SELECT 1 FROM repair_findings blocker WHERE "
+                       "blocker.status = repair_findings.status AND "
+                       "blocker.job_id = repair_findings.job_id AND "
+                       "blocker.review_case_key = repair_findings.review_case_key AND "
+                       "blocker.finding_type != 'reconciliation_metadata'))) ")
         where = f"status = ? {job_filter} {search}"
         total = conn.execute(
             f"SELECT COUNT(DISTINCT review_case_key) FROM repair_findings WHERE {where}",
@@ -753,7 +795,8 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
                    json_type({_DETAILS}, '$.changes.disc_number'),
                    json_type({_DETAILS}, '$.changes.library_track_number'),
                    json_type({_DETAILS}, '$.changes.library_disc_number'),
-                   json_extract({_DETAILS}, '$.title_difference_kind')
+                   json_extract({_DETAILS}, '$.title_difference_kind'),
+                   json_extract({_DETAILS}, '$.changes')
             FROM repair_findings
             WHERE job_id = 'library_reconciliation' AND status = 'pending'
               {case_filter}
@@ -764,7 +807,7 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for (finding_id, key, finding_type, last_error, confidence,
          track_number, disc_number, library_track_number, library_disc_number,
-         title_kind) in rows:
+         title_kind, raw_changes) in rows:
         position_values = (
             ('track_number', track_number), ('disc_number', disc_number),
             ('library_track_number', library_track_number),
@@ -773,7 +816,9 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
         details = {
             'confidence': confidence,
             'title_difference_kind': title_kind,
-            'changes': {name: True for name, value in position_values if value is not None},
+            'changes': {**(json.loads(raw_changes) if raw_changes else {}),
+                        **{name: True for name, value in position_values
+                           if value is not None}},
         }
         grouped.setdefault(key, []).append({
             'id': finding_id, 'finding_type': finding_type,
