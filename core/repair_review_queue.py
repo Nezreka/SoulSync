@@ -481,7 +481,15 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
         elif risk == 'destructive':
             search += " AND finding_type IN ('reconciliation_extra','reconciliation_duplicate')"
         elif risk == 'manual':
-            search += (" AND (finding_type NOT IN ('reconciliation_metadata',"
+            # The queue modes are album buckets. A case with a file action
+            # belongs in File actions even when it also needs a decision.
+            search += (" AND NOT EXISTS (SELECT 1 FROM repair_findings file_action "
+                       "WHERE file_action.status = repair_findings.status "
+                       "AND file_action.job_id = repair_findings.job_id "
+                       "AND file_action.review_case_key = repair_findings.review_case_key "
+                       "AND file_action.finding_type IN "
+                       "('reconciliation_extra','reconciliation_duplicate')) "
+                       "AND (finding_type NOT IN ('reconciliation_metadata',"
                        "'reconciliation_extra','reconciliation_duplicate') OR " +
                        position_condition + " OR " + artist_replacement +
                        " OR COALESCE(last_error, '') != '' OR "

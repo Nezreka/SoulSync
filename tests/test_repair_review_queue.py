@@ -51,6 +51,28 @@ def test_metadata_filter_keeps_credit_replacement_in_needs_input():
     assert safe_finding_ids(db)[0] == []
 
 
+def test_queue_modes_partition_albums_with_mixed_decisions():
+    db = _Database()
+    db.add(1, '/music/ready/01.flac', {
+        'album_id': 1, 'album_title': 'Ready',
+        'changes': {'title': {'old': 'Typo', 'new': 'Title'}},
+        'confidence': 'clear',
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    db.add(2, '/music/manual/01.flac', {
+        'album_id': 2, 'album_title': 'Manual',
+    }, job_id='library_reconciliation', kind='reconciliation_unresolved')
+    db.add(3, '/music/files/01.flac', {
+        'album_id': 3, 'album_title': 'Files',
+    }, job_id='library_reconciliation', kind='reconciliation_extra')
+    db.add(4, '/music/files/02.flac', {
+        'album_id': 3, 'album_title': 'Files',
+    }, job_id='library_reconciliation', kind='reconciliation_unresolved')
+
+    totals = {mode: list_cases(db, job_id='library_reconciliation', risk=mode)['total']
+              for mode in ('', 'ready', 'manual', 'destructive')}
+    assert totals == {'': 3, 'ready': 1, 'manual': 1, 'destructive': 1}
+
+
 def test_release_candidate_can_be_pinned_without_release_finding():
     class AlbumDatabase:
         selected = None
