@@ -52947,14 +52947,8 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     --np-ambient-r: 29;
     --np-ambient-g: 185;
     --np-ambient-b: 84;
-    width: 90vw;
-    max-width: 880px;
     max-height: 85vh;
     max-height: 85dvh;
-    background: linear-gradient(180deg, rgba(24, 24, 24, 0.97) 0%, rgba(10, 10, 10, 1) 100%);
-    border: 1px solid var(--white-a06);
-    border-radius: 20px;
-    box-shadow: 0 32px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--white-a03);
     position: relative;
     overflow: hidden;
     transform: scale(1);
@@ -52963,18 +52957,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-modal::before {
     content: '';
     position: absolute;
-    top: -40%;
     left: -20%;
     width: 140%;
-    height: 100%;
-    background: radial-gradient(ellipse at 30% 20%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.35) 0%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.08) 40%,
-        transparent 70%);
     pointer-events: none;
     z-index: 0;
     transition: background 1.2s ease;
-    filter: blur(40px);
 }
 .np-modal > * {
     position: relative;
@@ -53001,10 +52988,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-radius: var(--radius-circle);
     transition: all 0.15s ease;
 }
-.np-close-btn:hover {
-    color: var(--white-a70);
-    background: var(--white-a06);
-}
 
 /* Layout */
 /* Short-viewport safety (the #1024 bug class): the modal is clamped to 85vh
@@ -53021,9 +53004,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-body {
     display: flex;
     flex-direction: row;
-    padding: 48px 40px 36px;
-    gap: 48px;
-    align-items: flex-start;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -53056,11 +53036,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Album Art */
 .np-album-art-container {
-    width: 300px;
-    height: 300px;
-    border-radius: var(--radius-lg);
     overflow: hidden;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 2px 12px rgba(0, 0, 0, 0.3);
     position: relative;
     background: var(--white-a03);
     flex-shrink: 0;
@@ -53092,30 +53068,21 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Track Info */
 .np-track-info {
-    text-align: center;
     width: 300px;
 }
 .np-track-title {
-    font-size: 22px;
-    font-weight: 700;
     color: #fff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.3px;
 }
 .np-artist-name {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--white-a55);
     margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .np-album-name {
-    font-size: 13px;
-    color: var(--white-a35);
     font-style: italic;
     margin-top: 3px;
     white-space: nowrap;
@@ -53123,32 +53090,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     text-overflow: ellipsis;
 }
 .np-format-badges {
-    display: flex;
-    gap: 6px;
     justify-content: center;
-    margin-top: 10px;
-    flex-wrap: wrap;
-}
-.np-format-badge {
-    padding: 2px 8px;
-    border-radius: var(--radius-xs);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    background: var(--white-a06);
-    color: var(--white-a45);
-    border: 1px solid var(--white-a06);
-}
-.np-format-badge.flac {
-    color: rgba(var(--accent-rgb), 0.9);
-    background: rgba(var(--accent-rgb), 0.08);
-    border-color: rgba(var(--accent-rgb), 0.15);
-}
-.np-format-badge.preview {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
-    border-color: rgba(251, 191, 36, 0.3);
 }
 
 /* Progress Section */
@@ -53156,7 +53098,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 100%;
 }
 .np-progress-bar-container {
-    position: relative;
     height: 20px;
     display: flex;
     align-items: center;
@@ -53165,9 +53106,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-progress-track {
     position: absolute;
     width: 100%;
-    height: 4px;
-    background: var(--white-a08);
-    border-radius: 2px;
     overflow: hidden;
 }
 .np-progress-bar-container:hover .np-progress-track {
@@ -53175,8 +53113,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 .np-progress-fill {
     height: 100%;
-    background: rgb(var(--accent-rgb));
-    border-radius: 2px;
     width: 0%;
     transition: width 0.1s linear;
 }
@@ -53240,23 +53176,15 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 20px;
 }
 .np-btn {
     background: none;
     border: none;
-    color: var(--white-a60);
     cursor: pointer;
     padding: 8px;
-    border-radius: var(--radius-circle);
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
-}
-.np-btn:hover {
-    color: #fff;
-    transform: scale(1.08);
 }
 .np-btn:active {
     transform: scale(0.95);
@@ -53267,26 +53195,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     transform: none;
 }
 .np-btn-play {
-    width: 60px;
-    height: 60px;
-    border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
-    color: #000;
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
     position: relative;
-}
-.np-btn-play:hover {
-    filter: brightness(1.15);
-    transform: scale(1.05);
-    box-shadow: 0 6px 28px rgba(var(--accent-rgb), 0.4);
 }
 .np-btn-play:active {
     filter: brightness(0.9);
     transform: scale(0.97);
-}
-.np-btn-shuffle.active,
-.np-btn-repeat.active {
-    color: rgb(var(--accent-rgb));
 }
 .np-btn-shuffle.active::after,
 .np-btn-repeat.active::after {
@@ -53298,7 +53211,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 4px;
     height: 4px;
     border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
 }
 .np-btn-shuffle,
 .np-btn-repeat {
@@ -53339,15 +53251,10 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-volume-track {
     position: absolute;
     width: 100%;
-    height: 4px;
-    background: var(--white-a08);
-    border-radius: 2px;
     overflow: hidden;
 }
 .np-volume-fill {
     height: 100%;
-    background: rgb(var(--accent-rgb));
-    border-radius: 2px;
     width: 70%;
     transition: width 0.05s linear;
 }
@@ -53422,8 +53329,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 .np-viz-bar {
     width: 3px;
-    background: rgb(var(--accent-rgb));
-    border-radius: 1.5px;
     height: 24px;
     transform-origin: bottom;
     transform: scaleY(0.125);
@@ -53561,14 +53466,8 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-color: var(--white-a20);
 }
 .np-radio-btn.active {
-    color: rgb(var(--accent-rgb));
     border-color: rgba(var(--accent-rgb), 0.3);
     background: rgba(var(--accent-rgb), 0.08);
-}
-.np-queue-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 /* Queue panel scrollbar */
@@ -53655,12 +53554,9 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 .np-lyrics-line {
     padding: 2px 0;
-    transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .np-lyrics-line.active {
-    color: rgb(var(--accent-rgb));
-    font-weight: 600;
     transform: translateX(4px);
 }
 
@@ -53737,41 +53633,16 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     gap: 2px;
 }
 .np-queue-item {
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-.np-queue-item:hover {
-    background: var(--white-a05);
 }
 .np-queue-item.active {
-    background: rgba(var(--accent-rgb), 0.12);
     border-left: 3px solid rgb(var(--accent-rgb));
 }
 .np-queue-item-info {
-    min-width: 0;
     flex: 1;
 }
 .np-queue-item-title {
-    font-size: 13px;
     color: var(--white-a85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.np-queue-item.active .np-queue-item-title {
-    color: rgb(var(--accent-light-rgb));
-}
-.np-queue-item-artist {
-    font-size: 11px;
-    color: var(--white-a35);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 .np-queue-item-remove {
     background: none;
@@ -53786,7 +53657,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     justify-content: center;
     border-radius: var(--radius-circle);
     flex-shrink: 0;
-    transition: all 0.15s ease;
 }
 .np-queue-item-remove:hover {
     color: rgba(255, 80, 80, 0.8);
