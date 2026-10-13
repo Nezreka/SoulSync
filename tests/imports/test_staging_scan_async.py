@@ -283,6 +283,91 @@ def test_inbox_while_scanning_caches_history_reads(tmp_path, monkeypatch):
     assert calls["n"] == 1
 
 
+def test_inbox_while_scanning_keeps_pathless_history_rows(tmp_path, monkeypatch):
+    """Review fold: the dedupe identity normpath'd the folder path
+    unconditionally, and normpath("") is "." — every history row without a
+    folder path shared one identity, so all but the newest were dropped
+    even with distinct hashes. Pathless rows stand on their hash alone."""
+    _force_scanning(monkeypatch)
+
+    class _Pathless(_InboxWorker):
+        def get_results(self, limit=200):
+            return [
+                {**_history_row(41, "Newer Pathless", "completed"), "folder_path": None},
+                {**_history_row(40, "Older Pathless", "completed"), "folder_path": ""},
+            ]
+
+    payload, status = routes.inbox(_full_runtime(_staging(tmp_path, 2)), _Pathless())
+    assert status == 200
+    assert {row["history_id"] for row in payload["items"]} == {40, 41}
+
+
+def test_inbox_while_scanning_survives_cross_mount_history_paths(tmp_path, monkeypatch):
+    """Review fold: on Windows, os.path.relpath raises ValueError when a
+    history path sits on another drive/share than the staging root (the
+    folder moved mounts). build_inbox must fall back to the full path —
+    before the guard, the error emptied the whole scanning payload."""
+    _force_scanning(monkeypatch)
+    real_relpath = os.path.relpath
+
+    def _cross_mount(path, start):
+        if str(path).startswith("/staging/"):
+            raise ValueError("path is on mount 'E:', start on mount 'C:'")
+        return real_relpath(path, start)
+
+    monkeypatch.setattr(os.path, "relpath", _cross_mount)
+    payload, status = routes.inbox(_full_runtime(_staging(tmp_path, 2)), _MixedWorker())
+    assert status == 200
+    by_name = {row["name"]: row for row in payload["items"]}
+    assert by_name["Needs Review Album"]["in_staging"] is True
+    assert by_name["Needs Review Album"]["rel_path"] == "/staging/Needs Review Album"
+    assert by_name["Failed Album"]["status"] == "failed"
+
+
+def test_scan_cache_invalidation_clears_history_cache(tmp_path, monkeypatch):
+    """Review fold: invalidate_staging_scan_cache() is what actions call
+    after moving files; it must drop the scanning history cache too, not
+    leave stale rows served for the rest of the TTL."""
+    _force_scanning(monkeypatch)
+    state = {"rows": [_history_row(51, "Before Move", "completed")]}
+
+    class _Shifting(_InboxWorker):
+        def get_results(self, limit=200):
+            return state["rows"]
+
+    rt = _full_runtime(_staging(tmp_path, 2))
+    payload, _ = routes.inbox(rt, _Shifting())
+    assert [row["name"] for row in payload["items"]] == ["Before Move"]
+    state["rows"] = [_history_row(52, "After Move", "completed")]
+    payload, _ = routes.inbox(rt, _Shifting())
+    assert [row["name"] for row in payload["items"]] == ["Before Move"]  # cache warm
+    routes.invalidate_staging_scan_cache()
+    payload, _ = routes.inbox(rt, _Shifting())
+    assert [row["name"] for row in payload["items"]] == ["After Move"]
+
+
+def test_inbox_while_scanning_shows_live_progress(tmp_path, monkeypatch):
+    """Review fold: a processing row built from history during a scan must
+    carry the worker's live track progress, like the settled inbox does."""
+    _force_scanning(monkeypatch)
+
+    class _Live(_MixedWorker):
+        def get_status(self):
+            status = super().get_status()
+            status["active_imports"] = [{
+                "folder_hash": "h13", "folder_name": "In Flight Album",
+                "status": "processing", "track_index": 3, "track_total": 9,
+                "track_name": "Song Three",
+            }]
+            return status
+
+    payload, status = routes.inbox(_full_runtime(_staging(tmp_path, 2)), _Live())
+    assert status == 200
+    by_name = {row["name"]: row for row in payload["items"]}
+    assert by_name["In Flight Album"]["live"] == {
+        "track_index": 3, "track_total": 9, "track_name": "Song Three"}
+
+
 def test_inbox_while_scanning_without_worker(tmp_path, monkeypatch):
     _force_scanning(monkeypatch)
     payload, status = routes.inbox(_full_runtime(_staging(tmp_path, 2)), None)

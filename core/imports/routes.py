@@ -403,6 +403,10 @@ def invalidate_staging_scan_cache() -> None:
     _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
     _staging_scan_problems.clear()
+    # the scanning payload's history cache is an invalidation target too:
+    # an action that moves files must not leave stale history rows behind
+    # for the rest of its TTL.
+    _scanning_history_cache.update({"path": None, "ts": 0.0, "rows": None, "problems": None})
 
 
 def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
@@ -489,8 +493,11 @@ def _scanning_history_rows(worker: Any, staging_path: str,
     seen_identities = set()
     deduped = []
     for hist in history:
+        # normpath only a real path: normpath("") is ".", which would give
+        # every pathless row the same identity and drop all but the newest.
         keys = {k for k in (hist.get("folder_hash"),
-                            os.path.normpath(hist.get("folder_path") or "")) if k}
+                            os.path.normpath(hist["folder_path"])
+                            if hist.get("folder_path") else None) if k}
         if keys & seen_identities:
             continue
         seen_identities |= keys
@@ -538,7 +545,8 @@ def _scanning_history_rows(worker: Any, staging_path: str,
                 is_single=(hist.get("total_files") or 0) <= 1,
             ))
         kept.extend(
-            r for r in build_inbox(candidates, [], staged_rows, [],
+            r for r in build_inbox(candidates, [], staged_rows,
+                                   status.get("active_imports") or [],
                                    staging_root=staging_path)
             if r["in_staging"])
 
