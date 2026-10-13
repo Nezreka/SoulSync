@@ -33,6 +33,12 @@ _NORM_INLINE_LIMIT = 5000
 _NORM_CHUNK = 20000
 # below this many rows a backfill skips the ANALYZE + wal checkpoint
 _NORM_STATS_MIN_ROWS = 1000
+# rows ANALYZE samples per index. same plans as a full ANALYZE on a 300k
+# track library (same 400 ownership decisions, same matched rows) in 78 ms
+# instead of 1.9 s, so it can run after every scan without blocking writers.
+_PLANNER_ANALYSIS_LIMIT = 1000
+_planner_stats_lock = threading.Lock()
+_planner_stats_threads = {}
 
 # a per-track credit like "A feat. B" or "A; B" is one string in the tracks
 # row; track_credits holds each credited name separately, indexed, so "is B
@@ -475,6 +481,7 @@ class MusicDatabase:
                 conn.close()
         except Exception as e:
             logger.debug(f"norm readiness check at init skipped: {e}")
+        self._kick_planner_stats_thread()
     
     def _ensure_wal_mode(self):
         """put the database in wal mode, once per process. the mode lives in
@@ -4459,21 +4466,77 @@ class MusicDatabase:
                 logger.debug(f"wal checkpoint after backfill skipped: {e}")
         return filled
 
-    def refresh_planner_stats(self) -> None:
+    _PLANNER_STATS_TABLES = ('tracks', 'artists', 'albums', 'track_credits')
+
+    def refresh_planner_stats(self, tables=None) -> None:
         """ANALYZE the matching tables. without statistics sqlite guesses, and
         on a real library it guessed the server_source index (one value for
         every row) over the artist and credit indexes, turning indexed lookups
-        back into full scans. cheap; run after backfills and scans."""
+        back into full scans. sampled, so cheap; run after backfills and scans."""
         try:
             conn = self._get_connection()
             try:
-                for table in ('tracks', 'artists', 'albums', 'track_credits'):
-                    conn.execute(f"ANALYZE {table}")
+                conn.execute(f"PRAGMA analysis_limit = {_PLANNER_ANALYSIS_LIMIT}")
+                for table in (tables or self._PLANNER_STATS_TABLES):
+                    conn.execute(f'ANALYZE "{table}"')
                 conn.commit()
             finally:
                 conn.close()
         except Exception as e:
             logger.debug(f"ANALYZE skipped: {e}")
+
+    @staticmethod
+    def _tables_missing_planner_stats(cursor) -> list:
+        """tables big enough to matter with an index sqlite has no statistics
+        for. an index without stats is assumed to narrow an equality to ~10
+        rows, so idx_tracks_source_owner (added after the last ANALYZE) looked
+        like the best way to find a track: every title search walked all 300k
+        rows through it, 1.4 s per missing track in a watchlist scan."""
+        has_stat1 = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'").fetchone()
+        analyzed = set()
+        if has_stat1:
+            analyzed = {(t, i) for t, i in cursor.execute(
+                "SELECT tbl, idx FROM sqlite_stat1 WHERE idx IS NOT NULL")}
+        stale = []
+        tables = [r[0] for r in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'")]
+        for table in tables:
+            indexes = [r[1] for r in cursor.execute(f'PRAGMA index_list("{table}")')]
+            if not any((table, i) not in analyzed for i in indexes):
+                continue
+            big = cursor.execute(
+                f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_NORM_STATS_MIN_ROWS - 1}').fetchone()
+            if big:
+                stale.append(table)
+        return stale
+
+    def _kick_planner_stats_thread(self):
+        """at boot, analyze whatever has an index without stats, off the boot
+        path. the check is a few pragmas; the thread only starts when there is
+        work, so a fresh or test database never starts one."""
+        try:
+            conn = self._get_connection()
+            try:
+                stale = self._tables_missing_planner_stats(conn.cursor())
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"planner stats check skipped: {e}")
+            return
+        if not stale:
+            return
+        key = str(self.database_path)
+        with _planner_stats_lock:
+            t = _planner_stats_threads.get(key)
+            if t is not None and t.is_alive():
+                return
+            t = threading.Thread(target=self.refresh_planner_stats, args=(stale,),
+                                 name="planner-stats", daemon=True)
+            _planner_stats_threads[key] = t
+        logger.info(f"planner stats: analyzing {len(stale)} table(s) with unanalyzed indexes: {', '.join(stale)}")
+        t.start()
 
     def _kick_norm_backfill_thread(self):
         """one background backfill per db path per process. a big library's
