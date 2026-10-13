@@ -6,8 +6,12 @@ Audiobooks: follow a whole series (backfill every volume or new books only), an 
 
 One downloads page for music and video, video wishlist downloads capped per run (thanks @c5pie), and Usenet can pull a requested song out of an album release — with an option to keep the album's other tracks too.
 
+Your own playlists get covers, descriptions and a duplicate button. Imports skip tracks you already own instead of reprocessing them (thanks SeadogsBooty), and the inbox stays honest while a scan is running.
+
+Big phone pass: 22 screenshots' worth of layout fixes. The player button is round and the EQ is reachable, settings titles and popups clear the menu button, the watchlist scrolls, and the dashboard cards stack instead of clipping (thanks @Thibs, @c5pie, gzetk).
+
 Scrobbling no longer dies with the listening stats toggle, and the web player scrobbles by Last.fm's rule (thanks @cin). Mirror playlists are safe from empty refreshes and empty payloads (thanks @splitsec2). Quarantine tells you when a song already arrived another way, and slowed/sped-up versions stop landing as the original (thanks @nick2000713).
 
-Also: the UI follows your accent color, dead CSS deleted by the thousand lines (thanks @Thundernerd), the watchlist only wishlists tracks credited to the artist you watch, playlist sync matches again, and a stack of library and import fixes.
+Also: the subtitle chain is a settings widget with a backfill for your existing library, the audiobook wishlist matches the music design, scrollbars fade as you scroll, standalone library scans work, Deezer re-logins when its session dies, AcoustID keys apply without a restart, the UI follows your accent color, dead CSS deleted by the thousand lines (thanks @Thundernerd), the watchlist only wishlists tracks credited to the artist you watch, playlist sync matches again, and a stack of library and import fixes.
 
 Full notes on GitHub.
