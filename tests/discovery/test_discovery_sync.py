@@ -666,11 +666,46 @@ def test_post_sync_starts_organize_download_when_skip_wishlist_add(patched_db):
         automation_id='auto-2',
         deps=deps,
         skip_wishlist_add=True,
+        organize_by_playlist=True,
     )
 
     assert len(org_calls) == 1
     assert org_calls[0]['mirrored_playlist_id'] == 7
     assert org_calls[0]['automation_id'] == 'auto-2'
+
+
+def test_post_sync_wishlist_skip_without_organize_queues_nothing(patched_db):
+    """#1689: skip_wishlist_add also comes from pipeline runs whose
+    wishlist skip was resolved on (checkbox / global toggle). The
+    followup must not treat that as organize-by-playlist — an organize
+    batch would download exactly the tracks the user opted out of —
+    and must not trigger wishlist processing either."""
+    org_calls = []
+    wishlist_calls = []
+    result = _FakeSyncResult(
+        matched_tracks=50,
+        failed_tracks=10,
+        total_tracks=60,
+    )
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(
+        sync_service=svc,
+        run_playlist_organize_download=lambda **kw: org_calls.append(kw) or {'status': 'started'},
+        process_wishlist_automatically=lambda **kw: wishlist_calls.append(kw),
+        is_wishlist_actually_processing=lambda: False,
+    )
+
+    ds.run_sync_task(
+        'auto_mirror_9',
+        'Pipeline Skip',
+        [_track()],
+        automation_id='auto-3',
+        deps=deps,
+        skip_wishlist_add=True,
+    )
+
+    assert org_calls == []
+    assert wishlist_calls == []
 
 
 def test_wing_it_mode_no_longer_blanket_skips_wishlist(patched_db):

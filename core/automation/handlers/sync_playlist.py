@@ -301,7 +301,16 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         log_line=f'Starting sync: {len(tracks_json)} tracks',
         log_type='success',
     )
-    skip_wishlist_add = bool(pl.get('organize_by_playlist'))
+    # Organize-by-playlist skips sync-time wishlist adds (its batch failure
+    # handling covers missing tracks instead). A pipeline run whose
+    # resolved skip_wishlist is set — the automation's "Skip wishlist
+    # processing" checkbox or the global wishlist_missing_tracks toggle
+    # (#1455) — must skip the adds too (#1689): the wishlist-phase skip
+    # alone still let every sync wishlist the tracks it was syncing.
+    # Standalone sync automations never set the key, so they are unchanged.
+    organize_by_playlist = bool(pl.get('organize_by_playlist'))
+    skip_wishlist_add = organize_by_playlist or bool(
+        config.get('skip_wishlist_add'))
     threading.Thread(
         target=deps.run_sync_task,
         args=(
@@ -310,6 +319,10 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         ),
         kwargs={
             'skip_wishlist_add': skip_wishlist_add,
+            # Kept separate from skip_wishlist_add (#1689): the post-sync
+            # followup starts an organize download batch only for a real
+            # organize-by-playlist skip, never for a wishlist-toggle skip.
+            'organize_by_playlist': organize_by_playlist,
             # a playlist's own Sync & download click, not a schedule (#1603)
             'user_initiated': bool(config.get('user_initiated')),
         },
