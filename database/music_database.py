@@ -4503,7 +4503,10 @@ class MusicDatabase:
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'")]
         for table in tables:
-            indexes = [r[1] for r in cursor.execute(f'PRAGMA index_list("{table}")')]
+            # a WITHOUT ROWID table's primary key stats are filed under the
+            # table's own name, not its sqlite_autoindex name
+            indexes = [table if r[3] == 'pk' and (table, table) in analyzed else r[1]
+                       for r in cursor.execute(f'PRAGMA index_list("{table}")')]
             if not any((table, i) not in analyzed for i in indexes):
                 continue
             big = cursor.execute(

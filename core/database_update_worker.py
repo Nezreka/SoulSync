@@ -210,8 +210,9 @@ class DatabaseUpdateWorker:
         # the scan writes artists and albums without their normalized text;
         # fill it now so the first ownership check after a scan is the fast one
         try:
-            if self.database is not None and hasattr(self.database, 'ensure_norm_backfilled'):
-                self.database.ensure_norm_backfilled()
+            db = getattr(self, 'database', None)
+            if db is not None and hasattr(db, 'ensure_norm_backfilled'):
+                db.ensure_norm_backfilled()
         except Exception as e:
             logger.warning(f"norm backfill after scan failed (non-fatal): {e}")
         # a scan reshapes the library, so the planner's picture of it goes
@@ -219,8 +220,9 @@ class DatabaseUpdateWorker:
         # indexes went unanalyzed and every title search walked the whole
         # tracks table. sampled, ~80 ms on 300k tracks.
         try:
-            if self.database is not None and hasattr(self.database, 'refresh_planner_stats'):
-                self.database.refresh_planner_stats()
+            db = getattr(self, 'database', None)
+            if db is not None and hasattr(db, 'refresh_planner_stats'):
+                db.refresh_planner_stats()
         except Exception as e:
             logger.warning(f"planner stats after scan failed (non-fatal): {e}")
         self._emit_signal('finished', *args)

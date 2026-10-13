@@ -140,3 +140,32 @@ def test_a_finished_scan_refreshes_the_stats():
     w.database = FakeDb()
     w._emit_finished(0, 0, 0, 0, 0)
     assert calls == ["norm", "stats", "finished"]
+
+
+def test_a_without_rowid_table_is_not_flagged_forever(tmp_path):
+    """sqlite files a WITHOUT ROWID table's primary key stats under the table
+    name, so its sqlite_autoindex never shows up in sqlite_stat1. reading that
+    as unanalyzed re-analyzed track_credits on every boot."""
+    c = sqlite3.connect(str(tmp_path / "wr.db"))
+    c.execute("CREATE TABLE credits (track_id TEXT, name TEXT, PRIMARY KEY (track_id, name)) WITHOUT ROWID")
+    c.execute("CREATE INDEX idx_credits_name ON credits (name)")
+    c.executemany("INSERT INTO credits VALUES (?, ?)", [(str(i), f"n{i % 50}") for i in range(2000)])
+    c.commit()
+    assert MusicDatabase._tables_missing_planner_stats(c.cursor()) == ["credits"]
+    c.execute("ANALYZE credits")
+    c.commit()
+    assert MusicDatabase._tables_missing_planner_stats(c.cursor()) == []
+    c.close()
+
+
+def test_a_worker_without_a_database_finishes_quietly(monkeypatch):
+    import core.database_update_worker as mod
+    from core.database_update_worker import DatabaseUpdateWorker
+
+    warned = []
+    monkeypatch.setattr(mod.logger, "warning", lambda *a, **k: warned.append(a))
+    w = DatabaseUpdateWorker.__new__(DatabaseUpdateWorker)
+    w.callbacks = {"finished": []}
+    w.post_scan_hook = None
+    w._emit_finished(0, 0, 0, 0, 0)
+    assert warned == []
