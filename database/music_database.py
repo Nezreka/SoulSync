@@ -7633,19 +7633,9 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) as play_count
-                FROM listening_history lh
-                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
-                -- join scans tracks per history row (see core/stats/queries.py)
-                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                JOIN artists a ON a.id = t.artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
-                GROUP BY a.genres
-                ORDER BY play_count DESC
-                LIMIT 50
-            """)
+            # every payload, not the top 50. a genre spread over lots of small
+            # artist payloads used to fall off the cut and undercount.
+            cursor.execute(self._played_genres_sql(where))
             # Parse genre JSON and aggregate
             genre_counts = {}
             for row in cursor.fetchall():
@@ -7668,7 +7658,8 @@ class MusicDatabase:
             total = sum(genre_counts.values()) or 1
             result = sorted(
                 [{'genre': g, 'play_count': c, 'percentage': round(c / total * 100, 1)} for g, c in genre_counts.items()],
-                key=lambda x: x['play_count'], reverse=True
+                # name breaks ties, or which one makes the cut is up to sqlite
+                key=lambda x: (-x['play_count'], str(x['genre']))
             )[:15]
             return result
         except Exception as e:
@@ -7684,6 +7675,29 @@ class MusicDatabase:
     # acquisition history. We have both halves, so we can answer "you own 40%
     # metal and play 12% of it" — which is a fact about the user, not a number
     # about the software.
+
+    @staticmethod
+    def _played_genres_sql(where):
+        """plays per artist genre payload, as (genres, plays) rows. counts each
+        track's plays first, then joins each played track once. joining per
+        play hit tracks 150k times for 11k distinct tracks, 0.5 s on every
+        genre shelf."""
+        return f"""
+            WITH played AS MATERIALIZED (
+                SELECT lh.db_track_id AS tid, COUNT(*) AS n
+                FROM listening_history lh
+                {where} AND lh.db_track_id IS NOT NULL
+                GROUP BY lh.db_track_id
+            )
+            SELECT a.genres, SUM(played.n) AS plays
+            FROM played
+            -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
+            -- join scans tracks per history row (see core/stats/queries.py)
+            JOIN tracks t ON t.id = CAST(played.tid AS TEXT)
+            JOIN artists a ON a.id = t.artist_id
+            WHERE a.genres IS NOT NULL AND a.genres != ''
+            GROUP BY a.genres
+        """
 
     @staticmethod
     def _accumulate_genres(genre_counts, genres_str, weight):
@@ -7736,17 +7750,7 @@ class MusicDatabase:
 
             played = {}
             where = self._listening_time_filter(time_range, alias='lh', owner=owner)
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) AS plays
-                FROM listening_history lh
-                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
-                -- join scans tracks per history row (see core/stats/queries.py)
-                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                JOIN artists a ON a.id = t.artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
-                GROUP BY a.genres
-            """)
+            cursor.execute(self._played_genres_sql(where))
             for genres_str, count in cursor.fetchall():
                 self._accumulate_genres(played, genres_str, count)
 
