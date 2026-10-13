@@ -20,10 +20,13 @@
  * guard, so the weekly board gains the hourly board's behaviour.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  AUTO_SYNC_BUCKETS,
   autoSyncGroupSidebarRows,
+  autoSyncIntervalLabel,
+  autoSyncParseCustomInterval,
   autoSyncSourceLabel,
   autoSyncPlaylistHealth,
   type AutoSyncHistoryEntry,
@@ -270,19 +273,38 @@ function SidebarCard({
   playlist,
   displayName,
   badge,
+  onPick,
 }: {
   playlist: MirroredRow;
   displayName?: string;
   badge: AutoSyncSidebarBadge;
+  /** Tap/click activation, when the board offers one (see AutoSyncPickMenu). */
+  onPick?: (anchor: HTMLElement, playlist: MirroredRow) => void;
 }) {
   return (
     <div
-      className={`auto-sync-playlist ${badge.stateClass}`}
+      className={`auto-sync-playlist ${badge.stateClass}${onPick ? ' pickable' : ''}`}
       draggable
       data-playlist-id={playlist.id}
       onDragStart={(e) => {
         startDrag(e, playlist.id);
       }}
+      {...(onPick
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            title: 'Schedule this playlist',
+            onClick: (e: React.MouseEvent<HTMLDivElement>) => {
+              onPick(e.currentTarget, playlist);
+            },
+            onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onPick(e.currentTarget, playlist);
+              }
+            },
+          }
+        : {})}
     >
       <div className="auto-sync-playlist-name" title={displayName || playlist.name || ''}>
         {displayName || playlist.name}
@@ -304,15 +326,23 @@ function SidebarGroupBody({
   badgeFor,
   expandedKinds,
   onToggleKind,
+  onPickPlaylist,
 }: {
   rows: MirroredRow[];
   badgeFor: (p: MirroredRow) => AutoSyncSidebarBadge;
   expandedKinds: Set<string>;
   onToggleKind: (kind: string) => void;
+  onPickPlaylist?: (anchor: HTMLElement, playlist: MirroredRow) => void;
 }) {
   const { flat, groups } = autoSyncGroupSidebarRows(rows);
   const card = (p: MirroredRow, displayName?: string) => (
-    <SidebarCard key={String(p.id)} playlist={p} displayName={displayName} badge={badgeFor(p)} />
+    <SidebarCard
+      key={String(p.id)}
+      playlist={p}
+      displayName={displayName}
+      badge={badgeFor(p)}
+      onPick={onPickPlaylist}
+    />
   );
   return (
     <>
@@ -361,6 +391,7 @@ export function AutoSyncSidebar({
   expandedKinds,
   onToggleKind,
   onBulkMenu,
+  onPickPlaylist,
 }: {
   groups: { source: string; rows: MirroredRow[] }[];
   unavailable: MirroredRow[];
@@ -370,6 +401,7 @@ export function AutoSyncSidebar({
   expandedKinds: Set<string>;
   onToggleKind: (kind: string) => void;
   onBulkMenu?: (event: React.MouseEvent, source: string) => void;
+  onPickPlaylist?: (anchor: HTMLElement, playlist: MirroredRow) => void;
 }) {
   return (
     <aside className="auto-sync-sidebar">
@@ -427,6 +459,7 @@ export function AutoSyncSidebar({
                 badgeFor={badgeFor}
                 expandedKinds={expandedKinds}
                 onToggleKind={onToggleKind}
+                onPickPlaylist={onPickPlaylist}
               />
             </div>
           ))
@@ -530,6 +563,156 @@ export function AutoSyncBoardIntro({ heading, blurb }: { heading: string; blurb:
         <strong>{heading}</strong>
         <span>{blurb}</span>
       </div>
+    </div>
+  );
+}
+
+export interface AutoSyncPickMenuProps {
+  playlist: MirroredRow;
+  /** The playlist's current hourly interval, when it has one. */
+  currentHours?: number;
+  /** Where the tapped card sits, so the popover lands under it. */
+  anchor: { top: number; left: number };
+  onSchedule: (hours: number) => void;
+  /** Only offered while the playlist is scheduled. */
+  onUnschedule?: () => void;
+  onClose: () => void;
+}
+
+/**
+ * Tap-to-schedule — NEW, no vanilla counterpart.
+ *
+ * Scheduling was drag-only, and HTML5 drag does not fire on touch, so on
+ * a phone the boards could be looked at but not used: a sidebar card had
+ * no activation at all. Tapping (or Enter/Space on) a sidebar card opens
+ * this popover; picking an interval calls the board's existing drop
+ * handler, so a tap lands exactly where a drop would — same automation,
+ * same validation, no second scheduling path. Desktop keeps drag and
+ * gains the click as a bonus; a drag still ends in dragend, not a click,
+ * so the two never both fire.
+ *
+ * The chrome deliberately reuses the bulk menu's classes (it is the same
+ * popover, one playlist instead of one source), including its inline
+ * custom-interval field — the repo's window.prompt replacement, with
+ * the same `autoSyncParseCustomInterval` validation.
+ */
+export function AutoSyncPickMenu({
+  playlist,
+  currentHours,
+  anchor,
+  onSchedule,
+  onUnschedule,
+  onClose,
+}: AutoSyncPickMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [custom, setCustom] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    // Same hazard as the bulk menu: the click that OPENED this popover
+    // would immediately close it, so the outside-click listener defers
+    // by a tick.
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    const id = setTimeout(() => {
+      document.addEventListener('click', onDocClick);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', onDocClick);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    // Escape dismisses THIS popover, not the modal behind it — the modal's
+    // own Escape handler is on document, so this runs in capture phase and
+    // stops it, exactly like the weekly editor.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+
+  const submitCustom = () => {
+    const parsed = autoSyncParseCustomInterval(custom ?? '');
+    if ('error' in parsed) {
+      setError(parsed.error);
+      return;
+    }
+    onSchedule(parsed.hours);
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="auto-sync-bulk-menu auto-sync-pick-menu"
+      style={{ top: `${anchor.top}px`, left: `${anchor.left}px` }}
+    >
+      <div className="auto-sync-pick-menu-name" title={playlist.name || ''}>
+        {playlist.name}
+      </div>
+      <div className="auto-sync-bulk-menu-title">
+        {currentHours
+          ? `Scheduled · ${autoSyncIntervalLabel(currentHours).toLowerCase()}`
+          : 'Not scheduled'}
+      </div>
+      <div className="auto-sync-bulk-menu-buckets">
+        {AUTO_SYNC_BUCKETS.map((h) => (
+          <button
+            key={h}
+            type="button"
+            className={h === currentHours ? 'current' : ''}
+            aria-pressed={h === currentHours}
+            onClick={() => {
+              onSchedule(h);
+            }}
+          >
+            {autoSyncIntervalLabel(h)}
+          </button>
+        ))}
+      </div>
+      {custom === null ? (
+        <button
+          type="button"
+          className="auto-sync-bulk-menu-custom"
+          onClick={() => {
+            setCustom('6');
+          }}
+        >
+          Custom interval…
+        </button>
+      ) : (
+        <div className="auto-sync-bulk-menu-custom-row">
+          <input
+            type="number"
+            min={1}
+            aria-label="Custom interval in hours"
+            placeholder="e.g. 6, 36, 96"
+            value={custom}
+            autoFocus
+            onChange={(e) => {
+              setCustom(e.target.value);
+              setError('');
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') submitCustom();
+            }}
+          />
+          <button type="button" onClick={submitCustom}>
+            Schedule
+          </button>
+          {error ? <small className="auto-sync-bulk-menu-error">{error}</small> : null}
+        </div>
+      )}
+      {onUnschedule ? (
+        <button type="button" className="auto-sync-bulk-menu-unschedule" onClick={onUnschedule}>
+          Unschedule
+        </button>
+      ) : null}
     </div>
   );
 }
