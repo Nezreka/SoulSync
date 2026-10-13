@@ -29,6 +29,9 @@ logger = get_logger("deezer_download")
 
 # Deezer API endpoints
 _GW_API = "https://www.deezer.com/ajax/gw-light.php"
+# gateway reads the session heal may re-execute after a re-login (#1677);
+# writes (playlist.create / playlist.addSongs) are healed but never retried
+_GW_READ_METHODS = frozenset({"song.getData"})
 _MEDIA_API = "https://media.deezer.com/v1/get_url"
 
 # Blowfish decryption secret (public knowledge, used by all Deezer clients)
@@ -134,6 +137,13 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         # next try, doubling each miss (see is_authenticated)
         self._auth_retry_at = 0.0
         self._auth_retry_wait = 0.0
+        # session-token heals (#1677): one re-login at a time, and the login's
+        # own gateway call must never trigger a nested heal
+        self._reauth_lock = threading.Lock()
+        self._reauth_thread = None
+        # the token a heal already failed on — a burst of calls carrying it
+        # shares that failure until the retry backoff expires, not a login each
+        self._heal_failed_token = None
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -198,6 +208,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         """Authenticate with Deezer using ARL cookie token."""
         try:
             self._session.cookies.set('arl', arl)
+            # The bootstrap must not present the previous session's token:
+            # Deezer validates it before issuing a new one, so a dead token
+            # would reject the very login meant to replace it (#1677). The
+            # ARL test endpoint bootstraps with 'null' for the same reason.
+            self._api_token = None
 
             # Get user data and API token
             resp = self._gw_call('deezer.getUserData')
@@ -235,16 +250,38 @@ class DeezerDownloadClient(DownloadSourcePlugin):
             return False
 
     def _gw_call(self, method: str, params: dict = None) -> Optional[dict]:
-        """Call the Deezer gateway API."""
+        """Call the Deezer gateway API.
+
+        The gateway's api_token is a web-session token: it ages out over
+        hours while the ARL itself stays valid (#1677). When Deezer answers
+        VALID_TOKEN_REQUIRED the session is dead, not the ARL — re-login
+        once with the configured ARL and retry the call, instead of failing
+        every download until the container restarts."""
+        results, token_required, token_used = self._gw_call_once(method, params)
+        if not token_required:
+            return results
+        if not self._reauthenticate_session(token_used):
+            return None
+        if method not in _GW_READ_METHODS:
+            # healed for the next call, but never re-execute a write: if the
+            # token died mid-request the write may already have landed, and
+            # a blind retry would duplicate it (playlist.addSongs/create)
+            return None
+        results, _, _ = self._gw_call_once(method, params)
+        return results
+
+    def _gw_call_once(self, method: str, params: dict = None):
+        """One gateway attempt: (results, token_required, token_used)."""
         with self._api_lock:
             elapsed = time.time() - self._last_request
             if elapsed < self._min_interval:
                 time.sleep(self._min_interval - elapsed)
             self._last_request = time.time()
 
+        token_used = self._api_token
         try:
             url_params = {'method': method, 'api_version': '1.0'}
-            url_params['api_token'] = self._api_token if self._api_token else 'null'
+            url_params['api_token'] = token_used if token_used else 'null'
 
             resp = self._session.post(
                 _GW_API,
@@ -259,17 +296,51 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 error = data['error']
                 if isinstance(error, dict):
                     error_msg = error.get('VALID_TOKEN_REQUIRED') or error.get('GATEWAY_ERROR') or str(error)
+                    token_required = 'VALID_TOKEN_REQUIRED' in error
                 else:
                     error_msg = str(error)
+                    token_required = 'VALID_TOKEN_REQUIRED' in error_msg
                 if error_msg:
                     logger.warning(f"Deezer API error ({method}): {error_msg}")
-                    return None
+                    return None, token_required, token_used
 
-            return data.get('results', {})
+            return data.get('results', {}), False, token_used
 
         except Exception as e:
             logger.error(f"Deezer API call failed ({method}): {e}")
-            return None
+            return None, False, token_used
+
+    def _reauthenticate_session(self, failed_token) -> bool:
+        """Re-login after the gateway rejected the session token (#1677).
+
+        One heal at a time: a burst of downloads hitting the same dead token
+        waits for a single re-login, and the login's own gateway call
+        (deezer.getUserData, running on the healing thread) can never
+        recurse into a nested heal. A failed re-login drops the client
+        into the pending-ARL backoff via reconnect(), so it stops claiming
+        to be authenticated."""
+        if getattr(self, '_reauth_thread', None) == threading.get_ident():
+            return False  # this call IS the login's own gateway call
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            return False  # logins stay deferred until boot is over
+        with self._reauth_lock:
+            if self._authenticated and self._api_token != failed_token:
+                return True  # another thread already refreshed the session
+            if (failed_token is not None
+                    and failed_token == getattr(self, '_heal_failed_token', None)
+                    and time.time() < self._auth_retry_at):
+                return False  # this token already failed a heal; backoff owns it
+            self._reauth_thread = threading.get_ident()
+            try:
+                ok = self.reconnect()
+            except Exception as e:  # noqa: BLE001 — a heal must never break the caller
+                logger.error(f"Deezer session re-login raised: {e}")
+                ok = False
+            finally:
+                self._reauth_thread = None
+            self._heal_failed_token = None if ok else failed_token
+            return ok
 
     # ─── Status & Config ─────────────────────────────────────────
 
@@ -380,6 +451,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         else:
             self._pending_arl = None
             self._auth_retry_wait = 0.0
+            # a successful login supersedes any heal failure recorded against
+            # an earlier session — its marker and backoff must not suppress
+            # a future heal if this token is ever the one rejected (#1677)
+            self._heal_failed_token = None
+            self._auth_retry_at = 0.0
         return ok
 
     def get_quality_label(self) -> str:
@@ -1095,8 +1171,14 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         # Get track data from private API
         track_data = self._get_track_data(track_id)
         if not track_data:
-            self._set_error(download_id, 'Deezer would not return this track (expired ARL, '
-                                         'or not available in your region)')
+            if not getattr(self, '_authenticated', False):
+                # the session died and the re-login failed too — only now is
+                # the ARL itself the suspect (#1677)
+                self._set_error(download_id, 'Deezer login failed — expired ARL, '
+                                             'or the ARL in Settings is invalid')
+            else:
+                self._set_error(download_id, 'Deezer would not return this track '
+                                             '(not available in your region, or removed)')
             return None
 
         track_token = track_data.get('TRACK_TOKEN', '')
