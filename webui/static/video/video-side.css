@@ -293,6 +293,17 @@ body[data-side="video"][data-video-page="video-chat"] #chat-page {
 body[data-side="video"][data-video-page="video-chat"] #video-page-host {
     display: none !important;
 }
+/* Downloads is a shared page too, but it is a React route, not a legacy
+   page: its host is #webui-react-root (a plain .page, so the blanket rule
+   above hides it). Reveal it the same way and hide the video host.
+   data-video-page is set by gotoUnifiedDownloads() in video-side.js —
+   navigate() hands off before showPage() can set it. */
+body[data-side="video"][data-video-page="video-downloads"] #webui-react-root {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-downloads"] #video-page-host {
+    display: none !important;
+}
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
    library mapping) — hidden on the music side. */
 body[data-side="music"] [data-video-only] {
