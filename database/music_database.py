@@ -2196,6 +2196,20 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
 
+            # #1701: where reorganize last placed the album. the release it used
+            # and a fingerprint of the naming settings at the time, so a later
+            # scan keeps that release and only re-flags when the user changes
+            # their naming or pins a different version. NULL = never placed.
+            _placement_cols = {
+                'reorganize_source': 'TEXT DEFAULT NULL',
+                'reorganize_album_id': 'TEXT DEFAULT NULL',
+                'reorganize_fp': 'TEXT DEFAULT NULL',
+            }
+            for _col, _typedef in _placement_cols.items():
+                if album_cols and _col not in album_cols:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
+                    logger.info("Added %s column to albums table (#1701)", _col)
+
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
 

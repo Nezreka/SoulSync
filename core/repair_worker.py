@@ -3611,10 +3611,21 @@ class RepairWorker:
         # Resolve container/host path mismatches, keep only files that exist.
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
         resolved = []
+        folder_there = False
         for p in track_paths:
             rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
             if os.path.isfile(rp):
                 resolved.append(rp)
+            elif os.path.isdir(os.path.dirname(rp)):
+                folder_there = True
+
+        if not resolved and folder_there:
+            # #1701: the album's folder is right here but its files aren't, so
+            # they moved after the scan. calling that a success wrote nothing to
+            # disk and hid it, same folder rule as retire_vanished_findings.
+            return {'success': False, 'stale': True,
+                    'error': "Cover saved to the library, but the album's files moved "
+                             "since the scan so none were written. The next scan picks it up"}
 
         if not resolved:
             # Media-server-only album (no local files): DB thumbnail is all we can set.
