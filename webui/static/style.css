@@ -16692,11 +16692,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     opacity: 1;
     cursor: default;
 }
+/* rendered on body, placed by placeCoverMenu: the hero clips its overflow */
 .mm-cover-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 30;
+    position: fixed;
+    z-index: 10001;
     width: 248px;
     padding: 10px;
     border-radius: var(--radius-lg);

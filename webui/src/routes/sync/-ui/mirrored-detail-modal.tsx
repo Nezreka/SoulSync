@@ -23,7 +23,8 @@
  * styling here. The actions are props because the call sites differ.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
 import type { MirroredTrack } from '../-sync.mirrored';
@@ -175,6 +176,30 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
   );
 }
 
+/**
+ * where the cover menu goes. it renders on body (the hero clips with
+ * overflow hidden and the modal's transform traps fixed children), so it
+ * places itself off the cover: below if it fits, else above, else the
+ * roomier side, always kept on screen.
+ */
+export function placeCoverMenu(
+  anchor: { top: number; bottom: number; left: number },
+  menu: { width: number; height: number },
+  viewport: { width: number; height: number },
+  gap = 8,
+  margin = 8,
+): { top: number; left: number } {
+  const below = viewport.height - anchor.bottom - gap - margin;
+  const above = anchor.top - gap - margin;
+  let top: number;
+  if (menu.height <= below) top = anchor.bottom + gap;
+  else if (menu.height <= above) top = anchor.top - gap - menu.height;
+  else top = below >= above ? anchor.bottom + gap : anchor.top - gap - menu.height;
+  top = Math.max(margin, Math.min(top, viewport.height - margin - menu.height));
+  const left = Math.max(margin, Math.min(anchor.left, viewport.width - margin - menu.width));
+  return { top, left };
+}
+
 export function MirroredDetailModal({
   playlistId,
   data,
@@ -209,6 +234,48 @@ export function MirroredDetailModal({
     setCoverError(null);
     setDescEditing(false);
   }, [data]);
+  const coverWrapRef = useRef<HTMLDivElement>(null);
+  const coverMenuRef = useRef<HTMLDivElement>(null);
+  const [coverPos, setCoverPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!coverOpen) {
+      setCoverPos(null);
+      return;
+    }
+    const place = () => {
+      const wrap = coverWrapRef.current;
+      const menu = coverMenuRef.current;
+      if (!wrap || !menu) return;
+      setCoverPos(
+        placeCoverMenu(
+          wrap.getBoundingClientRect(),
+          { width: menu.offsetWidth, height: menu.offsetHeight },
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      );
+    };
+    place();
+    // it lives outside the modal now, so close it the way a menu closes
+    const onDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (coverMenuRef.current?.contains(target) || coverWrapRef.current?.contains(target)) return;
+      setCoverOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCoverOpen(false);
+    };
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+    // error text and the remove row change its height
+  }, [coverOpen, coverError, data.image_url]);
   const runCoverEdit = async (edit: () => Promise<unknown>) => {
     setCoverBusy(true);
     setCoverError(null);
@@ -273,7 +340,7 @@ export function MirroredDetailModal({
           ) : null}
           <div className="mm-hero-content">
             {own ? (
-              <div className="mm-cover-wrap">
+              <div className="mm-cover-wrap" ref={coverWrapRef}>
                 {heroArt ? (
                   <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
                 ) : (
@@ -290,88 +357,102 @@ export function MirroredDetailModal({
                 >
                   {coverBusy ? 'Saving…' : 'Change cover'}
                 </button>
-                {coverOpen ? (
-                  <div className="mm-cover-menu" role="menu">
-                    <label className="mm-cover-item">
-                      Upload a photo…
-                      <input
-                        type="file"
-                        accept="image/*"
-                        hidden
-                        disabled={coverBusy}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = '';
-                          if (file) void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
-                        }}
-                      />
-                    </label>
-                    {artTracks.length > 0 ? (
-                      <>
-                        <div className="mm-cover-label">From this playlist</div>
-                        <div className="mm-cover-tiles">
-                          {artTracks.slice(0, 8).map((t, i) => (
-                            <button
-                              key={`${t.position ?? i}-${t.image_url}`}
-                              type="button"
-                              className="mm-cover-tile"
-                              title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
-                              disabled={coverBusy}
-                              onClick={() =>
-                                void runCoverEdit(() =>
-                                  setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
-                                )
-                              }
-                            >
-                              <img src={t.image_url} alt="" loading="lazy" />
-                            </button>
-                          ))}
-                        </div>
-                      </>
-                    ) : null}
-                    <div className="mm-cover-label">Or paste an image link</div>
-                    <div className="mm-cover-urlrow">
-                      <input
-                        type="url"
-                        className="mm-cover-url"
-                        placeholder="https://…"
-                        value={coverUrlDraft}
-                        disabled={coverBusy}
-                        onChange={(event) => setCoverUrlDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter' && coverUrlDraft.trim()) {
-                            void runCoverEdit(() =>
-                              setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                            );
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="mm-btn mm-btn-ghost mm-btn-sm"
-                        disabled={coverBusy || !coverUrlDraft.trim()}
-                        onClick={() =>
-                          void runCoverEdit(() =>
-                            setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
-                          )
+                {coverOpen
+                  ? createPortal(
+                      <div
+                        ref={coverMenuRef}
+                        className="mm-cover-menu"
+                        role="menu"
+                        data-popover-layer=""
+                        style={
+                          coverPos
+                            ? { top: coverPos.top, left: coverPos.left }
+                            : { top: 0, left: 0, visibility: 'hidden' }
                         }
                       >
-                        Set
-                      </button>
-                    </div>
-                    {data.image_url ? (
-                      <button
-                        type="button"
-                        className="mm-cover-item mm-cover-remove"
-                        disabled={coverBusy}
-                        onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
-                      >
-                        Remove cover
-                      </button>
-                    ) : null}
-                    {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
-                  </div>
-                ) : null}
+                        <label className="mm-cover-item">
+                          Upload a photo…
+                          <input
+                            type="file"
+                            accept="image/*"
+                            hidden
+                            disabled={coverBusy}
+                            onChange={(event) => {
+                              const file = event.target.files?.[0];
+                              event.target.value = '';
+                              if (file)
+                                void runCoverEdit(() => uploadPlaylistCover(playlistId, file));
+                            }}
+                          />
+                        </label>
+                        {artTracks.length > 0 ? (
+                          <>
+                            <div className="mm-cover-label">From this playlist</div>
+                            <div className="mm-cover-tiles">
+                              {artTracks.slice(0, 8).map((t, i) => (
+                                <button
+                                  key={`${t.position ?? i}-${t.image_url}`}
+                                  type="button"
+                                  className="mm-cover-tile"
+                                  title={`${t.track_name ?? ''} — ${t.artist_name ?? ''}`}
+                                  disabled={coverBusy}
+                                  onClick={() =>
+                                    void runCoverEdit(() =>
+                                      setPlaylistCoverFromTrack(playlistId, t.position ?? i + 1),
+                                    )
+                                  }
+                                >
+                                  <img src={t.image_url} alt="" loading="lazy" />
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
+                        <div className="mm-cover-label">Or paste an image link</div>
+                        <div className="mm-cover-urlrow">
+                          <input
+                            type="url"
+                            className="mm-cover-url"
+                            placeholder="https://…"
+                            value={coverUrlDraft}
+                            disabled={coverBusy}
+                            onChange={(event) => setCoverUrlDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' && coverUrlDraft.trim()) {
+                                void runCoverEdit(() =>
+                                  setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                                );
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="mm-btn mm-btn-ghost mm-btn-sm"
+                            disabled={coverBusy || !coverUrlDraft.trim()}
+                            onClick={() =>
+                              void runCoverEdit(() =>
+                                setPlaylistCoverUrl(playlistId, coverUrlDraft.trim()),
+                              )
+                            }
+                          >
+                            Set
+                          </button>
+                        </div>
+                        {data.image_url ? (
+                          <button
+                            type="button"
+                            className="mm-cover-item mm-cover-remove"
+                            disabled={coverBusy}
+                            onClick={() => void runCoverEdit(() => clearPlaylistCover(playlistId))}
+                          >
+                            Remove cover
+                          </button>
+                        ) : null}
+                        {coverError ? <div className="mm-cover-error">{coverError}</div> : null}
+                      </div>,
+                      document.body,
+                    )
+                  : null}
               </div>
             ) : heroArt ? (
               <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />

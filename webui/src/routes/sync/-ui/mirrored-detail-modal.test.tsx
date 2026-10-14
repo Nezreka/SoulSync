@@ -8,7 +8,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MirroredDetailModal } from './mirrored-detail-modal';
+import { MirroredDetailModal, placeCoverMenu } from './mirrored-detail-modal';
 
 const NOW = Date.UTC(2026, 7, 5, 12, 0, 0);
 
@@ -306,6 +306,27 @@ describe('MirroredDetailModal — user playlist meta', () => {
     expect(screen.getByRole('button', { name: 'Remove cover' })).toBeInTheDocument();
   });
 
+  it('the cover menu renders on body, outside the clipping hero', () => {
+    renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
+    fireEvent.click(screen.getByRole('button', { name: 'Change cover' }));
+    const menu = document.querySelector('.mm-cover-menu');
+    expect(menu?.parentElement).toBe(document.body);
+    expect(menu?.closest('.mm-hero')).toBeNull();
+  });
+
+  it('the cover menu closes on escape and on an outside click, not an inside one', () => {
+    renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
+    const toggle = screen.getByRole('button', { name: 'Change cover' });
+    fireEvent.click(toggle);
+    fireEvent.mouseDown(screen.getByPlaceholderText('https://…'));
+    expect(document.querySelector('.mm-cover-menu')).not.toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.mm-cover-menu')).toBeNull();
+    fireEvent.click(toggle);
+    fireEvent.mouseDown(screen.getByText('One'));
+    expect(document.querySelector('.mm-cover-menu')).toBeNull();
+  });
+
   it('duplicate calls through and the tab opens the copy', async () => {
     const onDuplicate = vi.fn(async () => {});
     renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn(), onDuplicate });
@@ -315,5 +336,38 @@ describe('MirroredDetailModal — user playlist meta', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Duplicate' })).toHaveTextContent('Duplicate'),
     );
+  });
+});
+
+describe('placeCoverMenu', () => {
+  const menu = { width: 248, height: 300 };
+  const vp = { width: 1200, height: 900 };
+
+  it('drops below the cover when it fits', () => {
+    expect(placeCoverMenu({ top: 100, bottom: 228, left: 300 }, menu, vp)).toEqual({
+      top: 236,
+      left: 300,
+    });
+  });
+
+  it('flips above when below would run off screen', () => {
+    expect(placeCoverMenu({ top: 500, bottom: 628, left: 300 }, menu, vp)).toEqual({
+      top: 192,
+      left: 300,
+    });
+  });
+
+  it('stays on screen when neither side fits', () => {
+    const pos = placeCoverMenu({ top: 120, bottom: 248, left: 300 }, menu, {
+      width: 1200,
+      height: 360,
+    });
+    expect(pos.top).toBe(8);
+  });
+
+  it('pulls left on a narrow screen', () => {
+    expect(
+      placeCoverMenu({ top: 100, bottom: 228, left: 200 }, menu, { width: 390, height: 900 }).left,
+    ).toBe(134);
   });
 });
