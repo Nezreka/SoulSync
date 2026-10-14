@@ -385,6 +385,28 @@ def _album(db, path):
         conn.commit()
 
 
+def test_apply_guard_accepts_current_plan_over_older_unlocked_canonical(tmp_path):
+    path = tmp_path / '01.flac'
+    path.write_bytes(b'audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    with db._get_connection() as conn:
+        conn.execute('''INSERT INTO reconcile_album_plans
+            (case_id, album_id, album_folder, source, release_id,
+             evidence_signature, plan_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            ('case', '10', str(tmp_path), 'musicbrainz', 'chosen-release',
+             'evidence', '{}'))
+        conn.commit()
+    worker = RepairWorker(database=db, transfer_folder=str(tmp_path))
+    details = {'album_id': 10, 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'chosen-release'}
+    assert worker._reconciliation_release_guard(details) is None
+    assert db.get_album_canonical(10)['album_id'] == 'chosen-release'
+    assert not db.get_album_canonical(10)['locked']
+    assert worker._reconciliation_release_guard({**details, 'release_id': 'stale'})
+
+
 def test_partial_album_can_mark_only_selected_missing_slots_wanted(tmp_path):
     path = tmp_path / '01 - Laid to Rest.flac'
     path.write_bytes(b'audio')
@@ -1120,6 +1142,36 @@ def test_logical_album_groups_same_db_album_across_arbitrary_folders():
     assert len(grouped) == 1
     assert set(next(iter(grouped.values()))) == set(path for paths in folders.values()
                                                     for path in paths)
+    assert trusted == {}
+
+
+def test_replacement_fragment_joins_same_release_in_sibling_folder():
+    original = '/music/Ghost/[2018] Prequelle'
+    downloaded = '/music/Ghost/[2018]Album Ghost - Prequelle'
+    folders = {
+        original: [f'{original}/{number:02}.flac' for number in (1, 2, 3, 5)],
+        downloaded: [f'{downloaded}/04 - See the Light.mp3'],
+    }
+    tracks = {path: {'album_id': 10, 'track_number': number, 'disc_number': 1}
+              for number, path in zip((1, 2, 3, 5), folders[original])}
+    tracks[folders[downloaded][0]] = {
+        'album_id': 11, 'track_number': 4, 'disc_number': 1}
+    albums = {
+        10: {'album_title': 'Prequelle (FYE exclusive metallic vinyl)',
+             'artist_name': 'Ghost', 'owner_profile_id': 1,
+             'canonical_source': 'musicbrainz', 'canonical_album_id': 'same-release'},
+        11: {'album_title': 'Prequelle', 'artist_name': 'Ghost', 'owner_profile_id': 1,
+             },
+    }
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert list(grouped) == [original]
+    assert len(grouped[original]) == 5
+    assert trusted == {original: 10}
+
+    albums[11]['canonical_source'] = 'musicbrainz'
+    albums[11]['canonical_album_id'] = 'different-edition'
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert len(grouped) == 2
     assert trusted == {}
 
 

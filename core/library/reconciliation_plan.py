@@ -559,13 +559,29 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             ambiguity_reasons.append('another release track fits nearly as well')
         if competing_file:
             ambiguity_reasons.append('another local file fits this release track')
+        # A high numbered file outside this release can belong to a different
+        # album even when AcoustID links the fingerprint to this song too.
+        # Versioned top recordings make that provenance conflict actionable.
+        local_number = int(tags.get('track_number') or 0)
+        largest_slot_number = max((int(item.get('track_number') or 0)
+                                   for item in slots), default=0)
+        outlying_version = (
+            local_number > largest_slot_number + 1
+            and local_number != int(slot.get('track_number') or 0)
+            and any(_version_markers(str(recording.get('title') or ''))
+                    - slot_version_markers(slot)
+                    for recording in top_recordings)
+        )
+        if outlying_version:
+            ambiguity_reasons.append(
+                'file position is outside this release and audio suggests another version')
         pairs.append({
             'file_index': file_index, 'slot_index': slot_index,
             'score': weight, 'reasons': reasons,
             'duration_delta_ms': assigned_duration_delta,
             'ambiguity_reasons': ambiguity_reasons,
             'confidence': 'manual' if forced_pairs.get(file_index) == slot_index else
-                          'ambiguous' if ambiguous or close_alternative or competing_file
+                          'ambiguous' if ambiguous or close_alternative or competing_file or outlying_version
                           else 'clear' if weight >= 4500 else 'likely',
         })
     # A fingerprint can still name the predominant song when audio from the

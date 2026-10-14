@@ -491,7 +491,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
     fireEvent.click(selectedRow);
     expect(screen.queryByLabelText('Selected action detail')).toBeNull();
-    expect(selectedRow.getAttribute('aria-expanded')).toBe('false');
+    expect(selectedRow.getAttribute('aria-selected')).toBe('false');
     expect(screen.getByRole('row', { name: /Hourglass/ })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Show tracks'), { target: { value: 'numbering' } });
     expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('numbering');

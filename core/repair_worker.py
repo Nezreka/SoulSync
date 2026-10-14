@@ -1773,7 +1773,8 @@ class RepairWorker:
             return {'success': False, 'error': 'Unsupported review action'}
 
     def pin_review_release(self, case_id: str, *, source: str, release_id: str,
-                           expected_source: str, expected_release_id: str) -> dict:
+                           expected_source: str, expected_release_id: str,
+                           manual: bool = False, preview: bool = False) -> dict:
         """Pin a displayed candidate even when no release ambiguity was emitted."""
         with self._review_apply_lock:
             case = self.get_review_case(case_id, job_id='library_reconciliation')
@@ -1789,6 +1790,27 @@ class RepairWorker:
             candidate = next((row for row in plan.get('candidates') or []
                               if row.get('source') == source and
                               str(row.get('release_id') or '') == release_id), None)
+            if manual or preview:
+                import re
+                if source != 'musicbrainz' or not re.fullmatch(
+                        r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}',
+                        release_id):
+                    return {'success': False, 'error': 'Enter a MusicBrainz release MBID'}
+                release = self.mb_client.get_release(
+                    release_id, includes=['recordings', 'artist-credits']) if self.mb_client else None
+                if not release or str(release.get('id') or '').lower() != release_id.lower():
+                    return {'success': False, 'error': 'That MusicBrainz release could not be loaded'}
+                tracks = [track for medium in release.get('media') or []
+                          for track in medium.get('tracks') or []]
+                if not tracks:
+                    return {'success': False, 'error': 'That release has no track list'}
+                if preview:
+                    return {'success': True, 'release_title': release.get('title') or '',
+                            'track_count': len(tracks),
+                            'tracks': [track.get('title') or track.get('recording', {}).get('title') or ''
+                                       for track in tracks]}
+                candidate = candidate or {'source': source, 'release_id': release_id,
+                                          'clear': 0, 'matched': 1}
             if not candidate:
                 return {'success': False, 'stale': True,
                         'error': 'That release is no longer a candidate for this album'}
@@ -1845,6 +1867,25 @@ class RepairWorker:
             finding_ids=ids, allow_review_ids=True, review_approved=True,
             organize_album_ids=organize_album_ids,
             review_case_folders=refresh_cases,
+        )
+
+    def start_review_album_metadata(self, case_id: str) -> dict:
+        """Apply every displayed metadata edit for one explicitly approved album."""
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        if not case:
+            return {'started': False, 'error': 'This album plan changed; refresh it first'}
+        decisions = (case.get('plan') or {}).get('decisions') or []
+        blocked = {'release_conflicts', 'album_completeness'}
+        if any(row.get('category') in blocked for row in decisions):
+            return {'started': False,
+                    'error': 'Choose the release and album scope before applying metadata'}
+        ids = [row['id'] for row in case.get('items') or []
+               if row.get('finding_type') == 'reconciliation_metadata']
+        if not ids:
+            return {'started': False, 'error': 'No proposed metadata edits remain'}
+        return self.start_bulk_fix(
+            finding_ids=ids, allow_review_ids=True, review_approved=True,
+            review_case_folders=[(case_id, case.get('folder') or '')],
         )
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
@@ -4063,15 +4104,42 @@ class RepairWorker:
         album_id = details.get('album_id')
         if album_id is None:
             return None
+        source, release_id = details.get('source'), details.get('release_id')
         current = self.db.get_album_canonical(album_id)
-        if current and (current['source'], current['album_id']) != (
-                details.get('source'), details.get('release_id')):
-            return 'The selected album release changed; rescan before applying'
+        if current and (current['source'], current['album_id']) == (source, release_id):
+            return None
+        folder = details.get('album_folder')
+        if not source or not release_id or not folder:
+            return 'The album release differs from the reviewed plan; rescan before applying'
+        # A scan can select a better edition than the older, unlocked canonical
+        # album row. Applying that plan is approval of its displayed edition.
+        # Check the persisted snapshot before updating the canonical row so a
+        # stale finding can never silently switch releases.
+        conn = self.db._get_connection()
+        try:
+            plan = conn.execute('''
+                SELECT source, release_id, evidence_signature FROM reconcile_album_plans
+                WHERE album_id = ? AND album_folder = ?
+            ''', (str(album_id), folder)).fetchone()
+        except Exception:
+            plan = None
+        finally:
+            conn.close()
+        if (not plan or (plan[0], plan[1]) != (source, release_id) or
+                (details.get('evidence_signature') and
+                 plan[2] != details['evidence_signature'])):
+            return 'The album plan changed; rescan before applying'
+        if current and (current['source'], current['album_id']) != (source, release_id):
+            if current.get('locked'):
+                return 'The pinned album release differs from this plan; rescan before applying'
+            if not self.db.set_album_canonical(album_id, source, release_id,
+                                               score=1.0, locked=False):
+                return 'Could not update the album release before applying'
         return None
 
     def _fix_reconciliation_metadata(self, entity_type, entity_id, file_path, details):
-        error = (self._reconciliation_release_guard(details) or
-                 self._reconciliation_file_guard(file_path, details))
+        error = (self._reconciliation_file_guard(file_path, details) or
+                 self._reconciliation_release_guard(details))
         if error:
             return {'success': False, 'error': error}
         track_id = details.get('track_id') or entity_id
@@ -4293,9 +4361,14 @@ class RepairWorker:
 
     def _fix_reconciliation_assignment(self, entity_type, entity_id, file_path, details):
         choice = details.get('_fix_action') or ''
-        if (choice in ('replace', 'request_missing') and
-                details.get('version_conflict') and
+        if (choice == 'request_missing' and
+                (details.get('version_conflict') or details.get('replacement_available')) and
                 isinstance(details.get('replacement_track'), dict)):
+            return self._fix_reconciliation_extra(entity_type, entity_id,
+                                                  file_path, details)
+        if (choice == 'quarantine' and any(
+                'outside this release' in str(reason)
+                for reason in details.get('ambiguity_reasons') or [])):
             return self._fix_reconciliation_extra(entity_type, entity_id,
                                                   file_path, details)
         if not isinstance(choice, str) or not choice.startswith('assign:'):
@@ -4310,8 +4383,8 @@ class RepairWorker:
         release_id = details.get('release_id')
         if album_id is None or not source or not release_id:
             return {'success': False, 'error': 'Select an album release first'}
-        error = (self._reconciliation_release_guard(details) or
-                 self._reconciliation_file_guard(file_path, details))
+        error = (self._reconciliation_file_guard(file_path, details) or
+                 self._reconciliation_release_guard(details))
         if error:
             return {'success': False, 'error': error}
         conn = self.db._get_connection()
@@ -4441,8 +4514,8 @@ class RepairWorker:
         if action not in ('quarantine', 'replace', 'request_missing'):
             return {'success': False,
                     'error': 'Choose a version action explicitly'}
-        error = (self._reconciliation_release_guard(details) or
-                 self._reconciliation_file_guard(file_path, details))
+        error = (self._reconciliation_file_guard(file_path, details) or
+                 self._reconciliation_release_guard(details))
         if error:
             return {'success': False, 'error': error}
         track_id = details.get('track_id')
@@ -4469,7 +4542,9 @@ class RepairWorker:
         replacement_name = ''
         if action in ('replace', 'request_missing'):
             if (details.get('audio_conflict') != 'different_recording' and
-                    not details.get('version_conflict')):
+                    not details.get('version_conflict') and
+                    not (action == 'request_missing' and
+                         details.get('replacement_available'))):
                 return {'success': False, 'error': 'No reviewed version conflict is available'}
             slot = details.get('replacement_track')
             if not isinstance(slot, dict) or not slot.get('source_track_id'):

@@ -192,6 +192,14 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
             values.add((disc_number, track_number))
         return values
 
+    def release_identity(album):
+        if album.get('canonical_source') and album.get('canonical_album_id'):
+            return album['canonical_source'], str(album['canonical_album_id'])
+        for column, source in _SOURCES.items():
+            if album.get(column):
+                return source, str(album[column])
+        return None
+
     # A box set can be split between files in the release folder and a Disc N
     # child while the media-server scan assigns those two locations different
     # album rows. Join only this physical parent/child shape, with the same
@@ -216,14 +224,6 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
                 _album_identity_title(child_album.get('album_title'))):
             continue
 
-        def release_identity(album):
-            if album.get('canonical_source') and album.get('canonical_album_id'):
-                return album['canonical_source'], str(album['canonical_album_id'])
-            for column, source in _SOURCES.items():
-                if album.get(column):
-                    return source, str(album[column])
-            return None
-
         identities = {identity for identity in
                       (release_identity(parent_album), release_identity(child_album))
                       if identity}
@@ -238,6 +238,52 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
         groups[parent].extend(groups.pop(child))
         trusted[parent] = anchor_id
 
+    # Replacement downloads can be imported as a new album row in a sibling
+    # folder, sometimes with an extra edition qualifier on the original row.
+    # Join only a one-file gap filler to one nearby release-identified anchor.
+    def base_title(album):
+        return normalize(re.split(r'\s*[\[(]', str(album.get('album_title') or ''), maxsplit=1)[0])
+
+    for fragment in sorted(list(groups)):
+        if fragment not in groups or len(groups[fragment]) != 1:
+            continue
+        ids = album_ids(groups[fragment])
+        if len(ids) != 1:
+            continue
+        fragment_id = next(iter(ids))
+        fragment_album = albums.get(fragment_id) or {}
+        fragment_positions = positions(groups[fragment])
+        if not fragment_positions or not base_title(fragment_album):
+            continue
+        candidates = []
+        for anchor, paths in groups.items():
+            if (anchor == fragment or len(paths) < 3 or
+                    os.path.dirname(anchor) != os.path.dirname(fragment)):
+                continue
+            anchor_ids = album_ids(paths)
+            if len(anchor_ids) != 1 or fragment_id in anchor_ids:
+                continue
+            anchor_id = next(iter(anchor_ids))
+            anchor_album = albums.get(anchor_id) or {}
+            if (not _album_has_release_id(anchor_album) or
+                    base_title(anchor_album) != base_title(fragment_album) or
+                    normalize(anchor_album.get('artist_name') or '') !=
+                    normalize(fragment_album.get('artist_name') or '') or
+                    (anchor_album.get('owner_profile_id') or 1) !=
+                    (fragment_album.get('owner_profile_id') or 1)):
+                continue
+            anchor_identity = release_identity(anchor_album)
+            fragment_identity = release_identity(fragment_album)
+            if fragment_identity and fragment_identity != anchor_identity:
+                continue
+            anchor_positions = positions(paths)
+            if anchor_positions and not fragment_positions & anchor_positions:
+                candidates.append((anchor, anchor_id))
+        if len(candidates) == 1:
+            anchor, anchor_id = candidates[0]
+            groups[anchor].extend(groups.pop(fragment))
+            trusted[anchor] = anchor_id
+
     buckets: dict[tuple[object, str], list[str]] = defaultdict(list)
     for folder, paths in groups.items():
         ids = album_ids(paths)
@@ -251,6 +297,8 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     for bucket in buckets.values():
         anchors = []
         for folder in bucket:
+            if folder not in groups:
+                continue
             ids = album_ids(groups[folder])
             album_id = next(iter(ids))
             album = albums.get(album_id) or {}
@@ -2077,6 +2125,10 @@ class LibraryReconciliationJob(RepairJob):
                         slot, pair['slot_index'], numbering_mode, slots)
                     tags = file['tags']
                     if pair['confidence'] not in ('clear', 'manual'):
+                        competing_paths = [files[extra_index]['path']
+                                           for extra_index, rivals in
+                                           plan.get('competing_files', {}).items()
+                                           if pair['file_index'] in rivals]
                         if (pair['file_index'] in duplicate_indexes and
                                 pair.get('ambiguity_reasons') == [
                                     'another local file fits this release track']):
@@ -2093,10 +2145,22 @@ class LibraryReconciliationJob(RepairJob):
                             details={**common, 'current_tags': tags, 'acoustid': file['acoustid'],
                                      'fingerprint_key': file['acoustid'].get('fingerprint_key'),
                                      'expected_title': slot['title'], 'match_reasons': pair['reasons'],
+                                     'expected_artist': slot.get('artist') or common['artist_name'],
                                      'file_duration_ms': tags.get('duration_ms') or 0,
                                      'expected_duration_ms': slot.get('duration_ms') or 0,
+                                     'track_id': file['db']['id'] if file.get('db') else None,
+                                     'replacement_available': bool(slot.get('source_track_id')),
+                                     'replacement_track': {
+                                         'name': slot['title'],
+                                         'artist': slot.get('artist') or common['artist_name'],
+                                         'track_number': slot.get('track_number'),
+                                         'disc_number': slot.get('disc_number') or 1,
+                                         'duration_ms': slot.get('duration_ms') or 0,
+                                         'source_track_id': slot.get('source_track_id'),
+                                     },
                                      'expected_preview_url': slot.get('preview_url') or '',
                                      'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
+                                     'competing_copies': competing_paths,
                                      'expected_recording_disambiguation':
                                      slot.get('recording_disambiguation') or '',
                                      'current_recording_disambiguation':
@@ -2363,6 +2427,7 @@ class LibraryReconciliationJob(RepairJob):
                                'audio_conflict': ('different_recording'
                                                   if different_recording else ''),
                                'version_conflict': version_conflict,
+                               'expected_artist': (replacement_track or {}).get('artist') or '',
                                'replacement_track': replacement_track}
                     details['assignment_options'] = assignment_options
                     if emit(

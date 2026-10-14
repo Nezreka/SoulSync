@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 
 import type { ReviewFinding } from '../-review.api';
 
+import { musicBrainzBrowserUrl } from './musicbrainz-links';
 import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
@@ -61,11 +62,7 @@ function MusicBrainzId({ value, kind }: { value: unknown; kind: 'release' | 'rec
   const id = label(value);
   if (!id) return null;
   return (
-    <a
-      href={`https://musicbrainz.org/${kind}/${encodeURIComponent(id)}`}
-      target="_blank"
-      rel="noreferrer"
-    >
+    <a href={musicBrainzBrowserUrl(kind, id)} target="_blank" rel="noreferrer">
       {id}
     </a>
   );
@@ -846,10 +843,10 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
               <dd>{label(details.release_disambiguation)}</dd>
             </div>
           )}
-          {Boolean(details.artist_name) && (
+          {Boolean(details.expected_artist || replacement.artist || details.artist_name) && (
             <div>
-              <dt>Artist</dt>
-              <dd>{label(details.artist_name)}</dd>
+              <dt>Track artist</dt>
+              <dd>{label(details.expected_artist || replacement.artist || details.artist_name)}</dd>
             </div>
           )}
           {expectedDisambiguation && (
@@ -1088,17 +1085,24 @@ export function ReconciliationEvidence({
           <AudioEvidence details={details} />
         </div>
       )}
-      {(!prominent || objects(details.checked_files).length > 0 || reasons.length > 0) && (
+      {prominent && reasons.length > 0 && (
+        <section className={styles.technicalCard}>
+          <h5>Why this track was paired</h5>
+          <p>{reasons.join(' · ')}</p>
+          {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
+        </section>
+      )}
+      {(!prominent || objects(details.checked_files).length > 0) && (
         <details className={styles.technicalEvidence}>
           <summary>
             <EvidenceIcon name="info" /> Technical evidence
-            <span>Files, tags, IDs, and scoring details</span>
+            <span>Raw files, tags, and IDs</span>
           </summary>
           <div className={styles.technicalGrid}>
             {!prominent && <Facts finding={finding} details={details} />}
             {!prominent && <AudioEvidence details={details} />}
             <CheckedFiles details={details} />
-            {reasons.length > 0 && (
+            {!prominent && reasons.length > 0 && (
               <section className={styles.technicalCard}>
                 <h5>Why this track was paired</h5>
                 <p>{reasons.join(' · ')}</p>

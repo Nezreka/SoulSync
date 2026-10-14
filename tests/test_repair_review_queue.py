@@ -106,6 +106,56 @@ def test_release_candidate_can_be_pinned_without_release_finding():
     assert stale['stale']
 
 
+def test_manual_musicbrainz_release_is_previewed_before_pinning():
+    release_id = '301434dc-e59a-467d-b950-abfa9a2ad32e'
+    class AlbumDatabase:
+        selected = None
+        def set_album_canonical(self, album_id, source, selected_id, *, score, locked):
+            self.selected = (album_id, source, selected_id, locked)
+            return True
+    class MusicBrainz:
+        def get_release(self, mbid, includes):
+            assert mbid == release_id
+            return {'id': release_id, 'title': 'The Essential *NSYNC',
+                    'media': [{'tracks': [{'title': 'Song one'}, {'title': 'Song two'}]}]}
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = AlbumDatabase()
+    worker._mb_client = MusicBrainz()
+    worker._review_apply_lock = threading.RLock()
+    worker.get_review_case = lambda *_args, **_kwargs: {
+        'album_id': 7, 'folder': '/music/album',
+        'album_plan': {'source': 'itunes', 'release_id': 'old', 'candidates': []},
+    }
+    worker._schedule_album_refresh = lambda *_args: True
+    args = {'case_id': 'case', 'source': 'musicbrainz', 'release_id': release_id,
+            'expected_source': 'itunes', 'expected_release_id': 'old'}
+    preview = worker.pin_review_release(**args, preview=True)
+    assert preview['success'] and preview['track_count'] == 2
+    assert worker.db.selected is None
+    selected = worker.pin_review_release(**args, manual=True)
+    assert selected['success'] and worker.db.selected == (7, 'musicbrainz', release_id, True)
+
+
+def test_album_apply_all_includes_reviewed_metadata_but_not_other_decisions():
+    worker = RepairWorker.__new__(RepairWorker)
+    case = {
+        'folder': '/music/album', 'plan': {'decisions': []},
+        'items': [
+            {'id': 1, 'finding_type': 'reconciliation_metadata', 'review_tier': 'ready'},
+            {'id': 2, 'finding_type': 'reconciliation_metadata', 'review_tier': 'manual'},
+            {'id': 3, 'finding_type': 'reconciliation_unresolved', 'review_tier': 'manual'},
+        ],
+    }
+    worker.get_review_case = lambda *_args, **_kwargs: case
+    captured = {}
+    worker.start_bulk_fix = lambda **kwargs: captured.update(kwargs) or {'started': True}
+    assert worker.start_review_album_metadata('album-case')['started']
+    assert captured['finding_ids'] == [1, 2]
+    assert captured['review_case_folders'] == [('album-case', '/music/album')]
+    case['plan']['decisions'] = [{'category': 'release_conflicts'}]
+    assert not worker.start_review_album_metadata('album-case')['started']
+
+
 def test_album_title_cleanup_keeps_edition_and_drops_pressing_plant():
     from core.repair_jobs.library_reconciliation import _clean_album_display_title
 

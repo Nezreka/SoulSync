@@ -133,7 +133,8 @@ def repair_review_queue_pin_release(case_id):
             case_id, source=str(data.get('source') or ''),
             release_id=str(data.get('release_id') or ''),
             expected_source=str(data.get('expected_source') or ''),
-            expected_release_id=str(data.get('expected_release_id') or ''))
+            expected_release_id=str(data.get('expected_release_id') or ''),
+            manual=bool(data.get('manual')), preview=bool(data.get('preview')))
         return jsonify(result), 200 if result.get('success') else (409 if result.get('stale') else 400)
     except Exception as exc:
         logger.error('Error pinning review release: %s', exc, exc_info=True)
@@ -172,6 +173,19 @@ def repair_review_queue_apply_ready():
     except Exception as exc:
         logger.error('Error starting ready reconciliation changes: %s', exc, exc_info=True)
         return jsonify({'started': False, 'error': 'Could not start ready changes'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/apply-metadata', methods=['POST'])
+def repair_review_queue_apply_album_metadata(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    try:
+        result = worker.start_review_album_metadata(case_id)
+        return jsonify(result), 200 if result.get('started') else 400
+    except Exception as exc:
+        logger.error('Error starting album metadata changes: %s', exc, exc_info=True)
+        return jsonify({'started': False, 'error': 'Could not start album changes'}), 500
 
 @bp.route('/api/repair/status', methods=['GET'])
 def repair_status():

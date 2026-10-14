@@ -263,7 +263,16 @@ export async function pinReviewRelease(
   caseId: string,
   candidate: { source: string; release_id: string },
   current: { source?: string; release_id?: string },
-): Promise<{ success: boolean; message?: string; error?: string; refresh_queued?: boolean }> {
+  options: { manual?: boolean; preview?: boolean } = {},
+): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+  refresh_queued?: boolean;
+  release_title?: string;
+  track_count?: number;
+  tracks?: string[];
+}> {
   const response = await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/release`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -272,6 +281,7 @@ export async function pinReviewRelease(
       release_id: candidate.release_id,
       expected_source: current.source,
       expected_release_id: current.release_id,
+      ...options,
     }),
   });
   return (await response.json()) as {
@@ -336,6 +346,16 @@ export async function startReadyChanges(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ case_id: caseId || '', organize }),
+    }),
+  );
+}
+
+export async function startAlbumMetadataChanges(
+  caseId: string,
+): Promise<{ started: boolean; total?: number; error?: string }> {
+  return readJson(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/apply-metadata`, {
+      method: 'POST',
     }),
   );
 }

@@ -112,6 +112,23 @@ def test_verified_recording_length_filters_an_unrelated_fingerprint_link():
     assert result['pairs'][0]['confidence'] == 'clear'
 
 
+def test_out_of_range_position_and_live_fingerprint_block_renumbering():
+    file = _file('Come Back Down', '/album/16 - Come Back Down.mp3', 274000,
+                 {'mbid': 'album', 'title': 'Come Back Down',
+                  'artist': 'Lifehouse', 'score': 0.97})
+    file['tags'].update({'track_number': 16, 'disc_number': 1, 'artist': 'Lifehouse'})
+    file['acoustid']['recordings'].append(
+        {'mbid': 'live', 'title': 'Come Back Down (live in Portland)',
+         'artist': 'Lifehouse', 'score': 0.97})
+    slots = [{'title': 'Come Back Down', 'recording_mbid': 'album',
+              'artist': 'Lifehouse', 'track_number': 1, 'disc_number': 1,
+              'duration_ms': 274000}]
+    result = reconcile_folder([file], slots)
+    assert result['pairs'][0]['confidence'] == 'ambiguous'
+    assert any('outside this release' in reason
+               for reason in result['pairs'][0]['ambiguity_reasons'])
+
+
 def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_length():
     files = [
         _file('The Tourist', '/Radiohead/OK Computer/12 - The Tourist.flac', 323000),

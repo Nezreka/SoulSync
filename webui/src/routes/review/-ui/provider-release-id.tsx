@@ -1,7 +1,9 @@
+import { musicBrainzBrowserUrl } from './musicbrainz-links';
+
 function releaseUrl(source: string, releaseId: string): string | null {
   switch (source.toLowerCase()) {
     case 'musicbrainz':
-      return `https://musicbrainz.org/release/${encodeURIComponent(releaseId)}`;
+      return musicBrainzBrowserUrl('release', releaseId);
     case 'itunes':
       return `https://music.apple.com/us/album/${encodeURIComponent(releaseId)}`;
     case 'deezer':

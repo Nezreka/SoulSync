@@ -414,27 +414,60 @@
   background: #302719;
   color: #ffe0a4;
 }
+.loadingSpinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  border: 2px solid #b58a3d;
+  border-top-color: #fff0cc;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: reviewSpin 0.8s linear infinite;
+}
+@keyframes reviewSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .workflowSteps {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 0;
   margin-top: 16px;
+  padding-left: 15px;
+  border-left: 2px solid #454a60;
 }
 .workflowSteps button {
+  position: relative;
   display: grid;
   gap: 5px;
   min-width: 0;
-  padding: 11px;
-  border: 1px solid #49725d;
+  margin: 0 0 9px 14px;
+  padding: 12px 15px;
+  border: 1px solid #3f669a;
   border-radius: 10px;
-  background: #1a3027;
+  background: #1b293d;
   color: #e7f3eb;
   text-align: left;
   cursor: pointer;
 }
+.workflowSteps button::before {
+  content: '';
+  position: absolute;
+  left: -24px;
+  top: 17px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #78a7e8;
+  border-radius: 50%;
+  background: #141620;
+}
 .workflowSteps button[data-state='needs-review'] {
   border-color: #987846;
   background: #30291d;
+}
+.workflowSteps button[data-state='needs-review']::before {
+  border-color: #e2b561;
 }
 .workflowSteps span {
   color: #bca8ff;
@@ -1027,6 +1060,92 @@
   gap: 14px;
   align-items: start;
 }
+.trackWorkspace > .trackMatrix {
+  min-width: 0;
+}
+.secondaryButton {
+  padding: 7px 11px;
+  border: 1px solid #535a73;
+  border-radius: 8px;
+  background: #292d40;
+  color: #eef0f7;
+  cursor: pointer;
+}
+.secondaryButton:hover {
+  border-color: #a898ef;
+  background: #34304e;
+}
+.manualRelease {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #454a60;
+  border-radius: 10px;
+  background: #171b29;
+}
+.manualRelease h4 {
+  margin: 0 0 5px;
+}
+.manualRelease p {
+  margin: 0 0 12px;
+  color: #b7bed0;
+}
+.manualRelease > div:first-of-type {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.manualRelease input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #535a73;
+  border-radius: 8px;
+  background: #10121b;
+  color: #eef0f7;
+}
+.manualReleasePreview {
+  margin-top: 15px;
+}
+.manualReleasePreview ol {
+  max-height: 230px;
+  overflow: auto;
+  padding-left: 25px;
+  color: #c5cbd9;
+}
+.manualReleasePreview button {
+  padding: 8px 12px;
+  border: 1px solid #9477dc;
+  border-radius: 8px;
+  background: #554094;
+  color: #fff;
+  cursor: pointer;
+}
+.musicBrainzLinks {
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid #454a60;
+  border-radius: 10px;
+}
+.musicBrainzLinks summary {
+  cursor: pointer;
+}
+.musicBrainzLinks p {
+  color: #b7bed0;
+}
+.musicBrainzLinks > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.musicBrainzLinks input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #535a73;
+  border-radius: 8px;
+  background: #10121b;
+  color: #eef0f7;
+}
 .trackInspector {
   position: sticky;
   top: 16px;
@@ -1369,6 +1488,38 @@
 .readySummaryList b {
   color: #bff5d8;
   font-size: 12px;
+  white-space: nowrap;
+}
+.safeChangeFiles {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+}
+.safeChangeFiles button {
+  text-align: left;
+}
+.albumApplyAll {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid #3f669a;
+  border-radius: 11px;
+  background: #1b293d;
+}
+.albumApplyAll p {
+  margin: 5px 0 0;
+  color: #bdc8dc;
+}
+.albumApplyAll button {
+  padding: 9px 12px;
+  border: 1px solid #6c9ad6;
+  border-radius: 8px;
+  background: #28517f;
+  color: #fff;
+  cursor: pointer;
   white-space: nowrap;
 }
 .planContext {
@@ -2389,9 +2540,6 @@
 }
 
 @media (max-width: 900px) {
-  .workflowSteps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .trackWorkspace {
     grid-template-columns: 1fr;
   }
