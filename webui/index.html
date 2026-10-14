@@ -9889,6 +9889,18 @@
                                                     <input type="text" id="api-key-label"
                                                         placeholder="e.g. Discord Bot, Home Assistant">
                                                 </div>
+                                                <div class="form-group" style="margin-bottom: 8px;">
+                                                    <label>Access:</label>
+                                                    <select id="api-key-scope">
+                                                        <option value="read" selected>Read-only (stats and library, for dashboards)</option>
+                                                        <option value="admin">Admin (can change settings and everything else)</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        A read-only key can fetch library and status data. It cannot
+                                                        change anything or read settings, keys or profiles.
+                                                    </div>
+                                                </div>
                                                 <div class="form-actions">
                                                     <button class="auth-button" onclick="generateApiKey()">🔑 Generate
                                                         API Key</button>
