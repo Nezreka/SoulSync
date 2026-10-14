@@ -30,7 +30,7 @@ export function ReviewAudio({
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [playError, setPlayError] = useState(false);
+  const [playError, setPlayError] = useState('');
   const comparisonSource = comparisonPath
     ? `/stream/library-audio?path=${encodeURIComponent(comparisonPath)}`
     : '';
@@ -41,16 +41,23 @@ export function ReviewAudio({
       : selected === 'preview'
         ? catalogSource
         : `/stream/library-audio?path=${encodeURIComponent(localPath)}`;
-  const knownDuration = selected === 'local' ? localDurationMs : comparisonDurationMs;
+  const knownDuration =
+    selected === 'local' ? localDurationMs : selected === 'comparison' ? comparisonDurationMs : 0;
+  const playbackError = () =>
+    setPlayError(
+      selected === 'preview'
+        ? 'The catalog preview could not be played in this browser.'
+        : 'This local audio could not be played.',
+    );
 
   useEffect(() => {
     setPlaying(false);
     setPosition(0);
     setDuration(0);
-    setPlayError(false);
+    setPlayError('');
     if (shouldPlayRef.current) {
       shouldPlayRef.current = false;
-      void audioRef.current?.play().catch(() => setPlayError(true));
+      void audioRef.current?.play().catch(playbackError);
     }
   }, [source]);
 
@@ -62,7 +69,7 @@ export function ReviewAudio({
         try {
           await audio.play();
         } catch {
-          setPlayError(true);
+          playbackError();
         }
       } else audio.pause();
       return;
@@ -121,7 +128,16 @@ export function ReviewAudio({
           {clock(position)} / {clock(duration || (knownDuration || 0) / 1000)}
         </span>
       </div>
-      {playError && <small role="alert">This audio could not be played here.</small>}
+      {playError && (
+        <small role="alert">
+          {playError}{' '}
+          {selected === 'preview' && catalogSource && (
+            <a href={catalogSource} target="_blank" rel="noopener noreferrer">
+              Open the preview source
+            </a>
+          )}
+        </small>
+      )}
       <audio
         ref={audioRef}
         src={source}
@@ -131,7 +147,7 @@ export function ReviewAudio({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
-        onError={() => setPlayError(true)}
+        onError={playbackError}
       />
     </section>
   );

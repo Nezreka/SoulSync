@@ -36,7 +36,16 @@ export interface AlbumAssignment {
     | 'duplicate'
     | 'settled';
   evidence_status?: string;
-  action_state?: 'ready' | 'manual' | 'destructive' | 'blocked' | 'preview' | 'resolved';
+  action_state?:
+    | 'ready'
+    | 'manual'
+    | 'destructive'
+    | 'blocked'
+    | 'preview'
+    | 'resolved'
+    | 'waiting';
+  fulfillment_state?: 'wishlisted' | 'downloading';
+  numbering_preview?: boolean;
   preview_reason?: string;
   relationship?: 'version_conflict';
   relationship_key?: string;
@@ -44,6 +53,7 @@ export interface AlbumAssignment {
   counterpart_file?: string;
   counterpart_file_path?: string;
   counterpart_track_number?: number | string | null;
+  counterpart_display_track_number?: number | string | null;
   counterpart_disc_number?: number | string | null;
   audio_conflict?: 'different_recording' | '';
   file_path?: string;
@@ -55,6 +65,7 @@ export interface AlbumAssignment {
   current_disc_number?: number | string | null;
   slot_title?: string;
   slot_track_number?: number | string | null;
+  display_track_number?: number | string | null;
   slot_disc_number?: number | string | null;
   title_difference?: string;
   confidence?: string;
@@ -111,6 +122,7 @@ export interface AlbumReconciliationPlan {
       slot_preview_url?: string;
       disc_number?: number;
       track_number?: number;
+      display_track_number?: number;
       confidence: string;
     }>;
     missing_tracks?: string[];
@@ -185,7 +197,19 @@ export interface ReconciliationRun {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T & { error?: string };
+  if (typeof response.text !== 'function') {
+    const body = (await response.json()) as T & { error?: string };
+    if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+    return body;
+  }
+  const raw = await response.text();
+  if (!raw.trim()) throw new Error(`The server returned an empty response (${response.status})`);
+  let body: T & { error?: string };
+  try {
+    body = JSON.parse(raw) as T & { error?: string };
+  } catch {
+    throw new Error(`The server returned an invalid response (${response.status})`);
+  }
   if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
   return body;
 }
@@ -242,7 +266,14 @@ export async function applyReviewDecisionGroup(
   );
   // A grouped action can partially succeed before a later item fails. Keep
   // the counts from a non-2xx response so the queue can report that outcome.
-  return (await response.json()) as {
+  if (typeof response.text !== 'function') return response.json();
+  const raw = await response.text();
+  if (!raw.trim()) {
+    return response.ok
+      ? { success: true, refresh_queued: true }
+      : { success: false, error: `The server returned an empty response (${response.status})` };
+  }
+  return JSON.parse(raw) as {
     success: boolean;
     applied?: number;
     total?: number;

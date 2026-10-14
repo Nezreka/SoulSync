@@ -279,6 +279,16 @@ def test_filename_does_not_keep_a_different_recording_version():
         '/album/01 - Home.flac'
 
 
+def test_strong_audio_conflict_uses_the_release_slot_as_well_as_local_title():
+    from core.repair_jobs.library_reconciliation import _audio_conflicts_with_slot
+
+    file = {'tags': {'title': 'Misnamed'}, 'acoustid': {'recordings': [
+        {'title': 'Correct Song', 'artist': 'Artist', 'score': 0.99},
+    ]}}
+    assert not _audio_conflicts_with_slot(file, {'title': 'Correct Song', 'artist': 'Artist'})
+    assert _audio_conflicts_with_slot(file, {'title': 'Other Song', 'artist': 'Artist'})
+
+
 def test_album_title_compatibility_preserves_edition_detail_only_for_same_album():
     assert _album_titles_compatible(
         'New Miserable Experience (Deluxe Edition)', 'New Miserable Experience')
@@ -579,6 +589,17 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
         row = conn.execute('SELECT spotify_track_id, source_info FROM wishlist_tracks').fetchone()
     assert row['spotify_track_id'] == 'hourglass-id'
     assert json.loads(row['source_info'])['source_album_id'] == 'ashes-release'
+    scan.scan(context)
+    waiting_case = worker.get_review_case(case_id)
+    assert waiting_case, worker.get_review_cases()
+    waiting = next(item for item in waiting_case['items']
+                   if item['finding_type'] == 'reconciliation_missing')
+    assert waiting['details']['fulfillment_state'] == 'wishlisted'
+    assert any(decision['category'] == 'pending_fulfillment'
+               for decision in waiting_case['plan']['decisions'])
+    assert any(row.get('fulfillment_state') == 'wishlisted'
+               for row in waiting_case['album_plan']['assignments'])
+    assert not worker.start_review_missing_tracks(case_id)['started']
     assert db.set_album_canonical(10, 'spotify', 'alternate-edition', 0.8, locked=True)
     scan.scan(context)
     pending = worker.get_review_case(case_id)['items']
@@ -1183,6 +1204,43 @@ def test_replacement_fragment_joins_same_release_in_sibling_folder():
     assert len(grouped[original]) == 5
     assert trusted == {original: 10}
 
+
+def test_deluxe_addendum_joins_disjoint_regular_album_for_review():
+    regular = '/music/Split Chain/[2025] motionblur'
+    deluxe = '/music/Split Chain/[2026] motionblur (DELUXE)'
+    regular_paths = [f'{regular}/{number:02}.flac' for number in range(1, 12)]
+    deluxe_numbers = (12, 13, 14, 25, 26)
+    deluxe_paths = [f'{deluxe}/{number:02}.mp3' for number in deluxe_numbers]
+    folders = {regular: regular_paths, deluxe: deluxe_paths}
+    tracks = {
+        path: {'album_id': 10, 'disc_number': 1, 'track_number': number}
+        for number, path in enumerate(regular_paths, start=1)
+    }
+    tracks.update({
+        path: {'album_id': 11, 'disc_number': 1, 'track_number': number}
+        for number, path in zip(deluxe_numbers, deluxe_paths)
+    })
+    albums = {
+        10: {'album_title': 'motionblur', 'artist_name': 'Split Chain',
+             'owner_profile_id': 1, 'musicbrainz_release_id': 'regular'},
+        11: {'album_title': 'motionblur (DELUXE)', 'artist_name': 'Split Chain',
+             'owner_profile_id': 1, 'musicbrainz_release_id': 'deluxe'},
+    }
+
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert set(grouped[deluxe]) == set(regular_paths + deluxe_paths)
+    assert trusted == {deluxe: 11}
+
+    tracks[deluxe_paths[0]]['track_number'] = 11
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert len(grouped) == 2
+    assert trusted == {}
+
+    tracks[deluxe_paths[0]]['track_number'] = 12
+    albums[11]['artist_name'] = 'Different Artist'
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert len(grouped) == 2
+    assert trusted == {}
 
 def test_logical_album_joins_parent_and_disc_child_with_different_album_rows():
     parent = [f'/music/Matchbox Twenty/The Matchbox Twenty Collection/{n:02}.flac'

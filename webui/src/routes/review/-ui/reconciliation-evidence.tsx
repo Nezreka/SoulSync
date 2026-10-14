@@ -7,6 +7,7 @@ import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
+import { formatTrackPosition } from './review-position';
 
 type Data = Record<string, unknown>;
 type Tone = 'good' | 'warning' | 'danger' | 'info' | 'muted';
@@ -517,6 +518,7 @@ export function ReleaseComparison({
   busy = false,
   currentRelease,
   fallbackArtwork,
+  numberingMode,
 }: {
   candidates: Data[];
   selected: number;
@@ -525,6 +527,7 @@ export function ReleaseComparison({
   busy?: boolean;
   currentRelease?: Data;
   fallbackArtwork?: string;
+  numberingMode?: string;
 }) {
   const [inspectedPair, setInspectedPair] = useState<number | null>(null);
   useEffect(() => setInspectedPair(null), [selected]);
@@ -637,7 +640,12 @@ export function ReleaseComparison({
             {pairs.map((pair, index) => (
               <div key={`${label(pair.file)}-${index}`}>
                 <b>
-                  {label(pair.disc_number || 1)}.{label(pair.track_number || pair.slot_number)}
+                  {formatTrackPosition(
+                    label(pair.disc_number || 1),
+                    label(pair.track_number || pair.slot_number),
+                    numberingMode,
+                    label(pair.display_track_number) || undefined,
+                  )}
                 </b>
                 <span>
                   <strong>{label(pair.slot_title)}</strong>
@@ -778,6 +786,18 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
               <dd>{finding.file_path.split('/').pop()}</dd>
             </div>
           )}
+          {folder && (
+            <div>
+              <dt>Folder</dt>
+              <dd>{folder}</dd>
+            </div>
+          )}
+          {Boolean(details.file_duration_ms || tags.duration_ms) && (
+            <div>
+              <dt>Length</dt>
+              <dd>{formatDuration(details.file_duration_ms || tags.duration_ms)}</dd>
+            </div>
+          )}
           {currentTitle && (
             <div>
               <dt>Title</dt>
@@ -800,12 +820,6 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
             <div>
               <dt>Album</dt>
               <dd>{label(tags.album)}</dd>
-            </div>
-          )}
-          {folder && (
-            <div>
-              <dt>Folder</dt>
-              <dd>{folder}</dd>
             </div>
           )}
           {!finding.file_path && details.file_count !== undefined && (
@@ -1093,7 +1107,7 @@ export function ReconciliationEvidence({
         </section>
       )}
       {(!prominent || objects(details.checked_files).length > 0) && (
-        <details className={styles.technicalEvidence}>
+        <details className={styles.technicalEvidence} open>
           <summary>
             <EvidenceIcon name="info" /> Technical evidence
             <span>Raw files, tags, and IDs</span>

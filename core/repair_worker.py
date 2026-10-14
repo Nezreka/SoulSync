@@ -1361,7 +1361,7 @@ class RepairWorker:
                         except (TypeError, ValueError):
                             prior = {}
                         signals = ('fingerprint_key', 'source', 'release_id',
-                                   'evidence_signature')
+                                   'evidence_signature', 'fulfillment_state')
                         changed_reconciliation_evidence = any(
                             prior.get(key) != (details or {}).get(key) for key in signals)
                     if existing_status == 'dismissed' and not changed_reconciliation_evidence:
@@ -1904,7 +1904,8 @@ class RepairWorker:
             return {'started': False,
                     'error': 'Choose the release and complete-album scope first'}
         ids = [item['id'] for item in case.get('items') or []
-               if item.get('finding_type') == 'reconciliation_missing']
+               if (item.get('finding_type') == 'reconciliation_missing' and
+                   (item.get('details') or {}).get('fulfillment_state') != 'wishlisted')]
         if not ids:
             return {'started': False, 'error': 'No missing release tracks remain'}
         return self.start_bulk_fix(
@@ -4390,9 +4391,16 @@ class RepairWorker:
                 isinstance(details.get('replacement_track'), dict)):
             return self._fix_reconciliation_extra(entity_type, entity_id,
                                                   file_path, details)
-        if (choice == 'quarantine' and any(
-                'outside this release' in str(reason)
-                for reason in details.get('ambiguity_reasons') or [])):
+        if (choice == 'replace' and
+                details.get('audio_conflict') == 'different_recording' and
+                isinstance(details.get('replacement_track'), dict)):
+            return self._fix_reconciliation_extra(entity_type, entity_id,
+                                                  file_path, details)
+        if (choice == 'quarantine' and details.get('track_id') and
+                details.get('album_id') is not None and
+                not details.get('version_conflict') and
+                not details.get('competing_copies') and
+                not details.get('duplicate_copies')):
             return self._fix_reconciliation_extra(entity_type, entity_id,
                                                   file_path, details)
         if not isinstance(choice, str) or not choice.startswith('assign:'):

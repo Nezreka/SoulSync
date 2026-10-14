@@ -173,6 +173,9 @@ def test_complete_album_can_request_all_missing_slots_after_scope_choice():
     assert worker.start_review_missing_tracks('album-case')['started']
     assert captured['finding_ids'] == [1, 2]
     assert captured['review_case_folders'] == [('album-case', '/music/album')]
+    case['items'][1]['details'] = {'fulfillment_state': 'wishlisted'}
+    assert worker.start_review_missing_tracks('album-case')['started']
+    assert captured['finding_ids'] == [1]
     case['items'].append({'id': 4, 'finding_type': 'reconciliation_intent'})
     assert not worker.start_review_missing_tracks('album-case')['started']
 
@@ -639,6 +642,18 @@ def test_wrong_audio_is_not_reconnected_to_missing_slot_by_title():
     assert 'relationship' not in missing
     assert 'relationship' not in extra
     assert extra['finding_id'] == 1
+
+
+def test_unassigned_album_file_can_use_the_existing_quarantine_guard():
+    worker = RepairWorker.__new__(RepairWorker)
+    captured = []
+    worker._fix_reconciliation_extra = lambda *args: captured.append(args) or {'success': True}
+    details = {'_fix_action': 'quarantine', 'track_id': 7, 'album_id': 10}
+
+    assert worker._fix_reconciliation_assignment('track', '7', '/music/extra.flac', details)['success']
+    assert captured == [('track', '7', '/music/extra.flac', details)]
+    assert not worker._fix_reconciliation_assignment('track', '7', '/music/extra.flac',
+                                                     {**details, 'version_conflict': True})['success']
 
 
 def test_actionable_wrong_audio_remains_an_audio_conflict():

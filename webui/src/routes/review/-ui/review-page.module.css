@@ -408,6 +408,9 @@
   background: #141620;
 }
 .refreshBanner {
+  position: sticky;
+  top: 8px;
+  z-index: 11;
   margin-top: 14px;
   padding: 12px 14px;
   border: 1px solid #b58a3d;
@@ -466,11 +469,20 @@
   }
 }
 .workflowSteps {
+  position: relative;
   display: grid;
   gap: 6px;
   margin-top: 16px;
   padding-left: 22px;
-  border-left: 1px solid #4a5266;
+}
+.workflowSteps::before {
+  content: '';
+  position: absolute;
+  top: 20px;
+  bottom: 47px;
+  left: 7px;
+  width: 2px;
+  background: #596174;
 }
 .workflowSteps button {
   position: relative;
@@ -480,9 +492,9 @@
   margin: 0 0 0 10px;
   padding: 11px 15px;
   border: 1px solid #39485d;
-  border-left: 3px solid #78a7e8;
+  border-left: 3px solid #687286;
   border-radius: 8px;
-  background: #1a2230;
+  background: #1c202b;
   color: #e7edf7;
   text-align: left;
   cursor: pointer;
@@ -494,17 +506,28 @@
   top: 19px;
   width: 10px;
   height: 10px;
-  border: 2px solid #78a7e8;
+  border: 2px solid #8a93a4;
   border-radius: 50%;
   background: #141620;
 }
+.workflowSteps button[data-state='current'],
 .workflowSteps button[data-state='needs-review'] {
   border-color: #987846;
   border-left-color: #e2b561;
   background: #26231e;
 }
+.workflowSteps button[data-state='current']::before,
 .workflowSteps button[data-state='needs-review']::before {
   border-color: #e2b561;
+}
+.workflowSteps button[data-state='pending'] {
+  border-color: #363b49;
+  border-left-color: #4e5666;
+  background: #191c26;
+  color: #a3acbd;
+}
+.workflowSteps button[data-state='pending']::before {
+  border-color: #727b8c;
 }
 .workflowSteps span {
   color: #bca8ff;
@@ -1097,8 +1120,58 @@
   gap: 14px;
   align-items: start;
 }
+.tabWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.34fr);
+  gap: 14px;
+  align-items: start;
+}
+.tabWorkspace[data-view='tracks'] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.tabMain {
+  min-width: 0;
+}
+.tabContext {
+  position: sticky;
+  top: 16px;
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid #3b4053;
+  border-radius: 14px;
+  background: #151824;
+  color: #e7edf7;
+}
+.tabContext h3 {
+  margin: 10px 0 16px;
+  font-size: 19px;
+}
+.tabContext p {
+  color: #b9c2d3;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.contextFacts {
+  margin: 0;
+}
+.contextFacts > div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-top: 1px solid #363b4d;
+}
+.contextFacts dt {
+  color: #aeb6c9;
+  font-size: 12px;
+}
+.contextFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
 .trackWorkspace > .trackMatrix {
   min-width: 0;
+  margin-top: 0;
 }
 .secondaryButton {
   padding: 7px 11px;
@@ -1181,6 +1254,10 @@
 }
 .trackInspector .actions {
   position: static;
+}
+.inspectorBackdrop,
+.inspectorClose {
+  display: none;
 }
 .trackWorkspace .trackTableHead {
   display: none;
@@ -2559,6 +2636,52 @@
   border: 1px solid #538471;
   color: #dcffe9;
 }
+.albumNotice {
+  position: sticky;
+  top: 8px;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid #538471;
+  border-radius: 9px;
+  background: #213a32;
+  color: #dcffe9;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 25%);
+}
+.albumNotice button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  cursor: pointer;
+}
+.pendingFulfillment,
+.waitingNotice {
+  border: 1px solid #54708e;
+  border-radius: 10px;
+  background: #1c2a3b;
+  color: #d4e8ff;
+}
+.pendingFulfillment {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 15px;
+}
+.pendingFulfillment p,
+.waitingNotice {
+  margin: 5px 0 0;
+  font-size: 13px;
+}
+.waitingNotice {
+  padding: 12px;
+}
 .scanStatus {
   border: 1px solid #353a4c;
   border-radius: 8px;
@@ -2763,5 +2886,93 @@
   }
   .planContextActions {
     display: grid;
+  }
+}
+
+@media (max-width: 1450px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  .sidebar {
+    position: static;
+  }
+  .queueModes {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .caseList {
+    display: flex;
+    gap: 7px;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .caseButton,
+  .selectedCase {
+    flex: 0 0 235px;
+    min-width: 0;
+  }
+  .review {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 1050px) {
+  .tabWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tabContext {
+    position: static;
+    margin-top: 0;
+  }
+  .trackWorkspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .trackInspector[data-open] {
+    position: fixed;
+    z-index: 101;
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: min(76vh, 820px);
+    overflow: auto;
+    box-shadow: 0 18px 50px rgb(0 0 0 / 65%);
+  }
+  .trackInspector:not([data-open]) {
+    display: none;
+  }
+  .inspectorBackdrop {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgb(0 0 0 / 43%);
+  }
+  .inspectorClose {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    padding: 11px;
+    border: 0;
+    border-bottom: 1px solid #454a60;
+    background: #252a3a;
+    color: #eef0f7;
+    text-align: right;
+    cursor: pointer;
+  }
+}
+
+@media (max-width: 560px) {
+  .queueModes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .caseButton,
+  .selectedCase {
+    flex-basis: 190px;
   }
 }

@@ -35,6 +35,7 @@ import { ReconciliationEvidence, ReleaseComparison, StatusChip } from './reconci
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
+import { formatTrackPosition } from './review-position';
 
 const requireChoice = new Set([
   'reconciliation_extra',
@@ -91,6 +92,7 @@ const queueModes: Array<{ value: QueueMode; label: string; risk: string }> = [
 const decisionOrder: Record<string, number> = {
   release_conflicts: 0,
   album_completeness: 1,
+  pending_fulfillment: 2,
   numbering: 2,
   audio_conflicts: 3,
   title_issues: 4,
@@ -109,7 +111,12 @@ function caseStatusSummary(item: ReviewCaseSummary): string {
     (left, right) => (decisionOrder[left.category] ?? 99) - (decisionOrder[right.category] ?? 99),
   );
   const primary = ordered.find((decision) => decision.risk !== 'ready') || ordered[0];
-  const status = item.plan.status === 'ready' ? 'Ready' : 'Needs input';
+  const status =
+    primary?.category === 'pending_fulfillment'
+      ? 'Waiting for download'
+      : item.plan.status === 'ready'
+        ? 'Ready'
+        : 'Needs input';
   const more = ordered.length > 1 ? ` · +${ordered.length - 1} more` : '';
   return `${status}${primary ? ` · ${primary.label}` : ''} · ${item.pending} action${item.pending === 1 ? '' : 's'}${more}`;
 }
@@ -134,23 +141,29 @@ function findingHeading(finding: ReviewFinding): string {
 }
 
 function statusLabel(status: string, row?: AlbumAssignment) {
+  if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
+  if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
   if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
   return (
     {
-      confirmed: 'Confirmed',
+      confirmed: 'Confirmed match',
       change: 'Change',
       uncertain: 'Review',
       missing: 'Missing',
       not_owned: 'Not collected',
       extra: 'Extra',
       duplicate: 'Duplicate',
-      settled: 'No action',
+      settled: 'Previously reviewed',
     }[status] || status
   );
 }
 
-function decisionInstruction(decision: ReviewDecision, numberingMode?: string): string {
+function decisionInstruction(
+  decision: ReviewDecision,
+  numberingMode?: string,
+  multipleDiscs = false,
+): string {
   switch (decision.category) {
     case 'release_conflicts':
       return 'Choose the release this album should follow';
@@ -158,6 +171,7 @@ function decisionInstruction(decision: ReviewDecision, numberingMode?: string): 
       return 'Choose whether this folder represents the complete album';
     case 'numbering':
       if (decision.label === 'Disc numbering') return decision.summary || 'Update disc numbering';
+      if (!multipleDiscs) return 'Renumber tracks to match the selected release';
       return numberingMode === 'digital'
         ? 'Switch this album to continuous track numbering'
         : "Use the selected release's disc and track numbering";
@@ -179,6 +193,7 @@ function decisionCategoryLabel(category: string): string {
     {
       release_conflicts: 'Release or edition',
       album_completeness: 'Album completeness',
+      pending_fulfillment: 'Waiting for tracks',
       numbering: 'Numbering',
       audio_conflicts: 'Audio assignment',
       title_issues: 'Recording identity',
@@ -190,25 +205,42 @@ function decisionCategoryLabel(category: string): string {
   );
 }
 
+function numberingSchemeLabel(multipleDiscs: boolean, mode?: string): string {
+  if (!multipleDiscs) return 'One disc · match release positions';
+  return mode === 'digital' ? 'One continuous album sequence' : 'Numbered by release disc';
+}
+
 function AssignmentRow({
   row,
   onSelect,
   selected,
+  numberingMode,
 }: {
   row: AlbumAssignment;
   onSelect: (findingId: number, rowKey: string) => void;
   selected: boolean;
+  numberingMode?: string;
 }) {
   const pairedVersion = row.relationship === 'version_conflict' && row.status === 'extra';
-  const currentPosition = `${row.current_disc_number || 1}.${row.current_track_number ?? '—'}`;
-  const releasePosition = `${row.counterpart_disc_number || row.slot_disc_number || 1}.${
-    row.counterpart_track_number ?? row.slot_track_number ?? '—'
-  }`;
+  const currentPosition = formatTrackPosition(
+    row.current_disc_number,
+    row.current_track_number,
+    numberingMode,
+  );
+  const releasePosition = formatTrackPosition(
+    row.counterpart_disc_number || row.slot_disc_number,
+    row.counterpart_track_number ?? row.slot_track_number,
+    numberingMode,
+    row.counterpart_display_track_number ?? row.display_track_number,
+  );
   const position = pairedVersion
     ? `${currentPosition} → ${releasePosition}`
-    : `${
-        row.current_disc_number || row.slot_disc_number || 1
-      }.${row.current_track_number ?? row.slot_track_number ?? '—'}`;
+    : formatTrackPosition(
+        row.slot_disc_number || row.current_disc_number,
+        row.slot_track_number ?? row.current_track_number,
+        numberingMode,
+        row.display_track_number,
+      );
   const evidence = row.audio_title
     ? `${row.audio_title}${row.audio_score ? ` · ${Math.round(row.audio_score * 100)}%` : ''}`
     : row.confidence || '';
@@ -217,21 +249,27 @@ function AssignmentRow({
       ? `Fingerprint identifies ${row.audio_title || 'a different recording'}`
       : row.relationship === 'version_conflict'
         ? 'Compare the local and release versions'
-        : row.action_state === 'preview'
-          ? row.preview_reason || 'Resolve the album question first'
-          : row.status === 'settled'
-            ? 'No pending action'
-            : row.changes && Object.keys(row.changes).length
-              ? Object.keys(row.changes)
-                  .map((key) => key.replaceAll('_', ' '))
-                  .join(', ')
-              : row.status === 'uncertain'
-                ? 'Confirm assignment'
-                : row.title_difference === 'flavor'
-                  ? 'Display wording only'
-                  : row.title_difference === 'version_detail'
-                    ? 'Version detail preserved'
-                    : 'No metadata edit';
+        : row.numbering_preview
+          ? 'Numbering preview · choose the album numbering first'
+          : row.action_state === 'preview'
+            ? row.preview_reason || 'Resolve the album question first'
+            : row.fulfillment_state === 'wishlisted'
+              ? 'On wishlist · waiting for download'
+              : row.status === 'settled'
+                ? row.evidence_status === 'uncertain' || row.evidence_status === 'extra'
+                  ? 'Previously reviewed · match remains unverified'
+                  : 'Previously reviewed · no edit queued'
+                : row.changes && Object.keys(row.changes).length
+                  ? Object.keys(row.changes)
+                      .map((key) => key.replaceAll('_', ' '))
+                      .join(', ')
+                  : row.status === 'uncertain'
+                    ? 'Confirm assignment'
+                    : row.title_difference === 'flavor'
+                      ? 'Display wording only'
+                      : row.title_difference === 'version_detail'
+                        ? 'Version detail preserved'
+                        : 'No metadata edit';
   const changes = row.changes || {};
   const visibleChanges = Object.entries(changes).filter(([field, change]) => {
     const fileField = {
@@ -277,7 +315,12 @@ function AssignmentRow({
             Release{' '}
             {pairedVersion
               ? releasePosition
-              : `${row.slot_disc_number || 1}.${row.slot_track_number ?? '—'}`}
+              : formatTrackPosition(
+                  row.slot_disc_number,
+                  row.slot_track_number,
+                  numberingMode,
+                  row.display_track_number,
+                )}
             {row.slot_duration_ms ? ` · ${shortDuration(row.slot_duration_ms)}` : ''}
           </small>
         </span>
@@ -534,6 +577,7 @@ function SelectedActionDetail({
   comparisonPath,
   comparisonDurationMs,
   compact = false,
+  numberingPreview = false,
 }: {
   finding: ReviewFinding;
   itemIndex: number;
@@ -547,14 +591,21 @@ function SelectedActionDetail({
   comparisonPath?: string;
   comparisonDurationMs?: number;
   compact?: boolean;
+  numberingPreview?: boolean;
 }) {
-  const canApply = Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag';
+  const canApply =
+    Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag' && !numberingPreview;
   const [assignmentSlot, setAssignmentSlot] = useState('');
   const assignmentOptions = records(record(finding.details).assignment_options);
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
   const wrongAudio = finding.details?.audio_conflict === 'different_recording';
   const versionConflict = finding.details?.version_conflict === true;
+  const waitingForDownload = finding.details?.fulfillment_state === 'wishlisted';
   const replacement = record(finding.details?.replacement_track);
+  const proposedSlot = assignmentOptions.find((slot) => {
+    const sourceTrackId = textValue(replacement.source_track_id);
+    return sourceTrackId && textValue(slot.key).startsWith(`id:${sourceTrackId}:`);
+  });
   const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
   const suggested = finding.review_tier === 'ready';
   const compactReason = finding.review_reason || finding.description;
@@ -641,10 +692,14 @@ function SelectedActionDetail({
             )}
           />
         )}
-      {finding.finding_type === 'reconciliation_extra' &&
+      {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
         finding.file_path &&
+        Boolean(details.track_id) &&
+        details.album_id != null &&
+        !wrongAudio &&
         !versionConflict &&
-        !duplicateChoice && (
+        !duplicateChoice &&
+        !(details.competing_copies as unknown[] | undefined)?.length && (
           <div className={styles.extraAction}>
             <strong>This file is outside the selected release.</strong>
             <span>Move it to recoverable quarantine and remove its library entry.</span>
@@ -709,6 +764,16 @@ function SelectedActionDetail({
       )}
       {finding.file_path && assignmentOptions.length > 0 && (
         <div className={styles.assignmentCorrection}>
+          {proposedSlot && (
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy}
+              onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
+            >
+              Confirm current assignment to {textValue(proposedSlot.title)}
+            </button>
+          )}
           <label>
             Assign this file to another release track
             <select
@@ -718,7 +783,12 @@ function SelectedActionDetail({
               <option value="">Choose a release track…</option>
               {assignmentOptions.map((slot, index) => (
                 <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
-                  {textValue(slot.disc_number)}.{textValue(slot.track_number)}{' '}
+                  {formatTrackPosition(
+                    textValue(slot.disc_number),
+                    textValue(slot.track_number),
+                    textValue(details.numbering_mode),
+                    textValue(slot.display_track_number),
+                  )}{' '}
                   {textValue(slot.title)}
                 </option>
               ))}
@@ -734,103 +804,111 @@ function SelectedActionDetail({
           <small>The album will be rescanned before any metadata edit is offered.</small>
         </div>
       )}
-      <div className={styles.actions}>
-        {finding.finding_type === 'reconciliation_intent' ? null : versionConflict && canApply ? (
-          <>
-            {replacement.source_track_id && (
-              <>
+      {waitingForDownload && (
+        <p className={styles.waitingNotice} role="status">
+          This track is on the wishlist. The album is waiting for it to download and join the
+          library.
+        </p>
+      )}
+      {numberingPreview && (
+        <p className={styles.waitingNotice} role="status">
+          This numbering change is a preview. Choose the album numbering on Plan first.
+        </p>
+      )}
+      {!waitingForDownload && (
+        <div className={styles.actions}>
+          {finding.finding_type === 'reconciliation_intent' ? null : versionConflict && canApply ? (
+            <>
+              {replacement.source_track_id && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix', 'request_missing')}
+                  >
+                    Keep local and request release version
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
+                    Replace local with release version
+                  </button>
+                </>
+              )}
+            </>
+          ) : wrongAudio && canApply ? (
+            <>
+              {canReplaceWrongAudio && (
                 <button
                   type="button"
                   disabled={busy}
                   className={styles.primary}
-                  onClick={() => onAct('fix', 'request_missing')}
+                  onClick={() => onAct('fix', 'replace')}
                 >
-                  Keep local and request release version
+                  {busy ? 'Applying…' : 'Replace with correct track'}
                 </button>
-                <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
-                  Replace local with release version
-                </button>
-              </>
-            )}
-          </>
-        ) : wrongAudio && canApply ? (
-          <>
-            {canReplaceWrongAudio && (
-              <button
-                type="button"
-                disabled={busy}
-                className={styles.primary}
-                onClick={() => onAct('fix', 'replace')}
-              >
-                {busy ? 'Applying…' : 'Replace with correct track'}
+              )}
+              <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+                Quarantine wrong file
               </button>
-            )}
-            <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-              Quarantine wrong file
-            </button>
-          </>
-        ) : (
-          <>
-            {finding.finding_type === 'reconciliation_unresolved' &&
-              Boolean(details.replacement_available && replacement.source_track_id) && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={styles.primary}
-                  onClick={() => onAct('fix', 'request_missing')}
-                >
-                  Request release version for comparison
-                </button>
-              )}
-            {finding.finding_type === 'reconciliation_unresolved' &&
-              Array.isArray(details.ambiguity_reasons) &&
-              details.ambiguity_reasons.some((reason) =>
-                textValue(reason).includes('outside this release'),
-              ) && (
-                <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-                  Move outlying file to recoverable quarantine
-                </button>
-              )}
-            {canApply &&
-              finding.finding_type !== 'reconciliation_release' &&
-              finding.finding_type !== 'reconciliation_duplicate' &&
-              finding.finding_type !== 'reconciliation_unresolved' &&
-              finding.finding_type !== 'reconciliation_extra' && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={styles.primary}
-                  onClick={() => onAct('fix')}
-                >
-                  {busy
-                    ? 'Applying…'
-                    : suggested
-                      ? typeInfo?.verb || 'Apply repair'
-                      : finding.finding_type === 'reconciliation_extra'
-                        ? 'Quarantine file'
-                        : 'Apply this change'}
-                </button>
-              )}
-          </>
-        )}
-        <button type="button" disabled={busy} onClick={() => onAct('dismiss')}>
-          {versionConflict ? 'Keep local version' : 'Accept as-is'}
-        </button>
-        <button
-          type="button"
-          disabled={busy || previousId == null}
-          onClick={() => onSelect(previousId ?? null)}
-        >
-          ← Previous decision
-        </button>
-        <button
-          type="button"
-          disabled={busy || nextId == null}
-          onClick={() => onSelect(nextId ?? null)}
-        >
-          Next decision →
-        </button>
-      </div>
+            </>
+          ) : (
+            <>
+              {finding.finding_type === 'reconciliation_unresolved' &&
+                Boolean(details.replacement_available && replacement.source_track_id) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix', 'request_missing')}
+                  >
+                    Request release version for comparison
+                  </button>
+                )}
+              {canApply &&
+                finding.finding_type !== 'reconciliation_release' &&
+                finding.finding_type !== 'reconciliation_duplicate' &&
+                finding.finding_type !== 'reconciliation_unresolved' &&
+                finding.finding_type !== 'reconciliation_extra' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix')}
+                  >
+                    {busy
+                      ? 'Applying…'
+                      : suggested
+                        ? typeInfo?.verb || 'Apply repair'
+                        : finding.finding_type === 'reconciliation_extra'
+                          ? 'Quarantine file'
+                          : 'Apply this change'}
+                  </button>
+                )}
+            </>
+          )}
+          <button
+            type="button"
+            disabled={busy || numberingPreview}
+            onClick={() => onAct('dismiss')}
+          >
+            {versionConflict ? 'Keep local version' : 'Accept as-is'}
+          </button>
+          <button
+            type="button"
+            disabled={busy || previousId == null}
+            onClick={() => onSelect(previousId ?? null)}
+          >
+            ← Previous decision
+          </button>
+          <button
+            type="button"
+            disabled={busy || nextId == null}
+            onClick={() => onSelect(nextId ?? null)}
+          >
+            Next decision →
+          </button>
+        </div>
+      )}
     </section>
   );
 }
@@ -845,6 +923,7 @@ export function ReviewPage() {
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [trackFilter, setTrackFilter] = useState('');
   const [trackView, setTrackView] = useState<TrackView>('issues');
@@ -877,6 +956,12 @@ export function ReviewPage() {
   const [lastRun, setLastRun] = useState<ReconciliationRun | null>(null);
   const wasScanning = useRef(false);
   const risk = queueModes.find((mode) => mode.value === queueMode)?.risk || '';
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     if (caseListRef.current) caseListRef.current.scrollTop = 0;
@@ -1143,7 +1228,26 @@ export function ReviewPage() {
   const activeDecision = active
     ? decisions.find((decision) => decision.finding_ids.includes(active.id))
     : undefined;
-  const reviewDecisions = decisions.filter((decision) => decision.risk !== 'ready');
+  const reviewDecisions = decisions.filter(
+    (decision) => decision.risk !== 'ready' && decision.category !== 'pending_fulfillment',
+  );
+  const pendingDecisions = decisions.filter(
+    (decision) => decision.category === 'pending_fulfillment',
+  );
+  const wishlistedCount = assignments.filter(
+    (row) => row.fulfillment_state === 'wishlisted',
+  ).length;
+  const assignmentAttentionCount = Math.max(
+    0,
+    (reviewCase?.album_plan?.counts.uncertain || 0) +
+      (reviewCase?.album_plan?.counts.missing || 0) +
+      (reviewCase?.album_plan?.counts.extra || 0) -
+      wishlistedCount,
+  );
+  const releaseChoicePending = reviewDecisions.some(
+    (decision) => decision.category === 'release_conflicts',
+  );
+  const releaseHasMultipleDiscs = assignments.some((row) => Number(row.slot_disc_number || 1) > 1);
   const hasIntentDecision = reviewDecisions.some(
     (decision) => decision.category === 'album_completeness',
   );
@@ -1175,6 +1279,18 @@ export function ReviewPage() {
   const settledSlots =
     (reviewCase?.album_plan?.counts.confirmed || 0) + (reviewCase?.album_plan?.counts.settled || 0);
 
+  useEffect(() => {
+    if (albumView !== 'tracks' || !reviewCase || activeRowKey) return;
+    const first =
+      assignments.find((row) => row.finding_id === activeId) ||
+      assignments.find((row) => row.finding_id && row.action_state !== 'waiting');
+    if (first?.finding_id) {
+      setActiveId(first.finding_id);
+      setActiveRowKey(assignmentKey(first));
+      setInspectorOpen(true);
+    }
+  }, [albumView, reviewCase, activeRowKey, activeId, assignments]);
+
   const selectFinding = (findingId: number | null, rowKey?: string) => {
     setActiveId((current) => (current === findingId ? null : findingId));
     const target = assignments.find((row) => row.finding_id === findingId);
@@ -1185,6 +1301,7 @@ export function ReviewPage() {
 
   const selectCase = (next: string) => {
     setNotice('');
+    setInspectorOpen(true);
     setAlbumView('plan');
     setTrackFilter('');
     setTrackView('issues');
@@ -1230,26 +1347,23 @@ export function ReviewPage() {
     );
 
   const selectAssignment = (findingId: number, rowKey: string) => {
-    if (activeId === findingId && activeRowKey === rowKey) {
-      setActiveId(null);
-      setActiveRowKey(null);
-    } else {
-      setActiveId(findingId);
-      setActiveRowKey(rowKey);
-    }
+    setActiveId(findingId);
+    setActiveRowKey(rowKey);
+    setInspectorOpen(true);
   };
 
   const refresh = async () => {
     setError('');
     try {
-      const updatedQueue = await refreshQueue();
+      await refreshQueue();
       if (caseId) {
-        const updated = await fetchReviewCase(caseId).catch(() => null);
+        const updated = await fetchReviewCase(caseId);
         setReviewCase(updated);
-        if (!updated) setCaseId(updatedQueue.items[0]?.case_id || '');
       }
+      return true;
     } catch (cause) {
       setError((cause as Error).message);
+      return false;
     }
   };
 
@@ -1362,8 +1476,8 @@ export function ReviewPage() {
     const confirmed = window.showConfirmDialog
       ? await window.showConfirmDialog({
           title: 'Request missing album tracks',
-          message: `Request all ${missingCount} absent tracks from the selected release? Each request will be added to the wishlist.`,
-          confirmText: `Request ${missingCount} tracks`,
+          message: `Request ${missingCount === 1 ? 'the missing track' : `all ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
+          confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
         })
       : window.confirm(`Request ${missingCount} absent tracks?`);
     if (!confirmed) return;
@@ -1412,7 +1526,10 @@ export function ReviewPage() {
       action === 'fix' &&
       !fixAction?.startsWith('assign:') &&
       fixAction !== 'request_missing' &&
-      (typeInfo?.destructive || finding.finding_type === 'reconciliation_extra')
+      (typeInfo?.destructive ||
+        finding.finding_type === 'reconciliation_extra' ||
+        fixAction === 'quarantine' ||
+        fixAction === 'replace')
     ) {
       const confirmed = window.showConfirmDialog
         ? await window.showConfirmDialog({
@@ -1564,10 +1681,14 @@ export function ReviewPage() {
         );
       } else {
         setNotice(
-          `${result.applied || 0} action${result.applied === 1 ? '' : 's'} handled.${result.refresh_queued ? ' Updating this album plan…' : ''}`,
+          `${result.applied == null ? 'Decision handled' : `${result.applied} action${result.applied === 1 ? '' : 's'} handled`}.${result.refresh_queued ? ' Updating this album plan…' : ''}`,
         );
       }
-      await refresh();
+      if (!(await refresh()) && result.success) {
+        setError(
+          'The decision was handled, but the updated album plan could not be loaded. Refresh the queue.',
+        );
+      }
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -1660,6 +1781,7 @@ export function ReviewPage() {
         nextId={reviewCase.items[itemIndex + 1]?.id}
         comparisonPath={comparisonPath || undefined}
         comparisonDurationMs={comparisonDurationMs}
+        numberingPreview={activeAssignment?.numbering_preview}
       />
     ) : null;
   const compactSelectedActionDetail =
@@ -1678,6 +1800,7 @@ export function ReviewPage() {
         comparisonPath={comparisonPath || undefined}
         comparisonDurationMs={comparisonDurationMs}
         compact
+        numberingPreview={activeAssignment?.numbering_preview}
       />
     ) : null;
 
@@ -1689,6 +1812,7 @@ export function ReviewPage() {
         key={`${key}-${index}`}
         row={row}
         selected={selected}
+        numberingMode={reviewCase?.album_plan?.numbering_mode}
         onSelect={(findingId, rowKey) => {
           selectAssignment(findingId, rowKey);
         }}
@@ -1771,7 +1895,7 @@ export function ReviewPage() {
           {error}
         </div>
       )}
-      {notice && (
+      {notice && !reviewCase && (
         <div className={styles.notice} role="status">
           {notice}
         </div>
@@ -1942,6 +2066,14 @@ export function ReviewPage() {
         >
           {reviewCase ? (
             <>
+              {notice && reviewCase.refresh?.state !== 'running' && (
+                <div className={styles.albumNotice} role="status" aria-live="polite">
+                  <span>{notice}</span>
+                  <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
+                    ×
+                  </button>
+                </div>
+              )}
               <div className={styles.albumHeader}>
                 <div className={styles.albumIdentity}>
                   <ReviewArtwork
@@ -2029,874 +2161,1043 @@ export function ReviewPage() {
                 </div>
               )}
 
-              {albumView === 'plan' && reviewCase.album_plan && (
-                <section className={styles.workflowSteps} aria-label="Album review steps">
-                  <button
-                    type="button"
-                    data-state={
-                      reviewDecisions.some((step) => step.category === 'release_conflicts')
-                        ? 'needs-review'
-                        : 'settled'
-                    }
-                    onClick={() => setAlbumView('release')}
-                  >
-                    <span>1 · Release</span>
-                    <strong>
-                      {reviewDecisions.some((step) => step.category === 'release_conflicts')
-                        ? 'Choose or confirm the edition'
-                        : 'Release selected'}
-                    </strong>
-                    <small>Compare editions or change this choice →</small>
-                  </button>
-                  <button
-                    type="button"
-                    data-state={
-                      reviewDecisions.some((step) =>
-                        ['album_completeness', 'numbering'].includes(step.category),
-                      )
-                        ? 'needs-review'
-                        : 'settled'
-                    }
-                    onClick={() => {
-                      const step = reviewDecisions.find((item) =>
-                        ['album_completeness', 'numbering'].includes(item.category),
-                      );
-                      if (step) openDecision(step);
-                    }}
-                  >
-                    <span>2 · Scope and numbering</span>
-                    <strong>
-                      {reviewDecisions.some((step) =>
-                        ['album_completeness', 'numbering'].includes(step.category),
-                      )
-                        ? 'Choice needed'
-                        : 'Scheme established'}
-                    </strong>
-                    <small>
-                      {reviewCase.album_plan.numbering_mode === 'digital'
-                        ? 'Continuous album sequence'
-                        : 'Release disc and track sequence'}
-                    </small>
-                  </button>
-                  <button
-                    type="button"
-                    data-state={
-                      (reviewCase.album_plan.counts.uncertain || 0) +
-                      (reviewCase.album_plan.counts.missing || 0) +
-                      (reviewCase.album_plan.counts.extra || 0)
-                        ? 'needs-review'
-                        : 'settled'
-                    }
-                    onClick={() => setAlbumView('tracks')}
-                  >
-                    <span>3 · Track assignments</span>
-                    <strong>
-                      {(reviewCase.album_plan.counts.uncertain || 0) +
-                        (reviewCase.album_plan.counts.missing || 0) +
-                        (reviewCase.album_plan.counts.extra || 0)}{' '}
-                      need attention
-                    </strong>
-                    <small>Inspect the local files and release tracks →</small>
-                  </button>
-                  <button
-                    type="button"
-                    data-state={plan.ready || reviewMetadataCount ? 'needs-review' : 'settled'}
-                    onClick={() => {
-                      setTrackFilter('change');
-                      setAlbumView('tracks');
-                    }}
-                  >
-                    <span>4 · Proposed edits</span>
-                    <strong>
-                      {plan.ready} ready · {reviewMetadataCount} awaiting review
-                    </strong>
-                    <small>See every affected field and file →</small>
-                  </button>
-                </section>
-              )}
+              <div className={styles.tabWorkspace} data-view={albumView}>
+                <div className={styles.tabMain}>
+                  {albumView === 'plan' && reviewCase.album_plan && (
+                    <section className={styles.workflowSteps} aria-label="Album review steps">
+                      <button
+                        type="button"
+                        data-state={releaseChoicePending ? 'current' : 'settled'}
+                        onClick={() => setAlbumView('release')}
+                      >
+                        <span>1 · Release</span>
+                        <strong>
+                          {releaseChoicePending
+                            ? 'Choose or confirm the edition'
+                            : `Release selected · ${mappedSlots}/${totalSlots} local`}
+                        </strong>
+                        <small>
+                          {releaseChoicePending
+                            ? 'Compare editions before dependent decisions →'
+                            : (reviewCase.album_plan.counts.missing || 0) > 0
+                              ? `${reviewCase.album_plan.counts.missing} release tracks are absent · compare editions →`
+                              : 'Compare editions or change this choice →'}
+                        </small>
+                      </button>
+                      <button
+                        type="button"
+                        data-state={
+                          releaseChoicePending
+                            ? 'pending'
+                            : reviewDecisions.some((step) =>
+                                  ['album_completeness', 'numbering'].includes(step.category),
+                                )
+                              ? 'needs-review'
+                              : 'settled'
+                        }
+                        onClick={() => {
+                          const step = reviewDecisions.find((item) =>
+                            ['album_completeness', 'numbering'].includes(item.category),
+                          );
+                          if (step) openDecision(step);
+                        }}
+                      >
+                        <span>2 · Scope and numbering</span>
+                        <strong>
+                          {releaseChoicePending
+                            ? 'Pending release choice'
+                            : reviewDecisions.some((step) =>
+                                  ['album_completeness', 'numbering'].includes(step.category),
+                                )
+                              ? 'Choice needed'
+                              : 'Scheme established'}
+                        </strong>
+                        <small>
+                          {releaseChoicePending
+                            ? 'Edition determines the album sequence'
+                            : !releaseHasMultipleDiscs
+                              ? 'Single-disc release track order'
+                              : reviewCase.album_plan.numbering_mode === 'digital'
+                                ? 'Continuous album sequence'
+                                : 'Release disc and track sequence'}
+                        </small>
+                      </button>
+                      <button
+                        type="button"
+                        data-state={
+                          releaseChoicePending
+                            ? 'pending'
+                            : assignmentAttentionCount
+                              ? 'needs-review'
+                              : 'settled'
+                        }
+                        onClick={() => setAlbumView('tracks')}
+                      >
+                        <span>3 · Track assignments</span>
+                        <strong>
+                          {releaseChoicePending
+                            ? 'Pending release choice'
+                            : `${assignmentAttentionCount} need attention${wishlistedCount ? ` · ${wishlistedCount} awaiting download` : ''}`}
+                        </strong>
+                        <small>Inspect the local files and release tracks →</small>
+                      </button>
+                      <button
+                        type="button"
+                        data-state={
+                          releaseChoicePending
+                            ? 'pending'
+                            : plan.ready || reviewMetadataCount
+                              ? 'needs-review'
+                              : 'settled'
+                        }
+                        onClick={() => {
+                          setTrackFilter('change');
+                          setAlbumView('tracks');
+                        }}
+                      >
+                        <span>4 · Proposed edits</span>
+                        <strong>
+                          {releaseChoicePending
+                            ? 'Pending release choice'
+                            : `${plan.ready} ready · ${reviewMetadataCount} awaiting review`}
+                        </strong>
+                        <small>See every affected field and file →</small>
+                      </button>
+                    </section>
+                  )}
 
-              {albumView === 'plan' && plan.status === 'ready' && (
-                <section
-                  className={styles.albumPlan}
-                  data-state="ready"
-                  aria-label="Album reconciliation plan"
-                >
-                  <div className={styles.planSummary}>
-                    <div>
-                      <div className={styles.eyebrow}>Ready to apply</div>
-                      <strong>
-                        {readyChangeGroups.length === 1
-                          ? readyChangeGroups[0].valueSummary ||
-                            `${readyChangeGroups[0].label} on ${readyChangeGroups[0].count} tracks`
-                          : `${readyChangeGroups.length} supported updates across ${plan.ready} track${plan.ready === 1 ? '' : 's'}`}
-                      </strong>
-                      <p>
-                        {readyChangeGroups.length > 1
-                          ? `${readyChangeGroups.length} groups of changes passed the album and audio checks.`
-                          : primaryReadyDecision?.summary ||
-                            'All proposed changes are supported by the album and audio evidence.'}
-                      </p>
-                    </div>
-                    <div className={styles.planBadges}>
-                      <StatusChip tone="good" icon="check">
-                        {plan.ready} ready
+                  {albumView === 'plan' && pendingDecisions.length > 0 && (
+                    <section
+                      className={styles.pendingFulfillment}
+                      aria-label="Missing tracks being acquired"
+                    >
+                      <StatusChip tone="info" icon="info">
+                        {wishlistedCount} on wishlist
                       </StatusChip>
-                    </div>
-                  </div>
-                  {readySummaryList}
-                  {readyActionControls}
-                  {active &&
-                    activeDecision?.risk === 'ready' &&
-                    !activeAssignment &&
-                    selectedActionDetail}
-                </section>
-              )}
-
-              {albumView === 'plan' && decisions.length > 0 && showDecisionBoard && (
-                <section className={styles.decisionBoard} aria-label="Album decisions">
-                  {reviewDecisions.length > 1 && (
-                    <div className={styles.sectionHeading}>
                       <div>
-                        <div className={styles.eyebrow}>Resolve in order</div>
-                        <h3>{reviewDecisions.length} choices need your input</h3>
+                        <strong>Waiting for missing tracks</strong>
                         <p>
-                          Work from top to bottom. Earlier choices can update later track actions.
+                          {wishlistedCount === 1
+                            ? 'The missing track is'
+                            : 'These missing tracks are'}{' '}
+                          already requested. The album will be checked again after the files arrive.
                         </p>
                       </div>
-                      <span>
-                        {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
-                      </span>
-                    </div>
+                    </section>
                   )}
-                  <div className={styles.decisionGrid}>
-                    {reviewDecisions.map((decision, decisionIndex) => {
-                      const selected = active ? decision.finding_ids.includes(active.id) : false;
-                      return (
-                        <Fragment key={decision.id}>
-                          <article data-risk={decision.risk} data-selected={selected || undefined}>
-                            <button
-                              type="button"
-                              className={styles.decisionSelect}
-                              onClick={() => openDecision(decision)}
-                            >
-                              <span className={styles.decisionStep} aria-hidden="true">
-                                {reviewDecisions.length > 1 ? decisionIndex + 1 : '!'}
-                              </span>
-                              <span>
-                                <small>{decisionCategoryLabel(decision.category)}</small>
-                                <strong>
-                                  {decisionInstruction(
-                                    decision,
-                                    reviewCase.album_plan?.numbering_mode,
+
+                  {albumView === 'plan' && plan.status === 'ready' && (
+                    <section
+                      className={styles.albumPlan}
+                      data-state="ready"
+                      aria-label="Album reconciliation plan"
+                    >
+                      <div className={styles.planSummary}>
+                        <div>
+                          <div className={styles.eyebrow}>Ready to apply</div>
+                          <strong>
+                            {readyChangeGroups.length === 1
+                              ? readyChangeGroups[0].valueSummary ||
+                                `${readyChangeGroups[0].label} on ${readyChangeGroups[0].count} tracks`
+                              : `${readyChangeGroups.length} supported updates across ${plan.ready} track${plan.ready === 1 ? '' : 's'}`}
+                          </strong>
+                          <p>
+                            {readyChangeGroups.length > 1
+                              ? `${readyChangeGroups.length} groups of changes passed the album and audio checks.`
+                              : primaryReadyDecision?.summary ||
+                                'All proposed changes are supported by the album and audio evidence.'}
+                          </p>
+                        </div>
+                        <div className={styles.planBadges}>
+                          <StatusChip tone="good" icon="check">
+                            {plan.ready} ready
+                          </StatusChip>
+                        </div>
+                      </div>
+                      {readySummaryList}
+                      {readyActionControls}
+                      {active &&
+                        activeDecision?.risk === 'ready' &&
+                        !activeAssignment &&
+                        selectedActionDetail}
+                    </section>
+                  )}
+
+                  {albumView === 'plan' && decisions.length > 0 && showDecisionBoard && (
+                    <section className={styles.decisionBoard} aria-label="Album decisions">
+                      {reviewDecisions.length > 1 && (
+                        <div className={styles.sectionHeading}>
+                          <div>
+                            <div className={styles.eyebrow}>Resolve in order</div>
+                            <h3>{reviewDecisions.length} choices need your input</h3>
+                            <p>
+                              Work from top to bottom. Earlier choices can update later track
+                              actions.
+                            </p>
+                          </div>
+                          <span>
+                            {reviewActionCount} affected action{reviewActionCount === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                      )}
+                      <div className={styles.decisionGrid}>
+                        {reviewDecisions.map((decision, decisionIndex) => {
+                          const selected = active
+                            ? decision.finding_ids.includes(active.id)
+                            : false;
+                          return (
+                            <Fragment key={decision.id}>
+                              <article
+                                data-risk={decision.risk}
+                                data-selected={selected || undefined}
+                              >
+                                <button
+                                  type="button"
+                                  className={styles.decisionSelect}
+                                  onClick={() => openDecision(decision)}
+                                >
+                                  <span className={styles.decisionStep} aria-hidden="true">
+                                    {reviewDecisions.length > 1 ? decisionIndex + 1 : '!'}
+                                  </span>
+                                  <span>
+                                    <small>{decisionCategoryLabel(decision.category)}</small>
+                                    <strong>
+                                      {decisionInstruction(
+                                        decision,
+                                        reviewCase.album_plan?.numbering_mode,
+                                        releaseHasMultipleDiscs,
+                                      )}
+                                    </strong>
+                                    {decision.summary && <small>{decision.summary}</small>}
+                                  </span>
+                                  {reviewDecisions.length > 1 && (
+                                    <b>
+                                      {decision.action_count} action
+                                      {decision.action_count === 1 ? '' : 's'}
+                                      {' →'}
+                                    </b>
                                   )}
-                                </strong>
-                                {decision.summary && <small>{decision.summary}</small>}
-                              </span>
-                              {reviewDecisions.length > 1 && (
-                                <b>
-                                  {decision.action_count} action
-                                  {decision.action_count === 1 ? '' : 's'}
-                                  {' →'}
-                                </b>
-                              )}
-                            </button>
-                            {['numbering', 'title_conventions', 'metadata'].includes(
-                              decision.category,
-                            ) && (
-                              <div className={styles.decisionActions}>
-                                <button
-                                  type="button"
-                                  disabled={busy || reviewCase.refresh?.state === 'running'}
-                                  onClick={() => void actGroup(decision, 'fix')}
-                                >
-                                  {busyDecision === decision.category
-                                    ? `Applying ${decision.action_count} changes…`
-                                    : decision.category === 'numbering'
-                                      ? reviewCase.album_plan?.numbering_mode === 'digital'
-                                        ? `Apply continuous numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
-                                        : `Apply release numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
-                                      : decision.category === 'title_conventions'
-                                        ? 'Apply title conventions'
-                                        : decision.label === 'Confirm album artist'
-                                          ? 'Use proposed album artist'
-                                          : `Apply all ${decision.action_count} proposed changes`}
                                 </button>
-                                <button
-                                  type="button"
-                                  disabled={busy || reviewCase.refresh?.state === 'running'}
-                                  onClick={() => void actGroup(decision, 'dismiss')}
-                                >
-                                  {decision.category === 'numbering'
-                                    ? 'Keep current numbering'
-                                    : decision.label === 'Confirm album artist'
-                                      ? 'Keep current album artist'
-                                      : 'Keep current values'}
-                                </button>
-                              </div>
-                            )}
-                            {busyDecision === decision.category && (
-                              <p className={styles.decisionProgress} role="status">
-                                <span className={styles.loadingSpinner} aria-hidden="true" />
-                                Applying the selected changes now; the album will be reanalyzed
-                                next.
-                              </p>
-                            )}
-                            {decision.category === 'album_completeness' &&
-                              (() => {
-                                const intent = reviewCase.items.find(
-                                  (item) =>
-                                    item.finding_type === 'reconciliation_intent' &&
-                                    decision.finding_ids.includes(item.id),
-                                );
-                                return intent ? (
-                                  <CompletenessChoice
-                                    key={intent.id}
-                                    finding={intent}
-                                    busy={busy}
-                                    onChoose={(choice) => void act(intent, 'fix', choice)}
-                                  />
-                                ) : (
+                                {['numbering', 'title_conventions', 'metadata'].includes(
+                                  decision.category,
+                                ) && (
                                   <div className={styles.decisionActions}>
                                     <button
                                       type="button"
-                                      disabled={
-                                        applyBusy || busy || reviewCase.refresh?.state === 'running'
-                                      }
-                                      onClick={() => void requestAllMissing(decision.action_count)}
+                                      disabled={busy || reviewCase.refresh?.state === 'running'}
+                                      onClick={() => void actGroup(decision, 'fix')}
                                     >
-                                      Request all {decision.action_count} missing track
-                                      {decision.action_count === 1 ? '' : 's'}
+                                      {busyDecision === decision.category
+                                        ? `Applying ${decision.action_count} changes…`
+                                        : decision.category === 'numbering'
+                                          ? !releaseHasMultipleDiscs
+                                            ? `Apply release track numbers to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                            : reviewCase.album_plan?.numbering_mode === 'digital'
+                                              ? `Apply continuous numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                              : `Apply release numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                          : decision.category === 'title_conventions'
+                                            ? 'Apply title conventions'
+                                            : decision.label === 'Confirm album artist'
+                                              ? 'Use proposed album artist'
+                                              : `Apply all ${decision.action_count} proposed changes`}
                                     </button>
-                                    <small>
-                                      Each track is added to the wishlist for the selected release.
-                                    </small>
+                                    <button
+                                      type="button"
+                                      disabled={busy || reviewCase.refresh?.state === 'running'}
+                                      onClick={() => void actGroup(decision, 'dismiss')}
+                                    >
+                                      {decision.category === 'numbering'
+                                        ? 'Keep current numbering'
+                                        : decision.label === 'Confirm album artist'
+                                          ? 'Keep current album artist'
+                                          : 'Keep current values'}
+                                    </button>
                                   </div>
+                                )}
+                                {busyDecision === decision.category && (
+                                  <p className={styles.decisionProgress} role="status">
+                                    <span className={styles.loadingSpinner} aria-hidden="true" />
+                                    Applying the selected changes now; the album will be reanalyzed
+                                    next.
+                                  </p>
+                                )}
+                                {decision.category === 'album_completeness' &&
+                                  (() => {
+                                    const intent = reviewCase.items.find(
+                                      (item) =>
+                                        item.finding_type === 'reconciliation_intent' &&
+                                        decision.finding_ids.includes(item.id),
+                                    );
+                                    return intent ? (
+                                      <CompletenessChoice
+                                        key={intent.id}
+                                        finding={intent}
+                                        busy={busy}
+                                        onChoose={(choice) => void act(intent, 'fix', choice)}
+                                      />
+                                    ) : (
+                                      <div className={styles.decisionActions}>
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            applyBusy ||
+                                            busy ||
+                                            reviewCase.refresh?.state === 'running'
+                                          }
+                                          onClick={() =>
+                                            void requestAllMissing(decision.action_count)
+                                          }
+                                        >
+                                          Request{' '}
+                                          {decision.action_count === 1
+                                            ? 'the missing track'
+                                            : `all ${decision.action_count} missing tracks`}
+                                        </button>
+                                        <small>
+                                          Each track is added to the wishlist for the selected
+                                          release.
+                                        </small>
+                                      </div>
+                                    );
+                                  })()}
+                              </article>
+                              {selected &&
+                                !activeAssignment &&
+                                active?.finding_type !== 'reconciliation_intent' &&
+                                active?.finding_type !== 'reconciliation_release' &&
+                                !['numbering', 'title_conventions', 'metadata'].includes(
+                                  decision.category,
+                                ) &&
+                                selectedActionDetail}
+                              {selected && active?.finding_type === 'reconciliation_release' && (
+                                <div className={styles.releaseStepLink}>
+                                  <p>
+                                    Compare the available editions before choosing this album's
+                                    track list.
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className={styles.secondaryButton}
+                                    onClick={() => setAlbumView('release')}
+                                  >
+                                    Compare releases →
+                                  </button>
+                                </div>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
+
+                  {albumView === 'plan' &&
+                    reviewCase.items.filter(
+                      (item) => item.finding_type === 'reconciliation_metadata',
+                    ).length > 1 &&
+                    !reviewDecisions.some((decision) =>
+                      ['release_conflicts', 'album_completeness'].includes(decision.category),
+                    ) && (
+                      <div className={styles.albumApplyAll}>
+                        <div>
+                          <strong>Apply all proposed metadata edits</strong>
+                          <p>
+                            Includes ready and reviewed track edits. The album will be reanalyzed
+                            after these edits.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.primary}
+                          disabled={applyBusy}
+                          onClick={() => void applyReady(reviewCase.case_id, false, true)}
+                        >
+                          Apply all{' '}
+                          {
+                            reviewCase.items.filter(
+                              (item) => item.finding_type === 'reconciliation_metadata',
+                            ).length
+                          }{' '}
+                          album edits
+                        </button>
+                      </div>
+                    )}
+
+                  {albumView === 'plan' &&
+                    plan.status !== 'ready' &&
+                    reviewCase.album_plan &&
+                    !reviewDecisions.some(
+                      (decision) => decision.category === 'release_conflicts',
+                    ) && (
+                      <section className={styles.planContext} aria-label="Album plan context">
+                        <div>
+                          <div className={styles.eyebrow}>Album context</div>
+                          <h4>What this decision affects</h4>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>Selected release</dt>
+                            <dd>
+                              {reviewCase.album_plan.source || 'Catalog'}{' '}
+                              <ProviderReleaseId
+                                source={reviewCase.album_plan.source}
+                                releaseId={reviewCase.album_plan.release_id}
+                              />
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Track coverage</dt>
+                            <dd>
+                              {mappedSlots} of {totalSlots || '?'} release slots assigned
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Already settled</dt>
+                            <dd>
+                              {settledSlots === 0
+                                ? 'None yet'
+                                : `${settledSlots} track${settledSlots === 1 ? '' : 's'} need${
+                                    settledSlots === 1 ? 's' : ''
+                                  } no decision`}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Planned numbering</dt>
+                            <dd>
+                              {numberingSchemeLabel(
+                                releaseHasMultipleDiscs,
+                                reviewCase.album_plan.numbering_mode,
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                        <div className={`${styles.actions} ${styles.planContextActions}`}>
+                          <button type="button" onClick={() => setAlbumView('tracks')}>
+                            Review track assignments
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAlbumView('evidence');
+                              setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
+                            }}
+                          >
+                            View supporting evidence
+                          </button>
+                        </div>
+                      </section>
+                    )}
+
+                  {albumView === 'plan' &&
+                    plan.status !== 'ready' &&
+                    proposedChangeGroups.length > 0 && (
+                      <section
+                        className={styles.planContext}
+                        aria-label="Proposed metadata by field"
+                      >
+                        <div>
+                          <div className={styles.eyebrow}>Proposed metadata</div>
+                          <h4>Changes by field</h4>
+                          <p>Choose a field to see the affected tracks and exact values.</p>
+                        </div>
+                        <div className={styles.readySummaryList}>
+                          {proposedChangeGroups.map((group) => (
+                            <button
+                              key={group.key}
+                              type="button"
+                              onClick={() => {
+                                setTrackFilter(group.key);
+                                setAlbumView('tracks');
+                                setOpenGroups((current) =>
+                                  current.includes('changes') ? current : [...current, 'changes'],
                                 );
-                              })()}
-                          </article>
-                          {selected &&
-                            !activeAssignment &&
-                            active?.finding_type !== 'reconciliation_intent' &&
-                            active?.finding_type !== 'reconciliation_release' &&
-                            !['numbering', 'title_conventions', 'metadata'].includes(
-                              decision.category,
-                            ) &&
-                            selectedActionDetail}
-                          {selected && active?.finding_type === 'reconciliation_release' && (
-                            <div className={styles.releaseStepLink}>
-                              <p>
-                                Compare the available editions before choosing this album's track
-                                list.
-                              </p>
+                              }}
+                            >
+                              <span>
+                                <strong>{group.label}</strong>
+                                <small>{group.valueSummary}</small>
+                              </span>
+                              <b>
+                                {group.count} track{group.count === 1 ? '' : 's'} →
+                              </b>
+                            </button>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                  {albumView === 'plan' &&
+                    plan.status !== 'ready' &&
+                    plan.ready > 0 &&
+                    !readyIncludedInGroup && (
+                      <section
+                        className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
+                        data-state="supporting"
+                        aria-label="Independent safe changes"
+                      >
+                        <div className={styles.planSummary}>
+                          <div>
+                            <div className={styles.eyebrow}>Safe changes</div>
+                            <strong>
+                              {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'}{' '}
+                              ready
+                            </strong>
+                            <p>These can be applied without resolving the decisions above.</p>
+                          </div>
+                          <div className={styles.planBadges}>
+                            <StatusChip tone="good" icon="check">
+                              {plan.ready} ready
+                            </StatusChip>
+                          </div>
+                        </div>
+                        {readySummaryList}
+                        <div className={styles.safeChangeFiles}>
+                          {reviewCase.items
+                            .filter((item) => item.review_tier === 'ready')
+                            .map((item) => (
                               <button
+                                key={item.id}
                                 type="button"
                                 className={styles.secondaryButton}
-                                onClick={() => setAlbumView('release')}
+                                onClick={() => {
+                                  setTrackFilter('change');
+                                  setAlbumView('tracks');
+                                  setActiveId(item.id);
+                                  const row = assignments.find(
+                                    (assignment) => assignment.finding_id === item.id,
+                                  );
+                                  setActiveRowKey(row ? assignmentKey(row) : null);
+                                  setOpenGroups((current) =>
+                                    current.includes('changes') ? current : [...current, 'changes'],
+                                  );
+                                }}
                               >
-                                Compare releases →
+                                {item.file_path?.split('/').pop() || item.title} ·{' '}
+                                {Object.keys(record(item.details).changes || {})
+                                  .map(changeFieldLabel)
+                                  .join(', ') || item.title}
                               </button>
-                            </div>
+                            ))}
+                        </div>
+                        {readyActionControls}
+                        {active &&
+                          activeDecision?.risk === 'ready' &&
+                          !activeAssignment &&
+                          selectedActionDetail}
+                      </section>
+                    )}
+
+                  {albumView === 'plan' &&
+                    !showDecisionBoard &&
+                    pendingDecisions.length === 0 &&
+                    plan.ready === 0 && (
+                      <div className={styles.empty}>No album-level action is pending.</div>
+                    )}
+
+                  {albumView === 'tracks' && assignments.length > 0 && (
+                    <div className={styles.trackWorkspace}>
+                      <section
+                        className={styles.trackMatrix}
+                        aria-label="Complete album track assignment"
+                      >
+                        <div className={styles.sectionHeading}>
+                          <div>
+                            <div className={styles.eyebrow}>Album track list</div>
+                            <h3>Track assignments</h3>
+                            <p>
+                              Compare each local file with the selected release slot and proposed
+                              result.
+                            </p>
+                          </div>
+                          <div className={styles.matrixCounts}>
+                            {(reviewCase.album_plan?.counts.confirmed || 0) > 0 && (
+                              <StatusChip tone="good" icon="check">
+                                {reviewCase.album_plan?.counts.confirmed} confirmed
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.changed || 0) > 0 && (
+                              <StatusChip tone="info" icon="arrow">
+                                {reviewCase.album_plan?.counts.changed} changes
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.uncertain || 0) > 0 && (
+                              <StatusChip tone="warning" icon="warning">
+                                {reviewCase.album_plan?.counts.uncertain} uncertain
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.missing || 0) > 0 && (
+                              <StatusChip tone="danger" icon="x">
+                                {reviewCase.album_plan?.counts.missing} missing
+                              </StatusChip>
+                            )}
+                            {wishlistedCount > 0 && (
+                              <StatusChip tone="info" icon="info">
+                                {wishlistedCount} wishlisted
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.not_owned || 0) > 0 && (
+                              <StatusChip tone="muted" icon="info">
+                                {reviewCase.album_plan?.counts.not_owned} outside collection
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.settled || 0) > 0 && (
+                              <StatusChip tone="muted" icon="check">
+                                {reviewCase.album_plan?.counts.settled} already reviewed
+                              </StatusChip>
+                            )}
+                            {(reviewCase.album_plan?.counts.extra || 0) > 0 && (
+                              <StatusChip tone="danger" icon="warning">
+                                {reviewCase.album_plan?.counts.extra} extra
+                              </StatusChip>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.releaseContext}>
+                          <span>
+                            Selected {reviewCase.album_plan?.source || 'catalog'} release
+                            <ProviderReleaseId
+                              source={reviewCase.album_plan?.source}
+                              releaseId={reviewCase.album_plan?.release_id}
+                            />
+                          </span>
+                          {reviewCase.album_plan?.intent_scope && (
+                            <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
                           )}
-                        </Fragment>
-                      );
-                    })}
-                  </div>
-                </section>
-              )}
-
-              {albumView === 'plan' &&
-                reviewCase.items.filter((item) => item.finding_type === 'reconciliation_metadata')
-                  .length > 1 &&
-                !reviewDecisions.some((decision) =>
-                  ['release_conflicts', 'album_completeness'].includes(decision.category),
-                ) && (
-                  <div className={styles.albumApplyAll}>
-                    <div>
-                      <strong>Apply all proposed metadata edits</strong>
-                      <p>
-                        Includes ready and reviewed track edits. The album will be reanalyzed after
-                        these edits.
-                      </p>
+                          {reviewCase.album_plan?.candidates?.[0] && (
+                            <span>
+                              {numberingSchemeLabel(
+                                releaseHasMultipleDiscs,
+                                reviewCase.album_plan.numbering_mode,
+                              )}
+                            </span>
+                          )}
+                        </div>
+                        {pairedConflictCount > 0 && (
+                          <p className={styles.versionExplanation}>
+                            {pairedConflictCount} version conflict
+                            {pairedConflictCount === 1 ? '' : 's'} pair a local file with an
+                            unmatched release slot. Each pair contributes one extra file and one
+                            missing slot to the counts above.
+                          </p>
+                        )}
+                        <div className={styles.trackFilters}>
+                          <div
+                            className={styles.trackViewSwitch}
+                            role="group"
+                            aria-label="Track arrangement"
+                          >
+                            <button
+                              type="button"
+                              aria-pressed={trackView === 'issues'}
+                              onClick={() => setTrackView('issues')}
+                            >
+                              Group by action
+                            </button>
+                            <button
+                              type="button"
+                              aria-pressed={trackView === 'release'}
+                              onClick={() => setTrackView('release')}
+                            >
+                              Release order
+                            </button>
+                          </div>
+                          <label>
+                            Show tracks
+                            <select
+                              value={trackFilter}
+                              onChange={(event) => setTrackFilter(event.target.value)}
+                            >
+                              <option value="">All tracks</option>
+                              {trackFilter.startsWith('decision:') && (
+                                <option value={trackFilter}>
+                                  {decisions.find(
+                                    (decision) => `decision:${decision.id}` === trackFilter,
+                                  )?.label || 'Selected decision'}
+                                </option>
+                              )}
+                              <option value="uncertain">Uncertain assignments</option>
+                              <option value="duplicate">Duplicate files</option>
+                              <option value="extra">Unassigned files</option>
+                              <option value="change">All proposed changes</option>
+                              <option value="settled">Settled tracks</option>
+                              {proposedChangeGroups.map((group) => (
+                                <option value={group.key} key={group.key}>
+                                  {group.label} ({group.count})
+                                </option>
+                              ))}
+                              {missingAssignments.length > 0 && (
+                                <option value="missing">
+                                  Missing ({missingAssignments.length})
+                                </option>
+                              )}
+                              {pairedConflictCount > 0 && (
+                                <option value="version_conflict">
+                                  Version conflicts ({pairedConflictCount})
+                                </option>
+                              )}
+                            </select>
+                          </label>
+                          {trackFilter && (
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={() => setTrackFilter('')}
+                            >
+                              Clear filter
+                            </button>
+                          )}
+                        </div>
+                        <div className={styles.trackTable} role="table">
+                          <div className={styles.trackTableHead} role="row">
+                            <span>Review state</span>
+                            <span>Disc · track</span>
+                            <span>Local file → release track</span>
+                            <span>Proposed action</span>
+                          </div>
+                          {trackView === 'release' ? (
+                            releaseOrderedAssignments
+                              .filter(matchingFilter)
+                              .map(renderAssignmentRow)
+                          ) : (
+                            <>
+                              {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
+                              {changeAssignments.filter(matchingFilter).length > 0 && (
+                                <div className={styles.assignmentGroup} data-tone="info">
+                                  <div className={styles.assignmentGroupTitle}>
+                                    ↻ {changeAssignments.filter(matchingFilter).length} proposed
+                                    track changes
+                                  </div>
+                                  {changeAssignments
+                                    .filter(matchingFilter)
+                                    .map(renderAssignmentRow)}
+                                </div>
+                              )}
+                              {missingAssignments.filter(matchingFilter).length > 0 && (
+                                <div className={styles.assignmentGroup} data-tone="danger">
+                                  <button
+                                    type="button"
+                                    aria-expanded={openGroups.includes('missing')}
+                                    onClick={() => toggleGroup('missing')}
+                                  >
+                                    {openGroups.includes('missing') ? '▾' : '▸'}{' '}
+                                    {missingAssignments.filter(matchingFilter).length} absent
+                                    release tracks
+                                  </button>
+                                  {openGroups.includes('missing') && (
+                                    <>
+                                      {hasIntentDecision && (
+                                        <p>
+                                          Choose album completeness on Plan; each absent track is
+                                          listed here for context.
+                                        </p>
+                                      )}
+                                      {missingAssignments
+                                        .filter(matchingFilter)
+                                        .map(renderAssignmentRow)}
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              {settledAssignments.filter(matchingFilter).length > 0 && (
+                                <div className={styles.assignmentGroup} data-tone="good">
+                                  <button
+                                    type="button"
+                                    aria-expanded={openGroups.includes('settled')}
+                                    onClick={() => toggleGroup('settled')}
+                                  >
+                                    {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
+                                    {settledAssignments.filter(matchingFilter).length} settled
+                                    release slots
+                                  </button>
+                                  {openGroups.includes('settled') &&
+                                    settledAssignments
+                                      .filter(matchingFilter)
+                                      .map(renderAssignmentRow)}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </section>
+                      {inspectorOpen && (
+                        <button
+                          type="button"
+                          className={styles.inspectorBackdrop}
+                          aria-label="Close track details"
+                          onClick={() => setInspectorOpen(false)}
+                        />
+                      )}
+                      <aside
+                        className={styles.trackInspector}
+                        aria-label="Selected track details"
+                        data-open={inspectorOpen || undefined}
+                      >
+                        <button
+                          type="button"
+                          className={styles.inspectorClose}
+                          onClick={() => setInspectorOpen(false)}
+                        >
+                          Close details ×
+                        </button>
+                        {activeRowKey && active ? (
+                          <>
+                            {assignments.find((row) => assignmentKey(row) === activeRowKey)
+                              ?.status === 'missing' && (
+                              <p>
+                                This release track has no assigned local file. Review the album
+                                scope if you do not own it.
+                              </p>
+                            )}
+                            {compactSelectedActionDetail}
+                          </>
+                        ) : (
+                          <p>Select a track to inspect its evidence and decisions.</p>
+                        )}
+                      </aside>
                     </div>
-                    <button
-                      type="button"
-                      className={styles.primary}
-                      disabled={applyBusy}
-                      onClick={() => void applyReady(reviewCase.case_id, false, true)}
-                    >
-                      Apply all{' '}
-                      {
-                        reviewCase.items.filter(
-                          (item) => item.finding_type === 'reconciliation_metadata',
-                        ).length
-                      }{' '}
-                      album edits
-                    </button>
-                  </div>
-                )}
+                  )}
 
-              {albumView === 'plan' &&
-                plan.status !== 'ready' &&
-                reviewCase.album_plan &&
-                !reviewDecisions.some((decision) => decision.category === 'release_conflicts') && (
-                  <section className={styles.planContext} aria-label="Album plan context">
-                    <div>
-                      <div className={styles.eyebrow}>Album context</div>
-                      <h4>What this decision affects</h4>
+                  {albumView === 'tracks' && assignments.length === 0 && (
+                    <>
+                      <div className={styles.empty}>
+                        No track assignment data is available for this album.
+                      </div>
+                      {active && selectedActionDetail}
+                    </>
+                  )}
+
+                  {albumView === 'release' && (
+                    <section className={styles.evidenceView} aria-label="Release comparison">
+                      <div className={styles.sectionHeading}>
+                        <div>
+                          <div className={styles.eyebrow}>Release selection</div>
+                          <h3>Choose the edition for this album</h3>
+                          <p>
+                            The chosen release sets the track list. You can change it after
+                            reviewing individual tracks.
+                          </p>
+                        </div>
+                      </div>
+                      {Boolean(active?.details?.release_disambiguation) && (
+                        <p>Edition note: {textValue(active?.details?.release_disambiguation)}</p>
+                      )}
+                      <ReleaseComparison
+                        candidates={
+                          (reviewCase.album_plan?.candidates ||
+                            records(record(active?.details).candidates)) as Array<
+                            Record<string, unknown>
+                          >
+                        }
+                        selected={previewCandidate}
+                        onSelect={setPreviewCandidate}
+                        currentRelease={{
+                          source: reviewCase.album_plan?.source,
+                          release_id: reviewCase.album_plan?.release_id,
+                        }}
+                        fallbackArtwork={reviewCase.album_thumb_url || ''}
+                        numberingMode={reviewCase.album_plan?.numbering_mode}
+                        onPin={(index) =>
+                          active?.finding_type === 'reconciliation_release'
+                            ? void act(active, 'fix', String(index))
+                            : void pinCandidate(index)
+                        }
+                        busy={busy}
+                      />
+                      <div className={styles.manualRelease}>
+                        <h4>Have a different MusicBrainz edition?</h4>
+                        <p>
+                          Enter its release MBID or URL to inspect the track list before choosing
+                          it.
+                        </p>
+                        <div>
+                          <input
+                            aria-label="MusicBrainz release MBID or URL"
+                            value={releaseIdInput}
+                            onChange={(event) => {
+                              setReleaseIdInput(event.target.value);
+                              setManualRelease(null);
+                            }}
+                            placeholder="Release MBID or URL"
+                          />
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            disabled={busy}
+                            onClick={() => void inspectReleaseId()}
+                          >
+                            Load release
+                          </button>
+                        </div>
+                        {manualRelease && (
+                          <div className={styles.manualReleasePreview}>
+                            <strong>
+                              {manualRelease.title} · {manualRelease.tracks.length} tracks
+                            </strong>
+                            <ol>
+                              {manualRelease.tracks.map((title, index) => (
+                                <li key={`${index}-${title}`}>{title}</li>
+                              ))}
+                            </ol>
+                            <button
+                              type="button"
+                              className={styles.primary}
+                              disabled={busy}
+                              onClick={() => void pinManualRelease()}
+                            >
+                              Use this release
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {active?.finding_type === 'reconciliation_release' && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void act(active, 'dismiss')}
+                        >
+                          Keep current release
+                        </button>
+                      )}
+                    </section>
+                  )}
+
+                  {albumView === 'evidence' && (
+                    <section className={styles.evidenceView} aria-label="Album evidence">
+                      <div className={styles.sectionHeading}>
+                        <div>
+                          <div className={styles.eyebrow}>Supporting information</div>
+                          <h3>Why this plan was chosen</h3>
+                          <p>
+                            Catalog source, album scope, numbering, and the evidence behind each
+                            action.
+                          </p>
+                        </div>
+                      </div>
+                      <dl className={styles.albumFacts}>
+                        <div>
+                          <dt>Selected release</dt>
+                          <dd>
+                            {reviewCase.album_plan?.source || 'Catalog'}{' '}
+                            <ProviderReleaseId
+                              source={reviewCase.album_plan?.source}
+                              releaseId={reviewCase.album_plan?.release_id}
+                            />
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Album scope</dt>
+                          <dd>
+                            {reviewCase.album_plan?.intent_scope
+                              ? `${reviewCase.album_plan.intent_scope} album`
+                              : 'Not decided'}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Numbering</dt>
+                          <dd>
+                            {numberingSchemeLabel(
+                              releaseHasMultipleDiscs,
+                              reviewCase.album_plan?.numbering_mode,
+                            )}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Track coverage</dt>
+                          <dd>
+                            {assignments.length} local and release slot record
+                            {assignments.length === 1 ? '' : 's'} compared
+                          </dd>
+                        </div>
+                      </dl>
+                      {reviewCase.items.length > 0 && (
+                        <label className={styles.evidencePicker}>
+                          Evidence for action
+                          <select
+                            value={activeId ?? ''}
+                            onChange={(event) => selectFinding(Number(event.target.value))}
+                          >
+                            {reviewCase.items.map((finding) => (
+                              <option key={finding.id} value={finding.id}>
+                                {findingHeading(finding)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                      {active && <ReconciliationEvidence finding={active} prominent />}
+                    </section>
+                  )}
+
+                  {albumView === 'plan' &&
+                    active &&
+                    !activeAssignment &&
+                    !activeDecision &&
+                    selectedActionDetail}
+                </div>
+                {albumView !== 'tracks' && (
+                  <aside className={styles.tabContext} aria-label={`${albumView} context`}>
+                    <div className={styles.eyebrow}>
+                      {albumView === 'plan'
+                        ? 'Album context'
+                        : albumView === 'release'
+                          ? 'Edition context'
+                          : 'Evidence context'}
                     </div>
-                    <dl>
+                    <h3>
+                      {albumView === 'plan'
+                        ? 'What this plan affects'
+                        : albumView === 'release'
+                          ? 'Compare the edition'
+                          : 'What supports this decision'}
+                    </h3>
+                    <dl className={styles.contextFacts}>
                       <div>
                         <dt>Selected release</dt>
                         <dd>
-                          {reviewCase.album_plan.source || 'Catalog'}{' '}
                           <ProviderReleaseId
-                            source={reviewCase.album_plan.source}
-                            releaseId={reviewCase.album_plan.release_id}
+                            source={reviewCase.album_plan?.source}
+                            releaseId={reviewCase.album_plan?.release_id}
                           />
                         </dd>
                       </div>
                       <div>
                         <dt>Track coverage</dt>
                         <dd>
-                          {mappedSlots} of {totalSlots || '?'} release slots assigned
+                          {mappedSlots} of {totalSlots} release slots assigned
                         </dd>
                       </div>
                       <div>
-                        <dt>Already settled</dt>
-                        <dd>
-                          {settledSlots === 0
-                            ? 'None yet'
-                            : `${settledSlots} track${settledSlots === 1 ? '' : 's'} need${
-                                settledSlots === 1 ? 's' : ''
-                              } no decision`}
-                        </dd>
+                        <dt>Album scope</dt>
+                        <dd>{reviewCase.album_plan?.intent_scope || 'Choice pending'}</dd>
                       </div>
                       <div>
-                        <dt>Planned numbering</dt>
+                        <dt>Numbering</dt>
                         <dd>
-                          {reviewCase.album_plan.numbering_mode === 'digital'
-                            ? 'One continuous album sequence'
-                            : 'Disc and track positions from the release'}
+                          {numberingSchemeLabel(
+                            releaseHasMultipleDiscs,
+                            reviewCase.album_plan?.numbering_mode,
+                          )}
                         </dd>
                       </div>
                     </dl>
-                    <div className={`${styles.actions} ${styles.planContextActions}`}>
-                      <button type="button" onClick={() => setAlbumView('tracks')}>
-                        Review track assignments
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAlbumView('evidence');
-                          setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
-                        }}
-                      >
-                        View supporting evidence
-                      </button>
-                    </div>
-                  </section>
-                )}
-
-              {albumView === 'plan' &&
-                plan.status !== 'ready' &&
-                proposedChangeGroups.length > 0 && (
-                  <section className={styles.planContext} aria-label="Proposed metadata by field">
-                    <div>
-                      <div className={styles.eyebrow}>Proposed metadata</div>
-                      <h4>Changes by field</h4>
-                      <p>Choose a field to see the affected tracks and exact values.</p>
-                    </div>
-                    <div className={styles.readySummaryList}>
-                      {proposedChangeGroups.map((group) => (
-                        <button
-                          key={group.key}
-                          type="button"
-                          onClick={() => {
-                            setTrackFilter(group.key);
-                            setAlbumView('tracks');
-                            setOpenGroups((current) =>
-                              current.includes('changes') ? current : [...current, 'changes'],
-                            );
-                          }}
-                        >
-                          <span>
-                            <strong>{group.label}</strong>
-                            <small>{group.valueSummary}</small>
-                          </span>
-                          <b>
-                            {group.count} track{group.count === 1 ? '' : 's'} →
-                          </b>
-                        </button>
-                      ))}
-                    </div>
-                  </section>
-                )}
-
-              {albumView === 'plan' &&
-                plan.status !== 'ready' &&
-                plan.ready > 0 &&
-                !readyIncludedInGroup && (
-                  <section
-                    className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
-                    data-state="supporting"
-                    aria-label="Independent safe changes"
-                  >
-                    <div className={styles.planSummary}>
-                      <div>
-                        <div className={styles.eyebrow}>Safe changes</div>
-                        <strong>
-                          {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'} ready
-                        </strong>
-                        <p>These can be applied without resolving the decisions above.</p>
-                      </div>
-                      <div className={styles.planBadges}>
-                        <StatusChip tone="good" icon="check">
-                          {plan.ready} ready
-                        </StatusChip>
-                      </div>
-                    </div>
-                    {readySummaryList}
-                    <div className={styles.safeChangeFiles}>
-                      {reviewCase.items
-                        .filter((item) => item.review_tier === 'ready')
-                        .map((item) => (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={styles.secondaryButton}
-                            onClick={() => {
-                              setTrackFilter('change');
-                              setAlbumView('tracks');
-                              setActiveId(item.id);
-                              const row = assignments.find(
-                                (assignment) => assignment.finding_id === item.id,
-                              );
-                              setActiveRowKey(row ? assignmentKey(row) : null);
-                              setOpenGroups((current) =>
-                                current.includes('changes') ? current : [...current, 'changes'],
-                              );
-                            }}
-                          >
-                            {item.file_path?.split('/').pop() || item.title} ·{' '}
-                            {Object.keys(record(item.details).changes || {})
-                              .map(changeFieldLabel)
-                              .join(', ') || item.title}
-                          </button>
-                        ))}
-                    </div>
-                    {readyActionControls}
-                    {active &&
-                      activeDecision?.risk === 'ready' &&
-                      !activeAssignment &&
-                      selectedActionDetail}
-                  </section>
-                )}
-
-              {albumView === 'plan' && !showDecisionBoard && plan.ready === 0 && (
-                <div className={styles.empty}>No album-level action is pending.</div>
-              )}
-
-              {albumView === 'tracks' && assignments.length > 0 && (
-                <div className={styles.trackWorkspace}>
-                  <section
-                    className={styles.trackMatrix}
-                    aria-label="Complete album track assignment"
-                  >
-                    <div className={styles.sectionHeading}>
-                      <div>
-                        <div className={styles.eyebrow}>Album track list</div>
-                        <h3>Track assignments</h3>
-                        <p>
-                          Compare each local file with the selected release slot and proposed
-                          result.
-                        </p>
-                      </div>
-                      <div className={styles.matrixCounts}>
-                        {(reviewCase.album_plan?.counts.confirmed || 0) > 0 && (
-                          <StatusChip tone="good" icon="check">
-                            {reviewCase.album_plan?.counts.confirmed} confirmed
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.changed || 0) > 0 && (
-                          <StatusChip tone="info" icon="arrow">
-                            {reviewCase.album_plan?.counts.changed} changes
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.uncertain || 0) > 0 && (
-                          <StatusChip tone="warning" icon="warning">
-                            {reviewCase.album_plan?.counts.uncertain} uncertain
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.missing || 0) > 0 && (
-                          <StatusChip tone="danger" icon="x">
-                            {reviewCase.album_plan?.counts.missing} missing
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.not_owned || 0) > 0 && (
-                          <StatusChip tone="muted" icon="info">
-                            {reviewCase.album_plan?.counts.not_owned} outside collection
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.settled || 0) > 0 && (
-                          <StatusChip tone="muted" icon="check">
-                            {reviewCase.album_plan?.counts.settled} already reviewed
-                          </StatusChip>
-                        )}
-                        {(reviewCase.album_plan?.counts.extra || 0) > 0 && (
-                          <StatusChip tone="danger" icon="warning">
-                            {reviewCase.album_plan?.counts.extra} extra
-                          </StatusChip>
-                        )}
-                      </div>
-                    </div>
-                    <div className={styles.releaseContext}>
-                      <span>
-                        Selected {reviewCase.album_plan?.source || 'catalog'} release
-                        <ProviderReleaseId
-                          source={reviewCase.album_plan?.source}
-                          releaseId={reviewCase.album_plan?.release_id}
-                        />
-                      </span>
-                      {reviewCase.album_plan?.intent_scope && (
-                        <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
-                      )}
-                      {reviewCase.album_plan?.candidates?.[0] && (
-                        <span>
-                          {reviewCase.album_plan.numbering_mode === 'digital'
-                            ? 'Continuous digital numbering'
-                            : 'Multi-disc release numbering'}
-                        </span>
-                      )}
-                    </div>
-                    {pairedConflictCount > 0 && (
-                      <p className={styles.versionExplanation}>
-                        {pairedConflictCount} version conflict{pairedConflictCount === 1 ? '' : 's'}{' '}
-                        pair a local file with an unmatched release slot. Each pair contributes one
-                        extra file and one missing slot to the counts above.
+                    {albumView === 'plan' && (
+                      <p>
+                        {releaseChoicePending
+                          ? 'Choose the edition before acting on dependent track proposals.'
+                          : `${assignmentAttentionCount} track assignments need attention; ${wishlistedCount} are waiting for download.`}
                       </p>
                     )}
-                    <div className={styles.trackFilters}>
-                      <div
-                        className={styles.trackViewSwitch}
-                        role="group"
-                        aria-label="Track arrangement"
-                      >
-                        <button
-                          type="button"
-                          aria-pressed={trackView === 'issues'}
-                          onClick={() => setTrackView('issues')}
-                        >
-                          Group by action
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={trackView === 'release'}
-                          onClick={() => setTrackView('release')}
-                        >
-                          Release order
-                        </button>
-                      </div>
-                      <label>
-                        Show tracks
-                        <select
-                          value={trackFilter}
-                          onChange={(event) => setTrackFilter(event.target.value)}
-                        >
-                          <option value="">All tracks</option>
-                          {trackFilter.startsWith('decision:') && (
-                            <option value={trackFilter}>
-                              {decisions.find(
-                                (decision) => `decision:${decision.id}` === trackFilter,
-                              )?.label || 'Selected decision'}
-                            </option>
-                          )}
-                          <option value="uncertain">Uncertain assignments</option>
-                          <option value="duplicate">Duplicate files</option>
-                          <option value="extra">Unassigned files</option>
-                          <option value="change">All proposed changes</option>
-                          <option value="settled">Settled tracks</option>
-                          {proposedChangeGroups.map((group) => (
-                            <option value={group.key} key={group.key}>
-                              {group.label} ({group.count})
-                            </option>
-                          ))}
-                          {missingAssignments.length > 0 && (
-                            <option value="missing">Missing ({missingAssignments.length})</option>
-                          )}
-                          {pairedConflictCount > 0 && (
-                            <option value="version_conflict">
-                              Version conflicts ({pairedConflictCount})
-                            </option>
-                          )}
-                        </select>
-                      </label>
-                      {trackFilter && (
-                        <button
-                          type="button"
-                          className={styles.secondaryButton}
-                          onClick={() => setTrackFilter('')}
-                        >
-                          Clear filter
-                        </button>
-                      )}
-                    </div>
-                    <div className={styles.trackTable} role="table">
-                      <div className={styles.trackTableHead} role="row">
-                        <span>Review state</span>
-                        <span>Disc · track</span>
-                        <span>Local file → release track</span>
-                        <span>Proposed action</span>
-                      </div>
-                      {trackView === 'release' ? (
-                        releaseOrderedAssignments.filter(matchingFilter).map(renderAssignmentRow)
-                      ) : (
-                        <>
-                          {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                          {changeAssignments.filter(matchingFilter).length > 0 && (
-                            <div className={styles.assignmentGroup} data-tone="info">
-                              <div className={styles.assignmentGroupTitle}>
-                                ↻ {changeAssignments.filter(matchingFilter).length} proposed track
-                                changes
-                              </div>
-                              {changeAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                            </div>
-                          )}
-                          {missingAssignments.filter(matchingFilter).length > 0 && (
-                            <div className={styles.assignmentGroup} data-tone="danger">
-                              <button
-                                type="button"
-                                aria-expanded={openGroups.includes('missing')}
-                                onClick={() => toggleGroup('missing')}
-                              >
-                                {openGroups.includes('missing') ? '▾' : '▸'}{' '}
-                                {missingAssignments.filter(matchingFilter).length} absent release
-                                tracks
-                              </button>
-                              {openGroups.includes('missing') && (
-                                <>
-                                  {hasIntentDecision && (
-                                    <p>
-                                      Choose album completeness on Plan; each absent track is listed
-                                      here for context.
-                                    </p>
-                                  )}
-                                  {missingAssignments
-                                    .filter(matchingFilter)
-                                    .map(renderAssignmentRow)}
-                                </>
-                              )}
-                            </div>
-                          )}
-                          {settledAssignments.filter(matchingFilter).length > 0 && (
-                            <div className={styles.assignmentGroup} data-tone="good">
-                              <button
-                                type="button"
-                                aria-expanded={openGroups.includes('settled')}
-                                onClick={() => toggleGroup('settled')}
-                              >
-                                {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
-                                {settledAssignments.filter(matchingFilter).length} settled release
-                                slots
-                              </button>
-                              {openGroups.includes('settled') &&
-                                settledAssignments.filter(matchingFilter).map(renderAssignmentRow)}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </section>
-                  <aside className={styles.trackInspector} aria-label="Selected track details">
-                    {activeRowKey && active ? (
-                      <>
-                        {assignments.find((row) => assignmentKey(row) === activeRowKey)?.status ===
-                          'missing' && (
-                          <p>
-                            This release track has no assigned local file. Review the album scope if
-                            you do not own it.
-                          </p>
-                        )}
-                        {compactSelectedActionDetail}
-                      </>
-                    ) : (
-                      <p>Select a track to inspect its evidence and decisions.</p>
+                    {albumView === 'release' && (
+                      <p>
+                        Choosing another edition recalculates track positions and missing slots.
+                      </p>
+                    )}
+                    {albumView === 'evidence' && active && (
+                      <p>Showing evidence for: {findingHeading(active)}</p>
                     )}
                   </aside>
-                </div>
-              )}
-
-              {albumView === 'tracks' && assignments.length === 0 && (
-                <>
-                  <div className={styles.empty}>
-                    No track assignment data is available for this album.
-                  </div>
-                  {active && selectedActionDetail}
-                </>
-              )}
-
-              {albumView === 'release' && (
-                <section className={styles.evidenceView} aria-label="Release comparison">
-                  <div className={styles.sectionHeading}>
-                    <div>
-                      <div className={styles.eyebrow}>Release selection</div>
-                      <h3>Choose the edition for this album</h3>
-                      <p>
-                        The chosen release sets the track list. You can change it after reviewing
-                        individual tracks.
-                      </p>
-                    </div>
-                  </div>
-                  {Boolean(active?.details?.release_disambiguation) && (
-                    <p>Edition note: {textValue(active?.details?.release_disambiguation)}</p>
-                  )}
-                  <ReleaseComparison
-                    candidates={
-                      (reviewCase.album_plan?.candidates ||
-                        records(record(active?.details).candidates)) as Array<
-                        Record<string, unknown>
-                      >
-                    }
-                    selected={previewCandidate}
-                    onSelect={setPreviewCandidate}
-                    currentRelease={{
-                      source: reviewCase.album_plan?.source,
-                      release_id: reviewCase.album_plan?.release_id,
-                    }}
-                    fallbackArtwork={reviewCase.album_thumb_url || ''}
-                    onPin={(index) =>
-                      active?.finding_type === 'reconciliation_release'
-                        ? void act(active, 'fix', String(index))
-                        : void pinCandidate(index)
-                    }
-                    busy={busy}
-                  />
-                  <div className={styles.manualRelease}>
-                    <h4>Have a different MusicBrainz edition?</h4>
-                    <p>
-                      Enter its release MBID or URL to inspect the track list before choosing it.
-                    </p>
-                    <div>
-                      <input
-                        aria-label="MusicBrainz release MBID or URL"
-                        value={releaseIdInput}
-                        onChange={(event) => {
-                          setReleaseIdInput(event.target.value);
-                          setManualRelease(null);
-                        }}
-                        placeholder="Release MBID or URL"
-                      />
-                      <button
-                        type="button"
-                        className={styles.secondaryButton}
-                        disabled={busy}
-                        onClick={() => void inspectReleaseId()}
-                      >
-                        Load release
-                      </button>
-                    </div>
-                    {manualRelease && (
-                      <div className={styles.manualReleasePreview}>
-                        <strong>
-                          {manualRelease.title} · {manualRelease.tracks.length} tracks
-                        </strong>
-                        <ol>
-                          {manualRelease.tracks.map((title, index) => (
-                            <li key={`${index}-${title}`}>{title}</li>
-                          ))}
-                        </ol>
-                        <button
-                          type="button"
-                          className={styles.primary}
-                          disabled={busy}
-                          onClick={() => void pinManualRelease()}
-                        >
-                          Use this release
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {active?.finding_type === 'reconciliation_release' && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void act(active, 'dismiss')}
-                    >
-                      Keep current release
-                    </button>
-                  )}
-                </section>
-              )}
-
-              {albumView === 'evidence' && (
-                <section className={styles.evidenceView} aria-label="Album evidence">
-                  <div className={styles.sectionHeading}>
-                    <div>
-                      <div className={styles.eyebrow}>Supporting information</div>
-                      <h3>Why this plan was chosen</h3>
-                      <p>
-                        Catalog source, album scope, numbering, and the evidence behind each action.
-                      </p>
-                    </div>
-                  </div>
-                  <dl className={styles.albumFacts}>
-                    <div>
-                      <dt>Selected release</dt>
-                      <dd>
-                        {reviewCase.album_plan?.source || 'Catalog'}{' '}
-                        <ProviderReleaseId
-                          source={reviewCase.album_plan?.source}
-                          releaseId={reviewCase.album_plan?.release_id}
-                        />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Album scope</dt>
-                      <dd>
-                        {reviewCase.album_plan?.intent_scope
-                          ? `${reviewCase.album_plan.intent_scope} album`
-                          : 'Not decided'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Numbering</dt>
-                      <dd>
-                        {reviewCase.album_plan?.numbering_mode === 'digital'
-                          ? 'Continuous digital numbering'
-                          : 'Release disc and track numbering'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Track coverage</dt>
-                      <dd>
-                        {assignments.length} local and release slot record
-                        {assignments.length === 1 ? '' : 's'} compared
-                      </dd>
-                    </div>
-                  </dl>
-                  {reviewCase.items.length > 0 && (
-                    <label className={styles.evidencePicker}>
-                      Evidence for action
-                      <select
-                        value={activeId ?? ''}
-                        onChange={(event) => selectFinding(Number(event.target.value))}
-                      >
-                        {reviewCase.items.map((finding) => (
-                          <option key={finding.id} value={finding.id}>
-                            {findingHeading(finding)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
-                  {active && <ReconciliationEvidence finding={active} prominent />}
-                </section>
-              )}
-
-              {albumView === 'plan' &&
-                active &&
-                !activeAssignment &&
-                !activeDecision &&
-                selectedActionDetail}
+                )}
+              </div>
             </>
           ) : queue && queue.total === 0 ? (
             <div className={styles.empty}>

@@ -465,23 +465,23 @@ describe('library reconciliation review queue', () => {
 
     render(<ReviewPage />);
 
-    expect(await screen.findByText('Switch this album to continuous track numbering')).toBeTruthy();
+    expect(await screen.findByText('Renumber tracks to match the selected release')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Track assignments' })).toBeNull();
     expect(screen.queryByLabelText('Album reconciliation plan')).toBeNull();
     expect(screen.getByText(/Renumber 1 track as one sequence/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'What this decision affects' })).toBeTruthy();
-    expect(screen.getByText('2 of 3 release slots assigned')).toBeTruthy();
+    expect(screen.getAllByText('2 of 3 release slots assigned').length).toBeGreaterThan(0);
     expect(screen.getByText('2 tracks need no decision')).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(
-      screen.getByRole('button', { name: 'Apply continuous numbering to 1 track now' }),
+      screen.getByRole('button', { name: 'Apply release track numbers to 1 track now' }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
     expect(screen.getByRole('heading', { name: 'Why this plan was chosen' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
-    expect(screen.getByText('Continuous digital numbering')).toBeTruthy();
+    expect(screen.getAllByText('One disc · match release positions').length).toBeGreaterThan(0);
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
     expect(screen.getByText(/1 proposed track changes/)).toBeTruthy();
@@ -492,8 +492,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByRole('heading', { name: 'Proposed changes' })).toBeTruthy();
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
     fireEvent.click(selectedRow);
-    expect(screen.queryByLabelText('Selected action detail')).toBeNull();
-    expect(selectedRow.getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByLabelText('Selected action detail')).toBeTruthy();
+    expect(selectedRow.getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('row', { name: /Hourglass/ })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Show tracks'), { target: { value: 'numbering' } });
     expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('numbering');

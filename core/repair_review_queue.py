@@ -154,6 +154,11 @@ def _numbering_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str]:
     track_changed = bool({'track_number', 'library_track_number'} & changed_fields)
     count = len(rows)
     tracks = f'{count} track{"s" if count != 1 else ""}'
+    if (track_changed and all(
+            (row.get('details') or {}).get('release_disc_count') == 1
+            for row in rows)):
+        return ('Match release track positions',
+                f'Correct the positions of {tracks} to match the selected release.')
     if disc_changed and not track_changed:
         values = [
             _change_value(change, 'new')
@@ -208,6 +213,9 @@ def finding_category(item: dict[str, Any]) -> str:
     changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
     if finding_type == 'reconciliation_release':
         return 'release_conflicts'
+    if (finding_type == 'reconciliation_missing' and
+            details.get('fulfillment_state') == 'wishlisted'):
+        return 'pending_fulfillment'
     if finding_type in ('reconciliation_intent', 'reconciliation_missing'):
         return 'album_completeness'
     if details.get('audio_conflict') == 'different_recording':
@@ -294,6 +302,10 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 summary = (f'{len(rows)} expected track'
                            f'{"s are" if len(rows) != 1 else " is"} absent from the '
                            'intended complete album.')
+        elif category == 'pending_fulfillment':
+            decision_label = 'Waiting for missing tracks'
+            summary = (f'{len(rows)} missing track'
+                       f'{"s are" if len(rows) != 1 else " is"} on the wishlist.')
         elif category == 'extra_files':
             summary = (f'{len(rows)} local file'
                        f'{"s do" if len(rows) != 1 else " does"} not fit the release.')
@@ -310,7 +322,8 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'action_count': len(rows),
         })
     category_rank = {
-        'release_conflicts': 0, 'album_completeness': 1, 'numbering': 2,
+        'release_conflicts': 0, 'album_completeness': 1,
+        'pending_fulfillment': 2, 'numbering': 3,
         'title_issues': 3, 'audio_conflicts': 4,
         'extra_files': 6, 'duplicates': 7, 'title_conventions': 8, 'metadata': 9,
     }
@@ -326,6 +339,9 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     changes = details.get('changes') if isinstance(details.get('changes'), dict) else {}
     if item.get('last_error'):
         return 'manual', 'The previous apply attempt failed'
+    if (finding_type == 'reconciliation_missing' and
+            details.get('fulfillment_state') == 'wishlisted'):
+        return 'blocked', 'The missing track is already on the wishlist'
     if finding_type in _DESTRUCTIVE_TYPES:
         if details.get('audio_conflict') == 'different_recording':
             return ('destructive',
@@ -672,6 +688,11 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         album_art = _album_art_by_id(conn, {str(album_id)}).get(str(album_id)) if album_id is not None else None
         album_plan = load_album_plan(conn, case_id)
         if album_plan:
+            numbering_choice_pending = any(
+                decision.get('category') == 'numbering' and
+                decision.get('risk') != 'ready'
+                for decision in (plan.get('decisions') or [])
+            )
             finding_by_path = {item.get('file_path'): item for item in items
                                if item.get('file_path')}
             for item in items:
@@ -720,12 +741,18 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 extra['counterpart_title'] = match.get('slot_title')
                 extra['counterpart_disc_number'] = match.get('slot_disc_number')
                 extra['counterpart_track_number'] = match.get('slot_track_number')
+                extra['counterpart_display_track_number'] = match.get('display_track_number')
                 extra['relationship'] = match['relationship'] = 'version_conflict'
                 extra['relationship_key'] = match['relationship_key'] = key
                 match['counterpart_title'] = extra.get('current_title')
                 match['counterpart_file'] = extra.get('file')
                 match['counterpart_file_path'] = extra.get('file_path')
             for assignment in assignments:
+                if (numbering_choice_pending and
+                        {'track_number', 'disc_number', 'library_track_number',
+                         'library_disc_number'}.intersection(
+                             assignment.get('changes') or {})):
+                    assignment['numbering_preview'] = True
                 finding = finding_by_path.get(assignment.get('file_path'))
                 if not finding and assignment.get('status') == 'missing':
                     key = (str(assignment.get('source_track_id') or ''),
@@ -749,7 +776,9 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 if finding:
                     assignment['finding_id'] = finding['id']
                     assignment['review_tier'] = finding.get('review_tier')
-                    assignment['action_state'] = finding.get('review_tier')
+                    assignment['action_state'] = (
+                        'waiting' if assignment.get('fulfillment_state') == 'wishlisted'
+                        else finding.get('review_tier'))
                 elif has_release_decision or has_album_unresolved:
                     # These rows preview the selected candidate. They are not
                     # independent actions until the album-level question has
@@ -758,8 +787,16 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     assignment['preview_reason'] = (
                         'Choose the release first' if has_release_decision
                         else 'Resolve the album question first')
+                elif assignment.get('status') == 'missing':
+                    # A pending track match can postpone the completeness
+                    # finding. The release slot remains visibly absent.
+                    assignment['action_state'] = 'preview'
+                    assignment['preview_reason'] = (
+                        'Resolve track assignments before deciding album scope'
+                        if not album_plan.get('intent_scope')
+                        else 'Missing from the selected release')
                 elif assignment.get('status') in {
-                        'change', 'uncertain', 'missing', 'extra', 'duplicate'}:
+                        'change', 'uncertain', 'extra', 'duplicate'}:
                     # The persisted plan is complete evidence and can outlive
                     # a dismissed/applied finding. Do not present a resolved
                     # hypothesis as a pending action.
