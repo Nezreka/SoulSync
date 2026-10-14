@@ -181,13 +181,22 @@ def _track_at(db, file_path):
         conn.commit()
 
 
-def _track_path_queries(monkeypatch):
+POINT_LOOKUP = 'SELECT album_id, artist_id FROM tracks WHERE file_path = ?'
+
+
+def _track_path_queries(monkeypatch, point_lookups=None):
+    """the path-matching passes over tracks. the album-id lookup is one
+    indexed row per card, not a pass, so it goes in point_lookups instead."""
     seen = []
 
     class Cursor(sqlite3.Cursor):
         def execute(self, sql, params=()):
-            if 'FROM tracks WHERE file_path' in ' '.join(sql.split()):
-                seen.append(' '.join(sql.split()))
+            flat = ' '.join(sql.split())
+            if flat.startswith(POINT_LOOKUP):
+                if point_lookups is not None:
+                    point_lookups.append(flat)
+            elif 'FROM tracks WHERE file_path' in flat:
+                seen.append(flat)
             return super().execute(sql, params)
 
     class Conn(sqlite3.Connection):
@@ -209,10 +218,13 @@ def test_files_on_disk_never_ask_the_library(tmp_path, monkeypatch):
         f = tmp_path / f'song{i}.flac'
         f.write_bytes(b'x')
         _history_only(db, f'Song {i}', f'Album {i}', str(f))
-    seen = _track_path_queries(monkeypatch)
+    points = []
+    seen = _track_path_queries(monkeypatch, points)
     cards = db.get_recently_added_albums(limit=20)
     assert len(cards) == 3
     assert seen == []
+    # the album-id lookup: one indexed row per card, never more
+    assert len(points) <= len(cards)
 
 
 def test_gone_from_disk_but_in_the_library_under_another_root_is_kept(tmp_path, monkeypatch):
@@ -256,3 +268,41 @@ def test_many_gone_cards_match_keying_every_path(tmp_path, n_gone):
     assert sorted(c['album_name'] for c in cards) == sorted(
         f'Album {i}' for i in range(n_gone) if i % 2 == 0)
     assert live_paths.PREFILTER_MAX == 5
+
+
+# ---------------------------------------------------------------------------
+# the card's play / queue / add-to-playlist buttons act on the whole album, so
+# each card carries the library album it landed in.
+# ---------------------------------------------------------------------------
+
+
+def test_card_carries_the_library_album_its_newest_track_is_in(tmp_path):
+    db = _db(tmp_path)
+    _land(db, 'Track 1', 'Camellia', 'U.U.F.O.', file_path='/m/ufo/1.flac')
+    cards = db.get_recently_added_albums(limit=20)
+    # _land files every track under the fixture album
+    assert cards[0]['album_id'] == 'ra-fixture-album'
+    assert cards[0]['artist_id'] == 'ra-fixture-artist'
+
+
+def test_a_path_that_moved_roots_finds_the_album_by_name(tmp_path):
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Some Artist')")
+        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Moved Album')")
+        conn.commit()
+    _history_only(db, 'Moved', 'Moved Album', '/downloads/staging/Artist - Album/01 - Moved.flac')
+    _track_at(db, r'\\nas\music\Artist - Album\01 - MOVED.flac')
+    cards = db.get_recently_added_albums(limit=20)
+    assert cards[0]['album_id'] == 'al1'
+    assert cards[0]['artist_id'] == 'ar1'
+
+
+def test_no_library_album_leaves_the_card_single_track(tmp_path):
+    db = _db(tmp_path)
+    f = tmp_path / 'loose.flac'
+    f.write_bytes(b'x')
+    _history_only(db, 'Loose', 'Not In Library', str(f))
+    cards = db.get_recently_added_albums(limit=20)
+    assert cards[0]['album_id'] is None
+    assert cards[0]['artist_id'] is None

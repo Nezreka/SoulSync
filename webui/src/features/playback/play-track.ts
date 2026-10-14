@@ -14,6 +14,54 @@
 
 import type { ShellBridge } from '../../platform/shell/bridge';
 
+/** the owned copy of a song, ready for the player, or null on a miss. */
+export interface LibraryTrackPayload {
+  id: string | number;
+  title: string;
+  file_path: string;
+  bitrate?: string | number | null;
+  artist_id?: string | number | null;
+  album_id?: string | number | null;
+  _stats_image: string | null;
+  album: string;
+  artist: string;
+}
+
+/**
+ * Find the library's copy of a title + artist (/api/stats/resolve-track).
+ * null on a miss AND on a failed request: callers fall through to their
+ * no-library path either way.
+ */
+export async function resolveLibraryTrack(
+  title: string,
+  artist: string,
+  album = '',
+): Promise<LibraryTrackPayload | null> {
+  try {
+    const response = await fetch('/api/stats/resolve-track', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, artist }),
+    });
+    const data = await response.json();
+    if (!data?.success || !data.track) return null;
+    const track = data.track;
+    return {
+      id: track.id,
+      title: track.title,
+      file_path: track.file_path,
+      bitrate: track.bitrate,
+      artist_id: track.artist_id,
+      album_id: track.album_id,
+      _stats_image: track.image_url || null,
+      album: track.album_title || album || '',
+      artist: track.artist_name || artist || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Play one row: library first, streaming second (playTrackByMetadata,
  * library.js:1209).
@@ -29,32 +77,11 @@ export async function playTrackByMetadata(
   artist: string,
   album = '',
 ): Promise<void> {
-  try {
-    const response = await fetch('/api/stats/resolve-track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, artist }),
-    });
-    const data = await response.json();
-    if (data?.success && data.track) {
-      const track = data.track;
-      bridge?.playLibraryTrack(
-        {
-          id: track.id,
-          title: track.title,
-          file_path: track.file_path,
-          bitrate: track.bitrate,
-          artist_id: track.artist_id,
-          album_id: track.album_id,
-          _stats_image: track.image_url || null,
-        },
-        track.album_title || album || '',
-        track.artist_name || artist || '',
-      );
-      return;
-    }
-  } catch {
-    // Library resolve failed — try streaming rather than giving up.
+  const owned = await resolveLibraryTrack(title, artist, album);
+  if (owned) {
+    const { album: albumTitle, artist: artistName, ...track } = owned;
+    bridge?.playLibraryTrack(track, albumTitle, artistName);
+    return;
   }
 
   bridge?.showLoadingOverlay(`Searching for ${title}...`);

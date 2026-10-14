@@ -36,6 +36,10 @@ export interface RecentlyAddedAlbum {
   /** The newest landed track, ready for playLibraryTrack. */
   playTitle: string;
   playFilePath: string;
+  /** the library album it landed in, so the card can act on all of it.
+   *  null when the library has no such album. */
+  albumId: string | number | null;
+  artistId: string | number | null;
 }
 
 interface RecentlyAddedRow {
@@ -49,6 +53,8 @@ interface RecentlyAddedRow {
   download_source?: string;
   play_title?: string;
   play_file_path?: string;
+  album_id?: string | number | null;
+  artist_id?: string | number | null;
 }
 
 /**
@@ -130,6 +136,8 @@ export async function fetchRecentlyAdded(limit = 20): Promise<RecentlyAddedAlbum
       source: row.download_source ?? '',
       playTitle: row.play_title ?? '',
       playFilePath: row.play_file_path ?? '',
+      albumId: row.album_id ?? null,
+      artistId: row.artist_id ?? null,
     }));
   } catch {
     return [];

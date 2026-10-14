@@ -109,6 +109,8 @@ describe('fetchers', () => {
             download_source: 'soulseek',
             play_title: 'Vivarium',
             play_file_path: '/music/ado/vivarium.flac',
+            album_id: 'al1',
+            artist_id: 'ar1',
           },
         ],
       }),
@@ -120,7 +122,17 @@ describe('fetchers', () => {
       quality: 'FLAC',
       source: 'soulseek',
       playFilePath: '/music/ado/vivarium.flac',
+      // the card's buttons act on this whole library album
+      albumId: 'al1',
+      artistId: 'ar1',
     });
+  });
+
+  it('fetchRecentlyAdded leaves albumId null for a card the library has no album for', async () => {
+    fetchMock.mockReturnValueOnce(ok({ albums: [{ artist_name: 'Ado', album_name: 'X' }] }));
+    const [card] = await fetchRecentlyAdded();
+    expect(card.albumId).toBeNull();
+    expect(card.artistId).toBeNull();
   });
 
   it('fetchRecentlyAdded returns [] on a down endpoint instead of throwing', async () => {

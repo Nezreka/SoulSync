@@ -227,6 +227,8 @@ declare global {
     _showMobileTrackActions?: (track: unknown, album: unknown) => void;
     /** media-player.js — the play queue. */
     addToQueue?: (payload: unknown) => void;
+    /** several at once, one toast; starts playing if nothing is. */
+    addTracksToQueue?: (payloads: unknown[]) => void;
     playNext?: (payload: unknown) => void;
     /**
      * shared-helpers.js — the download-missing modal. Called directly rather

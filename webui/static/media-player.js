@@ -2629,6 +2629,23 @@ function playNext(track) {
     npScheduleQueuePrefetch();
 }
 
+// a whole album onto the end of the queue: one toast, one render, not one per
+// track the way calling addToQueue in a loop did.
+function addTracksToQueue(tracks) {
+    const list = npPrepareQueueTracks((tracks || []).filter(Boolean));
+    if (!list.length) return;
+    const firstNew = npQueue.length;
+    npQueue.push(...list);
+    showToast(list.length === 1 ? 'Added to queue' : `Added ${list.length} songs to queue`, 'success');
+    renderNpQueue();
+    updateNpPrevNextButtons();
+    npScheduleQueuePrefetch();
+    // same as addToQueue: nothing playing, so start with what was just added
+    if (!currentTrack) {
+        playQueueItem(firstNew);
+    }
+}
+
 function removeFromQueue(index) {
     if (index < 0 || index >= npQueue.length) return;
     const wasCurrentTrack = (index === npQueueIndex);

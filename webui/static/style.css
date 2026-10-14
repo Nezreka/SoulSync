@@ -71355,6 +71355,83 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     -webkit-backdrop-filter: blur(4px);
 }
 
+/* the rail cards' hover buttons: queue, a big accent play, add to playlist.
+   on the cover above the title, shown on hover or keyboard focus, and always on
+   a touch screen, where there is no hover to find them with. */
+.dash-card-actions {
+    position: absolute;
+    top: 40%;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    pointer-events: none;
+}
+.ya-card:hover .dash-card-actions,
+.ya-card:focus-within .dash-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+@media (hover: none) {
+    .dash-card-actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+.dash-card-action {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--white-a12);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.dash-card-action:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.75);
+    transform: scale(1.08);
+}
+.dash-card-action--play {
+    width: 46px;
+    height: 46px;
+    border: none;
+    background: rgb(var(--accent-rgb));
+    color: #000;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.dash-card-action--play:hover:not(:disabled) {
+    background: rgb(var(--accent-light-rgb));
+}
+.dash-card-action--play svg {
+    margin-left: 2px;
+}
+.dash-card-action:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+.dash-card-action:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .dash-card-actions,
+    .dash-card-action {
+        transition: none;
+    }
+}
+
 .dash-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
