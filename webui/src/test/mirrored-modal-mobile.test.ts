@@ -237,3 +237,29 @@ describe('the modal takes more of the phone', () => {
     expect(rule('.mm-hero-content', STACKED)).toMatch(/padding-right:\s*0/);
   });
 });
+
+// #1691: the floating chrome (z-index 999999) sat over the modal (10000): the
+// hamburger on its cover, and the bell, activity and helper buttons on the
+// bottom row of actions, right where Close and Identify land once the bar
+// stacks. measured in chromium against the real modal markup: all three sat
+// on Identify at 390 and 360px. hidden while the modal is open, the same way
+// the mix and download-missing modals do it.
+describe('floating chrome while the mirrored modal is open', () => {
+  const STYLE = read('static/style.css');
+  const at = STYLE.indexOf('body:has(#mirrored-track-modal)');
+  const block = at >= 0 ? STYLE.slice(at, STYLE.indexOf('}', at) + 1) : '';
+
+  it('hides every floating control', () => {
+    for (const target of [
+      '#gsearch-bar',
+      '#gsearch-aura',
+      '#notif-bell-btn',
+      '#helper-float-btn',
+      '#activity-float-btn',
+      '.hamburger-btn',
+    ]) {
+      expect(block).toContain(`body:has(#mirrored-track-modal) ${target}`);
+    }
+    expect(block).toMatch(/\{\s*display:\s*none\s*!important;\s*\}/);
+  });
+});
