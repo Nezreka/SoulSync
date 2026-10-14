@@ -566,8 +566,9 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     // (the harness's seeded span says Road Trip too now, so aim at the card)
     fireEvent.click(document.querySelector('#mirrored-card-3 .pl-card-name') as HTMLElement);
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
-    expect(screen.getByText('Delete Mirror')).toBeInTheDocument();
-    expect(screen.getByText('Edit Source')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('More actions'));
+    expect(screen.getByRole('menuitem', { name: 'Delete mirror' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit source link' })).toBeInTheDocument();
     fireEvent.click(screen.getByText('View identification'));
     expect(screen.getByTestId('open-id')).toHaveTextContent('mirrored_3');
     // reopened the existing one, no second prepare
@@ -618,7 +619,8 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     fireEvent.click(screen.getByText('Road Trip'));
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
     // #1289: the label now names the source ("Refresh from YouTube")
-    fireEvent.click(screen.getByText('Refresh from YouTube'));
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Refresh from YouTube/ }));
     await waitFor(() =>
       expect(calls.find((c) => c.url.endsWith('/pipeline/run'))).toMatchObject({
         method: 'POST',
@@ -941,8 +943,9 @@ describe('MirroredTab — the source-ref reopen tail (2434-2438)', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Edit Source'));
+    // Edit source lives behind the detail's ⋯ now
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
     // The editor replaces the detail modal while it is open (React cannot
     // stack them the way the vanilla's prompt sat on top).
     await waitFor(() =>
@@ -998,8 +1001,9 @@ describe('MirroredTab — the source-ref reopen tail (2434-2438)', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Edit Source'));
+    // Edit source lives behind the detail's ⋯ now
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1032,8 +1036,9 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
 
     // Open from the detail modal, then back out.
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Edit Source'));
+    // Edit source lives behind the detail's ⋯ now
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1070,8 +1075,9 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Stale Name')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Stale Name'));
-    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Edit Source'));
+    // Edit source lives behind the detail's ⋯ now
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1091,8 +1097,9 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Road Trip'));
-    await waitFor(() => expect(screen.getByText('Edit Source')).toBeInTheDocument());
-    fireEvent.click(screen.getByText('Edit Source'));
+    // Edit source lives behind the detail's ⋯ now
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1674,7 +1681,8 @@ describe('play from a card, and copy a mirror to My Playlists', () => {
     };
     render(<Harness />);
     fireEvent.click(await screen.findByText('Road Trip'));
-    fireEvent.click(await screen.findByText('Copy to My Playlists'));
+    fireEvent.click(await screen.findByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Copy to My Playlists/ }));
     await waitFor(() => expect(screen.getByText('Your Playlist')).toBeInTheDocument());
     expect(
       calls.some((c) => c.url === '/api/user-playlists/from-mirror/3' && c.method === 'POST'),

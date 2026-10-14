@@ -8,9 +8,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { MirroredDetailModal, placeCoverMenu } from './mirrored-detail-modal';
+import { descriptionLink, MirroredDetailModal, placeCoverMenu } from './mirrored-detail-modal';
 
 const NOW = Date.UTC(2026, 7, 5, 12, 0, 0);
+
+/** the hero's ⋯, where everything but play / sync / identify lives now */
+function openMore() {
+  fireEvent.click(screen.getByLabelText('More actions'));
+}
 
 function renderModal(data: Parameters<typeof MirroredDetailModal>[0]['data'], on = {}) {
   const handlers = {
@@ -113,39 +118,48 @@ describe('MirroredDetailModal', () => {
   it('Refresh from {source} shows when wired and calls its handler (#1413)', () => {
     const onRefreshFromSource = vi.fn();
     renderModal({ name: 'A', source: 'youtube', tracks: [] }, { onRefreshFromSource });
-    // #1289: the button names the source now ("Refresh from YouTube").
-    const btn = screen.getByText('Refresh from YouTube');
-    expect(btn.getAttribute('title')).toMatch(/nothing is pushed to your server or downloaded/);
-    fireEvent.click(btn);
+    // #1289: it names the source ("Refresh from YouTube"), in the ⋯ menu now
+    openMore();
+    const item = screen.getByRole('menuitem', { name: /Refresh from YouTube/ });
+    expect(item).toHaveTextContent('pull the latest tracks, nothing pushed or downloaded');
+    fireEvent.click(item);
     expect(onRefreshFromSource).toHaveBeenCalled();
   });
 
   it('no handler, no refresh button', () => {
     renderModal({ name: 'A', source: 'youtube', tracks: [] });
+    openMore();
     expect(screen.queryByText('Refresh from YouTube')).toBeNull();
   });
 
-  it('labels the buttons by direction with a one-line explainer (#1289)', () => {
+  it('labels the actions by direction (#1289): sync pushes, refresh only pulls', () => {
     renderModal({ name: 'A', source: 'spotify', tracks: [] }, { onRefreshFromSource: vi.fn() });
-    expect(screen.getByText('Refresh from Spotify')).toBeTruthy();
-    expect(screen.getByText('Pull only — nothing pushed or downloaded')).toBeTruthy();
-    expect(screen.getByText('Sync & download')).toBeTruthy();
-    expect(screen.getByText("Push the playlist and download what's missing")).toBeTruthy();
+    expect(screen.getByText('Sync & download')).toHaveAttribute(
+      'title',
+      "Refresh from the source, match, push to your server and download what's missing",
+    );
+    openMore();
+    expect(screen.getByRole('menuitem', { name: /Refresh from Spotify/ })).toHaveTextContent(
+      'nothing pushed or downloaded',
+    );
   });
 
   it('wires the five actions, and Delete CLOSES first (1148)', () => {
     const h = renderModal({ name: 'A', source: 'spotify', tracks: [] });
     fireEvent.click(screen.getByText('Identify'));
     expect(h.onDiscover).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Edit Source'));
-    expect(h.onEditSource).toHaveBeenCalled();
     fireEvent.click(screen.getByText('Sync & download'));
     expect(h.onRunPipeline).toHaveBeenCalled();
-    fireEvent.click(screen.getByText('Close'));
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Edit source link' }));
+    expect(h.onEditSource).toHaveBeenCalled();
+    // the ✕ is the only close now; the footer bar is gone
+    fireEvent.click(screen.getByLabelText('Close'));
     expect(h.onClose).toHaveBeenCalled();
 
     h.onClose.mockClear();
-    fireEvent.click(screen.getByText('Delete Mirror'));
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete mirror' }));
     expect(h.onClose).toHaveBeenCalled();
     expect(h.onDelete).toHaveBeenCalled();
   });
@@ -178,10 +192,11 @@ describe('MirroredDetailModal — a user playlist', () => {
     });
     expect(screen.getByText('Your Playlist')).toBeInTheDocument();
     expect(screen.queryByText('SoulSync')).toBeNull();
-    expect(screen.queryByText('Edit Source')).toBeNull();
-    expect(screen.queryByText(/^Refresh from/)).toBeNull();
-    expect(screen.getByText('Delete playlist')).toBeInTheDocument();
     expect(screen.getByText('Sync & download')).toBeInTheDocument();
+    openMore();
+    expect(screen.queryByText('Edit source link')).toBeNull();
+    expect(screen.queryByText(/^Refresh from/)).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Delete playlist' })).toBeInTheDocument();
   });
 
   it('removes by position, and locks the other rows until the refetch lands', () => {
@@ -336,12 +351,14 @@ describe('MirroredDetailModal — user playlist meta', () => {
   it('duplicate calls through and the tab opens the copy', async () => {
     const onDuplicate = vi.fn(async () => {});
     renderModal(own, { onRemoveTrack: vi.fn(), onReorder: vi.fn(), onDuplicate });
-    fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
+    openMore();
+    fireEvent.click(screen.getByRole('menuitem', { name: /Duplicate/ }));
     await waitFor(() => expect(onDuplicate).toHaveBeenCalledTimes(1));
-    // flush the busy-state reset that lands after the promise resolves
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Duplicate' })).toHaveTextContent('Duplicate'),
-    );
+    // the menu closed on select; open it again once the busy state resets
+    await waitFor(() => {
+      openMore();
+      expect(screen.getByRole('menuitem', { name: /^Duplicate/ })).not.toBeDisabled();
+    });
   });
 });
 
@@ -375,5 +392,54 @@ describe('placeCoverMenu', () => {
     expect(
       placeCoverMenu({ top: 100, bottom: 228, left: 200 }, menu, { width: 390, height: 900 }).left,
     ).toBe(134);
+  });
+});
+
+describe('the made-over hero', () => {
+  it('a url-only description is an Open on link, not a raw url', () => {
+    renderModal({
+      name: 'thomasclan test',
+      source: 'deezer',
+      description: 'https://www.deezer.com/us/playlist/15769125861',
+      tracks: [],
+    });
+    expect(screen.queryByText('https://www.deezer.com/us/playlist/15769125861')).toBeNull();
+    const link = screen.getByText('Open on Deezer ↗');
+    expect(link).toHaveAttribute('href', 'https://www.deezer.com/us/playlist/15769125861');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  });
+
+  it('a description with words stays a description', () => {
+    renderModal({ name: 'A', source: 'deezer', description: 'songs for the gym', tracks: [] });
+    expect(screen.getByText('songs for the gym')).toBeInTheDocument();
+    expect(screen.queryByText(/Open on/)).toBeNull();
+  });
+
+  it('descriptionLink only takes a bare http(s) url', () => {
+    expect(descriptionLink(' https://x.y/z ')).toBe('https://x.y/z');
+    expect(descriptionLink('see https://x.y/z')).toBeNull();
+    expect(descriptionLink('javascript:alert(1)')).toBeNull();
+    expect(descriptionLink(null)).toBeNull();
+  });
+
+  it('the source label sits in the eyebrow', () => {
+    renderModal({ name: 'A', source: 'deezer', tracks: [] });
+    expect(document.querySelector('.mm-eyebrow .mm-source-pill')?.textContent).toBe('Deezer');
+  });
+
+  it('there is no footer bar any more', () => {
+    renderModal({ name: 'A', source: 'spotify', tracks: [] });
+    expect(document.querySelector('.mm-actions')).toBeNull();
+  });
+
+  it('the ⋯ menu closes on Escape and on a second press', () => {
+    renderModal({ name: 'A', source: 'spotify', tracks: [] });
+    openMore();
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    openMore();
+    openMore();
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

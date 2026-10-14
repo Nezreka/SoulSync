@@ -52,6 +52,7 @@ import {
   uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
 import { LikedArt } from './playlist-art';
+import { usePopoverDismiss } from './use-popover-dismiss';
 
 export interface MirroredDetailModalProps {
   playlistId: number;
@@ -152,6 +153,97 @@ function QueueGlyph() {
   );
 }
 
+/**
+ * a description that is only the source's own link (deezer hands its URL over
+ * as the description) reads as a raw URL under the title. that one becomes an
+ * "Open on Deezer" link instead; anything with words in it stays a description.
+ */
+export function descriptionLink(description: string | null | undefined): string | null {
+  const text = (description ?? '').trim();
+  return /^https?:\/\/\S+$/i.test(text) ? text : null;
+}
+
+export interface MoreMenuItem {
+  label: string;
+  /** one line under the label, for the ones whose effect isn't obvious */
+  hint?: string;
+  danger?: boolean;
+  /** a line above this one */
+  separated?: boolean;
+  busy?: boolean;
+  onSelect: () => void;
+}
+
+/**
+ * the hero's ⋯: everything that isn't play, sync or identify. it renders on
+ * body for the same reason the cover menu does (the hero clips, the modal's
+ * transform traps fixed children) and sits under the button, kept on screen.
+ */
+function MoreMenu({
+  anchor,
+  items,
+  onClose,
+}: {
+  anchor: HTMLElement;
+  items: MoreMenuItem[];
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  usePopoverDismiss({ ref, anchor, onClose });
+  useLayoutEffect(() => {
+    const place = () => {
+      const menu = ref.current;
+      if (!menu) return;
+      const box = anchor.getBoundingClientRect();
+      // right-aligned under the button, the way a ⋯ menu opens
+      setPos(
+        placeCoverMenu(
+          { top: box.top, bottom: box.bottom, left: box.right - menu.offsetWidth },
+          { width: menu.offsetWidth, height: menu.offsetHeight },
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      );
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [anchor]);
+  return createPortal(
+    <div
+      ref={ref}
+      className="mm-more-menu"
+      role="menu"
+      data-popover-layer=""
+      style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: 'hidden' }}
+    >
+      {items.map((item) => (
+        <div key={item.label}>
+          {item.separated ? <div className="mm-more-sep" /> : null}
+          <button
+            type="button"
+            role="menuitem"
+            className={`mm-more-item${item.danger ? ' mm-more-item--danger' : ''}`}
+            disabled={item.busy}
+            onClick={() => {
+              onClose();
+              item.onSelect();
+            }}
+          >
+            <span className="mm-more-label">{item.label}</span>
+            {item.hint ? <span className="mm-more-hint">{item.hint}</span> : null}
+          </button>
+        </div>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
 interface EditProps {
   index: number;
   busy: boolean;
@@ -166,7 +258,16 @@ interface EditProps {
   onDragEnd: () => void;
 }
 
-function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
+function TrackRow({
+  track,
+  edit,
+  onPlay,
+}: {
+  track: MirroredTrack;
+  edit?: EditProps;
+  /** play the playlist from this song on; the number turns into it on hover */
+  onPlay?: () => void;
+}) {
   const cls = `mm-row${edit?.dragging ? ' mm-row--dragging' : ''}${edit?.over ? ' mm-row--over' : ''}`;
   return (
     <div
@@ -200,7 +301,25 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
       }
       onDragEnd={edit?.onDragEnd}
     >
-      <span className="mm-row-pos">{track.position}</span>
+      <span className="mm-row-pos">
+        <span className="mm-row-num">{track.position}</span>
+        {onPlay ? (
+          <button
+            type="button"
+            className="mm-row-play"
+            aria-label={`Play from ${track.track_name ?? 'this song'}`}
+            title="Play from here"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPlay();
+            }}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+            </svg>
+          </button>
+        ) : null}
+      </span>
       {track.image_url ? (
         <img
           className="mm-row-art"
@@ -306,16 +425,23 @@ export function MirroredDetailModal({
   // dragging only means something in the playlist's own order
   const editable = own && Boolean(onRemoveTrack && onReorder);
   const draggable = editable && sort === 'custom';
-  const runPlay = async (mode: PlaylistPlayMode) => {
+  const runPlay = async (mode: PlaylistPlayMode, from = 0) => {
     if (playing) return;
     setPlaying(mode);
     try {
-      // what you see is what plays: a sorted view plays in that order
-      await playPlaylist(shownTracks, data.display_name || data.name || 'this playlist', mode);
+      // what you see is what plays: a sorted view plays in that order, and a
+      // row's play starts there and carries on down the list
+      await playPlaylist(
+        shownTracks.slice(from),
+        data.display_name || data.name || 'this playlist',
+        mode,
+      );
     } finally {
       setPlaying(null);
     }
   };
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
+  const sourceLink = own ? null : descriptionLink(data.description);
   // cover + description state. meta edits refetch through onRefresh, so the
   // modal always shows what's saved, same as the track edits below.
   const [coverOpen, setCoverOpen] = useState(false);
@@ -561,7 +687,10 @@ export function MirroredDetailModal({
               <div className={`mm-cover mm-cover-empty ${source}`}>{sourceIcon}</div>
             )}
             <div className="mm-hero-info">
-              <span className="mm-eyebrow">{own ? 'Your Playlist' : 'Mirrored Playlist'}</span>
+              <span className="mm-eyebrow">
+                {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
+                {own ? 'Your Playlist' : 'Mirrored Playlist'}
+              </span>
               <h2 className="mm-title">{data.name}</h2>
               {own ? (
                 descEditing ? (
@@ -622,11 +751,10 @@ export function MirroredDetailModal({
                     Add a description
                   </button>
                 )
-              ) : data.description ? (
+              ) : data.description && !sourceLink ? (
                 <p className="mm-desc mm-desc-readonly">{data.description}</p>
               ) : null}
               <div className="mm-meta">
-                {own ? null : <span className={`mm-source-pill ${source}`}>{srcLabel}</span>}
                 {data.owner ? (
                   <>
                     <span className="mm-meta-item">{data.owner}</span>
@@ -644,6 +772,19 @@ export function MirroredDetailModal({
                 <span className="mm-meta-item">
                   {own ? 'Edited' : 'Mirrored'} {timeAgo(data.updated_at || data.mirrored_at, now)}
                 </span>
+                {sourceLink ? (
+                  <>
+                    <span className="mm-dot">&middot;</span>
+                    <a
+                      className="mm-source-link"
+                      href={sourceLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open on {srcLabel === 'unknown' ? 'the source' : srcLabel} ↗
+                    </a>
+                  </>
+                ) : null}
               </div>
               {skippedNote ? <div className="mm-skipped-note">{skippedNote}</div> : null}
               {/* play is the one big thing; the rest sit beside it, quiet */}
@@ -703,19 +844,96 @@ export function MirroredDetailModal({
                     Add songs
                   </button>
                 ) : null}
-                {!own && onMakeMine ? (
-                  <button
-                    type="button"
-                    className="mm-pill"
-                    title="An editable copy in My Playlists, with its matches. This mirror keeps syncing from its source"
-                    disabled={makingMine}
-                    onClick={() => {
-                      setMakingMine(true);
-                      void onMakeMine().finally(() => setMakingMine(false));
-                    }}
-                  >
-                    {makingMine ? 'Copying…' : 'Copy to My Playlists'}
-                  </button>
+                <span className="mm-play-gap" />
+                {/* runs the pipeline now; the header's Auto-Sync schedules it */}
+                <button
+                  type="button"
+                  className="mm-pill"
+                  title={
+                    own
+                      ? "Match, push to your server and download what's missing"
+                      : "Refresh from the source, match, push to your server and download what's missing"
+                  }
+                  onClick={onRunPipeline}
+                >
+                  Sync & download
+                </button>
+                <button type="button" className="mm-pill mm-pill--quiet" onClick={onDiscover}>
+                  {discoverLabel}
+                </button>
+                <button
+                  type="button"
+                  className={`mm-round${moreAnchor ? ' mm-round--on' : ''}`}
+                  aria-label="More actions"
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(moreAnchor)}
+                  title="More"
+                  onClick={(e) => {
+                    const anchor = e.currentTarget;
+                    setMoreAnchor((cur) => (cur ? null : anchor));
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                    <circle cx="5" cy="12" r="1.8" fill="currentColor" />
+                    <circle cx="12" cy="12" r="1.8" fill="currentColor" />
+                    <circle cx="19" cy="12" r="1.8" fill="currentColor" />
+                  </svg>
+                </button>
+                {moreAnchor ? (
+                  <MoreMenu
+                    anchor={moreAnchor}
+                    onClose={() => setMoreAnchor(null)}
+                    items={[
+                      ...(!own && onMakeMine
+                        ? [
+                            {
+                              label: makingMine ? 'Copying…' : 'Copy to My Playlists',
+                              hint: 'an editable copy, matches kept',
+                              busy: makingMine,
+                              onSelect: () => {
+                                setMakingMine(true);
+                                void onMakeMine().finally(() => setMakingMine(false));
+                              },
+                            },
+                          ]
+                        : []),
+                      ...(own && onDuplicate
+                        ? [
+                            {
+                              label: dupBusy ? 'Duplicating…' : 'Duplicate',
+                              hint: 'a copy with its tracks, cover and description',
+                              busy: dupBusy,
+                              onSelect: () => {
+                                setDupBusy(true);
+                                void onDuplicate().finally(() => setDupBusy(false));
+                              },
+                            },
+                          ]
+                        : []),
+                      // no source behind a user playlist, so nothing to pull or point
+                      ...(!own && onRefreshFromSource
+                        ? [
+                            {
+                              label: `Refresh from ${srcLabel === 'unknown' ? 'source' : srcLabel}`,
+                              hint: 'pull the latest tracks, nothing pushed or downloaded',
+                              onSelect: onRefreshFromSource,
+                            },
+                          ]
+                        : []),
+                      ...(!own ? [{ label: 'Edit source link', onSelect: onEditSource }] : []),
+                      {
+                        label: own ? 'Delete playlist' : 'Delete mirror',
+                        danger: true,
+                        separated: true,
+                        // 1148 closes first, then asks, so the confirm is not
+                        // behind the overlay
+                        onSelect: () => {
+                          onClose();
+                          onDelete();
+                        },
+                      },
+                    ]}
+                  />
                 ) : null}
               </div>
             </div>
@@ -735,8 +953,10 @@ export function MirroredDetailModal({
         ) : null}
         {tracks.length > 1 ? (
           <div className="mm-sortbar">
+            {editable && sort !== 'custom' ? (
+              <span className="mm-sort-note">Back to custom order to drag tracks around</span>
+            ) : null}
             <label className="mm-sort">
-              <span>Sort</span>
               <select
                 value={sort}
                 aria-label="Sort tracks"
@@ -749,9 +969,6 @@ export function MirroredDetailModal({
                 ))}
               </select>
             </label>
-            {editable && sort !== 'custom' ? (
-              <span className="mm-sort-note">Back to custom order to drag tracks around</span>
-            ) : null}
           </div>
         ) : null}
         <div className={`mm-list${editable ? ' mm-list--editable' : ''}`}>
@@ -769,6 +986,7 @@ export function MirroredDetailModal({
               <TrackRow
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
+                onPlay={() => void runPlay('play', index)}
                 edit={
                   editable
                     ? {
@@ -807,77 +1025,6 @@ export function MirroredDetailModal({
                 : 'No tracks in this mirror yet.'}
             </div>
           )}
-        </div>
-        <div className="mm-actions">
-          <button
-            type="button"
-            className="mm-btn mm-btn-danger"
-            onClick={() => {
-              // 1148 closes first, then asks — so the confirm is not behind
-              // the overlay.
-              onClose();
-              onDelete();
-            }}
-          >
-            {own ? 'Delete playlist' : 'Delete Mirror'}
-          </button>
-          <div className="mm-actions-right">
-            {/* no source behind a user playlist, so nothing to point or pull */}
-            {own ? null : (
-              <button type="button" className="mm-btn mm-btn-ghost" onClick={onEditSource}>
-                Edit Source
-              </button>
-            )}
-            {own && onDuplicate ? (
-              <button
-                type="button"
-                className="mm-btn mm-btn-ghost"
-                title="Copy this playlist, with its tracks, cover and description"
-                disabled={dupBusy}
-                onClick={() => {
-                  setDupBusy(true);
-                  void onDuplicate().finally(() => setDupBusy(false));
-                }}
-              >
-                {dupBusy ? 'Duplicating…' : 'Duplicate'}
-              </button>
-            ) : null}
-            {onRefreshFromSource && !own ? (
-              <div className="mm-btn-wrap">
-                <button
-                  type="button"
-                  className="mm-btn mm-btn-ghost"
-                  title="Pull the latest tracks from the source and discover the new ones. Your matches are kept, nothing is pushed to your server or downloaded"
-                  onClick={onRefreshFromSource}
-                >
-                  Refresh from {srcLabel === 'unknown' ? 'source' : srcLabel}
-                </button>
-                <span className="mm-btn-caption">Pull only — nothing pushed or downloaded</span>
-              </div>
-            ) : null}
-            {/* Runs the pipeline now; the header's "Auto-Sync" schedules it. */}
-            <div className="mm-btn-wrap">
-              <button
-                type="button"
-                className="mm-btn mm-btn-secondary"
-                title={
-                  own
-                    ? "Match, push to your server and download what's missing"
-                    : "Refresh from the source, match, push to your server and download what's missing"
-                }
-                onClick={onRunPipeline}
-              >
-                Sync & download
-              </button>
-              <span className="mm-btn-caption">Push the playlist and download what's missing</span>
-            </div>
-            <button type="button" className="mm-btn mm-btn-ghost" onClick={onClose}>
-              Close
-            </button>
-            <button type="button" className="mm-btn mm-btn-primary" onClick={onDiscover}>
-              {discoverLabel}
-            </button>
-          </div>
         </div>
       </div>
     </div>

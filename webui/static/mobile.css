@@ -4665,6 +4665,8 @@ body:has([data-audiobook-overlay]) .hamburger-btn {
     .mm-play { width: 46px; height: 46px; }
     .mm-round { width: 38px; height: 38px; }
     .mm-pill { height: 38px; padding: 0 13px; }
+    .mm-play-gap { display: none; }
+    .mm-cover { width: 120px; height: 120px; }
     .mm-sortbar { padding: 8px 12px 0; flex-wrap: wrap; }
     .as-panel { margin: 10px 8px 4px; padding: 14px 12px 8px; max-height: 52vh; }
     .as-row { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; }

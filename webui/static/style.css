@@ -87861,3 +87861,119 @@ body.src-modal-open { overflow: hidden; }
     .as-bar,
     .as-row--skeleton .as-art { animation: none; }
 }
+
+/* ── the playlist detail modal, made over (oct 2026) ─────────────────────────
+   one row of actions in the hero (play first, sync and identify as pills, the
+   rest behind ⋯), no footer bar, the source label up in the eyebrow, a
+   url-only description as an "Open on …" link, and rows whose number turns
+   into play-from-here on hover. */
+.mirrored-modal { border-radius: 22px; background: #121216; }
+.mm-hero { padding: 34px 34px 26px; border-bottom: none; }
+.mm-hero::after {
+    background: linear-gradient(180deg, rgba(18, 18, 22, 0.3) 0%, rgba(18, 18, 22, 0.78) 70%, #121216 100%);
+}
+.mm-hero-content { gap: 26px; }
+.mm-cover { width: 168px; height: 168px; border-radius: 14px; box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); }
+.mm-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 10px;
+    letter-spacing: 0.12em;
+    color: var(--white-a70);
+}
+.mm-eyebrow .mm-source-pill { padding: 3px 9px; font-size: 10.5px; letter-spacing: 0.06em; }
+.mm-title { font-size: clamp(26px, 3.4vw, 40px); font-weight: 850; letter-spacing: -0.03em; line-height: 1.05; }
+.mm-meta { margin-top: 10px; font-size: 13.5px; color: var(--white-a70); }
+.mm-source-link {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+    text-decoration: none;
+}
+.mm-source-link:hover { text-decoration: underline; }
+.mm-play-row { margin-top: 20px; }
+.mm-play { width: 56px; height: 56px; }
+.mm-play-gap { flex: 1; }
+.mm-pill { height: 42px; padding: 0 18px; background: rgba(255, 255, 255, 0.1); border-color: var(--white-a14); font-size: 13.5px; }
+.mm-pill:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.mm-pill--quiet { background: rgba(0, 0, 0, 0.28); }
+.mm-round { width: 42px; height: 42px; }
+.mm-round--on { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+.mm-more-menu {
+    position: fixed;
+    z-index: 100001;
+    width: 280px;
+    padding: 6px;
+    border: 1px solid var(--white-a10);
+    border-radius: 14px;
+    background: #1d1b25;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    animation: as-in 0.14s ease-out;
+}
+.mm-more-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: #fff;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.mm-more-item:hover:not(:disabled),
+.mm-more-item:focus-visible { background: rgba(var(--accent-rgb), 0.14); outline: none; }
+.mm-more-item:disabled { opacity: 0.55; cursor: default; }
+.mm-more-label { font-size: 13.5px; font-weight: 600; }
+.mm-more-hint { margin-top: 2px; font-size: 11.5px; color: var(--white-a50); }
+.mm-more-item--danger .mm-more-label { color: #ff7a7a; }
+.mm-more-item--danger:hover:not(:disabled) { background: rgba(255, 90, 90, 0.12); }
+.mm-more-sep { height: 1px; margin: 5px 8px; background: var(--white-a08); }
+
+/* the sort is a quiet pill on the right, above the column head */
+.mm-sortbar { justify-content: flex-end; padding: 4px 22px 4px; background: #121216; }
+.mm-sort-note { margin-right: auto; }
+.mm-sort select {
+    height: 30px;
+    padding: 0 28px 0 12px;
+    border-color: transparent;
+    background-color: var(--white-a05);
+    color: var(--white-a70);
+    font-weight: 600;
+}
+.mm-sort select:hover { color: #fff; background-color: var(--white-a08); }
+.mm-list { background: #121216; padding: 0 0 12px; }
+.mm-list-head { background: #121216; margin: 0 12px; padding: 0 22px; }
+.mm-row { height: 56px; margin: 0 12px; padding: 0 22px; border-radius: 10px; }
+.mm-row:hover { background: var(--white-a06); }
+
+/* the number becomes play-from-here on hover */
+.mm-row-pos { position: relative; display: grid; place-items: center; }
+.mm-row-play {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transform: translate(-50%, -50%);
+}
+.mm-row:hover .mm-row-play,
+.mm-row-play:focus-visible { opacity: 1; }
+.mm-row:hover .mm-row-num,
+.mm-row:focus-within .mm-row-num { visibility: hidden; }
+.mm-row-play:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.8); }
+@media (hover: none) {
+    .mm-row-play { display: none; }
+}

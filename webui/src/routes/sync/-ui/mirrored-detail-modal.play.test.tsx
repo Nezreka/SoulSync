@@ -197,15 +197,20 @@ describe('copy to My Playlists', () => {
     let finish: () => void = () => {};
     const onMakeMine = vi.fn(() => new Promise<void>((r) => (finish = r)));
     renderModal({ name: 'Radar', source: 'spotify', tracks: TRACKS }, { onMakeMine });
-    fireEvent.click(screen.getByText('Copy to My Playlists'));
+    fireEvent.click(screen.getByLabelText('More actions'));
+    fireEvent.click(screen.getByRole('menuitem', { name: /Copy to My Playlists/ }));
     expect(onMakeMine).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('Copying…')).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('More actions'));
+    expect(screen.getByRole('menuitem', { name: /Copying…/ })).toBeDisabled();
     finish();
-    await waitFor(() => expect(screen.getByText('Copy to My Playlists')).not.toBeDisabled());
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Copy to My Playlists/ })).not.toBeDisabled(),
+    );
   });
 
   it('your own playlist does not', () => {
     renderModal(MINE, { ...EDITS, onMakeMine: vi.fn() });
+    fireEvent.click(screen.getByLabelText('More actions'));
     expect(screen.queryByText('Copy to My Playlists')).toBeNull();
   });
 });
@@ -219,5 +224,20 @@ describe('Liked Songs', () => {
   it('LikedArt is decorative', () => {
     const { container } = render(<LikedArt />);
     expect(container.querySelector('.playlist-liked-art')).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
+describe('play from a row', () => {
+  it('plays from that song on, in the order shown', async () => {
+    renderModal(MINE, EDITS);
+    fireEvent.click(screen.getByLabelText('Play from alpha'));
+    await waitFor(() => expect(playPlaylist).toHaveBeenCalled());
+    const [tracks, , mode] = playPlaylist.mock.calls[0] as unknown as [
+      MirroredTrack[],
+      string,
+      string,
+    ];
+    expect(tracks.map((t) => t.track_name)).toEqual(['alpha', 'Bravo']);
+    expect(mode).toBe('play');
   });
 });
