@@ -31,6 +31,13 @@ logger = get_logger("repair_job.acoustid")
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
 
 
+# a file's mtime comes from whatever wrote it: a nas clock running behind,
+# or exfat rounding down to 2 s, can stamp a change made just after a pass
+# started as older than the pass. the slack rescans those instead of
+# trusting them forever
+VERIFIED_CUTOFF_SLACK_S = 600
+
+
 @register_job
 class AcoustIDScannerJob(RepairJob):
     job_id = 'acoustid_scanner'
@@ -74,8 +81,9 @@ class AcoustIDScannerJob(RepairJob):
         title_threshold = settings.get('title_similarity', 0.70)
         artist_threshold = settings.get('artist_similarity', 0.60)
         batch_size = settings.get('batch_size', 200)
+        skip_verified = bool(settings.get('skip_verified'))
         verified_cutoff = None
-        if settings.get('skip_verified'):
+        if skip_verified:
             verified_cutoff = self._get_cfg(context, 'verified_cutoff')
 
         # Get AcoustID client
@@ -212,7 +220,8 @@ class AcoustIDScannerJob(RepairJob):
             # run started (re-download, retag, replacement) is scanned again.
             if (verified_cutoff is not None
                     and track_info.get('db_verification_status') == 'verified'
-                    and not self._modified_since(resolved, verified_cutoff)):
+                    and not self._modified_since(
+                        resolved, verified_cutoff - VERIFIED_CUTOFF_SLACK_S)):
                 result.skipped += 1
                 last_completed_id = track_id
                 if context.update_progress and (i + 1) % 10 == 0:
@@ -266,7 +275,10 @@ class AcoustIDScannerJob(RepairJob):
         if pass_started_at is not None and not pass_dirty and result.errors == 0:
             self._set_cfg(context, 'verified_cutoff', pass_started_at)
             self._set_cfg(context, 'dirty_passes', 0)
-        else:
+        elif skip_verified:
+            # only warn people who turned the setting on. with it off an
+            # unresolved path or one rate limit would warn every run about a
+            # setting they never touched
             dirty_passes = int(self._get_cfg(context, 'dirty_passes') or 0) + 1
             self._set_cfg(context, 'dirty_passes', dirty_passes)
             msg = (f"AcoustID pass did not finish clean ({result.errors} errors and "

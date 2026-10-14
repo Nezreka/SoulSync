@@ -1016,8 +1016,11 @@ class _Library:
         self.files[tid].write_bytes(b"replaced")
         time.sleep(0.05)
 
-    def run(self, monkeypatch, *, stop_after=None, error_on=None, unresolved=()):
-        """One scan(). Returns (scanned_ids, result)."""
+    def run(self, monkeypatch, *, stop_after=None, error_on=None, unresolved=(), slack=0):
+        """One scan(). Returns (scanned_ids, result). The cutoff slack is 0 by
+        default: these files are written moments before the pass, inside it."""
+        import core.repair_jobs.acoustid_scanner as scanner_mod
+        monkeypatch.setattr(scanner_mod, 'VERIFIED_CUTOFF_SLACK_S', slack)
         rows = list(self.rows.values())
 
         class _Cursor:
@@ -1058,6 +1061,9 @@ class _Library:
         monkeypatch.setattr(job, "_scan_file", _scan_file)
         if stop_after is not None:
             context.check_stop = lambda: len(scanned) >= stop_after
+        self.warnings = []
+        context.report_progress = lambda log_line=None, log_type=None, **k: (
+            self.warnings.append(log_line) if log_type == 'warning' else None)
         return scanned, job.scan(context)
 
 
@@ -1182,3 +1188,30 @@ def test_stopped_pass_is_not_counted_as_dirty(monkeypatch, tmp_path):
     lib = _Library(tmp_path)
     lib.run(monkeypatch, stop_after=2)
     assert KEY + 'dirty_passes' not in lib.cfg
+
+
+def test_dirty_pass_is_quiet_when_the_setting_is_off(monkeypatch, tmp_path):
+    # an unresolved path is common; with the setting off it is not news
+    lib = _Library(tmp_path, setting=False)
+    lib.run(monkeypatch, unresolved=("2",))
+    assert lib.warnings == []
+    assert KEY + 'dirty_passes' not in lib.cfg
+
+
+def test_dirty_pass_warns_when_the_setting_is_on(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, unresolved=("2",))
+    assert len(lib.warnings) == 1
+
+
+def test_cutoff_slack_rescans_a_file_stamped_just_before_the_cutoff(monkeypatch, tmp_path):
+    # a nas clock behind the server stamps a fresh change as older than the
+    # pass start. inside the slack it is scanned, not trusted
+    import time
+    lib = _Library(tmp_path)
+    _full_pass(lib, monkeypatch)
+    lib.cfg[KEY + 'verified_cutoff'] = time.time() + 60
+    scanned, _ = lib.run(monkeypatch, slack=600)
+    assert scanned == ["1", "2", "3", "4"]
+    scanned, _ = lib.run(monkeypatch, slack=0)
+    assert scanned == []
