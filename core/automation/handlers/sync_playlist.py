@@ -307,10 +307,15 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     # processing" checkbox or the global wishlist_missing_tracks toggle
     # (#1455) — must skip the adds too (#1689): the wishlist-phase skip
     # alone still let every sync wishlist the tracks it was syncing.
-    # Standalone sync automations never set the key, so they are unchanged.
+    # a standalone "Sync Playlist" automation never sets the key: nobody chose
+    # per click there, so the global toggle decides, as its help text says
+    # ("turn it off and syncs skip the wishlist step").
     organize_by_playlist = bool(pl.get('organize_by_playlist'))
-    skip_wishlist_add = organize_by_playlist or bool(
-        config.get('skip_wishlist_add'))
+    skip_add = config.get('skip_wishlist_add')
+    if skip_add is None:
+        _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
+        skip_add = callable(_cm_get) and not _cm_get('playlist_sync.wishlist_missing_tracks', True)
+    skip_wishlist_add = organize_by_playlist or bool(skip_add)
     threading.Thread(
         target=deps.run_sync_task,
         args=(
