@@ -8,6 +8,7 @@ import {
   closeAddToPlaylist,
   duplicateMessage,
   openAddToPlaylist,
+  PlaylistCover,
 } from './add-to-playlist';
 
 interface Call {
@@ -250,5 +251,55 @@ describe('the picker', () => {
       "Can't add this one, it has no artist or title",
       'error',
     );
+  });
+});
+
+describe('the playlist art in the picker', () => {
+  const pl = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    name: 'vibes',
+    track_count: 6,
+    ...over,
+  });
+  const srcs = (c: HTMLElement) => [...c.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+
+  it('uses the collage the playlists page draws when there is no cover', () => {
+    const { container } = render(
+      <PlaylistCover
+        playlist={pl({ cover_tiles: ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg', '/e.jpg'] })}
+      />,
+    );
+    expect(srcs(container)).toHaveLength(4);
+    expect(srcs(container).every((s) => s?.includes('.jpg'))).toBe(true);
+  });
+
+  it('shows one cover from fewer than four tiles, never a part-filled grid', () => {
+    const { container } = render(
+      <PlaylistCover playlist={pl({ cover_tiles: ['/a.jpg', '/b.jpg'] })} />,
+    );
+    expect(srcs(container)).toHaveLength(1);
+    expect(srcs(container)[0]).toContain('/a.jpg');
+  });
+
+  it('lets its own cover beat the collage', () => {
+    const { container } = render(
+      <PlaylistCover
+        playlist={pl({
+          image_url: '/own.jpg',
+          cover_tiles: ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg'],
+        })}
+      />,
+    );
+    expect(srcs(container)).toHaveLength(1);
+    expect(srcs(container)[0]).toContain('/own.jpg');
+  });
+
+  it('falls to the first letter with no art, or when the art will not load', () => {
+    const { container, rerender } = render(<PlaylistCover playlist={pl()} />);
+    expect(container.textContent).toBe('V');
+    rerender(<PlaylistCover playlist={pl({ cover_tiles: ['/a.jpg'] })} />);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toBe('V');
   });
 });

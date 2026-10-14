@@ -13,6 +13,7 @@ import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { thumb } from '@/platform/artwork-thumb';
 import { usePopoverDismiss } from '@/routes/sync/-ui/use-popover-dismiss';
 import { usePopoverPosition } from '@/routes/sync/-ui/use-popover-position';
 
@@ -229,6 +230,48 @@ export async function addAndReport(
   }
 }
 
+/**
+ * the same art the playlists page shows: the playlist's own cover, else its
+ * collage (four covers make a 2x2, fewer make one), else its first letter.
+ * a cover that won't load drops to the next rung instead of a broken image.
+ */
+export function PlaylistCover({ playlist }: { playlist: UserPlaylistSummary }) {
+  const tiles = playlist.cover_tiles ?? [];
+  const [failed, setFailed] = useState(false);
+  const single = playlist.image_url || (tiles.length > 0 && tiles.length < 4 ? tiles[0] : '');
+  if (!failed && !playlist.image_url && tiles.length >= 4) {
+    return (
+      <span className={`${styles.cover} ${styles.mosaic}`} aria-hidden="true">
+        {tiles.slice(0, 4).map((tile) => (
+          <img
+            key={tile}
+            src={thumb(tile, 'card')}
+            alt=""
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+        ))}
+      </span>
+    );
+  }
+  if (!failed && single) {
+    return (
+      <img
+        className={styles.cover}
+        src={thumb(single, 'card')}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <span className={styles.cover} aria-hidden="true">
+      {playlist.name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 function Picker({ request }: { request: Request }) {
   const ref = useRef<HTMLDivElement>(null);
   const pos = usePopoverPosition({ top: request.top, left: request.left }, ref);
@@ -370,13 +413,7 @@ function Picker({ request }: { request: Request }) {
               disabled={saving}
               onClick={() => void pick(p)}
             >
-              {p.image_url ? (
-                <img className={styles.cover} src={p.image_url} alt="" loading="lazy" />
-              ) : (
-                <span className={styles.cover} aria-hidden="true">
-                  {p.name.slice(0, 1).toUpperCase()}
-                </span>
-              )}
+              <PlaylistCover playlist={p} />
               <span className={styles.rowText}>
                 <span className={styles.name}>{p.name}</span>
                 <span className={styles.count}>

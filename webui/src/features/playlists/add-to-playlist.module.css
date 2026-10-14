@@ -155,6 +155,19 @@
   font-weight: 700;
 }
 
+/* four covers in a 2x2, like the playlists page's collage */
+.mosaic {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  overflow: hidden;
+}
+
+.mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .newCover {
   background: var(--white-a08);
 }

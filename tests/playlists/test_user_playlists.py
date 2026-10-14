@@ -191,6 +191,29 @@ def test_list_is_only_this_profiles_user_playlists(mdb):
     assert [p["id"] for p in up.list_playlists(mdb, 2)] == [mine]
 
 
+
+def _set_tiles(mdb, pid, value):
+    with mdb._get_connection() as conn:
+        conn.execute("UPDATE mirrored_playlists SET cover_tiles = ? WHERE id = ?", (value, pid))
+        conn.commit()
+
+
+def test_list_carries_the_collage_the_playlists_page_draws(mdb):
+    # no cover of its own: the page draws cover_tiles, so the picker must get them
+    pid = up.create_playlist(mdb, 1, "Vibes")
+    _set_tiles(mdb, pid, '["https://a.jpg", "https://b.jpg", "", 5]')
+    [row] = up.list_playlists(mdb, 1)
+    assert row["image_url"] is None
+    assert row["cover_tiles"] == ["https://a.jpg", "https://b.jpg"]
+
+
+@pytest.mark.parametrize("raw", ["[]", "not json", '{"a": 1}'])
+def test_unusable_tiles_read_as_none(mdb, raw):
+    pid = up.create_playlist(mdb, 1, "Vibes")
+    _set_tiles(mdb, pid, raw)
+    assert up.list_playlists(mdb, 1)[0]["cover_tiles"] == []
+
+
 # ── refresh / pipeline ──────────────────────────────────────────────────
 
 

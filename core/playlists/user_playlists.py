@@ -196,7 +196,22 @@ def list_playlists(db: Any, profile_id: int) -> List[Dict[str, Any]]:
         'name': effective_mirrored_name(p),
         'track_count': int(p.get('track_count') or 0),
         'image_url': p.get('image_url'),
+        # the collage the playlists page falls back to when there's no cover of
+        # its own. without it the picker drew a letter where the page drew art.
+        'cover_tiles': _cover_tiles(p.get('cover_tiles')),
     } for p in rows]
+
+
+def _cover_tiles(raw: Any) -> List[str]:
+    """the cover_tiles column (json text, or NULL until the backfill runs)."""
+    if isinstance(raw, list):
+        tiles = raw
+    else:
+        try:
+            tiles = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+    return [t for t in tiles if isinstance(t, str) and t] if isinstance(tiles, list) else []
 
 
 def add_tracks(

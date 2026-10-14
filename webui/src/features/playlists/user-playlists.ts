@@ -25,6 +25,8 @@ export interface UserPlaylistSummary {
   name: string;
   track_count: number;
   image_url?: string | null;
+  /** the collage the playlists page draws when there's no cover of its own. */
+  cover_tiles?: string[];
 }
 
 export interface AddTracksResult {
