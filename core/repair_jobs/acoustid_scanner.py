@@ -9,7 +9,7 @@ actual files on disk. Creates actionable findings that can be fixed:
 
 import os
 import re
-from datetime import datetime, timezone
+import time
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -76,7 +76,7 @@ class AcoustIDScannerJob(RepairJob):
         batch_size = settings.get('batch_size', 200)
         verified_cutoff = None
         if settings.get('skip_verified'):
-            verified_cutoff = self._last_clean_run_epoch(context)
+            verified_cutoff = self._get_cfg(context, 'verified_cutoff')
 
         # Get AcoustID client
         acoustid_client = context.acoustid_client
@@ -143,6 +143,22 @@ class AcoustIDScannerJob(RepairJob):
         if checkpoint_id is not None:
             checkpoint_id = str(checkpoint_id)
 
+        # A pass is a walk through the whole list: it starts when there is no
+        # checkpoint and ends when the list runs out. A run that resumes from a
+        # checkpoint continues the same pass, so it must never move the cutoff
+        # that ``skip_verified`` trusts. The cutoff is the START of the last
+        # pass that finished clean: a file changed while the pass was running
+        # has a newer mtime and is scanned again by the next one.
+        if checkpoint_id is None:
+            pass_started_at = time.time()
+            pass_dirty = False
+            self._set_cfg(context, 'pass_started_at', pass_started_at)
+        else:
+            pass_started_at = self._get_cfg(context, 'pass_started_at')
+            # A checkpoint with no recorded start (saved before this existed)
+            # cannot be vouched for, so this pass never promotes.
+            pass_dirty = bool(self._get_cfg(context, 'pass_dirty')) or pass_started_at is None
+
         # Build ordered list of (track_id, info) sorted by ID for deterministic order
         track_list = sorted(db_tracks.items(), key=lambda x: str(x[0]))
 
@@ -169,16 +185,20 @@ class AcoustIDScannerJob(RepairJob):
         last_completed_id = None
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 return result
             if i % 10 == 0 and context.wait_if_paused():
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 return result
 
             # Resolve the DB path to an actual file on disk
             file_path = track_info.get('file_path', '')
             resolved = self._resolve_path(file_path, context)
             if not resolved:
+                # Not looked at, so the pass cannot count as clean (a music
+                # mount that is missing would otherwise "finish" with every
+                # file skipped).
+                pass_dirty = True
                 result.skipped += 1
                 continue
 
@@ -216,7 +236,7 @@ class AcoustIDScannerJob(RepairJob):
                 )
                 if status == 'abort_invalid_key':
                     logger.warning("Aborting AcoustID scan due to invalid API key")
-                    self._save_checkpoint_id(context, last_completed_id)
+                    self._save_progress(context, last_completed_id, result, pass_dirty)
                     return result
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
@@ -230,14 +250,17 @@ class AcoustIDScannerJob(RepairJob):
             # Rate limit: pause between batches to avoid hammering AcoustID API
             if batch_count >= batch_size:
                 batch_count = 0
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 if context.sleep_or_stop(2):
                     return result
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)
 
-        # Clear checkpoint on full completion
+        # Reached the end of the list: promote the pass to the clean cutoff
+        # when nothing in it errored or went unread, then clear the checkpoint.
+        if pass_started_at is not None and not pass_dirty and result.errors == 0:
+            self._set_cfg(context, 'verified_cutoff', pass_started_at)
         self._save_checkpoint_id(context, None)
 
         if context.update_progress:
@@ -739,36 +762,20 @@ class AcoustIDScannerJob(RepairJob):
                 f'repair.jobs.{self.job_id}.checkpoint_id', track_id
             )
 
-    def _last_clean_run_epoch(self, context: JobContext) -> Optional[float]:
-        """Start time (epoch seconds) of this job's last run that finished
-        without errors, or None when there is none.
-
-        ``skip_verified`` only trusts a run that looked at every file it was
-        given, so a run that was stopped, failed or logged errors does not
-        count. None means "scan everything". ``repair_job_runs`` stamps UTC
-        with CURRENT_TIMESTAMP.
-        """
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT started_at FROM repair_job_runs "
-                "WHERE job_id = ? AND status = 'completed' AND errors = 0 "
-                "ORDER BY started_at DESC LIMIT 1",
-                (self.job_id,),
-            )
-            row = cursor.fetchone()
-            if not row or not row[0]:
-                return None
-            started = datetime.strptime(str(row[0])[:19], '%Y-%m-%d %H:%M:%S')
-            return started.replace(tzinfo=timezone.utc).timestamp()
-        except Exception as e:
-            logger.debug("Could not read the last clean AcoustID run: %s", e)
+    def _get_cfg(self, context: JobContext, name: str):
+        if not context.config_manager:
             return None
-        finally:
-            if conn:
-                conn.close()
+        return context.config_manager.get(f'repair.jobs.{self.job_id}.{name}', None)
+
+    def _set_cfg(self, context: JobContext, name: str, value) -> None:
+        if context.config_manager:
+            context.config_manager.set(f'repair.jobs.{self.job_id}.{name}', value)
+
+    def _save_progress(self, context: JobContext, track_id, result, pass_dirty: bool) -> None:
+        """Save the checkpoint together with whether the pass has gone dirty,
+        so a resumed run still knows about errors from the run before it."""
+        self._set_cfg(context, 'pass_dirty', bool(pass_dirty or result.errors))
+        self._save_checkpoint_id(context, track_id)
 
     @staticmethod
     def _modified_since(path: str, epoch: float) -> bool:

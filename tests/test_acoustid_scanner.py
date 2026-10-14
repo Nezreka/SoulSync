@@ -988,52 +988,83 @@ def test_scan_skip_does_not_downgrade_verified(monkeypatch):
 # Opt-in skip_verified
 # ---------------------------------------------------------------------------
 
-def _skip_verified_scan(monkeypatch, tmp_path, *, setting, db_status,
-                        last_run_age_s):
-    """Run scan() over one track and return (scanned_ids, result).
+KEY = 'repair.jobs.acoustid_scanner.'
 
-    ``last_run_age_s`` is how long ago the last clean run started, or None for
-    no clean run on record. The file is created now, so a run that started an
-    hour ago predates it (changed) and one "started" an hour from now does not.
-    """
-    import time
 
-    audio = tmp_path / "song.flac"
-    audio.write_bytes(b"x")
-    last_run = None
-    if last_run_age_s is not None:
-        last_run = time.strftime(
-            '%Y-%m-%d %H:%M:%S', time.gmtime(time.time() - last_run_age_s))
+class _Library:
+    """A few tracks on disk plus the config store the scanner reads and writes,
+    so several runs can be chained and a run can be stopped partway."""
 
-    class _Cursor:
-        def execute(self, query, params=None):
-            return self
+    def __init__(self, tmp_path, ids=("1", "2", "3", "4"), setting=True):
+        self.tmp_path = tmp_path
+        self.files = {}
+        for tid in ids:
+            f = tmp_path / f"song{tid}.flac"
+            f.write_bytes(b"x")
+            self.files[tid] = f
+        self.cfg = {}
+        self.setting = setting
+        self.rows = {tid: (int(tid), "Good Track", "Artist", str(f), 1, "Album",
+                           None, None, "", "Artist", 240000, 7, "verified")
+                     for tid, f in self.files.items()}
 
-        def fetchone(self):
-            return (last_run,) if last_run else None
+    def touch(self, tid):
+        """Replace a file now. The pauses keep its mtime and ctime clear of
+        the pass start before it and of the next run's start after it."""
+        import time
+        time.sleep(0.05)
+        self.files[tid].write_bytes(b"replaced")
+        time.sleep(0.05)
 
-        def fetchall(self):
-            return [(42, "Good Track", "Artist", str(audio), 1, "Album", None, None,
-                     "", "Artist", 240000, 7, db_status)]
+    def run(self, monkeypatch, *, stop_after=None, error_on=None, unresolved=()):
+        """One scan(). Returns (scanned_ids, result)."""
+        rows = list(self.rows.values())
 
-    cursor = _Cursor()
-    conn = SimpleNamespace(cursor=lambda: cursor, close=lambda: None)
-    context = _make_context([])
-    context.db = SimpleNamespace(_get_connection=lambda: conn)
-    context.config_manager = SimpleNamespace(
-        get=lambda key, default=None: (
-            {'skip_verified': setting} if key.endswith('.settings') else default),
-        set=lambda *a, **k: None,
-    )
+        class _Cursor:
+            def execute(self, query, params=None):
+                return self
 
-    job = AcoustIDScannerJob()
-    monkeypatch.setattr(job, "_resolve_path", lambda file_path, _c: file_path)
-    scanned = []
-    monkeypatch.setattr(
-        job, "_scan_file",
-        lambda fpath, track_id, *a, **k: scanned.append(track_id))
-    result = job.scan(context)
-    return scanned, result
+            def fetchone(self):
+                return None
+
+            def fetchall(self):
+                return rows
+
+        cursor = _Cursor()
+        conn = SimpleNamespace(cursor=lambda: cursor, close=lambda: None)
+        context = _make_context([])
+        context.db = SimpleNamespace(_get_connection=lambda: conn)
+
+        def _get(key, default=None):
+            if key.endswith('.settings'):
+                return {'skip_verified': self.setting}
+            return self.cfg.get(key, default)
+
+        context.config_manager = SimpleNamespace(
+            get=_get, set=lambda key, value: self.cfg.__setitem__(key, value))
+
+        scanned = []
+        job = AcoustIDScannerJob()
+        monkeypatch.setattr(
+            job, "_resolve_path",
+            lambda file_path, _c: None if any(
+                str(self.files[u]) == file_path for u in unresolved) else file_path)
+
+        def _scan_file(fpath, track_id, expected, client, ctx, result, *a, **k):
+            scanned.append(track_id)
+            if track_id == error_on:
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr(job, "_scan_file", _scan_file)
+        if stop_after is not None:
+            context.check_stop = lambda: len(scanned) >= stop_after
+        return scanned, job.scan(context)
+
+
+def _full_pass(lib, monkeypatch):
+    scanned, _ = lib.run(monkeypatch)
+    assert KEY + 'checkpoint_id' in lib.cfg and lib.cfg[KEY + 'checkpoint_id'] is None
+    return scanned
 
 
 def test_skip_verified_is_off_by_default():
@@ -1041,51 +1072,96 @@ def test_skip_verified_is_off_by_default():
 
 
 def test_skip_verified_off_still_scans_verified(monkeypatch, tmp_path):
-    scanned, result = _skip_verified_scan(
-        monkeypatch, tmp_path, setting=False, db_status='verified',
-        last_run_age_s=-3600)
-    assert scanned == ["42"]
+    lib = _Library(tmp_path, setting=False)
+    _full_pass(lib, monkeypatch)
+    scanned, result = lib.run(monkeypatch)
+    assert scanned == ["1", "2", "3", "4"]
     assert result.skipped == 0
 
 
-def test_skip_verified_skips_unchanged_verified_file(monkeypatch, tmp_path):
-    scanned, result = _skip_verified_scan(
-        monkeypatch, tmp_path, setting=True, db_status='verified',
-        last_run_age_s=-3600)
+def test_skip_verified_scans_everything_before_a_clean_pass(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    scanned, _ = lib.run(monkeypatch)
+    assert scanned == ["1", "2", "3", "4"]
+
+
+def test_skip_verified_skips_unchanged_files_after_a_clean_pass(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    _full_pass(lib, monkeypatch)
+    scanned, result = lib.run(monkeypatch)
     assert scanned == []
-    assert result.scanned == 0
-    assert result.skipped == 1
+    assert result.skipped == 4
 
 
-def test_skip_verified_rescans_verified_file_modified_after_last_run(monkeypatch, tmp_path):
-    scanned, result = _skip_verified_scan(
-        monkeypatch, tmp_path, setting=True, db_status='verified',
-        last_run_age_s=3600)
-    assert scanned == ["42"]
-
-
-def test_skip_verified_scans_everything_without_a_clean_run(monkeypatch, tmp_path):
-    scanned, result = _skip_verified_scan(
-        monkeypatch, tmp_path, setting=True, db_status='verified', last_run_age_s=None)
-    assert scanned == ["42"]
+def test_skip_verified_rescans_a_file_changed_after_a_clean_pass(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    _full_pass(lib, monkeypatch)
+    lib.touch("2")
+    scanned, _ = lib.run(monkeypatch)
+    assert scanned == ["2"]
 
 
 @pytest.mark.parametrize("status", [None, "unverified", "force_imported"])
 def test_skip_verified_only_skips_verified(monkeypatch, tmp_path, status):
-    scanned, result = _skip_verified_scan(
-        monkeypatch, tmp_path, setting=True, db_status=status,
-        last_run_age_s=-3600)
-    assert scanned == ["42"]
+    lib = _Library(tmp_path)
+    _full_pass(lib, monkeypatch)
+    lib.rows["3"] = lib.rows["3"][:-1] + (status,)
+    scanned, _ = lib.run(monkeypatch)
+    assert scanned == ["3"]
 
 
-def test_last_clean_run_epoch_reads_started_at_as_utc():
-    from datetime import datetime, timezone
+def test_resumed_run_does_not_move_the_cutoff(monkeypatch, tmp_path):
+    """Stop partway, replace a verified file the first run already checked,
+    resume to the end. The next run has to scan the replaced file."""
+    lib = _Library(tmp_path)
+    scanned, _ = lib.run(monkeypatch, stop_after=2)
+    assert scanned == ["1", "2"]
+    assert lib.cfg[KEY + 'checkpoint_id'] == "2"
 
-    cursor = SimpleNamespace(
-        execute=lambda q, p=None: cursor,
-        fetchone=lambda: ("2026-10-12 08:00:00",))
-    context = SimpleNamespace(db=SimpleNamespace(
-        _get_connection=lambda: SimpleNamespace(
-            cursor=lambda: cursor, close=lambda: None)))
-    expected = datetime(2026, 10, 12, 8, 0, 0, tzinfo=timezone.utc).timestamp()
-    assert AcoustIDScannerJob()._last_clean_run_epoch(context) == expected
+    lib.touch("1")
+    scanned, _ = lib.run(monkeypatch)
+    assert scanned == ["3", "4"]
+    assert lib.cfg[KEY + 'checkpoint_id'] is None
+
+    scanned, _ = lib.run(monkeypatch)
+    assert "1" in scanned
+
+
+def test_stopped_run_does_not_set_the_cutoff(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, stop_after=2)
+    assert KEY + 'verified_cutoff' not in lib.cfg
+
+
+def test_errors_before_a_stop_keep_the_resumed_pass_from_promoting(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, stop_after=2, error_on="1")
+    scanned, result = lib.run(monkeypatch)
+    assert result.errors == 0
+    assert KEY + 'verified_cutoff' not in lib.cfg
+
+
+def test_pass_with_an_error_does_not_promote(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, error_on="3")
+    assert KEY + 'verified_cutoff' not in lib.cfg
+
+
+def test_unresolved_path_keeps_the_pass_from_promoting(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, unresolved=("2",))
+    assert KEY + 'verified_cutoff' not in lib.cfg
+
+
+def test_checkpoint_without_a_recorded_pass_never_promotes(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.cfg[KEY + 'checkpoint_id'] = "2"
+    lib.run(monkeypatch)
+    assert KEY + 'verified_cutoff' not in lib.cfg
+
+
+def test_next_fresh_pass_starts_clean_after_a_dirty_one(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, error_on="3")
+    scanned, _ = lib.run(monkeypatch)
+    assert KEY + 'verified_cutoff' in lib.cfg
