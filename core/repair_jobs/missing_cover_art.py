@@ -1,5 +1,7 @@
 """Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
+import hashlib
+import json
 import os
 import re
 
@@ -7,6 +9,7 @@ from core.metadata.art_apply import file_has_embedded_art, folder_has_cover_side
 from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
+from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, hand_tagged_path_keys, is_hand_tagged_path
 from utils.logging_config import get_logger
 
@@ -54,13 +57,21 @@ class MissingCoverArtJob(RepairJob):
         'When artwork is found, a finding is created with the image URL so you can review '
         'and apply it. The job does not download or embed artwork automatically.\n\n'
         'Settings:\n'
-        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used'
+        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used\n'
+        '- Remember Empty Lookups: When on, an album no source had art for is not searched '
+        'again until it changes, your art sources change, or the recheck time passes. '
+        'Fewer repeated requests to the metadata services\n'
+        '- Recheck After Days: How long an empty answer is trusted (default 7)'
     )
     icon = 'repair-icon-coverart'
     default_enabled = True
     default_interval_hours = 48
-    default_settings = {}
+    default_settings = {
+        'remember_empty_lookups': False,
+        'recheck_after_days': 7,
+    }
     auto_fix = False
+    _lookup_failures = 0
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -159,10 +170,31 @@ class MissingCoverArtJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
 
+        # Opt-in: albums no source had art for are not searched again until
+        # something about the question changes or the recheck time passes.
+        memory = None
+        recheck_days = settings.get('recheck_after_days', 7)
+        if settings.get('remember_empty_lookups'):
+            try:
+                recheck_days = max(0.0, float(recheck_days))
+            except (TypeError, ValueError):
+                recheck_days = 7.0
+            memory = EmptyLookupMemory.open(context.db, self.job_id, recheck_days)
+        self._lookup_failures = 0
+        remembered_empty = 0
+        # Which sources can actually be asked. Part of what the lookup asks, so
+        # setting one up later makes the albums it has not seen worth asking again.
+        askable_sources = ([s for s in source_priority if get_client_for_source(s)]
+                           if memory else [])
+
         for i, row in enumerate(albums):
             if context.check_stop():
+                if memory:
+                    memory.close()
                 return result
             if i % 10 == 0 and context.wait_if_paused():
+                if memory:
+                    memory.close()
                 return result
 
             album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
@@ -264,27 +296,47 @@ class MissingCoverArtJob(RepairJob):
 
             artwork_url = None
 
+            # What was asked, so a changed title, id or source order asks again.
+            lookup_key = str(album_id)
+            lookup_signature = self._lookup_signature(
+                title, artist_name, source_album_ids, askable_sources, art_order)
+            skip_lookup = bool(memory and memory.recently_empty(lookup_key, lookup_signature))
+            failures_before = self._lookup_failures
+
             # Honor the user's configured cover-art sources first (the same
             # metadata_enhancement.album_art_order the post-process embed and the
             # Library Re-tag job use) so "cover art sources" means one thing
             # app-wide. Non-breaking: returns None when no order is configured
             # (the default), so we fall back to the prefer_source / metadata
             # source-priority loop below — unchanged behavior for existing users.
-            try:
-                from core.metadata.art_lookup import select_preferred_art_url
-                artwork_url = select_preferred_art_url(
-                    artist_name, title,
-                    {'musicbrainz_release_id': None}, art_order,
-                )
-            except Exception as e:
-                logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
+            if not skip_lookup:
+                try:
+                    from core.metadata.art_lookup import select_preferred_art_url
+                    artwork_url = select_preferred_art_url(
+                        artist_name, title,
+                        {'musicbrainz_release_id': None}, art_order,
+                    )
+                except Exception as e:
+                    self._lookup_failures += 1
+                    logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
 
-            # Try source-specific IDs first, then title/artist search, in priority order.
-            if not artwork_url:
-                for source in source_priority:
-                    artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
-                    if artwork_url:
-                        break
+                # Try source-specific IDs first, then title/artist search, in priority order.
+                if not artwork_url:
+                    for source in source_priority:
+                        artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
+                        if artwork_url:
+                            break
+            else:
+                remembered_empty += 1
+
+            if memory and not skip_lookup:
+                if artwork_url:
+                    memory.forget(lookup_key)
+                elif (self._lookup_failures == failures_before
+                        and not self._spotify_rate_limited(context)):
+                    # Every source answered and none had art. A failed or
+                    # throttled lookup is not an answer and is asked again.
+                    memory.remember(lookup_key, lookup_signature)
 
             # Fixable if we found API art (to embed/write), OR it's just a
             # missing cover.jpg on an album that already has embedded art — the
@@ -354,6 +406,15 @@ class MissingCoverArtJob(RepairJob):
 
             if context.update_progress and (i + 1) % 5 == 0:
                 context.update_progress(i + 1, total)
+            if memory and (i + 1) % 25 == 0:
+                memory.commit()
+
+        if memory:
+            memory.prune(str(row[0]) for row in albums)
+            memory.close()
+            if remembered_empty:
+                logger.info("Cover art scan: %d albums not searched again (empty answer "
+                            "within the last %g days)", remembered_empty, recheck_days)
 
         if context.update_progress:
             context.update_progress(total, total)
@@ -403,8 +464,27 @@ class MissingCoverArtJob(RepairJob):
                         if artwork_url:
                             return artwork_url
         except Exception as e:
+            self._lookup_failures += 1
             logger.debug("%s art lookup failed for '%s': %s", source.capitalize(), title, e)
         return None
+
+    @staticmethod
+    def _lookup_signature(title, artist_name, source_album_ids, sources, art_order) -> str:
+        """A short fingerprint of everything that decides what the lookup asks."""
+        payload = json.dumps(
+            [title, artist_name,
+             sorted((k, str(v)) for k, v in source_album_ids.items() if v),
+             list(sources), list(art_order or [])],
+            default=str)
+        return hashlib.sha1(payload.encode('utf-8')).hexdigest()[:16]
+
+    @staticmethod
+    def _spotify_rate_limited(context) -> bool:
+        check = getattr(context, 'is_spotify_rate_limited', None)
+        try:
+            return bool(check()) if callable(check) else False
+        except Exception:  # noqa: BLE001 - an unreadable flag means "do not trust this answer"
+            return True
 
     def _find_artist_art(self, artist_name, source_priority):
         """Search the configured sources for an artist image, in priority
