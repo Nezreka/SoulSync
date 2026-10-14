@@ -171,6 +171,17 @@ describe('M-02/M-04 — hamburger hides behind the modals the React-root cap exp
   });
 });
 
+describe('the sidebar visualizer stays off on phones', () => {
+  it('is hidden in every drawer state, not only while the drawer is closed (the violet line)', () => {
+    const at = MOBILE.indexOf('the sidebar visualizer is a desktop thing');
+    expect(at).toBeGreaterThan(-1);
+    expect(blockAfter(MOBILE.slice(at), '.sidebar-visualizer {')).toContain(
+      'display: none !important',
+    );
+    expect(MOBILE).not.toContain('.sidebar:not(.mobile-open) ~ .sidebar-visualizer');
+  });
+});
+
 describe('M-05/M-17 — the mini player defers to the drawer and to the year story', () => {
   it('body.mobile-nav-open hides the player (z-99998 over the z-10001 drawer before)', () => {
     expect(blockAfter(MOBILE, 'body.mobile-nav-open #media-player {')).toContain(

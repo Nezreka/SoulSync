@@ -3665,13 +3665,12 @@ body:has([data-year-story-overlay]) .helper-float-btn {
 }
 
 @media (max-width: 768px) {
-    /* Sidebar visualizer is pinned at the (desktop) sidebar's right edge, so on
-       mobile it floats over the page content when the off-canvas sidebar drawer
-       is closed. Show it ONLY while the drawer is open. The .active/.viz-* rules
-       set display with 2-class specificity, so this 3-class + !important selector
-       is needed to beat them; when the drawer IS open it doesn't match, so the
-       visualizer's normal display rules take over again. */
-    .sidebar:not(.mobile-open) ~ .sidebar-visualizer {
+    /* the sidebar visualizer is a desktop thing. on phones it floated over the
+       page with the drawer closed, and with the drawer open it was just a thin
+       violet line down the drawer's edge that read as a bug. hide it in every
+       state. the .viz-* rules set display with 2-class specificity, so this
+       needs !important to win. */
+    .sidebar-visualizer {
         display: none !important;
     }
 }
