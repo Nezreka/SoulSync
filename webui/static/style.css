@@ -6857,6 +6857,18 @@ body:has(#mix-modal-overlay) .hamburger-btn {
     display: none !important;
 }
 
+/* and the mirrored playlist modal (#1691): on a phone the hamburger sat on
+   its cover and the bell, activity and helper buttons on its bottom row of
+   actions, right where Close and Identify land once the action bar stacks */
+body:has(#mirrored-track-modal) #gsearch-bar,
+body:has(#mirrored-track-modal) #gsearch-aura,
+body:has(#mirrored-track-modal) #notif-bell-btn,
+body:has(#mirrored-track-modal) #helper-float-btn,
+body:has(#mirrored-track-modal) #activity-float-btn,
+body:has(#mirrored-track-modal) .hamburger-btn {
+    display: none !important;
+}
+
 /* and for chat's full-screen web preview: on a phone the bell and helper sat
    on the page being previewed */
 body:has(.chat-web-modal-overlay--open) #gsearch-bar,
