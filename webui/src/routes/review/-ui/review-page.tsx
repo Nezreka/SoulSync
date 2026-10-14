@@ -690,6 +690,8 @@ function SelectedActionDetail({
             previewUrl={textValue(
               details.expected_preview_url || record(details.replacement_track).preview_url,
             )}
+            previewSource={textValue(details.source)}
+            previewTrackId={textValue(record(details.replacement_track).source_track_id)}
           />
         )}
       {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&

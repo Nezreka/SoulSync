@@ -11,8 +11,11 @@ every handler already answers that case itself.
 from __future__ import annotations
 
 import time
+from urllib.parse import urlparse
 
-from flask import Blueprint, jsonify, request
+import requests
+
+from flask import Blueprint, jsonify, redirect, request
 
 from utils.logging_config import get_logger
 
@@ -50,6 +53,26 @@ def _safe_int(val, default=0):
 
 def create_blueprint():
     return bp
+
+
+@bp.route('/api/repair/release-preview/deezer/<int:track_id>', methods=['GET'])
+def repair_deezer_release_preview(track_id):
+    """Resolve a fresh signed Deezer preview URL when playback starts."""
+    if track_id <= 0:
+        return jsonify({'error': 'Invalid Deezer track'}), 400
+    try:
+        response = requests.get(f'https://api.deezer.com/track/{track_id}', timeout=8)
+        response.raise_for_status()
+        preview = str((response.json() or {}).get('preview') or '')
+        parsed = urlparse(preview)
+        if parsed.scheme != 'https' or not (parsed.hostname or '').endswith('.dzcdn.net'):
+            return jsonify({'error': 'No playable preview is available'}), 404
+        result = redirect(preview, code=302)
+        result.headers['Cache-Control'] = 'no-store'
+        return result
+    except (requests.RequestException, ValueError, TypeError) as exc:
+        logger.warning('Could not refresh Deezer preview for track %s: %s', track_id, exc)
+        return jsonify({'error': 'Could not load the release preview'}), 502
 
 
 # --- Repair Worker API Endpoints ---

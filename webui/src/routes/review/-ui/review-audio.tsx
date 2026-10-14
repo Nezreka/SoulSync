@@ -15,6 +15,8 @@ export function ReviewAudio({
   comparisonTitle,
   comparisonDurationMs,
   previewUrl,
+  previewSource,
+  previewTrackId,
 }: {
   localPath: string;
   localTitle: string;
@@ -23,6 +25,8 @@ export function ReviewAudio({
   comparisonTitle?: string;
   comparisonDurationMs?: number;
   previewUrl?: string;
+  previewSource?: string;
+  previewTrackId?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const shouldPlayRef = useRef(false);
@@ -34,7 +38,12 @@ export function ReviewAudio({
   const comparisonSource = comparisonPath
     ? `/stream/library-audio?path=${encodeURIComponent(comparisonPath)}`
     : '';
-  const catalogSource = previewUrl && /^https?:\/\//i.test(previewUrl) ? previewUrl : '';
+  const catalogSource =
+    previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '')
+      ? `/api/repair/release-preview/deezer/${previewTrackId}`
+      : previewUrl && /^https?:\/\//i.test(previewUrl)
+        ? previewUrl
+        : '';
   const source =
     selected === 'comparison'
       ? comparisonSource

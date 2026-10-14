@@ -690,6 +690,8 @@ export function ReleaseComparison({
                 comparisonTitle={label(pairs[inspectedPair].slot_title)}
                 comparisonDurationMs={count(pairs[inspectedPair].slot_duration_ms)}
                 previewUrl={label(pairs[inspectedPair].slot_preview_url)}
+                previewSource={label(active.source)}
+                previewTrackId={label(pairs[inspectedPair].slot_source_track_id)}
               />
             )}
             <p className={styles.muted}>

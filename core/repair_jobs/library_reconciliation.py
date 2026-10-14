@@ -1207,6 +1207,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                 'slot_title': release_slots[pair['slot_index']].get('title') or '',
                 'slot_duration_ms': release_slots[pair['slot_index']].get('duration_ms') or 0,
                 'slot_preview_url': release_slots[pair['slot_index']].get('preview_url') or '',
+                'slot_source_track_id': release_slots[pair['slot_index']].get('source_track_id') or '',
                 'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
                 'track_number': release_slots[pair['slot_index']].get('track_number'),
                 'display_track_number': _numbered_slot(
