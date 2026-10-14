@@ -65,6 +65,16 @@ def test_resolves_another_mount_and_learns_it(library):
     assert server_paths._learned == {'/music': str(library).replace('\\', '/')}
 
 
+@pytest.mark.parametrize('reported_local', [True, False])
+def test_relative_library_configuration_returns_absolute_identity(tmp_path, library, monkeypatch, reported_local):
+    monkeypatch.chdir(tmp_path)
+    config = _Config(['./Media/Music'])
+    path = './Media/Music/' + _REL if reported_local else '/music/' + _REL
+    assert server_paths.local_path_for(path, config) == str(library / _REL)
+    if not reported_local:
+        assert server_paths._learned == {'/music': str(library).replace('\\', '/')}
+
+
 def test_learned_mount_skips_the_walk(library, monkeypatch):
     server_paths.local_path_for('/music/' + _REL, settings_module.config_manager)
     other = library / 'The Killers' / 'The Killers - Hot Fuss' / '01 - Jenny.flac'
@@ -137,6 +147,16 @@ def test_scan_keeps_server_path_on_mapping_and_local_file_on_catalogue(tmp_path,
     db, tid = _db(tmp_path, library)
     assert db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
     assert _paths(db, tid) == (str(library / _REL), '/music/' + _REL)
+
+
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+def test_relative_mount_recognizes_file_without_recording_id_or_parent_mapping(tmp_path, library, monkeypatch, server):
+    db, tid = _db(tmp_path, library, server)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings_module, 'config_manager', _Config(['./Media/Music']))
+    assert db.insert_or_update_media_track(_Track('new-song', '/music/' + _REL),
+                                           'unmapped-edition', 'unmapped-artist', server_source=server)
+    assert _paths(db, tid, server) == (str(library / _REL), '/music/' + _REL)
 
 
 def test_unresolved_server_mount_preserves_the_imported_local_path(tmp_path, library, monkeypatch):

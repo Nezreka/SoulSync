@@ -10,6 +10,7 @@ song back. the skip now also needs every matched library track to still exist.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any, Iterable, Set
 
 from utils.logging_config import get_logger
@@ -93,4 +94,110 @@ def matched_tracks_still_present(db: Any, mirror_rows: Iterable[dict]) -> bool:
     return True
 
 
-__all__ = ['existing_track_ids', 'matched_tracks_still_present']
+def refresh_history_library_presence(db: Any, entry: dict, server_source: str) -> None:
+    """Add today's scoped ownership/recognition to a run without changing its facts.
+
+    Fetch candidates in batches, rather than re-searching the catalogue for
+    every historic miss. Provider IDs or recorded server IDs must resolve to
+    one owned row; name fallbacks retain strict recording/version identity.
+    """
+    from core.library_scope import library_scope_for_profile
+    from core.library2.sql_util import owner_clause, separated
+    from core.downloads.atomic_album_publish import contains_staging_segment
+    from core.wishlist.library_match import _strict_identity_matches
+
+    details = [row for row in (entry.get('track_results') or []) if isinstance(row, dict)]
+    if not details:
+        return
+    scope = separated(library_scope_for_profile(entry.get('profile_id')))
+    owner = owner_clause(scope=scope, column='f.owner_profile_id')
+    by_provider, by_server, by_title = {}, {}, {}
+    providers = ('spotify', 'deezer', 'itunes', 'tidal', 'qobuz')
+    with db._get_connection() as conn:
+        for start in range(0, len(details), 100):
+            chunk = details[start:start + 100]
+            ids = sorted({str(t['source_track_id']) for t in chunk if t.get('source_track_id')})
+            titles = sorted({str(t['name']).lower() for t in chunk if t.get('name')})
+            server_ids = sorted({str(t['matched_track']['id']) for t in chunk
+                                 if isinstance(t.get('matched_track'), dict) and t['matched_track'].get('id')})
+            clauses, params = [], [server_source, server_source, server_source]
+            if ids:
+                marks = ','.join('?' for _ in ids)
+                clauses.append(f't.spotify_id IN ({marks})')
+                params.extend(ids)
+                for provider in providers:
+                    clauses.append(f"CAST(json_extract(t.external_ids, '$.{provider}') AS TEXT) IN ({marks})")
+                    params.extend(ids)
+            if titles:
+                clauses.append(f"LOWER(t.title) IN ({','.join('?' for _ in titles)})")
+                params.extend(titles)
+            if server_ids:
+                marks = ','.join('?' for _ in server_ids)
+                clauses.append(f"current_server_id IN ({marks})")
+                params.extend(server_ids)
+            if not clauses:
+                continue
+            rows = conn.execute(f"""
+                SELECT t.*, COALESCE(NULLIF(t.track_artist,''), a.name) AS artist_name,
+                       al.title AS album_title, f.path AS file_path,
+                       COALESCE(m.server_id, CASE WHEN t.server_source=? AND f.owner_profile_id IS NULL
+                           AND NOT EXISTS (SELECT 1 FROM lib2_media_server_mappings other_m
+                               WHERE other_m.entity_type='track' AND other_m.entity_id=t.id
+                                 AND other_m.server_source=?) THEN t.server_id END) AS current_server_id
+                  FROM lib2_tracks t
+                  JOIN lib2_albums al ON al.id=t.album_id
+             LEFT JOIN lib2_artists a ON a.id=al.primary_artist_id
+                  JOIN lib2_track_files f ON f.track_id=t.id
+                       AND COALESCE(f.file_state,'active')='active'
+                       AND f.path IS NOT NULL AND TRIM(f.path)<>''{owner}
+             LEFT JOIN lib2_media_server_mappings m ON m.entity_type='track'
+                       AND m.entity_id=t.id AND m.server_source=?
+                       AND m.match_status='recognized'
+                       AND m.server_library_id=CASE WHEN f.owner_profile_id IS NULL
+                           THEN '' ELSE 'own:' || f.owner_profile_id END
+                 WHERE {' OR '.join(clauses)}
+            """, params)
+            for raw in rows:
+                row = dict(raw)
+                if contains_staging_segment(row['file_path']):
+                    continue
+                external = json.loads(row.get('external_ids') or '{}')
+                for provider, value in {('spotify', str(row.get('spotify_id') or '')),
+                                        *((p, str(external.get(p) or '')) for p in providers)}:
+                    if value:
+                        by_provider.setdefault((provider, value), {})[row['id']] = row
+                if row['current_server_id']:
+                    by_server.setdefault(str(row['current_server_id']), {})[row['id']] = row
+                by_title.setdefault(str(row['title']).lower(), {})[row['id']] = row
+
+    for detail in details:
+        source_id = str(detail.get('source_track_id') or '')
+        provider = detail.get('provider') or entry.get('source')
+        if provider in providers:
+            candidates = by_provider.get((provider, source_id))
+        else:
+            candidates = {key: row for p in providers
+                          for key, row in by_provider.get((p, source_id), {}).items()} or None
+            if candidates and len(candidates) == 1:
+                row = next(iter(candidates.values()))
+                if not _strict_identity_matches(SimpleNamespace(**row), detail.get('name') or '',
+                                                detail.get('artist') or '', detail.get('album'), False):
+                    candidates = None
+        if not candidates:
+            matched = detail.get('matched_track') or {}
+            candidates = by_server.get(str(matched.get('id') or ''))
+        if candidates is None:
+            candidates = {
+                key: row for key, row in by_title.get(str(detail.get('name') or '').lower(), {}).items()
+                if _strict_identity_matches(SimpleNamespace(**row), detail.get('name') or '',
+                                            detail.get('artist') or '', detail.get('album'), False)
+            }
+        row = next(iter(candidates.values())) if candidates and len(candidates) == 1 else None
+        detail['current_library_match'] = ({'catalogue_id': row['id'],
+                                            'server_id': row['current_server_id'],
+                                            'server_type': server_source} if row else None)
+    entry['current_tracks_in_library'] = sum(bool(t['current_library_match']) for t in details)
+    entry['current_tracks_recognized'] = sum(bool((t['current_library_match'] or {}).get('server_id')) for t in details)
+
+
+__all__ = ['existing_track_ids', 'matched_tracks_still_present', 'refresh_history_library_presence']

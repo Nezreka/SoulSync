@@ -227,3 +227,39 @@ def test_album_aware_fallback_actually_works(tmp_path: Path) -> None:
     assert track is not None, "album-aware fallback must find the track"
     assert track.title == "Hooked on a Feeling"
     assert confidence >= 0.7
+
+
+@pytest.mark.parametrize("server_source", ["navidrome", "jellyfin", "plex"])
+@pytest.mark.parametrize("mapped", [False, True])
+def test_album_fallback_returns_server_id(tmp_path, server_source, mapped):
+    """An album match must carry the server song ID into playlist writes."""
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / "fallback_identity.db"))
+    with db._get_connection() as conn:
+        catalogue_id = seed_library_track(
+            conn, artist="Various Artists", album="Compilation", title="Song",
+            track_server_id="compat-song", server_source=server_source,
+            file_path="/music/Compilation/Song.flac",
+        )
+        if mapped:
+            conn.execute(
+                "INSERT INTO lib2_media_server_mappings"
+                "(entity_type,entity_id,server_source,server_id) VALUES('track',?,?,?)",
+                (catalogue_id, server_source, "live-song"),
+            )
+            # Another server's compatibility projection must not override the mapping.
+            conn.execute(
+                "UPDATE lib2_tracks SET server_source='soulsync',server_id='local-song' WHERE id=?",
+                (catalogue_id,),
+            )
+
+    track, confidence = db.check_track_exists(
+        "Song", "Guest Performer", confidence_threshold=0.7,
+        server_source=server_source, album="Compilation", candidate_tracks=[],
+    )
+
+    assert track is not None
+    assert confidence == 1.0
+    assert track.id == ("live-song" if mapped else "compat-song")
+    assert track.server_source == server_source

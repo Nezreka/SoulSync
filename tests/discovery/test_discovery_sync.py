@@ -22,10 +22,13 @@ class _FakeSyncResult:
     total_tracks: int = 6
     wishlist_added_count: int = 0
     match_details: list = None
+    errors: list = None
 
     def __post_init__(self):
         if self.match_details is None:
             self.match_details = []
+        if self.errors is None:
+            self.errors = []
 
 
 class _FakeMediaClient:
@@ -305,6 +308,36 @@ def test_setup_error_with_automation_id_updates_progress(patched_db, monkeypatch
 # ---------------------------------------------------------------------------
 # Sync service errors
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('automation_id', [None, 'automation-1'])
+def test_playlist_write_failure_is_not_reported_as_synced(patched_db, automation_id):
+    """A returned SyncResult error must not persist a successful sync fingerprint."""
+    status_calls = []
+    automation_calls = []
+    deps = _build_deps(
+        sync_service=_FakeSyncService(
+            media_client=_FakeMediaClient(),
+            sync_result=_FakeSyncResult(
+                synced_tracks=0, errors=['Navidrome playlist write failed'],
+            ),
+        ),
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+        update_automation_progress=lambda *a, **kw: automation_calls.append(kw),
+    )
+
+    ds.run_sync_task('failed-playlist', 'Playlist', [_track()],
+                     automation_id=automation_id, deps=deps)
+
+    state = deps.sync_states['failed-playlist']
+    assert state['status'] == 'error'
+    assert 'Navidrome playlist write failed' in state['error']
+    assert state['result']['errors'] == ['Navidrome playlist write failed']
+    assert status_calls == []
+    assert deps.automation_engine.events == []
+    if automation_id:
+        assert any(call.get('status') == 'error' for call in automation_calls)
+        assert not any(call.get('status') == 'finished' for call in automation_calls)
 
 def test_no_sync_service_marks_error(patched_db):
     """sync_service None → caught by outer except, sync_states marked error."""
@@ -782,6 +815,15 @@ class TestRecordLibraryMembership:
         # Both stamped, so "checked and absent" is distinguishable from
         # "never looked at" — the page must not report the second as the first.
         assert writes[11]['library_checked_at'] == writes[22]['library_checked_at']
+
+    def test_owned_file_counts_without_server_recognition(self, monkeypatch):
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        _record_library_membership([{'db_track_id': 11}], [
+            {'index': 0, 'status': 'not_found', 'owned_in_library': True},
+        ])
+        assert writes[11]['in_library'] is True
+        assert writes[11]['library_track_id'] is None
 
     def test_ignores_tracks_that_are_not_mirrored_rows(self, monkeypatch):
         # Only the mirrored sync handler attaches db_track_id; every other

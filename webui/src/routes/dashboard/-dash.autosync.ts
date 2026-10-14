@@ -34,6 +34,7 @@ export interface AutoSyncSeamPlaylist {
    *  get_mirrored_playlists_endpoint: alias if set, else upstream name). */
   display_name?: string;
   source?: string;
+  source_playlist_id?: string;
   total_count?: number;
   in_library_count?: number;
   wishlisted_count?: number;
@@ -246,7 +247,9 @@ function runningFor(playlist: AutoSyncSeamPlaylist | undefined): AutoSyncRowRunn
   };
 }
 
-function coverageFor(playlist: AutoSyncSeamPlaylist | undefined): AutoSyncRowCoverage | null {
+export function coverageFor(
+  playlist: AutoSyncSeamPlaylist | undefined,
+): AutoSyncRowCoverage | null {
   if (!playlist) return null;
   const total = Number(playlist.total_count) || 0;
   if (total <= 0) return null;

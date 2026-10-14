@@ -83,3 +83,12 @@ def test_track_owned_by_id_and_name_counts_once(tmp_path):
         conn.commit()
     assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == 2
     assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2
+
+
+def test_current_provider_identity_overrules_old_missing_verdict(tmp_path):
+    db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE mirrored_playlist_tracks SET extra_data=? WHERE source_track_id='sp-humble'",
+                     ('{"in_library": false, "library_checked_at": 1}',))
+    assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2
+    assert db.get_all_mirrored_playlist_status_counts(1)[10]['in_library'] == 2

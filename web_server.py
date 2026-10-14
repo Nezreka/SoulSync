@@ -16934,6 +16934,9 @@ def get_sync_history_entry(entry_id):
         entry['track_results'] = json.loads(entry['track_results']) if entry.get('track_results') else None
         entry.pop('tracks_json', None)
 
+        from core.sync.library_presence import refresh_history_library_presence
+        refresh_history_library_presence(db, entry, config_manager.get_active_media_server())
+
         return jsonify({"success": True, "entry": entry})
     except Exception as e:
         logger.error(f"Error getting sync history entry: {e}")

@@ -351,4 +351,26 @@ describe('the split sync buttons (#1455)', () => {
     await vi.waitFor(() => expect(posts).toHaveLength(2));
     expect(posts[1].body).toEqual({ skip_wishlist: false });
   });
+
+  it('syncs an unscheduled mirror without a history entry through its pipeline', async () => {
+    window.buildAutoSyncScheduleState = () => ({
+      playlists: [
+        { id: 8, name: 'Feelings', source: 'spotify', total_count: 414, in_library_count: 65 },
+      ],
+      playlistSchedules: {},
+      weeklySchedules: {},
+      runHistory: [],
+    });
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<SyncRail />);
+    });
+    await vi.waitFor(() => expect(view.container.querySelector('.dash-sync-act')).not.toBeNull());
+    fireEvent.click(view.container.querySelector('.dash-sync-act')!);
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      url: '/api/mirrored-playlists/8/pipeline/run',
+      body: { skip_wishlist: true },
+    });
+  });
 });

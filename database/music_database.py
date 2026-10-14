@@ -549,13 +549,21 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
-# A mirrored playlist row counts as in the library when the sync matcher said
-# so. Rows it never checked fall back to Library v2, id-first: the source id
-# against the Spotify column or external_ids, else the exact artist/title
-# relation. Every hit must own an active file; a provider-only discography
-# row is known, not owned.
+# Preserve positive sync matches for aliases/collaborations. A current provider
+# ID with an active scoped file supersedes an old negative verdict after download.
+# Checked title-only rejections remain rejected; unchecked rows may use names.
 _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
     WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
+    WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' AND EXISTS (
+        SELECT 1 FROM lib2_tracks t
+         WHERE (t.spotify_id = mpt.source_track_id
+                OR json_extract(t.external_ids, '$.spotify') = mpt.source_track_id)
+           AND EXISTS (
+             SELECT 1 FROM lib2_track_files f
+              WHERE f.track_id = t.id
+                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
+                AND COALESCE(f.file_state, 'active') = 'active'{owner})
+    ) THEN 1
     WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
     WHEN EXISTS (
         SELECT 1 FROM lib2_tracks t
@@ -583,7 +591,7 @@ _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
              SELECT 1 FROM lib2_track_files f
               WHERE f.track_id = t.id
                 AND f.path IS NOT NULL AND TRIM(f.path) <> ''
-                AND COALESCE(f.file_state, 'active') = 'active')
+                AND COALESCE(f.file_state, 'active') = 'active'{owner})
     ) THEN 1
     ELSE 0 END)"""
 
@@ -9517,7 +9525,7 @@ class MusicDatabase:
         """
         from core.library2.media_mappings import resolve_mapping
         from core.library2.media_server_sync import (
-            resolve_album, resolve_artist, upsert_track,
+            recognize_track_artists, resolve_album, resolve_artist, upsert_track,
         )
         max_retries = 3
         retry_count = 0
@@ -9594,10 +9602,35 @@ class MusicDatabase:
                 catalogue_album = resolve_album(cursor, server_source, album_id)
                 catalogue_artist = resolve_artist(cursor, server_source, artist_id)
                 if catalogue_album is None or catalogue_artist is None:
-                    logger.warning(
-                        f"Track {title} skipped: album/artist "
-                        f"{server_source}:{album_id}/{artist_id} not in the catalogue")
-                    return False
+                    # Edition/artist labels may differ after retagging. The
+                    # imported file or a unique recording ID can recognize
+                    # the track independently of its server album. Never
+                    # create catalogue rows or infer ownership from a title.
+                    from core.library2.sql_util import owner_clause
+                    owned_scope = owner_clause(column='f.owner_profile_id')
+                    select_owned = (
+                        "SELECT DISTINCT t.id,t.album_id,al.primary_artist_id "
+                        "FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
+                        "JOIN lib2_track_files f ON f.track_id=t.id "
+                        "WHERE COALESCE(f.file_state,'active')='active' "
+                        "AND f.path IS NOT NULL AND TRIM(f.path)<>'' " + owned_scope
+                    )
+                    candidates = cursor.execute(
+                        select_owned + " AND f.path=? LIMIT 2", (file_path,),
+                    ).fetchall() if file_path else []
+                    recording_id = getattr(track_obj, 'musicBrainzId', None)
+                    if not candidates and recording_id:
+                        candidates = cursor.execute(
+                            select_owned + " AND t.musicbrainz_id=? AND LOWER(t.title)=LOWER(?) "
+                            "AND (? IS NULL OR t.duration IS NULL OR ABS(t.duration-?)<=5000) LIMIT 2",
+                            (recording_id, title, duration, duration),
+                        ).fetchall()
+                    if len(candidates) != 1:
+                        logger.warning(
+                            "Track %s skipped: unresolved server album/artist and no unique imported identity", title)
+                        return False
+                    catalogue_album = candidates[0]['album_id']
+                    catalogue_artist = candidates[0]['primary_artist_id']
                 # Per-track artist for compilations/DJ mixes — only stored when it
                 # differs from the album artist.
                 track_artist = None
@@ -9667,6 +9700,7 @@ class MusicDatabase:
                 if catalogue_track_id is None:
                     logger.info("Media track %s skipped: no active imported file row", title)
                     return False
+                recognize_track_artists(cursor, catalogue_track_id, track_obj, server_source)
                 conn.commit()
                 try:
                     self.backfill_track_external_ids_from_provenance(
@@ -10768,8 +10802,17 @@ class MusicDatabase:
                         )
                         params = [album_candidate.id] + (
                             [server_source, server_source] if server_source else [])
+                        mapping_projection = "NULL AS requested_server_id"
+                        mapping_params = []
+                        if server_source:
+                            mapping_projection = (
+                                "(SELECT m.server_id FROM lib2_media_server_mappings m "
+                                "WHERE m.entity_type='track' AND m.entity_id=t.id "
+                                "AND m.server_source=? LIMIT 1) AS requested_server_id"
+                            )
+                            mapping_params.append(server_source)
                         cursor.execute(f"""
-                            SELECT t.*, al.primary_artist_id AS artist_id,
+                            SELECT t.*, {mapping_projection}, al.primary_artist_id AS artist_id,
                                    a.name as artist_name, al.title as album_title,
                                    f.path AS file_path, f.bitrate AS bitrate
                             FROM lib2_tracks t
@@ -10779,25 +10822,11 @@ class MusicDatabase:
                                    ON f.track_id = t.id AND f.is_primary = 1
                                   AND COALESCE(f.file_state, 'active') <> 'deleted'
                             WHERE t.album_id = ? {source_filter}
-                        """, params)
+                        """, [*mapping_params, *params])
 
-                        for row in cursor.fetchall():
-                            # DatabaseTrack is a strict dataclass — only the declared
-                            # fields go in __init__; the joined artist/album/server
-                            # values are attached afterwards just like _rows_to_tracks
-                            # does. Building it the kwarg-soup way used to raise
-                            # TypeError on every fallback row, silently swallowed by
-                            # the outer except, so this path never matched anything.
-                            db_track = DatabaseTrack(
-                                id=row['id'], album_id=row['album_id'], artist_id=row['artist_id'],
-                                title=row['title'], track_number=row['track_number'],
-                                duration=row['duration'], file_path=row['file_path'],
-                                bitrate=row['bitrate'],
-                            )
-                            db_track.artist_name = row['artist_name']
-                            db_track.album_title = row['album_title']
-                            db_track.server_source = row['server_source']
-                            db_track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
+                        # Playlist writes need the requested server's ID, just
+                        # like artist matches; a Library-v2 row ID is not a song ID.
+                        for db_track in self._rows_to_tracks(cursor.fetchall(), server_source=server_source):
                             title_sim = max(
                                 self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
                                 self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
@@ -23556,6 +23585,7 @@ class MusicDatabase:
         in a single round-trip. Replaces N×4-query per-playlist loop on the
         Auto-Sync modal load path. Result is `{playlist_id: {total, discovered,
         wishlisted, in_library}}`."""
+        from core.library2.sql_util import owner_clause
         result: dict = {}
         try:
             with self._get_connection() as conn:
@@ -23581,21 +23611,9 @@ class MusicDatabase:
                            -- casing, and normalising at query time is a full scan
                            -- of `tracks` per row. Free to read — same scan, one
                            -- more CASE.
-                           -- THE FLAG FIRST, THE JOIN ONLY AS FALLBACK.
-                           --
-                           -- The flag is what the sync matcher decided, and it is
-                           -- right about the cases a join cannot reach:
-                           -- collaborations and casing. But it only exists for
-                           -- playlists synced since it was added, so dropping the
-                           -- join outright regressed the id-first fix that landed
-                           -- for the 45/50 Hot Hits undercount.
-                           --
-                           -- So: trust the flag where there is one, including when
-                           -- it says NOT owned, and fall back to the old join only
-                           -- for tracks nobody has checked. The expensive branch
-                           -- therefore stops running for a playlist the moment it
-                           -- syncs once.
-                           {_MIRRORED_ROW_IN_LIBRARY} as in_library,
+                           -- Current provider/file evidence supersedes an old
+                           -- negative result; checked name-only rejections stay.
+                           {_MIRRORED_ROW_IN_LIBRARY.format(owner=owner_clause(column="f.owner_profile_id"))} as in_library,
                            -- How many rows have EVER been checked. Without this a
                            -- never-synced playlist reads as "you own none of it"
                            -- rather than "nobody has looked".
@@ -23666,6 +23684,7 @@ class MusicDatabase:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
         Discovery counts are critical (same as old method). Library/wishlist counts are
         best-effort extras that won't break discovery detection if they fail."""
+        from core.library2.sql_util import owner_clause
         result = {'total': 0, 'discovered': 0, 'wishlisted': 0, 'in_library': 0}
         try:
             with self._get_connection() as conn:
@@ -23698,22 +23717,10 @@ class MusicDatabase:
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
-                # THE FLAG FIRST, THE JOIN ONLY AS FALLBACK — the same order
-                # as the batched variant, and it has to be the same order: this
-                # figure lands in the sync history entry while that one renders
-                # the card, and two numbers for one playlist that disagree are
-                # worse than either being a little wrong.
-                #
-                # The flag is what the sync matcher decided, and it is right
-                # about the cases a join cannot reach (collaborations, casing).
-                # It only exists for playlists synced since it was added, so the
-                # fallback below stays for the rest: id-first, the source id
-                # against Library-v2's Spotify id, OR the case-sensitive name
-                # relation. Case-sensitive equality keeps the name/title indexes
-                # usable on very large catalogues.
+                # Use the same current ownership evidence as the batched count.
                 try:
                     cursor.execute(f"""
-                        SELECT {_MIRRORED_ROW_IN_LIBRARY} as in_library
+                        SELECT {_MIRRORED_ROW_IN_LIBRARY.format(owner=owner_clause(column="f.owner_profile_id"))} as in_library
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
                     """, (playlist_id,))

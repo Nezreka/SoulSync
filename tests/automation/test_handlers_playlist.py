@@ -786,7 +786,8 @@ class TestSyncPlaylist:
         assert args[2][0]['quality_profile_id'] == 23
         assert args[4] == 7
 
-    def test_organize_by_playlist_passes_skip_wishlist_add(self):
+    @pytest.mark.parametrize('organize, explicit_skip', [(True, False), (False, True)])
+    def test_organize_or_sync_only_passes_skip_wishlist_add(self, organize, explicit_skip):
         discovered_track = {
             'extra_data': json.dumps({
                 'discovered': True,
@@ -798,7 +799,7 @@ class TestSyncPlaylist:
             'artist_name': 'X',
         }
         db = _StubDB(
-            playlists=[{'id': 1, 'name': 'P', 'organize_by_playlist': True}],
+            playlists=[{'id': 1, 'name': 'P', 'organize_by_playlist': organize}],
             playlist_tracks={1: [discovered_track]},
         )
         sync_calls: List[tuple] = []
@@ -806,7 +807,7 @@ class TestSyncPlaylist:
             get_database=lambda: db,
             run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
         )
-        auto_sync_playlist({'playlist_id': '1'}, deps)
+        auto_sync_playlist({'playlist_id': '1', 'skip_wishlist_add': explicit_skip}, deps)
         for _ in range(50):
             if sync_calls:
                 break

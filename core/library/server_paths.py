@@ -91,17 +91,20 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
         return None
     try:
         if os.path.exists(server_path):
-            return server_path
+            return os.path.abspath(server_path)
         normalized = server_path.replace('\\', '/')
         hit = _from_learned(normalized)
         if hit:
-            return hit
+            return os.path.abspath(hit)
         with _lock:
             if _misses >= _GIVE_UP_AFTER:
                 return None
         from core.library.path_resolver import resolve_library_file_path
         resolved = resolve_library_file_path(server_path, config_manager=config_manager)
         if resolved:
+            # Configured roots may be ./Transfer while imports store /app/Transfer.
+            # Return one path identity for exact catalogue/file comparisons.
+            resolved = os.path.abspath(resolved)
             with _lock:
                 _misses = 0
             _learn(normalized, resolved)

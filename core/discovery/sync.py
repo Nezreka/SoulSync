@@ -294,7 +294,7 @@ def _record_library_membership(tracks_json, match_details) -> None:
             db_track_id = (tracks_json[idx] or {}).get('db_track_id')
             if not db_track_id:
                 continue
-            found = detail.get('status') == 'found'
+            found = detail.get('status') == 'found' or detail.get('owned_in_library') is True
             db.update_mirrored_track_extra_data(db_track_id, {
                 'in_library': found,
                 # which library row: the next sync's skip checks it still
@@ -619,18 +619,22 @@ def run_sync_task(
             ]
             if unmatched_summary:
                 result_dict['unmatched_tracks'] = unmatched_summary
+        sync_errors = getattr(result, 'errors', None) or []
+        sync_error = '; '.join(str(error) for error in sync_errors)
         with sync_lock:
             current_status = sync_states.get(playlist_id, {}).get("status")
             if current_status == "cancelled":
                 logger.info(f"Sync for {playlist_id} was cancelled - not setting finished")
                 return
             sync_states[playlist_id] = {
-                "status": "finished",
+                "status": "error" if sync_errors else "finished",
                 "playlist_name": playlist_name,
                 "progress": result_dict,
                 "result": result_dict
             }
-        logger.info(f"Sync finished for {playlist_id} - state updated")
+            if sync_errors:
+                sync_states[playlist_id]['error'] = sync_error
+        logger.info(f"Sync {'failed' if sync_errors else 'finished'} for {playlist_id} - state updated")
 
         # Set playlist poster image if available (Plex, Jellyfin, Emby).
         # Don't log the URL itself — it may carry an auth token (Plex
@@ -643,7 +647,9 @@ def run_sync_task(
         # exists (#993) — either re-clobbers a user's custom poster. The source cover
         # is pushed only to a brand-new playlist (a genuine first mirror); after that
         # its cover is left alone. A one-off retroactive backfill is future work.
-        if sync_mode in ('reconcile', 'append'):
+        if sync_errors:
+            logger.info("[PLAYLIST IMAGE] sync failed — skipping image upload")
+        elif sync_mode in ('reconcile', 'append'):
             logger.info(f"[PLAYLIST IMAGE] {sync_mode} mode — preserving existing playlist image")
         elif playlist_image_url and _synced > 0 and _playlist_preexisted:
             logger.info("[PLAYLIST IMAGE] playlist already existed — leaving its current cover untouched (#993)")
@@ -705,6 +711,17 @@ def run_sync_task(
                 logger.warning(f"[Sync History] No match_details on SyncResult for batch {target_batch_id}")
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
+
+        if sync_errors:
+            # A returned error is just as terminal as a raised exception. Do
+            # not persist a successful fingerprint or trigger sync follow-ups.
+            logger.error("SYNC FAILED for %s: %s", playlist_id, sync_error)
+            if automation_id:
+                deps.update_automation_progress(
+                    automation_id, status='error', progress=100, phase='Error',
+                    log_line=f'Sync failed: {sync_error}', log_type='error',
+                )
+            return
 
         # Record which tracks are actually IN THE LIBRARY, per track.
         #

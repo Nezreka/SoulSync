@@ -24,6 +24,7 @@ Absence is not evidence here; a staging path is.
 from __future__ import annotations
 
 import re
+import os
 import unicodedata
 from typing import Any, Optional, Tuple
 
@@ -246,6 +247,26 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
             f"{log_prefix} Track found in database: '{track_name}' by {artist_name} "
             f"(confidence: {confidence:.2f}) → {file_path or '<no path>'}")
         return db_track, confidence, artist_name
+
+    # Library-v2 imports own their files before a media server recognizes
+    # them. A missing server mapping must not request another download.
+    # Unlike remote server paths, this fallback requires an existing local
+    # file and strict recording identity, in the caller's library scope.
+    for artist_name in names:
+        try:
+            candidates = music_database.search_tracks(
+                title=track_name, artist=artist_name, limit=500, server_source=None,
+            )
+            for candidate in candidates:
+                path = getattr(candidate, 'file_path', None)
+                if not path or contains_staging_segment(path) or not os.path.isfile(path):
+                    continue
+                if not _strict_identity_matches(candidate, track_name, artist_name, album, require_album):
+                    continue
+                log.info(f"{log_prefix} Already owns local file for '{track_name}' by {artist_name}: {path}")
+                return candidate, 1.0, artist_name
+        except Exception as exc:  # noqa: BLE001 - no ownership proof means keep the request
+            logger.debug(f"{log_prefix} Local ownership lookup failed for '{track_name}': {exc}")
 
     # The fuzzy matcher returns one winner and does not rank by album. When it
     # chose another release, check the requested album's tracks before leaving

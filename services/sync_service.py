@@ -842,15 +842,19 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
 
             wishlist_added_count = 0
-            if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
+            skip_wishlist = getattr(self, '_skip_unmatched_wishlist', False)
+            if unmatched_tracks and skip_wishlist:
                 logger.info(
                     "Skipping sync-time wishlist for %s unmatched tracks (wing-it or organize-by-playlist)",
                     len(unmatched_tracks),
                 )
-                unmatched_tracks = []  # Clear so the loop below doesn't run
             if unmatched_tracks:
-                wishlist_added_count = await run_blocking(
-                    self._wishlist_unmatched, playlist, unmatched_tracks)
+                if skip_wishlist:
+                    wishlist_added_count = await run_blocking(
+                        self._wishlist_unmatched, playlist, unmatched_tracks, add_to_wishlist=False)
+                else:
+                    wishlist_added_count = await run_blocking(
+                        self._wishlist_unmatched, playlist, unmatched_tracks)
 
             # Build per-track match details for sync history
             _match_details = []
@@ -896,6 +900,11 @@ class PlaylistSyncService:
                         # the file was deleted (#1417)
                         'id': str(getattr(mr.plex_track, 'ratingKey', '') or ''),
                     }
+                if getattr(mr, 'owned_in_library', False):
+                    detail['owned_in_library'] = True
+                    detail['download_status'] = None
+                elif skip_wishlist and not mr.is_match:
+                    detail['download_status'] = None
                 keeper = _fold_keepers.get(id(mr))
                 if keeper is not None:
                     # found, but not on the playlist as its own entry: the file
@@ -936,7 +945,7 @@ class PlaylistSyncService:
             if not getattr(self, 'syncing_playlists', None):
                 self._cancelled = False
     
-    def _wishlist_unmatched(self, playlist, unmatched_tracks) -> int:
+    def _wishlist_unmatched(self, playlist, unmatched_tracks, *, add_to_wishlist=True) -> int:
         """put the tracks the library doesn't have on the wishlist, returns
         how many went on. a db write per track, so the sync runs this off the
         shared event loop (see _find_track_in_media_server)."""
@@ -961,6 +970,24 @@ class PlaylistSyncService:
                     stub_artist, spotify_track.name,
                 ):
                     logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
+                    continue
+
+                # File ownership and server recognition are separate in
+                # Library v2. Do not download a published file again while
+                # its media-server mapping is awaiting a scan.
+                from core.wishlist.library_match import find_owned_match
+                from core.settings import config_manager
+                owned = find_owned_match(
+                    getattr(wishlist_service, 'database', None), spotify_track.name, spotify_track.artists,
+                    getattr(spotify_track, 'album', None), config_manager.get_active_media_server(),
+                    strict_identity=True,
+                )
+                if owned:
+                    match_result.owned_in_library = True
+                    logger.info("Skipping wishlist for already-owned recording: %s", spotify_track.name)
+                    continue
+
+                if not add_to_wishlist:
                     continue
 
                 # Check if we have original track data with full album objects

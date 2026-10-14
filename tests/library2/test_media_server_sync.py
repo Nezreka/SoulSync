@@ -58,6 +58,150 @@ def test_unknown_server_entities_never_create_catalogue_rows(cur):
     assert cur.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+def test_server_can_recognize_an_owned_featured_artist_without_solo_albums(cur, server):
+    _, _, track, _ = _imported(cur)
+    featured = cur.execute("INSERT INTO lib2_artists(name,name_key) VALUES('GIVĒON','givēon')").lastrowid
+    cur.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                (track, featured))
+    assert upsert_artist(cur, server_source=server, server_id='featured-id', name='GIVĒON') == featured
+
+
+@pytest.mark.parametrize('server,credit_key,credit', [
+    ('navidrome', 'artists', {'id': 'giveon-id', 'name': 'GIVĒON'}),
+    ('jellyfin', 'ArtistItems', {'Id': 'giveon-id', 'Name': 'GIVĒON'}),
+])
+def test_track_scan_recognizes_existing_featured_artist_ids(tmp_path, server, credit_key, credit):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+    db = MusicDatabase(str(tmp_path / 'credits.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        tid = seed_library_track(conn, artist='Joji', album='Piss In The Wind',
+                                 title='Piece of You (with Giveon)', file_path=str(path), server_source='soulsync')
+        featured = conn.execute("INSERT INTO lib2_artists(name,name_key) VALUES('GIVĒON','givēon')").lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                     (tid, featured))
+    observed = SimpleNamespace(ratingKey='song-id', title='Piece of You (with Giveon)', path=str(path),
+                               _data={credit_key: [credit, {'id': 'unknown', 'name': 'Not Credited'}]})
+    assert db.insert_or_update_media_track(observed, 'unmapped-album', 'joji-id', server_source=server)
+    with db._get_connection() as conn:
+        row = conn.execute("SELECT entity_id FROM lib2_media_server_mappings WHERE entity_type='artist' AND server_source=? AND server_id='giveon-id'", (server,)).fetchone()
+        assert row is not None and row[0] == featured
+        assert conn.execute('SELECT COUNT(*) FROM lib2_artists').fetchone()[0] == 2
+
+
+def test_full_refresh_keeps_featured_artist_observed_only_on_a_song(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from core.database_update_worker import DatabaseUpdateWorker
+    from tests.support.catalogue_seed import seed_library_track
+    db = MusicDatabase(str(tmp_path / 'featured_refresh.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        tid = seed_library_track(conn, artist='Joji', album='Album', title='Song',
+                                 file_path=str(path), server_source='soulsync')
+        featured = conn.execute("INSERT INTO lib2_artists(name,name_key) VALUES('GIVĒON','givēon')").lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                     (tid, featured))
+    track = SimpleNamespace(ratingKey='song-id', title='Song', path=str(path),
+                            _data={'artists': [{'id': 'giveon-id', 'name': 'GIVĒON'}]})
+    album = SimpleNamespace(ratingKey='album-id', title='Album', tracks=lambda: [track])
+    artist = SimpleNamespace(ratingKey='joji-id', title='Joji', albums=lambda: [album])
+    client = SimpleNamespace(last_fetch_failed=False)
+    def verified_ids(ids):
+        client.last_fetch_failed = False
+        return ids
+    client.get_all_artist_ids = lambda: verified_ids({'joji-id'})
+    client.get_all_album_ids = lambda: verified_ids({'album-id'})
+    worker = DatabaseUpdateWorker(client, database_path=str(db.database_path), server_type='navidrome')
+    worker.database = db
+    monkeypatch.setattr(worker, '_can_detach_server_mappings', lambda *a, **kw: True)
+    worker._process_artist_with_content(artist)
+    worker._detect_and_remove_stale_content()
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT entity_id FROM lib2_media_server_mappings WHERE entity_type='artist' AND server_id='giveon-id'").fetchone()[0] == featured
+
+
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+@pytest.mark.parametrize('evidence', ['path', 'recording_id'])
+def test_track_recognition_survives_unmapped_edition_album(tmp_path, server, evidence):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / 'recognition.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        tid = seed_library_track(conn, artist='Muse', album='Absolution',
+                                 title='Time Is Running Out', file_path=str(path),
+                                 duration=180000, musicbrainz_id='recording-id',
+                                 server_source='soulsync')
+        conn.execute('UPDATE lib2_tracks SET server_source=NULL,server_id=NULL WHERE id=?', (tid,))
+    observed = SimpleNamespace(ratingKey='live-song', title='Time Is Running Out',
+                               duration=180000, trackNumber=4, discNumber=1,
+                               path=str(path) if evidence == 'path' else '/old/edition/song.flac',
+                               musicBrainzId='recording-id' if evidence == 'recording_id' else None)
+
+    assert db.insert_or_update_media_track(observed, 'unknown-edition', 'unknown-artist',
+                                           server_source=server)
+    assert db.get_track_by_server_id('live-song', server).title == 'Time Is Running Out'
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM lib2_tracks').fetchone()[0] == 1
+        assert conn.execute('SELECT title FROM lib2_albums').fetchone()[0] == 'Absolution'
+        assert conn.execute('SELECT path FROM lib2_track_files').fetchone()[0] == str(path)
+
+
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+def test_scan_inspects_tracks_when_artist_and_album_labels_are_unmapped(tmp_path, server):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from core.database_update_worker import DatabaseUpdateWorker
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / 'scan_recognition.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        seed_library_track(conn, artist='Muse', album='Absolution', title='Time Is Running Out',
+                           file_path=str(path), server_source='soulsync')
+    track = SimpleNamespace(ratingKey='live-song', title='Time Is Running Out', path=str(path))
+    album = SimpleNamespace(ratingKey='edition-id', title='Absolution (Edition)', tracks=lambda: [track])
+    artist = SimpleNamespace(ratingKey='artist-id', title='Muse & Guests', albums=lambda: [album])
+    worker = DatabaseUpdateWorker(None, database_path=str(db.database_path), server_type=server)
+    worker.database = db
+    seen = set()
+    worker._process_artist_with_content(artist, seen_track_ids=seen)
+    assert seen == {'live-song'}
+    assert db.get_track_by_server_id('live-song', server) is not None
+
+
+@pytest.mark.parametrize('rejection', ['duration', 'ambiguous'])
+def test_recording_id_cannot_map_an_ambiguous_or_different_recording(tmp_path, rejection):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / 'unsafe_recognition.db'))
+    with db._get_connection() as conn:
+        seed_library_track(conn, artist='Muse', album='Absolution', title='Song',
+                           file_path=str(tmp_path / 'one.flac'), duration=180000,
+                           musicbrainz_id='recording-id', server_source='soulsync')
+        if rejection == 'ambiguous':
+            seed_library_track(conn, artist='Muse', album='Absolution', title='Song',
+                               file_path=str(tmp_path / 'two.flac'), duration=180000,
+                               musicbrainz_id='recording-id', server_source='soulsync')
+    observed = SimpleNamespace(ratingKey='live', title='Song', path='/old/song.flac',
+                               musicBrainzId='recording-id', trackNumber=1,
+                               duration=240000 if rejection == 'duration' else 180000)
+    assert db.insert_or_update_media_track(observed, 'unknown', 'unknown', server_source='navidrome') is False
+    assert db.get_track_by_server_id('live', 'navidrome') is None
+
+
 def test_server_maps_existing_imported_rows_and_preserves_catalogue_metadata(cur):
     artist, album, track, _file = _imported(cur)
 

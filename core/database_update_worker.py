@@ -98,6 +98,7 @@ class DatabaseUpdateWorker:
         # type. The superseded-row pass at the end folds a row the server no
         # longer lists into the live row for the same file (#1257).
         self._seen_track_ids = set()
+        self._seen_credit_artist_ids = set()
         self._trashed_skipped = 0
 
         # scopes the deep scan asked about and got no answer for: an artist
@@ -1506,7 +1507,7 @@ class DatabaseUpdateWorker:
 
         # Compute removal sets (only for types we have valid server data for)
         server_artist_ids = {self._library_artist_id(i) for i in server_artist_ids}
-        removed_artist_ids = (db_artist_ids - server_artist_ids) if check_artists else set()
+        removed_artist_ids = (db_artist_ids - server_artist_ids - self._seen_credit_artist_ids) if check_artists else set()
         removed_album_ids = (db_album_ids - server_album_ids) if check_albums else set()
 
         # Filter out albums that will already be cascade-deleted with their artist
@@ -1771,13 +1772,11 @@ class DatabaseUpdateWorker:
             # 1. Insert/update the artist using server-agnostic method
             artist_id = str(media_artist.ratingKey)
             artist_success = self.database.insert_or_update_media_artist(media_artist, server_source=self.server_type)
-            if not artist_success:
-                if seen_track_ids is not None:
-                    # deep scan: nothing under this artist was looked at
-                    self._unverified_artist_ids.add(self._library_artist_id(artist_id))
-                return False, "Failed to update artist data", 0, 0
-
-            self._touched_artist_ids.add(self._library_artist_id(artist_id))
+            if artist_success:
+                self._touched_artist_ids.add(self._library_artist_id(artist_id))
+            # An unmapped artist/edition does not make its imported files
+            # unknown. Inspect the tracks so exact file/recording evidence can
+            # reconnect them without creating catalogue rows.
 
             # 2. Get all albums for this artist (cached from aggressive pre-population)
             try:
@@ -1812,62 +1811,64 @@ class DatabaseUpdateWorker:
                         # Insert/update album using server-agnostic method
                         album_id = str(album.ratingKey)
                         album_success = self.database.insert_or_update_media_album(album, artist_id, server_source=self.server_type)
-                        if not album_success and seen_track_ids is not None:
-                            # deep scan: the album's tracks were never listed
-                            self._unverified_album_ids.add(album_id)
                         if album_success:
                             album_count += 1
                             self._touched_album_ids.add(album_id)
 
-                            # 4. Process tracks in this album (cached from aggressive pre-population)
+                        # 4. Process tracks in this album (cached from aggressive pre-population)
+                        try:
                             try:
-                                try:
-                                    tracks = verified_listing(album, 'tracks')
-                                except ListingUnavailable as e:
-                                    logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
-                                    if seen_track_ids is not None:
-                                        # deep scan: the album answered nothing, so
-                                        # its rows are unverified, not stale
-                                        self._unverified_album_ids.add(album_id)
-                                    tracks = []
-
-                                # Batch insert tracks for better database performance
-                                track_batch = []
-                                for track in tracks:
-                                    if self.should_stop:
-                                        break
-                                    if self._is_trashed(track):
-                                        self._trashed_skipped += 1
-                                        continue
-                                    track_batch.append((track, album_id, artist_id))
-
-                                # Process track batch
-                                for track, alb_id, art_id in track_batch:
-                                    try:
-                                        track_id_str = str(track.ratingKey)
-                                        self._seen_track_ids.add(track_id_str)
-
-                                        # Deep scan: collect all server track IDs
-                                        if seen_track_ids is not None:
-                                            seen_track_ids.add(track_id_str)
-
-                                        # Always refresh the mapping/technical observations;
-                                        # catalogue and file ownership stay import-controlled.
-                                        is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
-                                        track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
-                                        if track_success == 'inserted':
-                                            self._new_track_ids.add(track_id_str)
-                                        if is_existing:
-                                            skipped_count += 1
-                                        elif track_success:
-                                            track_count += 1
-                                    except Exception as e:
-                                        logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
-
-                            except Exception as e:
+                                tracks = verified_listing(album, 'tracks')
+                            except ListingUnavailable as e:
                                 logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
                                 if seen_track_ids is not None:
+                                    # deep scan: the album answered nothing, so
+                                    # its rows are unverified, not stale
                                     self._unverified_album_ids.add(album_id)
+                                tracks = []
+
+                            # Batch insert tracks for better database performance
+                            track_batch = []
+                            for track in tracks:
+                                if self.should_stop:
+                                    break
+                                if self._is_trashed(track):
+                                    self._trashed_skipped += 1
+                                    continue
+                                track_batch.append((track, album_id, artist_id))
+
+                            # Process track batch
+                            for track, alb_id, art_id in track_batch:
+                                try:
+                                    track_id_str = str(track.ratingKey)
+                                    self._seen_track_ids.add(track_id_str)
+
+                                    # Deep scan: collect all server track IDs
+                                    if seen_track_ids is not None:
+                                        seen_track_ids.add(track_id_str)
+
+                                    # Always refresh the mapping/technical observations;
+                                    # catalogue and file ownership stay import-controlled.
+                                    is_existing = skip_existing_tracks and self.database.track_exists_by_server(track_id_str, self.server_type)
+                                    track_success = self.database.insert_or_update_media_track(track, alb_id, art_id, server_source=self.server_type)
+                                    if track_success:
+                                        from core.library2.media_server_sync import track_artist_references
+                                        credit_ids = {self._library_artist_id(ref[0]) for ref in track_artist_references(track)}
+                                        self._seen_credit_artist_ids.update(credit_ids)
+                                        self._touched_artist_ids.update(credit_ids)
+                                    if track_success == 'inserted':
+                                        self._new_track_ids.add(track_id_str)
+                                    if is_existing:
+                                        skipped_count += 1
+                                    elif track_success:
+                                        track_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Failed to process track '{getattr(track, 'title', 'Unknown')}': {e}")
+
+                        except Exception as e:
+                            logger.warning(f"Could not get tracks for album '{getattr(album, 'title', 'Unknown')}': {e}")
+                            if seen_track_ids is not None:
+                                self._unverified_album_ids.add(album_id)
 
                     except Exception as e:
                         logger.warning(f"Failed to process album '{getattr(album, 'title', 'Unknown')}': {e}")

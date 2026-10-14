@@ -86,12 +86,12 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
     ``allow_create`` is exclusively for the successful import pipeline.  A
     normal media-server scan only stamps an existing row.
     """
+    from core.library2.sql_util import owned_sql
+    owned_artist = owned_sql('artist', 'lib2_artists')
     mapped_id = resolve_mapping(cursor, "artist", server_source, server_id)
     row = ((mapped_id,) if mapped_id is not None else cursor.execute(
-        "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=? AND (? OR"
-        " EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id=al.id"
-        " JOIN lib2_track_files f ON f.track_id=t.id WHERE al.primary_artist_id=lib2_artists.id"
-        " AND f.file_state='active' AND TRIM(f.path)<>''))",
+        "SELECT id FROM lib2_artists WHERE server_source=? AND server_id=? AND (? OR "
+        + owned_artist + ")",
         (server_source, str(server_id), allow_create),
     ).fetchone())
     if row is None:
@@ -100,10 +100,7 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
         candidates = cursor.execute(
             "SELECT id FROM lib2_artists "
             " WHERE name_key=? AND canonical_artist_id IS NULL "
-            "   AND EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t"
-            "                ON t.album_id=al.id JOIN lib2_track_files f ON f.track_id=t.id"
-            "                WHERE al.primary_artist_id=lib2_artists.id"
-            "                  AND f.file_state='active' AND TRIM(f.path)<>'') "
+            "   AND " + owned_artist +
             " ORDER BY id LIMIT 2",
             (_name_key(name),),
         ).fetchall()
@@ -150,6 +147,35 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
     if is_media_server_source(server_source):
         upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
     return artist_id
+
+
+def track_artist_references(track_obj: Any) -> list:
+    """Native artist IDs explicitly reported on a song (OpenSubsonic/Jellyfin)."""
+    raw = getattr(track_obj, '_data', None)
+    if not isinstance(raw, dict):
+        return []
+    references = raw.get('ArtistItems') or raw.get('artists') or []
+    if not isinstance(references, list):
+        return []
+    return [(str(item.get('Id') or item.get('id')), str(item.get('Name') or item.get('name')))
+            for item in references if isinstance(item, dict)
+            and (item.get('Id') or item.get('id')) and (item.get('Name') or item.get('name'))]
+
+
+def recognize_track_artists(cursor: Any, track_id: int, track_obj: Any, server_source: str) -> None:
+    """Stamp native IDs only onto the recognized recording's existing credits.
+
+    Navidrome's album-artist listing omits featured-only artists, but song
+    responses carry their IDs. Do not create credits or artists from a scan.
+    """
+    credits = cursor.execute(
+        "SELECT a.id,a.name_key FROM lib2_track_artists ta JOIN lib2_artists a ON a.id=ta.artist_id "
+        "WHERE ta.track_id=?", (track_id,),
+    ).fetchall()
+    for server_id, name in track_artist_references(track_obj):
+        candidates = {row['id'] for row in credits if row['name_key'] == _name_key(name)}
+        if len(candidates) == 1:
+            upsert_mapping(cursor, 'artist', candidates.pop(), server_source, server_id)
 
 
 def resolve_artist(cursor, server_source: str, server_id: Any) -> Optional[int]:
