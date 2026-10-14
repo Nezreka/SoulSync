@@ -355,6 +355,8 @@ export interface CompactRow {
   cover: string;
   /** EMPTY for a zero/unknown length rather than "0:00". */
   duration: string;
+  /** the raw length, 0 when unknown. the header adds these up. */
+  durationMs: number;
   selectable: boolean;
 }
 
@@ -379,9 +381,34 @@ export function compactRows(tracks: unknown[], selectable = false): CompactRow[]
       album: t.album,
       cover: t.cover || MIX_COVER_PLACEHOLDER,
       duration: ms > 0 ? `${min}:${sec.toString().padStart(2, '0')}` : '',
+      durationMs: ms > 0 ? ms : 0,
       selectable,
     };
   });
+}
+
+/** "50 tracks · 3 hr 4 min". the length is left off when no row has one. */
+export function mixMetaLine(rows: CompactRow[]): string {
+  const count = `${rows.length} track${rows.length === 1 ? '' : 's'}`;
+  const total = Math.round(rows.reduce((sum, r) => sum + r.durationMs, 0) / 60000);
+  if (total <= 0) return count;
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  const length = hours > 0 ? (mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`) : `${mins} min`;
+  return `${count} · ${length}`;
+}
+
+/**
+ * the header art: four different covers make a mosaic, fewer make one. the
+ * placeholder never counts, a grid of grey squares is worse than none.
+ */
+export function mixCoverArt(rows: CompactRow[]): string[] {
+  const seen: string[] = [];
+  for (const r of rows) {
+    if (r.cover && r.cover !== MIX_COVER_PLACEHOLDER && !seen.includes(r.cover)) seen.push(r.cover);
+    if (seen.length === 4) break;
+  }
+  return seen.length === 4 ? seen : seen.slice(0, 1);
 }
 
 // ── #1079: the selection bar (4772-4806) ───────────────────────────────────

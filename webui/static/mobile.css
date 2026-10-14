@@ -4120,30 +4120,51 @@ html.download-modal-open body {
     }
 }
 
-/* discover mix modal on a phone: the header actions and the selection bar wrap
-   instead of running off the right edge, and the compact rows drop the number
-   and album columns so the title and artist get the width. */
+/* discover mix modal on a phone: the art shrinks beside the title, the header
+   actions wrap and share the width, the floating selection bar wraps instead of
+   running off the edge, and the rows drop the number and album columns so the
+   title and artist get the width. */
 @media (max-width: 768px) {
     .mix-modal {
-        position: relative;
         width: 100%;
         max-width: calc(100vw - 16px);
         max-height: 90vh;
         max-height: 90dvh;
     }
+    /* a grid with the heading's children lifted into it: art beside the
+       words, the actions on their own full-width row underneath. inside the
+       heading they only got the narrow column and Sync wrapped alone. */
     .mix-modal-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 12px;
-        padding: 16px 16px 14px;
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        /* row-gap 0: the desktop gap: 24px would land between every text line */
+        gap: 0 14px;
+        align-items: start;
+        padding: 18px 16px 16px;
     }
-    .mix-modal-header > div:first-child {
-        padding-right: 36px;
+    .mix-modal-heading {
+        display: contents;
+    }
+    .mix-modal-cover {
+        grid-row: 1 / span 4;
+        align-self: center;
+        width: 76px;
+        height: 76px;
+        border-radius: 10px;
+    }
+    .mix-modal-eyebrow,
+    .mix-modal-title,
+    .mix-modal-subtitle,
+    .mix-modal-meta {
+        grid-column: 2;
+        padding-right: 30px;
     }
     .mix-modal-title {
-        font-size: 20px;
+        font-size: 22px;
     }
     .mix-modal-actions {
+        grid-column: 1 / -1;
+        margin-top: 14px;
         flex-wrap: wrap;
     }
     .mix-modal-actions .btn {
@@ -4151,45 +4172,57 @@ html.download-modal-open body {
         justify-content: center;
     }
     .mix-modal-close {
-        position: absolute;
         top: 10px;
         right: 10px;
     }
 
     .mix-modal-selbar {
         flex-wrap: wrap;
+        justify-content: center;
         row-gap: 8px;
-        column-gap: 10px;
+        column-gap: 6px;
+        width: calc(100% - 24px);
+        bottom: 12px;
         padding: 10px 12px;
+        border-radius: 18px;
+        white-space: normal;
     }
-    .mix-selbar-spacer {
-        display: none;
-    }
-    /* select-all and the count share the first line, the buttons split the second */
     .mix-sel-count {
         flex: 1 1 auto;
-        text-align: right;
     }
     .mix-modal-selbar .btn {
         flex: 1 1 0;
         justify-content: center;
         white-space: nowrap;
     }
-
-    .mix-modal-body {
-        padding: 8px 8px 16px;
+    .mix-modal.has-selection .mix-modal-body {
+        padding-bottom: 120px;
     }
 
-    .discover-playlist-track-compact {
+    .mix-modal-colhead {
+        margin: 0 8px;
+        padding: 8px;
+    }
+    .mix-modal-body {
+        padding: 4px 8px 16px;
+    }
+
+    .discover-playlist-track-compact,
+    .mix-modal .discover-playlist-track-compact,
+    .mix-modal-colhead {
         grid-template-columns: 40px minmax(0, 1fr) auto 32px;
         gap: 10px;
         padding: 8px;
     }
-    .discover-playlist-track-compact.has-select {
+    .discover-playlist-track-compact.has-select,
+    .mix-modal .discover-playlist-track-compact.has-select,
+    .mix-modal-colhead.has-select {
         grid-template-columns: 22px 40px minmax(0, 1fr) auto 32px;
     }
     .discover-playlist-track-compact .track-compact-number,
-    .discover-playlist-track-compact .track-compact-album {
+    .discover-playlist-track-compact .track-compact-album,
+    .mix-colhead-num,
+    .mix-colhead-album {
         display: none;
     }
     .track-compact-name {

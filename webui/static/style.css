@@ -36950,29 +36950,169 @@ div.artist-hero-badge {
 }
 .mix-card-decade-icon { font-size: 34px; line-height: 1; }
 .mix-card-decade-label { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
-/* The mix modal — opened from a mix card; holds the track list + per-mix actions. */
+/* The mix modal: opened from a mix card, holds the track list + per-mix actions.
+   the station preview and the search playlist preview share this shell.
+   header = art + eyebrow + title + one filled action, then a column head that
+   owns select-all, then the rows. the selection bar floats in only once
+   something is ticked (oct 2026 redesign). */
 .mix-modal {
-    background: #14141c; border-radius: 18px;
-    width: 760px; max-width: 94vw; max-height: 86vh;
-    display: flex; flex-direction: column;
-    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    position: relative;
+    width: 860px; max-width: 94vw; max-height: 88vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: #121218;
     border: 1px solid var(--white-a08);
+    border-radius: 20px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
 }
 .mix-modal-header {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    padding: 22px 24px; gap: 16px;
-    border-bottom: 1px solid var(--white-a06);
+    position: relative;
+    display: flex; align-items: flex-end; gap: 24px;
+    padding: 28px 64px 24px 28px;
+    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0));
+    flex-shrink: 0;
 }
-.mix-modal-subtitle { font-size: 12px; color: #999; }
-.mix-modal-title { font-size: 24px; font-weight: 700; color: #fff; margin: 4px 0; }
-.mix-modal-meta { font-size: 12px; color: var(--white-a50); }
-.mix-modal-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mix-modal-cover {
+    flex: 0 0 132px; width: 132px; height: 132px;
+    display: grid; overflow: hidden;
+    border-radius: 12px;
+    background: var(--white-a06);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.mix-modal-cover.is-mosaic { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.mix-modal-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.mix-modal-cover-blank {
+    display: grid; place-items: center;
+    font-size: 44px; color: var(--white-a30);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.05));
+}
+.mix-modal-heading { flex: 1; min-width: 0; }
+.mix-modal-eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(var(--accent-rgb), 0.9);
+}
+.mix-modal-title {
+    margin: 6px 0 4px;
+    font-size: 30px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.1;
+    color: #fff;
+    overflow-wrap: anywhere;
+}
+.mix-modal-subtitle { font-size: 14px; color: var(--white-a70); }
+.mix-modal-meta {
+    margin-top: 4px;
+    font-size: 12.5px; color: var(--white-a50);
+    font-variant-numeric: tabular-nums;
+}
+.mix-modal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.mix-modal-actions .btn { padding: 8px 16px; gap: 7px; border-radius: 999px; font-size: 13px; }
+.mix-modal-actions .btn--primary { padding: 8px 20px; box-shadow: none; }
+.mix-modal-actions .btn--secondary {
+    background: var(--white-a06); border-color: transparent; color: var(--white-a85);
+}
+.mix-modal-actions .btn--secondary:hover:not(:disabled) { background: var(--white-a12); color: #fff; }
 .mix-modal-close {
-    background: none; border: none; color: var(--white-a50);
-    font-size: 16px; cursor: pointer; padding: 6px; line-height: 1;
+    position: absolute; top: 16px; right: 16px;
+    width: 32px; height: 32px; padding: 0;
+    display: grid; place-items: center;
+    border: none; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3); color: var(--white-a70);
+    cursor: pointer;
 }
-.mix-modal-close:hover { color: #fff; }
-.mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
+.mix-modal-close:hover { background: var(--white-a12); color: #fff; }
+.mix-modal-close:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+
+/* one grid for the column head and the rows, so the labels sit over their column */
+.mix-modal-colhead,
+.mix-modal .discover-playlist-track-compact {
+    grid-template-columns: 24px 40px minmax(0, 1.4fr) minmax(0, 1fr) 44px 28px;
+    gap: 14px;
+}
+.mix-modal-colhead.has-select,
+.mix-modal .discover-playlist-track-compact.has-select {
+    grid-template-columns: 20px 24px 40px minmax(0, 1.4fr) minmax(0, 1fr) 44px 28px;
+}
+.mix-modal-colhead {
+    display: grid; align-items: center; flex-shrink: 0;
+    margin: 0 20px; padding: 8px 12px;
+    border-bottom: 1px solid var(--white-a06);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--white-a40);
+}
+.mix-colhead-num { text-align: center; }
+.mix-colhead-time { text-align: right; }
+.mix-modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 20px; }
+/* room under the last row for the floating bar */
+.mix-modal.has-selection .mix-modal-body { padding-bottom: 84px; }
+.mix-modal .discover-playlist-tracks-compact { background: none; border-radius: 0; overflow: visible; }
+.mix-modal .discover-playlist-track-compact {
+    padding: 8px 12px;
+    border-bottom: none; border-radius: 8px;
+    transition: background-color 0.12s ease;
+}
+.mix-modal .discover-playlist-track-compact:hover { background: var(--white-a05); }
+.mix-modal .discover-playlist-track-compact.is-selected { background: rgba(var(--accent-rgb), 0.12); }
+.mix-modal .discover-playlist-track-compact:hover .track-compact-play { opacity: 1; }
+.mix-modal .track-compact-number {
+    font-size: 13px; color: var(--white-a40);
+    font-variant-numeric: tabular-nums;
+}
+.mix-modal .track-compact-image { border-radius: 6px; }
+.mix-modal .track-compact-name { margin-bottom: 3px; font-size: 14px; font-weight: 500; color: #fff; }
+.mix-modal .track-compact-artist { font-size: 13px; color: var(--white-a55); }
+.mix-modal .track-compact-album { font-size: 13px; color: var(--white-a50); }
+.mix-modal .track-compact-duration {
+    font-size: 13px; color: var(--white-a50);
+    font-variant-numeric: tabular-nums;
+}
+
+/* quiet square checkboxes in the accent, not the browser's white boxes */
+.mix-modal input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    width: 16px; height: 16px; margin: 0;
+    display: grid; place-items: center;
+    border: 1.5px solid var(--white-a30); border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.mix-modal input[type="checkbox"]:hover { border-color: var(--white-a55); }
+.mix-modal input[type="checkbox"]:checked {
+    background: rgb(var(--accent-rgb)); border-color: rgb(var(--accent-rgb));
+}
+.mix-modal input[type="checkbox"]:checked::after {
+    content: "";
+    width: 4px; height: 8px; margin-top: -2px;
+    border: solid #111; border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.mix-modal input[type="checkbox"]:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.mix-selbar-all { display: flex; align-items: center; cursor: pointer; }
+
+/* the selection bar: a pill floating over the list, only while something is ticked */
+.mix-modal-selbar {
+    position: absolute; left: 50%; bottom: 20px; z-index: 2;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    max-width: calc(100% - 32px);
+    padding: 8px 8px 8px 18px;
+    border: 1px solid var(--white-a10); border-radius: 999px;
+    background: rgba(32, 32, 42, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    animation: mix-selbar-in 0.18s ease-out;
+}
+@keyframes mix-selbar-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mix-modal-selbar { animation: none; }
+}
+.mix-sel-count { margin-right: 8px; font-size: 13px; font-weight: 600; color: #fff; }
+.mix-modal-selbar .btn { padding: 7px 14px; gap: 6px; border-radius: 999px; font-size: 13px; }
+.mix-modal-selbar .btn--primary { box-shadow: none; }
+.mix-selbar-clear { background: none; border: none; color: var(--white-a65); }
+.mix-selbar-clear:hover { color: #fff; }
 
 /* ── Unified Discover card grid (#discover redesign) ─────────────────────────
    One responsive wrapping grid (fills the section width, wraps to rows — no
@@ -39354,41 +39494,6 @@ div.artist-hero-badge {
 .track-compact-image:hover .track-compact-play,
 .track-compact-play:focus-visible {
     opacity: 1;
-}
-
-.mix-modal-selbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    border-bottom: 1px solid #2a2a2a;
-    background: #1a1a1a;
-}
-
-.mix-selbar-all {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #ccc;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.mix-selbar-all input {
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-    accent-color: var(--accent);
-}
-
-.mix-sel-count {
-    font-size: 12px;
-    color: #999;
-}
-
-.mix-selbar-spacer {
-    flex: 1;
 }
 
 .track-compact-block {
