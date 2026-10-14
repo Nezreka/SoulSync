@@ -1677,6 +1677,12 @@ class RepairWorker:
         self._review_refresh_snapshots[case_id] = snapshot
         return self._schedule_album_refresh(case_id, folder)
 
+    def reanalyze_review_case(self, case_id: str) -> bool:
+        """Refresh one current album case without queuing a full library job."""
+        case = self.get_review_case(case_id)
+        return bool(case and self._schedule_review_refresh(
+            case_id, case.get('folder') or '', case))
+
     def _schedule_album_refresh(self, case_id: str, folder: str) -> bool:
         """Replan only the changed logical album after a review action."""
         snapshot = getattr(self, '_review_refresh_snapshots', {}).pop(case_id, None)

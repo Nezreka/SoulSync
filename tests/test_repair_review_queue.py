@@ -177,6 +177,19 @@ def test_complete_album_can_request_all_missing_slots_after_scope_choice():
     assert not worker.start_review_missing_tracks('album-case')['started']
 
 
+def test_reanalyze_review_case_targets_only_its_folder():
+    worker = RepairWorker.__new__(RepairWorker)
+    case = {'folder': '/music/Ghost/Prequelle', 'items': []}
+    worker.get_review_case = lambda *_args, **_kwargs: case
+    calls = []
+    worker._schedule_review_refresh = lambda *args: calls.append(args) or True
+
+    assert worker.reanalyze_review_case('prequelle-case')
+    assert calls == [('prequelle-case', '/music/Ghost/Prequelle', case)]
+    worker.get_review_case = lambda *_args, **_kwargs: None
+    assert not worker.reanalyze_review_case('stale-case')
+
+
 def test_bulk_selection_admits_only_explicitly_reviewed_missing_slot_ids():
     for reviewed, expected in ((False, []), (True, [1])):
         db = _Database()

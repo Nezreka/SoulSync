@@ -890,7 +890,11 @@ describe('library reconciliation review queue', () => {
         ],
       },
     };
-    fetchMock.mockImplementation((url: string) => {
+    fetchMock.mockImplementation((url: string, options?: RequestInit) => {
+      if (url === '/api/repair/review-queue/folder%3A1%3Aloose/reanalyze') {
+        expect(options?.method).toBe('POST');
+        return Promise.resolve(reply({ queued: true }));
+      }
       const common = auxiliary(url);
       if (common) return Promise.resolve(common);
       if (url.startsWith('/api/repair/review-queue?'))
@@ -932,6 +936,14 @@ describe('library reconciliation review queue', () => {
     await screen.findByRole('heading', { name: 'Loose files' });
     expect(screen.getByText('Technical evidence')).toBeTruthy();
     expect(screen.queryByLabelText('Evidence summary')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).endsWith('/folder%3A1%3Aloose/reanalyze'),
+        ),
+      ).toBe(true),
+    );
   });
 
   it('presents competing copies as one explicit keeper decision', async () => {

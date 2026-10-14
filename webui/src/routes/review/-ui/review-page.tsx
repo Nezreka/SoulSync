@@ -13,6 +13,7 @@ import {
   pinReviewRelease,
   fetchReconciliationScanStatus,
   runReconciliationScan,
+  reanalyzeReviewCase,
   startReadyChanges,
   startAlbumMetadataChanges,
   startMissingTrackRequests,
@@ -1265,6 +1266,18 @@ export function ReviewPage() {
     }
   };
 
+  const reanalyzeAlbum = async () => {
+    if (!reviewCase) return;
+    setError('');
+    try {
+      await reanalyzeReviewCase(reviewCase.case_id);
+      setReviewCase(await fetchReviewCase(reviewCase.case_id));
+      setNotice('Reanalyzing this album…');
+    } catch (cause) {
+      setError((cause as Error).message);
+    }
+  };
+
   const applyReady = async (scopeCaseId?: string, organize = false, allMetadata = false) => {
     const count = allMetadata
       ? reviewCase?.items.filter((item) => item.finding_type === 'reconciliation_metadata')
@@ -1948,6 +1961,13 @@ export function ReviewPage() {
                   </div>
                 </div>
                 <div className={styles.nav}>
+                  <button
+                    type="button"
+                    disabled={reviewCase.refresh?.state === 'running'}
+                    onClick={() => void reanalyzeAlbum()}
+                  >
+                    Reanalyze album
+                  </button>
                   <button
                     type="button"
                     disabled={caseIndex <= 0}

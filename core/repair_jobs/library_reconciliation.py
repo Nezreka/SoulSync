@@ -274,7 +274,17 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
                 continue
             anchor_identity = release_identity(anchor_album)
             fragment_identity = release_identity(fragment_album)
-            if fragment_identity and fragment_identity != anchor_identity:
+            # Downloaders may tag a replacement track with a different
+            # edition's release ID. A shared provider album ID still proves
+            # these sibling folders belong to the same album. Require the
+            # title, artist, unused position, and one-file checks above too.
+            shared_catalog_id = any(
+                anchor_album.get(column) and
+                anchor_album.get(column) == fragment_album.get(column)
+                for column in _SOURCES
+            )
+            if (fragment_identity and fragment_identity != anchor_identity and
+                    not shared_catalog_id):
                 continue
             anchor_positions = positions(paths)
             if anchor_positions and not fragment_positions & anchor_positions:

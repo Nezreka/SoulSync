@@ -370,6 +370,14 @@ export async function startMissingTrackRequests(
   );
 }
 
+export async function reanalyzeReviewCase(caseId: string): Promise<void> {
+  await readJson<{ queued: boolean }>(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/reanalyze`, {
+      method: 'POST',
+    }),
+  );
+}
+
 export async function fetchReviewApplyStatus(): Promise<BulkFixStatus> {
   return readJson<BulkFixStatus>(await fetch('/api/repair/bulk-fix/status'));
 }

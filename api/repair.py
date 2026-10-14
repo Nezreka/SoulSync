@@ -141,6 +141,19 @@ def repair_review_queue_pin_release(case_id):
         return jsonify({'error': 'Could not pin review release'}), 500
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/reanalyze', methods=['POST'])
+def repair_review_queue_reanalyze(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    try:
+        queued = worker.reanalyze_review_case(case_id)
+        return jsonify({'queued': queued}), 200 if queued else 404
+    except Exception as exc:
+        logger.error('Error reanalyzing review case: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not reanalyze album'}), 500
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/decisions/<category>/apply', methods=['POST'])
 def repair_review_queue_apply_decision(case_id, category):
     worker = _repair_worker()

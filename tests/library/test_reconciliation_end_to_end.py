@@ -1174,6 +1174,15 @@ def test_replacement_fragment_joins_same_release_in_sibling_folder():
     assert len(grouped) == 2
     assert trusted == {}
 
+    # A replacement downloaded from another edition can carry a different
+    # release MBID while both album rows still share a catalog album ID.
+    albums[10]['itunes_album_id'] = '1368196699'
+    albums[11]['itunes_album_id'] = '1368196699'
+    grouped, trusted = _group_logical_albums(folders, tracks, albums)
+    assert list(grouped) == [original]
+    assert len(grouped[original]) == 5
+    assert trusted == {original: 10}
+
 
 def test_logical_album_joins_parent_and_disc_child_with_different_album_rows():
     parent = [f'/music/Matchbox Twenty/The Matchbox Twenty Collection/{n:02}.flac'
