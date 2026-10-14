@@ -67,9 +67,17 @@ function measureChromeVars() {
   const nav = document.getElementById('artmap-island-nav');
   const toolbarH = toolbar ? toolbar.offsetHeight : 56;
   const sidebarW = sidebar && sidebar.style.display !== 'none' ? sidebar.offsetWidth || 0 : 0;
+  // In the stacked phone layout the sidebar is a full-width strip, so its
+  // width says nothing about where the canvas starts: sidebarW + 16 came to
+  // ~406px on a 390px phone and pushed the island nav's quick-jump menu off
+  // the right edge (Oct 13 fold, M-11c). A strip spanning the container
+  // leaves the chrome at the plain 16px inset. (The ≤768px CSS also anchors
+  // the nav and menu directly; these variables stay correct for the row
+  // layout and any width where the CSS anchor does not apply.)
+  const stacked = sidebarW > 0 && sidebarW >= container.clientWidth - 1;
   container.style.setProperty('--artmap-panel-top', `${toolbarH}px`);
   container.style.setProperty('--artmap-chrome-top', `${toolbarH + 10}px`);
-  container.style.setProperty('--artmap-chrome-left', `${sidebarW + 16}px`);
+  container.style.setProperty('--artmap-chrome-left', `${stacked ? 16 : sidebarW + 16}px`);
   if (nav) {
     container.style.setProperty('--artmap-menu-top', `${nav.offsetTop + nav.offsetHeight + 6}px`);
   }

@@ -797,6 +797,20 @@
     .dd-prevnext { padding: 6px 22px 40px; grid-template-columns: 1fr; }
     .dd-title { font-size: 26px; }
 }
+/* Oct 13 batch, M-12 — band-aligned in the fold: the clearance below is
+   for the app's fixed hamburger, which only exists at ≤768px, so the
+   rules live in the ≤768px band, not the docs drawer's ≤860px band (at
+   769-860px there is no hamburger to clear and the docs button keeps its
+   designed 14px spot). Two buttons share the top-left corner on phones —
+   the hamburger (16px, 44px wide, z-9999) and this page's own menu
+   button (absolute at 14px inside the content). They rendered stacked on
+   top of each other, and the open drawer's header ("Documentation") slid
+   under the hamburger and clipped. Move the docs button right of the
+   hamburger, and give the drawer header the same clearance. */
+@media (max-width: 768px) {
+    .dd-mobile-menu-btn { left: 64px; }
+    .docs-sidebar-header { padding-left: 76px; }
+}
 
 /* Anchor scroll offset for in-page links */
 .dd-body h2[id], .dd-body h3[id] { scroll-margin-top: 16px; }

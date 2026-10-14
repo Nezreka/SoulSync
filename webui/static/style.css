@@ -6665,7 +6665,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex; align-items: center; justify-content: center;
 }
 .notif-history-modal {
-    width: 640px; max-width: 94vw; max-height: 80vh;
+    width: 640px; max-width: 94vw; max-height: 80vh; max-height: 80dvh;
     background: rgba(14, 14, 20, 0.98); border: 1px solid var(--white-a08);
     border-radius: var(--radius-xl); box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     display: flex; flex-direction: column;
@@ -7550,6 +7550,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 90vw;
     height: 500px;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -7716,6 +7717,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     left: 0;
     width: 100vw;
     height: 100vh;
+    /* dvh tracks the visible viewport under mobile browser chrome —
+       100vh alone sizes the overlay taller than the visible area and
+       the centred modal's bottom slides below the fold (Oct 13 batch,
+       M-16; same bug class PR #1661 fixed for the drawer). vh stays as
+       the fallback line above. Fold: the same vh→dvh twin treatment was
+       swept across every modal family's max-height in this file
+       (.playlist-modal, .ma-modal, .discog-modal, .ya-modal, … — 60+
+       rules), not just this overlay and the account modal. */
+    height: 100dvh;
     background: rgba(18, 18, 18, 0.85);
     backdrop-filter: blur(12px);
     z-index: 10000;
@@ -7943,6 +7953,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 460px;
     max-width: 90vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
@@ -10161,6 +10172,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 740px;
     max-width: 95vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
@@ -10977,6 +10989,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 700px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-xl);
@@ -11376,6 +11389,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 1040px;
     max-width: 96vw;
     max-height: 88vh;
+    max-height: 88dvh;
     background: linear-gradient(180deg, rgba(20, 20, 22, 0.98), rgba(12, 12, 14, 0.99));
     border: 1px solid var(--white-a08);
     border-radius: 20px;
@@ -11675,6 +11689,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         width: 100%;
         max-width: 100vw;
         max-height: 100vh;
+        max-height: 100dvh;
         border-radius: 0;
         border: none;
     }
@@ -11864,6 +11879,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 750px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-xl);
@@ -16247,6 +16263,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     /* FIXED HEIGHT — prevents layout shift when results load */
     height: 600px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
@@ -16546,6 +16563,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         max-width: 100%;
         height: 100vh;
         max-height: 100vh;
+        max-height: 100dvh;
         border-radius: 0;
     }
 
@@ -16592,6 +16610,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 100%;
     max-width: 900px;
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -20651,6 +20670,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 1200px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
 
@@ -21071,6 +21091,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 900px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
 
@@ -21564,6 +21585,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     position: relative;
     overflow: hidden;
     border-top: 1px solid var(--white-a15);
@@ -23661,6 +23683,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 580px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -24540,6 +24563,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 900px;
     max-width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -25120,6 +25144,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .download-missing-modal-content {
         height: 95vh;
         max-height: 95vh;
+        max-height: 95dvh;
     }
 
     .download-progress-section {
@@ -25142,6 +25167,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .download-missing-modal-content {
         height: 98vh;
         max-height: 98vh;
+        max-height: 98dvh;
     }
 
     .download-missing-modal-hero {
@@ -26797,6 +26823,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 90%;
     max-width: 820px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
@@ -27828,6 +27855,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 700px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     z-index: 2;
     overflow: hidden;
     display: flex;
@@ -28206,6 +28234,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .artist-download-modal-content {
         width: 95vw;
         max-height: 90vh;
+        max-height: 90dvh;
         margin: 16px;
         border-radius: var(--radius-xl);
     }
@@ -28713,7 +28742,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ── Watch All Unwatched Modal ──────────────────────────── */
 .watch-all-modal {
-    width: 880px; max-width: 95vw; max-height: 85vh;
+    width: 880px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -30598,6 +30627,7 @@ div.artist-hero-badge {
     width: 900px;
     max-width: 90vw;
     max-height: 85vh;
+    max-height: 85dvh;
     border-radius: 18px;
     overflow: hidden;
     position: relative;
@@ -31097,6 +31127,7 @@ div.artist-hero-badge {
     .add-to-wishlist-modal {
         width: 95vw;
         max-height: 90vh;
+        max-height: 90dvh;
         border-radius: var(--radius-xl);
     }
 
@@ -34286,6 +34317,7 @@ div.artist-hero-badge {
     width: 700px;
     max-width: 90vw;
     max-height: 85vh;
+    max-height: 85dvh;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
         0 0 1px var(--white-a10) inset;
@@ -34946,6 +34978,7 @@ div.artist-hero-badge {
     max-width: 600px;
     width: 90%;
     max-height: 80vh;
+    max-height: 80dvh;
     overflow-y: auto;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
     animation: slideUp 0.3s ease;
@@ -35076,6 +35109,7 @@ div.artist-hero-badge {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     display: flex;
     flex-direction: column;
     box-shadow:
@@ -35468,6 +35502,7 @@ div.artist-hero-badge {
     max-width: 650px;
     width: 90%;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow:
@@ -36211,6 +36246,7 @@ div.artist-hero-badge {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
 }
 
 .recommended-modal .playlist-modal-body {
@@ -36958,6 +36994,7 @@ div.artist-hero-badge {
 .mix-modal {
     position: relative;
     width: 860px; max-width: 94vw; max-height: 88vh;
+    max-height: 88dvh;
     display: flex; flex-direction: column; overflow: hidden;
     background: #121218;
     border: 1px solid var(--white-a08);
@@ -37313,7 +37350,7 @@ div.artist-hero-badge {
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
-    width: 480px; max-width: 95vw; max-height: 85vh;
+    width: 480px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--white-a06);
     overflow: hidden; position: relative;
@@ -38318,7 +38355,7 @@ div.artist-hero-badge {
 /* Genre picker modal */
 .artmap-genre-picker-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%);
-    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh;
+    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh; max-height: 75dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
@@ -38435,7 +38472,7 @@ div.artist-hero-badge {
 /* Your Artists Modal */
 .ya-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 800px; max-width: 95vw; max-height: 85vh;
+    width: 800px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
@@ -38560,6 +38597,7 @@ div.artist-hero-badge {
     width: 90vw;
     max-width: 800px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -39548,6 +39586,7 @@ div.artist-hero-badge {
     width: 500px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -39698,6 +39737,7 @@ div.artist-hero-badge {
     width: 520px;
     max-width: 95vw;
     max-height: 84vh;
+    max-height: 84dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -47164,6 +47204,7 @@ div.artist-hero-badge {
     width: 90%;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
@@ -47303,7 +47344,7 @@ div.artist-hero-badge {
     background: linear-gradient(135deg, #1c1c1c 0%, #131313 100%);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
     border-radius: var(--radius-xl);
-    width: 90%; max-width: 560px; max-height: 86vh;
+    width: 90%; max-width: 560px; max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
     transform: scale(0.96);
@@ -49734,6 +49775,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
     max-width: 580px;
     width: 100%;
     max-height: 85vh;
+    max-height: 85dvh;
     overflow-y: auto;
     position: relative;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5),
@@ -50545,7 +50587,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
 
 .automation-history-modal {
-    max-width: 560px; width: 90%; max-height: 75vh; display: flex; flex-direction: column;
+    max-width: 560px; width: 90%; max-height: 75vh; max-height: 75dvh; display: flex; flex-direction: column;
 }
 .history-modal-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -52362,7 +52404,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .discog-modal-overlay.visible { opacity: 1; }
 
 .discog-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: rgba(14, 14, 14, 0.97);
     border: 1px solid var(--white-a08);
     border-radius: 18px;
@@ -52768,7 +52810,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Mobile */
 @media (max-width: 768px) {
-    .discog-modal { max-width: 100vw; max-height: 100vh; border-radius: 0; }
+    .discog-modal { max-width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
     .discog-grid { grid-template-columns: 1fr; }
     .discog-filter-bar { flex-wrap: wrap; gap: 8px; }
 }
@@ -52781,6 +52823,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 560px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a04);
@@ -53172,6 +53215,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 90vw;
     max-width: 880px;
     max-height: 85vh;
+    max-height: 85dvh;
     background: linear-gradient(180deg, rgba(24, 24, 24, 0.97) 0%, rgba(10, 10, 10, 1) 100%);
     border: 1px solid var(--white-a06);
     border-radius: 20px;
@@ -54666,6 +54710,7 @@ tr.tag-diff-same {
     width: 850px;
     max-width: 92vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     /* the list scrolls inside; header and footer stay put (#1254) */
@@ -54688,6 +54733,7 @@ tr.tag-diff-same {
 
 .tag-preview-modal {
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -54963,6 +55009,7 @@ tr.tag-diff-same {
     max-width: 1400px;
     height: 95vh;
     max-height: 95vh;
+    max-height: 95dvh;
     background: rgba(14, 14, 14, 0.98);
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-xl);
@@ -55448,6 +55495,7 @@ tr.tag-diff-same {
     width: 90vw;
     max-width: 700px;
     max-height: 85vh;
+    max-height: 85dvh;
     background: rgba(18, 18, 18, 0.99);
     border: 1px solid var(--white-a10);
     border-radius: 14px;
@@ -55701,6 +55749,7 @@ tr.tag-diff-same {
     width: 94vw;
     max-width: 1100px;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -56402,7 +56451,7 @@ tr.tag-diff-same {
 
 /* ── Cache Health Modal ── */
 .cache-health-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -56841,7 +56890,7 @@ tr.tag-diff-same {
 /* ── Failed MB Lookups Modal ── */
 .failed-mb-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 720px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column;
+    width: 720px; max-width: 95vw; max-height: 85vh; max-height: 85dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
 .failed-mb-header {
@@ -56911,7 +56960,7 @@ tr.tag-diff-same {
 /* ── MB Search Sub-Modal ── */
 .mb-search-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 620px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column;
+    width: 620px; max-width: 95vw; max-height: 80vh; max-height: 80dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
 .mb-search-header {
@@ -58712,6 +58761,7 @@ tr.tag-diff-same {
     .repair-modal {
         width: 98vw;
         max-height: 95vh;
+        max-height: 95dvh;
         border-radius: var(--radius-lg);
     }
 
@@ -58895,6 +58945,7 @@ tr.tag-diff-same {
     width: 90vw;
     max-width: 480px;
     max-height: 80vh;
+    max-height: 80dvh;
     overflow-y: auto;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
     animation: repair-help-slidein 0.2s ease;
@@ -64319,6 +64370,7 @@ tr.tag-diff-same {
     max-width: 1100px;
     width: 95vw;
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--white-a06) inset, 0 0 80px rgba(0,0,0,0.3) inset;
@@ -64758,6 +64810,7 @@ tr.tag-diff-same {
     max-width: 600px;
     width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
@@ -76057,6 +76110,7 @@ body.em-scroll-lock { overflow: hidden; }
     width: 860px;
     max-width: 94vw;
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background:
@@ -76326,6 +76380,7 @@ body.em-scroll-lock { overflow: hidden; }
     width: 640px;
     max-width: 94vw;
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background: linear-gradient(165deg, rgba(24,24,32,0.97) 0%, rgba(13,13,18,0.985) 60%, rgba(10,10,14,0.99) 100%);
@@ -76440,7 +76495,7 @@ body.em-scroll-lock { overflow: hidden; }
     --ss-brand: #7c5cff; /* panels override with the active service's color */
     background: linear-gradient(160deg, #181a21 0%, #121319 100%);
     border: 1px solid var(--white-a08);
-    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh;
+    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
 }
@@ -76680,7 +76735,7 @@ body.em-scroll-lock { overflow: hidden; }
     background: rgba(3, 4, 6, 0.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .ma-modal {
-    width: min(600px, 94vw); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+    width: min(600px, 94vw); max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(180deg, #17191f 0%, #111318 100%);
     border: 1px solid var(--white-a08); border-radius: 24px; color: #f4f5f7;
     box-shadow: 0 40px 120px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.4);
@@ -78318,6 +78373,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     position: relative;
     width: min(760px, 94vw);
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -78582,6 +78638,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .art-picker-modal {
     width: min(920px, 94vw);
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background: #181818;
@@ -82219,6 +82276,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     width: 860px;
     max-width: 95vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -85183,7 +85241,7 @@ body.src-modal-open { overflow: hidden; }
 
 @media (max-width: 620px) {
     .src-tile-row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-    .src-modal { max-height: 92vh; }
+    .src-modal { max-height: 92vh; max-height: 92dvh; }
     .src-modal-overlay { padding: 10px; }
 }
 

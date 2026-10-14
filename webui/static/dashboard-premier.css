@@ -1197,10 +1197,15 @@ body.max-performance #dashboard-page .listen-hero-play::after {
         grid-template-columns: 1fr;
     }
     /* …and inside the hero, the desktop row (78px vinyl + nowrap kicker +
-       66px play button) still doesn't fit a phone-width card: the kicker
-       is white-space:nowrap by design, so it overflowed the text column
-       and painted toward the play button. Shrink the furniture and let
-       the kicker wrap. */
+       66px play button) still doesn't fit a phone-width card. Batch #2 let
+       the kicker wrap, which stacked it word-per-line in the squeezed
+       text column (measured 128px wide × 44px tall at 390px, three
+       lines — Oct 13 batch, M-15). Instead of wrapping the kicker, give
+       the text column the width: the play button leaves the flex row
+       and parks at the hero's bottom-right corner (the hero is
+       position:relative), the text keeps a right pad so the description
+       never runs under it, and the kicker stays on one line, set
+       smaller and tighter. */
     #dashboard-page .listen-hero {
         gap: 14px;
         padding: 18px;
@@ -1209,12 +1214,20 @@ body.max-performance #dashboard-page .listen-hero-play::after {
         width: 56px;
         height: 56px;
     }
+    #dashboard-page .listen-hero-text {
+        padding-right: 58px;
+    }
     #dashboard-page .listen-kicker {
-        white-space: normal;
+        white-space: nowrap;
+        font-size: 9.5px;
+        letter-spacing: 0.1em;
     }
     #dashboard-page .listen-hero-play {
-        width: 54px;
-        height: 54px;
+        position: absolute;
+        right: 16px;
+        bottom: 16px;
+        width: 48px;
+        height: 48px;
     }
     #dashboard-page .dash-hero-eyebrow {
         font-size: 10px;
@@ -1237,6 +1250,17 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     }
     #dashboard-page .dash-sync-pct {
         font-size: 36px;
+    }
+}
+
+/* M-15 floor (Oct 13 fold): the one-line kicker is ~195px at 9.5px/0.1em.
+   With the play button parked, the text column holds it down to ~340px
+   viewports; below that the hero is overflow:hidden and the kicker would
+   clip mid-word into the reserved padding. Only there, let it wrap —
+   two balanced lines beat a clipped one. */
+@media (max-width: 340px) {
+    #dashboard-page .listen-kicker {
+        white-space: normal;
     }
 }
 

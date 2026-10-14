@@ -97,6 +97,29 @@ afterEach(() => {
 });
 
 describe('My Account', () => {
+  it('closes the mobile nav drawer it was opened from (Oct 13 fold, M-04)', async () => {
+    // The My Account button lives inside the sidebar drawer; drawer-first
+    // is the natural phone flow, and the drawer (z-10001) would otherwise
+    // stay open over the modal (z-10000) with its close button hidden.
+    document.body.innerHTML = `
+      <button id="hamburger-btn" class="active" aria-expanded="true"></button>
+      <div id="mobile-overlay" class="active"></div>
+      <aside class="sidebar mobile-open"></aside>`;
+    document.body.classList.add('mobile-nav-open');
+    mockAccount({});
+    await opened();
+    expect(document.querySelector('.sidebar')?.classList.contains('mobile-open')).toBe(false);
+    expect(document.body.classList.contains('mobile-nav-open')).toBe(false);
+    expect(document.getElementById('mobile-overlay')?.classList.contains('active')).toBe(false);
+    const burger = document.getElementById('hamburger-btn');
+    expect(burger?.classList.contains('active')).toBe(false);
+    expect(burger?.getAttribute('aria-expanded')).toBe('false');
+    // …and the modal itself is open.
+    expect(document.getElementById('my-accounts-overlay')?.classList.contains('hidden')).toBe(
+      false,
+    );
+  });
+
   it('is one modal with your media server and your music services', async () => {
     mockAccount({ library: { navidrome_username: 'kim' } });
     await opened();
