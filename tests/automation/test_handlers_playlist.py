@@ -822,6 +822,48 @@ class TestSyncPlaylist:
         assert args[2][0]['quality_profile_id'] == 23
         assert args[4] == 7
 
+    def _sync_kwargs(self, playlist, config):
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(playlists=[playlist], playlist_tracks={1: [discovered_track]})
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+        auto_sync_playlist(config, deps)
+        for _ in range(50):
+            if sync_calls:
+                break
+            import time
+            time.sleep(0.01)
+        assert sync_calls
+        return sync_calls[0][1]
+
+    def test_mirror_sync_mode_reaches_the_sync(self):
+        # #1704: an append-only mirror while the global mode is something else
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': 'append'},
+                               {'playlist_id': '1'})
+        assert kw.get('sync_mode') == 'append'
+
+    def test_pipeline_sync_mode_used_when_mirror_has_none(self):
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': None},
+                               {'playlist_id': '1', 'sync_mode': 'replace'})
+        assert kw.get('sync_mode') == 'replace'
+
+    def test_mirror_sync_mode_beats_the_pipeline(self):
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': 'append'},
+                               {'playlist_id': '1', 'sync_mode': 'replace'})
+        assert kw.get('sync_mode') == 'append'
+
     def test_organize_by_playlist_passes_skip_wishlist_add(self):
         discovered_track = {
             'extra_data': json.dumps({

@@ -389,6 +389,24 @@ describe('MirroredTab — the three actions', () => {
     expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBeGreaterThan(1);
   });
 
+  it('sync mode (#1704): the menu shows the stored mode and PATCHes a change', async () => {
+    const toast = vi.fn();
+    window.showToast = toast as typeof window.showToast;
+    await loaded({ ...ROW, sync_mode: 'append' });
+
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    const select = screen.getByLabelText('Sync mode') as HTMLSelectElement;
+    expect(select.value).toBe('append');
+
+    fireEvent.change(select, { target: { value: '' } });
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    const patch = calls.find((c) => c.method === 'PATCH')!;
+    expect(patch.url).toBe('/api/mirrored-playlists/3/preferences');
+    // '' is "use global", sent as null so the backend clears the column
+    expect(patch.body).toEqual({ sync_mode: null });
+    expect(toast).toHaveBeenCalledWith('"Road Trip" follows the global sync mode', 'success');
+  });
+
   it('rename: a failure keeps the vanilla Error: prefix (auto-sync.js 2406)', async () => {
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;

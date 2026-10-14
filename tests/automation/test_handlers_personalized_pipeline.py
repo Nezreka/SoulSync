@@ -499,7 +499,8 @@ class TestSyncLaunch:
         assert args[3] is None  # automation_id muted
         assert args[4] == 7  # profile_id
         # Default: sync-time wishlist adds stay on (today's behavior).
-        assert kwargs == {'skip_wishlist_add': False}
+        # no mode of its own, so the global setting decides (#1704)
+        assert kwargs == {'skip_wishlist_add': False, 'sync_mode': None}
 
     def test_sync_skip_wishlist_reaches_run_sync_task(self):
         # #1689: the pipeline's resolved skip must reach the sync as
@@ -528,7 +529,28 @@ class TestSyncLaunch:
             import time
             time.sleep(0.01)
         assert len(captured) == 1
-        assert captured[0][1] == {'skip_wishlist_add': True}
+        assert captured[0][1] == {'skip_wishlist_add': True, 'sync_mode': None}
+
+    def test_pipeline_sync_mode_reaches_run_sync_task(self):
+        # #1704: a daily mix pipeline set to replace while the global is append
+        captured: List[tuple] = []
+        deps = _build_deps(
+            run_sync_task=lambda *a, **k: captured.append((a, k)),
+            get_current_profile_id=lambda: 7,
+        )
+        payload = {
+            'sync_id': 'auto_personalized_daily_mix_1',
+            'name': 'Daily Mix 1',
+            'tracks_json': [{'name': 'X', 'id': 'sp-1'}],
+            'image_url': '',
+        }
+        _sync_personalized_playlist(deps, payload, sync_mode='replace')
+        for _ in range(100):
+            if captured:
+                break
+            import time
+            time.sleep(0.01)
+        assert captured[0][1]['sync_mode'] == 'replace'
 
 
 # ─── Full pipeline (with stubbed manager + sync states) ─────────────
@@ -573,6 +595,36 @@ class TestPipelineHappyPath:
         assert result['_manages_own_progress'] is True
         # Pipeline-running flag cleaned up.
         assert deps.state.pipeline_running is False
+
+    def test_pipeline_config_sync_mode_reaches_the_sync(self):
+        # #1704: the automation's own sync mode rides config -> sync
+        manager = _StubManagerWithTracks(
+            tracks_per_kind={'hidden_gems': [{'name': 'A', 'id': 'sp-1'}]},
+        )
+        sync_states_storage = {}
+        seen = []
+
+        def fake_run_sync(sync_id, name, tracks, aid, pid, img, **kwargs):
+            seen.append(kwargs)
+            sync_states_storage[sync_id] = {'status': 'finished', 'result': {'matched_tracks': 1}}
+
+        deps = _build_deps(
+            build_personalized_manager=lambda: manager,
+            run_sync_task=fake_run_sync,
+            get_sync_states=lambda: sync_states_storage,
+        )
+        import core.automation.handlers._pipeline_shared as shared
+        orig = shared.time.sleep
+        shared.time.sleep = lambda _: None
+        try:
+            auto_personalized_pipeline(
+                {'_automation_id': 'auto-1', 'kinds': [{'kind': 'hidden_gems'}],
+                 'sync_mode': 'replace'},
+                deps,
+            )
+        finally:
+            shared.time.sleep = orig
+        assert seen and seen[0]['sync_mode'] == 'replace'
 
 
 # ─── Wishlist skip plumbing (#1689) ────────────────────────────────
@@ -632,7 +684,7 @@ class TestPipelineWishlistSkipPlumbing:
     def test_global_toggle_off_skips_sync_time_wishlist_adds(self):
         sync_kwargs, wishlist_calls, result = self._run_pipeline(
             {}, {'playlist_sync.wishlist_missing_tracks': False})
-        assert sync_kwargs == [{'skip_wishlist_add': True}]
+        assert sync_kwargs == [{'skip_wishlist_add': True, 'sync_mode': None}]
         assert wishlist_calls == []
         assert result['wishlist_queued'] == '0'
 
@@ -640,13 +692,13 @@ class TestPipelineWishlistSkipPlumbing:
         sync_kwargs, wishlist_calls, result = self._run_pipeline(
             {'skip_wishlist': True},
             {'playlist_sync.wishlist_missing_tracks': True})
-        assert sync_kwargs == [{'skip_wishlist_add': True}]
+        assert sync_kwargs == [{'skip_wishlist_add': True, 'sync_mode': None}]
         assert wishlist_calls == []
         assert result['wishlist_queued'] == '0'
 
     def test_no_skip_keeps_todays_behavior(self):
         sync_kwargs, wishlist_calls, result = self._run_pipeline(
             {}, {'playlist_sync.wishlist_missing_tracks': True})
-        assert sync_kwargs == [{'skip_wishlist_add': False}]
+        assert sync_kwargs == [{'skip_wishlist_add': False, 'sync_mode': None}]
         assert len(wishlist_calls) == 1
         assert result['wishlist_queued'] == '1'

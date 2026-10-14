@@ -330,6 +330,9 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             'organize_by_playlist': organize_by_playlist,
             # a playlist's own Sync & download click, not a schedule (#1603)
             'user_initiated': bool(config.get('user_initiated')),
+            # #1704: the mirror's own mode, then the pipeline's, then
+            # None so the global setting decides
+            'sync_mode': pl.get('sync_mode') or config.get('sync_mode') or None,
         },
         daemon=True,
         name=f'auto-sync-{playlist_id}',

@@ -314,7 +314,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -335,6 +335,14 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             if quality_profile_id is None:
                 return jsonify({"error": "Invalid quality_profile_id"}), 400
 
+        # #1704: null/'' clears back to the global mode, else a real mode
+        sync_mode = None
+        if 'sync_mode' in data:
+            from core.sync.playlist_edit import VALID_SYNC_MODES
+            sync_mode = data.get('sync_mode') or ''
+            if sync_mode and sync_mode not in VALID_SYNC_MODES:
+                return jsonify({"error": "Invalid sync_mode"}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -343,6 +351,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             profile_id=profile_id,
             organize_by_playlist=organize_by_playlist,
             quality_profile_id=quality_profile_id,
+            sync_mode=sync_mode,
         )
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404
@@ -357,6 +366,9 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
         ):
             # A profile-only change must not be swallowed by the auto-sync
             # "tracks unchanged" fast path (P1-03).
+            _invalidate_mirror_sync_fingerprint(playlist_id)
+        if sync_mode is not None and (sync_mode or None) != playlist.get('sync_mode'):
+            # same for a mode change, the next sync should apply it
             _invalidate_mirror_sync_fingerprint(playlist_id)
 
         updated = _owned_mirrored_playlist(database, playlist_id) or {}

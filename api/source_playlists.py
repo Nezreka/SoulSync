@@ -5311,9 +5311,9 @@ def _run_sync_task(
     # Append/Reconcile (#823 carlosjfcasero). The global default is now
     # 'reconcile' (#1289), so default users get the safer behavior; only users
     # who explicitly set a mode get something different. (Mirrors _submit_sync_task.)
-    if sync_mode is None:
-        from core.sync.playlist_edit import normalize_sync_mode
-        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'reconcile'))
+    # a mode a mirror or pipeline stored itself (#1704) wins, if it's a real one
+    from core.sync.playlist_edit import normalize_sync_mode
+    sync_mode = normalize_sync_mode(sync_mode, config_manager.get('playlist_sync.mode', 'reconcile'))
     tracks_json, _quality_profile_id = _tracks_with_mirrored_quality_profile(
         playlist_id,
         playlist_name,

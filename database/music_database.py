@@ -1461,6 +1461,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
@@ -2789,6 +2790,18 @@ class MusicDatabase:
                 logger.info("Added organize_by_playlist column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_sync_mode_column(self, cursor):
+        """Per-playlist sync mode (#1704). null means use the global
+        playlist_sync.mode, so existing mirrors keep doing what they did."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'sync_mode' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN sync_mode TEXT DEFAULT NULL")
+                logger.info("Added sync_mode column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding sync_mode column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_custom_name_column(self, cursor):
         """Add custom_name (a user alias) for a mirrored playlist.
@@ -25113,8 +25126,12 @@ class MusicDatabase:
         profile_id: Optional[int] = None,
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
+        sync_mode: Optional[str] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
+
+        ``sync_mode`` None leaves it alone, '' clears it back to the global
+        mode, anything else is stored as given (the route validates it).
 
         Returns ``'ok'``, ``'not_found'``, ``'unknown_quality_profile'`` or
         ``'error'``.  Both fields are validated BEFORE anything is written and
@@ -25144,6 +25161,10 @@ class MusicDatabase:
                 if organize_by_playlist is not None:
                     assignments.append("organize_by_playlist=?")
                     params.append(1 if organize_by_playlist else 0)
+
+                if sync_mode is not None:
+                    assignments.append("sync_mode=?")
+                    params.append(sync_mode or None)
 
                 if not assignments:
                     return 'ok'
