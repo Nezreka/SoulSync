@@ -6878,7 +6878,9 @@ function renderApiKeys(keys) {
     container.innerHTML = keys.map(k => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
             <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}</div>
+                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}
+                    <span style="margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${k.scope === 'read' ? 'background: rgba(100,255,218,0.12); color: #64ffda;' : 'background: rgba(255,171,64,0.12); color: #ffab40;'}">${k.scope === 'read' ? 'Read-only' : 'Admin'}</span>
+                </div>
                 <div style="font-size: 11px; color: #666; margin-top: 2px;">
                     <code>${escapeHtml(k.key_prefix || 'sk_...')}...</code>
                     &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
@@ -6909,12 +6911,14 @@ function _initApiKeyClickHandler() {
 async function generateApiKey() {
     const labelInput = document.getElementById('api-key-label');
     const label = labelInput ? labelInput.value.trim() : '';
+    const scopeInput = document.getElementById('api-key-scope');
+    const scope = scopeInput && scopeInput.value === 'admin' ? 'admin' : 'read';
 
     try {
         const response = await fetch('/api/v1/api-keys-internal/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: label || 'Default' })
+            body: JSON.stringify({ label: label || 'Default', scope })
         });
         const data = await response.json();
 

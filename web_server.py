@@ -608,6 +608,16 @@ def _require_login_enabled():
         return _last_known_require_login
 
 
+# --- API key scope (before_request hook) ---
+# Registered ahead of the login / launch-PIN / profile gates on purpose: each of
+# them waves a valid key through, so a read-scope key has to be held to its
+# narrower access before any of them sees it.
+@app.before_request
+def _enforce_api_key_scope():
+    from api.auth import enforce_read_key_scope
+    return enforce_read_key_scope()
+
+
 # --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
 @app.before_request
 def _enforce_login():
@@ -4129,8 +4139,13 @@ def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
     from api import key_store
     from api.helpers import api_success
+    from api.auth import SCOPE_ADMIN, VALID_SCOPES
+    from api.helpers import api_error
     body = request.get_json(silent=True) or {}
-    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    scope = body.get("scope", SCOPE_ADMIN)
+    if scope not in VALID_SCOPES:
+        return api_error("BAD_REQUEST", f"scope must be one of: {', '.join(VALID_SCOPES)}.", 400)
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""), scope)
     return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
