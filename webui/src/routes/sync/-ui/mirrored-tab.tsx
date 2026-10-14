@@ -182,6 +182,7 @@ function MirroredCardMenu({
   onClear,
   onDelete,
   onToggleOrganize,
+  onCopyToMine,
 }: {
   row: MirroredPlaylistRow;
   top: number;
@@ -195,6 +196,8 @@ function MirroredCardMenu({
   onClear: () => void;
   onDelete: () => void;
   onToggleOrganize: (enabled: boolean) => void;
+  /** a mirror only: an editable copy in My Playlists */
+  onCopyToMine?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const pos = usePopoverPosition({ top, left }, ref);
@@ -271,6 +274,7 @@ function MirroredCardMenu({
       ) : null}
       <div className="pl-menu-sep" />
       {item('Rename', onRename)}
+      {!isUserPlaylist(row) && onCopyToMine && item('Copy to My Playlists', onCopyToMine)}
       {!isUserPlaylist(row) && item('Edit source link', onEditSource)}
       {item('Export', onExport)}
       {/* Only offered when there IS a discovery to clear (575-582). */}
@@ -820,6 +824,22 @@ export function MirroredTab({
    * playlist behind it opened an empty discovery modal nobody could use
    * (#1405). the detail's Discover button reopens the discovery instead.
    */
+  /** make a mirror yours, from its card menu or its detail: the copy opens,
+   *  ready to edit, and the mirror keeps syncing from its source */
+  const copyToMine = useCallback(async (mirrorId: number) => {
+    try {
+      const copy = await copyMirrorToUserPlaylist(mirrorId);
+      const data = await fetchMirroredPlaylist(copy.id);
+      if (!data.error) setDetail({ playlistId: copy.id, data });
+      window.showToast?.(`“${copy.name}” is in My Playlists now`, 'success');
+    } catch (err) {
+      window.showToast?.(
+        err instanceof Error ? err.message : 'Could not copy the playlist',
+        'error',
+      );
+    }
+  }, []);
+
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
       void openDetail(row.id);
@@ -1308,6 +1328,7 @@ export function MirroredTab({
           onClear={() => void onClear(menu.row)}
           onDelete={() => void onDelete(menu.row)}
           onToggleOrganize={(enabled) => void setOrganize(menu.row, enabled)}
+          onCopyToMine={() => void copyToMine(menu.row.id)}
         />
       )}
       {exporting && (
@@ -1385,23 +1406,7 @@ export function MirroredTab({
               : undefined
           }
           onRefresh={() => editTracks(detail.playlistId, async () => {})}
-          onMakeMine={
-            isUserPlaylist(detail.data)
-              ? undefined
-              : async () => {
-                  try {
-                    const copy = await copyMirrorToUserPlaylist(detail.playlistId);
-                    const data = await fetchMirroredPlaylist(copy.id);
-                    if (!data.error) setDetail({ playlistId: copy.id, data });
-                    window.showToast?.(`“${copy.name}” is in My Playlists now`, 'success');
-                  } catch (err) {
-                    window.showToast?.(
-                      err instanceof Error ? err.message : 'Could not copy the playlist',
-                      'error',
-                    );
-                  }
-                }
-          }
+          onMakeMine={isUserPlaylist(detail.data) ? undefined : () => copyToMine(detail.playlistId)}
           onDuplicate={
             isUserPlaylist(detail.data)
               ? async () => {

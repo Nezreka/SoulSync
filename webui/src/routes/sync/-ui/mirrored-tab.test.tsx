@@ -1618,6 +1618,42 @@ describe('play from a card, and copy a mirror to My Playlists', () => {
     expect(document.querySelector('#mirrored-track-modal')).toBeNull();
   });
 
+  it('the card menu offers Copy to My Playlists on a mirror, and it opens the copy', async () => {
+    stubFetch();
+    window.showToast = vi.fn();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url === '/api/user-playlists/from-mirror/3' && method === 'POST')
+        return { success: true, id: 9, name: 'Road Trip' };
+      if (url === '/api/mirrored-playlists/9')
+        return {
+          id: 9,
+          name: 'Road Trip',
+          source: 'soulsync',
+          source_playlist_id: 'x',
+          tracks: TRACKS,
+        };
+      return { states: [] };
+    };
+    render(<Harness />);
+    await screen.findByText('Road Trip');
+    runCardAction('Copy to My Playlists');
+    await waitFor(() => expect(screen.getByText('Your Playlist')).toBeInTheDocument());
+    expect(calls.some((c) => c.url === '/api/user-playlists/from-mirror/3')).toBe(true);
+  });
+
+  it('a user playlist’s card menu has no Copy to My Playlists: it is already yours', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists' ? [{ ...ROW, source: 'soulsync' }] : { states: [] };
+    render(<Harness scope="user" />);
+    await screen.findByText('Road Trip');
+    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).not.toContain(
+      'Copy to My Playlists',
+    );
+  });
+
   it('Copy to My Playlists makes the copy and opens it, editable', async () => {
     stubFetch();
     window.showToast = vi.fn();
