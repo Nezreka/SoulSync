@@ -25282,19 +25282,20 @@ class MusicDatabase:
                                WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                                    -- Separate probes keep each provider lookup indexed.
-                                    -- After ANALYZE, mostly-NULL provider IDs can make
-                                    -- one multi-column OR scan tracks for every mpt row.
+                                    -- Separate probes avoid a multi-column OR scan.
+                                    -- INDEXED BY also forces seeks on older SQLite:
+                                    -- after ANALYZE, mostly-NULL IDs can otherwise
+                                    -- cause even a single-column probe to scan its index.
                                     AND (
-                                        EXISTS (SELECT 1 FROM tracks ti
+                                        EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_spotify_id
                                                 WHERE ti.spotify_track_id = mpt.source_track_id)
-                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                        OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_deezer_id
                                                    WHERE ti.deezer_id = mpt.source_track_id)
-                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                        OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_tidal_id
                                                    WHERE ti.tidal_id = mpt.source_track_id)
-                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                        OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_qobuz_id
                                                    WHERE ti.qobuz_id = mpt.source_track_id)
-                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                        OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_itunes_id
                                                    WHERE ti.itunes_track_id = mpt.source_track_id)
                                     ))
                                    -- The name join stays exact (case-sensitive):
@@ -25427,18 +25428,18 @@ class MusicDatabase:
                         WHERE mpt.playlist_id = ?
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             -- Keep the same independently indexed provider probes
-                             -- as the batched counts, even after ANALYZE.
+                             -- Force the same provider-index seeks as the batched
+                             -- counts, including on older SQLite after ANALYZE.
                              AND (
-                                 EXISTS (SELECT 1 FROM tracks ti
+                                 EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_spotify_id
                                          WHERE ti.spotify_track_id = mpt.source_track_id)
-                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                 OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_deezer_id
                                             WHERE ti.deezer_id = mpt.source_track_id)
-                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                 OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_tidal_id
                                             WHERE ti.tidal_id = mpt.source_track_id)
-                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                 OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_qobuz_id
                                             WHERE ti.qobuz_id = mpt.source_track_id)
-                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                 OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_itunes_id
                                             WHERE ti.itunes_track_id = mpt.source_track_id)
                              ))
                             OR EXISTS (SELECT 1 FROM artists a
