@@ -338,6 +338,46 @@ class TestReleaseTitleIdentity:
 # ---------------------------------------------------------------------------
 
 
+class TestSameScriptRetitleNeedsArtistEvidence:
+    """the rescue skips the artist check, which is only safe for a retitle
+    into another script (the reporter's chinese -> english case). with
+    both titles latin and the artist wrong, an exact other-release title
+    is not identity: some release listing a different artist's track as
+    "Intro" would otherwise bless that wrong file."""
+
+    def _wrong_artist_intro(self):
+        return {'title': 'Prelude', 'artist': 'Some Other Band', 'mbid': 'm-x',
+                'score': 1.0, 'alternate_titles': ['Intro']}
+
+    def test_same_script_retitle_with_wrong_artist_does_not_rescue(self):
+        out = evaluate('Intro', 'The Expected Artist', [self._wrong_artist_intro()],
+                       fingerprint_score=1.0)
+        assert out.decision == Decision.FAIL
+
+    def test_same_script_retitle_with_matching_artist_rescues(self):
+        rec = dict(self._wrong_artist_intro(), artist='The Expected Artist')
+        out = evaluate('Intro', 'The Expected Artist', [rec], fingerprint_score=1.0)
+        assert out.decision == Decision.PASS
+        assert 'Intro' in out.reason
+
+    def test_same_script_retitle_with_artist_alias_rescues(self):
+        out = evaluate('Intro', 'Expected Alias', [self._wrong_artist_intro()],
+                       fingerprint_score=1.0,
+                       aliases_provider=['Some Other Band'])
+        assert out.decision == Decision.PASS
+
+    def test_same_script_retitle_without_expected_artist_rescues(self):
+        out = evaluate('Intro', '', [self._wrong_artist_intro()], fingerprint_score=1.0)
+        assert out.decision == Decision.PASS
+
+    def test_cross_script_retitle_still_needs_no_artist(self):
+        # the reporter's exact shape stays rescued.
+        out = evaluate('Myriad Sins', 'Linyao Feng',
+                       [_reporter_recording(alternate_titles=list(ALTERNATES))],
+                       fingerprint_score=1.0)
+        assert out.decision == Decision.PASS
+
+
 def _mb_payload():
     """Shape of get_recording(inc=releases+media+aliases) for the
     reporter's recording (verified live against MusicBrainz): ``media``

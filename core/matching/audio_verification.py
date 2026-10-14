@@ -580,6 +580,19 @@ def evaluate(expected_title: str, expected_artist: str,
         expected_title, recordings, expected_version,
         fingerprint_score=fingerprint_score,
         accept_version=accept_version)
+    if identity is not None and not no_expected_artist:
+        # no artist evidence is only waived for a retitle into another
+        # script (the reported shape: chinese canonical, english release
+        # title, composer vs group credit). a same-script retitle with a
+        # mismatched artist is how a wrong song by someone else that one
+        # release happens to list as "Intro" would get blessed.
+        _id_rec = identity[0]
+        _id_artist = _id_rec.get('artist') or ''
+        if not (is_cross_script_mismatch(expected_title, _id_rec.get('title') or '')
+                or is_cross_script_mismatch(expected_artist, _id_artist)
+                or _alias_aware_artist_sim(expected_artist, _id_artist,
+                                           aliases_provider) >= ARTIST_MATCH_THRESHOLD):
+            identity = None
     if identity is not None:
         id_rec, id_alt, id_source = identity
         # Reported for the log/outcome only — plain similarity, NOT the
