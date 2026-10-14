@@ -1834,7 +1834,7 @@ export function ReviewPage() {
     );
 
   return (
-    <main className={`page-shell ${styles.page}`}>
+    <main className={`page-shell review-queue-root ${styles.page}`}>
       <header className={styles.header}>
         <div>
           <a href="/tools" className={styles.back}>

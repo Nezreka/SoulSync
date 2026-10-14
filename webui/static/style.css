@@ -7456,6 +7456,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 }
 
+/* The review queue reflows its own sidebar and inspector below desktop width. */
+@media (min-width: 769px) and (max-width: 1450px) {
+    .main-container:has(.review-queue-root),
+    .main-content:has(.review-queue-root) {
+        min-width: 0;
+    }
+}
+
 /* Optimize for larger screens */
 @media (min-width: 1440px) {
     .stats-grid {
