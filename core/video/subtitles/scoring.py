@@ -35,7 +35,9 @@ DEFAULT_MIN_SCORE = 24.0
 
 #: Allowed ``subtitle_hi_forced`` setting values (validated in
 #: ``core.video.organization.normalize``; anything else reads as "off").
-HI_FORCED_PREFS = ("off", "prefer_hi", "prefer_forced")
+#: forced isn't a preference any more: forced tracks are their own wanted
+#: rows (the ``subtitle_forced`` setting), never a stand-in for a full one.
+HI_FORCED_PREFS = ("off", "prefer_hi")
 
 #: Tiebreak epsilon for the HI/forced preference — far below any real score
 #: delta (the gate is 24.0), so it only ever breaks exact ties: it can never
@@ -162,8 +164,6 @@ def score_candidate(candidate, query) -> float:
     try:
         _pref = str(getattr(query, "hi_forced_pref", "off") or "off").strip().lower()
         if _pref == "prefer_hi" and bool(getattr(candidate, "hi", False)):
-            score += _HI_FORCED_PREF_TIEBREAK
-        elif _pref == "prefer_forced" and bool(getattr(candidate, "forced", False)):
             score += _HI_FORCED_PREF_TIEBREAK
     except Exception:  # noqa: BLE001 - the preference is best-effort
         pass

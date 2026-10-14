@@ -59,6 +59,7 @@
         youtube_mass_missing: 'Mass Missing',
         watched_cleanup: 'Watched Cleanup',
         naming_mismatch: 'Naming',
+        missing_subtitles: 'Missing Subtitles',
     };
     // Types absent here are report-only: no approve button, dismiss + details only.
     var FIXABLE_TYPES = {
@@ -72,11 +73,12 @@
         youtube_mass_missing: 'Flag Individually',
         watched_cleanup: 'Clean Up',
         naming_mismatch: 'Rename',
+        missing_subtitles: 'Queue Subtitles',
     };
     var ACTION_LABELS = { wishlisted: 'Wishlisted', grabbed: 'Grabbed', refreshed: 'Refreshed',
         removed: 'Removed', resolved: 'Resolved',
         marked_deleted: 'Marked Deleted', forgotten: 'Forgotten', flagged: 'Flagged',
-        cleaned: 'Cleaned', renamed: 'Renamed' };
+        cleaned: 'Cleaned', renamed: 'Renamed', queued: 'Queued' };
     var GAP_LABELS = { unmatched: 'not TMDB-matched', overview: 'no summary',
         genres: 'no genres', poster: 'no poster', backdrop: 'no backdrop' };
 
@@ -443,6 +445,7 @@
         if (f.finding_type === 'youtube_mass_missing') return massMissingDetailHTML(d);
         if (f.finding_type === 'watched_cleanup') return watchedDetailHTML(d);
         if (f.finding_type === 'naming_mismatch') return namingDetailHTML(d);
+        if (f.finding_type === 'missing_subtitles') return subtitlesDetailHTML(d);
         return '<pre class="repair-finding-json">' + esc(JSON.stringify(d, null, 2)) + '</pre>';
     }
 
@@ -631,6 +634,47 @@
             '<p class="vrf-show-overview"><strong>Becomes:</strong> ' + esc(d.expected_path || '') + '</p>' +
             '<p class="vrf-show-overview">Approving renames the file (sidecars and subtitles come along); ' +
                 'the server picks the new name up on its next scan. Nothing is ever overwritten.</p>';
+    }
+
+    // ── Missing Subtitles: which languages, per movie or per episode ─────────
+    function subLangChips(missing) {
+        return (missing || []).map(function (m) {
+            var label = String(m[0] || '?').toUpperCase() + (m[1] ? ' HI' : '') + (m[2] ? ' forced' : '');
+            return '<span class="vrf-chip vrf-chip--miss">' + esc(label) + '</span>';
+        }).join('');
+    }
+    function subtitlesDetailHTML(d) {
+        var isShow = d.kind === 'show';
+        var poster = d.library_id != null
+            ? '<img class="vrf-poster" src="/api/video/poster/' + (isShow ? 'show' : 'movie') + '/' +
+              d.library_id + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<div class="vrf-poster vrf-poster--empty">💬</div>';
+        var items = d.items || [];
+        var body;
+        if (isShow) {
+            var shown = items.slice(0, 60);
+            body = '<div class="repair-ep-list">' + shown.map(function (it) {
+                return '<div class="repair-ep-row"><span class="repair-ep-code">' + esc(it.label || '') +
+                    '</span><span class="repair-ep-title">' + subLangChips(it.missing) + '</span></div>';
+            }).join('') + '</div>' +
+            (items.length > shown.length
+                ? '<p class="repair-finding-hint">+' + (items.length - shown.length) + ' more episodes</p>' : '');
+        } else {
+            body = '<div class="vrf-chips">' + subLangChips((items[0] || {}).missing) + '</div>';
+        }
+        var view = d.library_id != null
+            ? '<button class="vrf-btn" type="button" data-vjr-open-' + (isShow ? 'show' : 'movie') + '="' +
+              d.library_id + '">View ' + (isShow ? 'show' : 'movie') + ' →</button>' : '';
+        return '<div class="vrf-show">' + poster +
+            '<div class="vrf-show-info">' +
+                '<div class="vrf-show-title">' + esc(d.title || '?') +
+                    (d.year ? ' <span class="vrf-mini-year">' + esc(d.year) + '</span>' : '') + '</div>' +
+                (isShow ? '' : body) +
+                '<p class="vrf-show-overview">No subtitle file next to the video and no embedded track ' +
+                    'in these languages. Approving queues them: the subtitle worker fetches them within ' +
+                    'your daily quota. Nothing is downloaded from here.</p>' +
+                '<div class="vrf-actions">' + view + '</div>' +
+            '</div></div>' + (isShow ? body : '');
     }
 
     function simpleEpisodeList(d) {

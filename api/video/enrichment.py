@@ -232,10 +232,24 @@ def register_routes(bp):
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
         w = engine().worker(service)
-        if not w:
-            return jsonify({"success": False, "error": "unknown service"}), 404
+        if w:
+            # matcher workers wrap a client; backfill workers (fanart,
+            # opensubtitles, trakt...) carry test() themselves.
+            run_test = (getattr(w, "client", None) or w).test
+        else:
+            # subtitle-only providers (subdl, subsource) aren't enrichment
+            # workers; their keys live top-level like the rest.
+            from core.video.subtitles.providers import get_providers
+            from . import get_video_db
+            provider = get_providers().get(service)
+            if provider is None:
+                return jsonify({"success": False, "error": "unknown service"}), 404
+            db = get_video_db()
+
+            def run_test():
+                return provider.test(lambda k, d=None: db.get_setting(k) or d)
         try:
-            ok, msg = w.client.test()
+            ok, msg = run_test()
             return jsonify({"success": bool(ok), "message": msg, "error": None if ok else msg})
         except Exception:
             logger.exception("video enrichment test failed for %s", service)

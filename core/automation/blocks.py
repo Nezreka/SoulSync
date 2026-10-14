@@ -558,7 +558,8 @@ ACTIONS: list[dict] = [
                       {"value": "wishlist_audit", "label": "Wishlist Audit"},
                       {"value": "youtube_ghosts", "label": "YouTube Ghost Files"},
                       {"value": "watched_cleanup", "label": "Watched Cleanup"},
-                      {"value": "naming_conformance", "label": "Naming Conformance"}],
+                      {"value": "naming_conformance", "label": "Naming Conformance"},
+                      {"value": "missing_subtitles", "label": "Missing Subtitles"}],
           "default": "all"}
      ]},
 ]

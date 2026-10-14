@@ -27,6 +27,8 @@ from .helpers import (
     srt_name,
     valid_lang_code,
     validate_lang_codes,
+    wanted_variants,
+    is_wanted_variant,
     write_subtitles,
 )
 from .providers.opensubtitles import opensubtitles_fetcher, pick_best_file, search_params
@@ -35,4 +37,5 @@ __all__ = ["parse_langs", "parse_provider_order", "pick_best_file", "srt_name",
            "search_params", "opensubtitles_fetcher", "write_subtitles",
            "validate_lang_codes", "valid_lang_code", "MAX_LANG_CODES",
            "effective_subtitle_languages",
-           "show_override_for_download", "SubtitleLookupError"]
+           "show_override_for_download", "SubtitleLookupError",
+           "wanted_variants", "is_wanted_variant"]

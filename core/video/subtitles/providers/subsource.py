@@ -13,15 +13,15 @@ Isolated: stdlib only; no music imports.
 
 from __future__ import annotations
 
-import io
 import json
 import re
 import urllib.parse
 import urllib.request
-import zipfile
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
+from ..archive import extract_srt, pick_member
+from .base import (SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter,
+                   http_error_message)
 
 BASE = "https://api.subsource.net/api/v1"
 _UA = "SoulSync v1.0"
@@ -68,8 +68,34 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+#: subsource names languages in lowercase english with underscores (seen
+#: live: 'english', 'brazilian_portuguese', 'farsi_persian'). the chinese
+#: names are subscene's legacy pair: 'chinese_bg_code' is simplified (GB),
+#: 'big_5_code' traditional.
+_CODE_TO_NAME = {
+    "pt-br": "brazilian_portuguese", "fa": "farsi_persian",
+    "zh": "chinese_bg_code", "zh-cn": "chinese_bg_code", "zh-tw": "big_5_code",
+}
+_NAME_TO_CODE = {"brazilian_portuguese": "pt-br", "farsi_persian": "fa",
+                 "chinese_bg_code": "zh", "big_5_code": "zh-tw"}
+
+
+def _language_name(code: str) -> str | None:
+    """A soulsync code -> subsource's language name, or None. Pure."""
+    from ..languages import NAME_TO_CODE
+    c = str(code or "").strip().lower()
+    if c in _CODE_TO_NAME:
+        return _CODE_TO_NAME[c]
+    for name, mapped in NAME_TO_CODE.items():
+        if mapped == c and name.isascii() and name.isalpha():
+            return name
+    return None
+
+
 def _sub_lang(entry: dict) -> str:
     v = str(entry.get("language") or entry.get("lang") or "").strip().lower()
+    if v in _NAME_TO_CODE:
+        return _NAME_TO_CODE[v]
     if len(v) == 2 and v.isalpha():
         return v
     # Full language names ("portuguese", "dutch", "chinese") need the real
@@ -90,7 +116,7 @@ def _sub_hi(entry: dict) -> bool:
 
 
 def _sub_forced(entry: dict) -> bool:
-    for key in ("forced", "isForced", "is_forced"):
+    for key in ("foreignParts", "forced", "isForced", "is_forced"):
         v = entry.get(key)
         if isinstance(v, bool):
             return v
@@ -99,12 +125,32 @@ def _sub_forced(entry: dict) -> bool:
     return False
 
 
-def _sub_title(entry: dict) -> str:
+def _release_names(entry: dict) -> list[str]:
+    """Every release name an entry lists. subsource puts them in the
+    ``releaseInfo`` list. Pure."""
+    rel = entry.get("releaseInfo")
+    names = [str(r) for r in rel if r] if isinstance(rel, list) else ([str(rel)] if rel else [])
     for key in ("releaseName", "release_name", "release", "name", "title", "fileName"):
         v = entry.get(key)
         if v:
-            return str(v)
-    return ""
+            names.append(str(v))
+    return names
+
+
+def _sub_title(entry: dict) -> str:
+    names = _release_names(entry)
+    return names[0] if names else ""
+
+
+def _is_srt(entry: dict) -> bool:
+    """subsource shows a ``preview`` of the file. srt has '-->' timings;
+    subviewer/microdvd uploads don't and would fail extraction after
+    burning a download. No preview: give it the benefit of the doubt."""
+    preview = entry.get("preview")
+    return not preview or "-->" in str(preview)
+
+
+_EP_RANGE = re.compile(r"[Ss]\d{1,2}[Ee]\d{1,3}\s*(?:-\s*[Ee]?\d{1,3}|[Ee]\d{1,3})")
 
 
 def _sub_id(entry: dict) -> Any:
@@ -125,7 +171,11 @@ def _sub_episode(entry: dict) -> tuple[int | None, int | None]:
     season = _as_int(s_val)
     episode = _as_int(e_val)
     if season is None or episode is None:
-        m = re.search(r"[Ss](\d{1,2})[Ee](\d{1,3})", _sub_title(entry))
+        names = _release_names(entry)
+        if any(_EP_RANGE.search(n) for n in names):
+            return season, None  # a multi-episode pack: never one episode
+        m = next((m for m in (re.search(r"[Ss](\d{1,2})[Ee](\d{1,3})", n) for n in names) if m),
+                 None)
         if m:
             try:
                 if season is None:
@@ -137,48 +187,10 @@ def _sub_episode(entry: dict) -> tuple[int | None, int | None]:
     return season, episode
 
 
-def _pick_zip_member(names: list[str]) -> str | None:
-    """First real .srt in a zip; subtitle zips are single-file. Pure.
-
-    macOS-made zips carry AppleDouble shadow files (``__MACOSX/._movie.srt``)
-    that also end in .srt — picking one reads binary metadata and fails the
-    text check even though a valid subtitle sits next to it. Skip resource
-    forks and dotfiles.
-    """
-    for n in names:
-        if n.startswith("__MACOSX/"):
-            continue
-        base = n.rsplit("/", 1)[-1]
-        if base.startswith("."):
-            continue
-        if n.lower().endswith(".srt"):
-            return n
-    return None
-
-
-def _extract_srt(payload: bytes) -> str | None:
-    """SRT text from a download payload: zip -> first .srt, else raw text.
-    Pure (no network)."""
-    if not payload:
-        return None
-    data = payload
-    if payload[:4] == b"PK\x03\x04":
-        try:
-            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
-                member = _pick_zip_member(zf.namelist())
-                if not member:
-                    return None
-                data = zf.read(member)
-        except Exception:  # noqa: BLE001 - a bad zip is a miss
-            return None
-    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
-        try:
-            text = data.decode(enc)
-        except (UnicodeDecodeError, ValueError):
-            continue
-        if "-->" in text:
-            return text
-    return None
+# shared with the other providers: zip, RAR/7z (bsdtar) or a bare .srt,
+# commentary tracks and macOS shadow files skipped.
+_pick_zip_member = pick_member
+_extract_srt = extract_srt
 
 
 class SubSourceProvider(SubtitleProvider):
@@ -250,15 +262,21 @@ class SubSourceProvider(SubtitleProvider):
         return first.get("movieId") or first.get("movie_id") or first.get("id")
 
     def _list_subtitles(self, movie_id: Any, query: SubtitleQuery) -> list[dict]:
-        params: dict[str, Any] = {
-            "movieId": movie_id,
-            "language": query.language,
-            "limit": 100,
-            "sort": "popular",
-        }
-        if query.hi:
-            params["hearingImpaired"] = "true"
-        return _data_list(self._api_get("/subtitles", params))
+        name = _language_name(query.language)
+        if not name:
+            return []  # a language subsource doesn't carry
+        out: list[dict] = []
+        # 100 per page; a long-running show's season can run past one page.
+        for page in (1, 2, 3):
+            payload = self._api_get("/subtitles", {
+                "movieId": movie_id, "language": name, "limit": 100,
+                "page": page, "sort": "popular"})
+            out.extend(_data_list(payload))
+            pages = ((payload or {}).get("pagination") or {}).get("pages") \
+                if isinstance(payload, dict) else None
+            if not isinstance(pages, int) or page >= pages:
+                break
+        return out
 
     def _entries_to_candidates(self, entries: list[dict],
                                query: SubtitleQuery) -> list[SubtitleCandidate]:
@@ -269,7 +287,7 @@ class SubSourceProvider(SubtitleProvider):
         out: list[SubtitleCandidate] = []
         for entry in entries:
             sid = _sub_id(entry)
-            if sid is None:
+            if sid is None or not _is_srt(entry):
                 continue
             if _sub_lang(entry) not in ("", want):
                 # Empty language on the entry: keep it (can't do better);
@@ -300,6 +318,18 @@ class SubSourceProvider(SubtitleProvider):
                 download_count=dl_count,
             ))
         return out
+
+    def test(self, get_setting: Callable[[str, Any], Any]) -> tuple[bool, str]:
+        if not self.is_configured(get_setting):
+            return False, "No SubSource API key"
+        try:
+            j = self._api_get("/movies/search", {"searchType": "imdb", "imdb": "tt0137523"})
+        except Exception as e:  # noqa: BLE001
+            return False, http_error_message("SubSource", e)
+        if isinstance(j, dict) and isinstance(j.get("data"), list):
+            return True, "SubSource key OK"
+        msg = (j.get("error") or j.get("message")) if isinstance(j, dict) else None
+        return False, "SubSource: %s" % (msg or "unexpected response")
 
     # ── HTTP injection points (stubbed in tests) ─────────────────────────────
     def _api_get(self, path: str, params: dict) -> Any:

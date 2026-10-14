@@ -4020,8 +4020,8 @@
                                                             href="https://www.opensubtitles.com/en/consumers"
                                                             target="_blank" style="color: #22a079;">OpenSubtitles</a>
                                                         (register a consumer)</div>
-                                                    <div class="callback-help">Records which subtitle languages exist
-                                                        per title.</div>
+                                                    <div class="callback-help">Subtitle downloads, plus which
+                                                        subtitle languages exist per title.</div>
                                                 </div>
                                                 <button class="test-button" type="button"
                                                     data-video-test-service="opensubtitles">Test OpenSubtitles</button>
@@ -4045,6 +4045,8 @@
                                                             target="_blank" style="color: #22a079;">SubDL</a>
                                                         (account panel)</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="subdl">Test SubDL</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="subsource">
@@ -4065,6 +4067,8 @@
                                                             target="_blank" style="color: #22a079;">SubSource</a>
                                                         (profile page)</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="subsource">Test SubSource</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="trakt">
@@ -8289,11 +8293,11 @@
                                                         <input type="checkbox" id="vo-subs-dl">
                                                         <span>Download subtitles</span>
                                                     </label>
-                                                    <small class="settings-hint">Fetch external .srt files from
-                                                        OpenSubtitles next to the video. On by default for new
-                                                        imports &mdash; best effort: the OpenSubtitles free tier is
-                                                        quota-limited (~20 downloads/day), so anything missed is
-                                                        retried later.</small>
+                                                    <small class="settings-hint">Fetch external .srt files next to
+                                                        the video from the provider chain below, only for what's
+                                                        missing. On by default for new imports &mdash; free tiers
+                                                        are quota-limited (~20 downloads/day each), so anything
+                                                        missed is retried later.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8310,16 +8314,57 @@
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label for="vo-sub-hi-forced">Hearing-impaired / forced
+                                                    <label for="vo-sub-hi-forced">Hearing-impaired
                                                         preference:</label>
                                                     <select id="vo-sub-hi-forced">
                                                         <option value="off">Off — best match wins</option>
                                                         <option value="prefer_hi">Prefer hearing-impaired</option>
-                                                        <option value="prefer_forced">Prefer forced</option>
                                                     </select>
                                                     <small class="settings-hint">A tiebreak only, never a filter:
-                                                        when two subtitles score the same, the preferred kind
-                                                        wins.</small>
+                                                        when two subtitles score the same, the hearing-impaired
+                                                        one (sound cues, speaker names) wins.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-forced">
+                                                        <span>Also grab forced subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">On top of the full track, fetch a
+                                                        forced (foreign-parts-only) track per language, written as
+                                                        &lt;video&gt;.&lt;lang&gt;.forced.srt &mdash; the lines
+                                                        for scenes in another language, for when you watch
+                                                        without full subtitles. Many titles have none, so these
+                                                        often stay missing.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Already have it when&hellip;</label>
+                                                    <small class="settings-hint">Before fetching, SoulSync checks what
+                                                        the video already has: any sidecar next to it
+                                                        (<code>.en.srt</code>, <code>.eng.srt</code>,
+                                                        <code>.English.sdh.srt</code>, or an unlabeled
+                                                        <code>.srt</code> whose language it detects) and the
+                                                        file's own embedded tracks.</small>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-use-embedded">
+                                                        <span>Count embedded subtitles</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-pgs">
+                                                        <span>&hellip;except PGS (Blu-ray image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-vobsub">
+                                                        <span>&hellip;except VobSub (DVD image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-ass">
+                                                        <span>&hellip;except ASS/SSA (styled subs)</span>
+                                                    </label>
+                                                    <small class="settings-hint">Ignore image subs if your players
+                                                        can't show them (or have to transcode for them) and you'd
+                                                        rather have a text .srt.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8431,17 +8476,17 @@
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label>Library backfill:</label>
+                                                    <label>Videos already in your library:</label>
                                                     <div>
-                                                        <button class="test-button" id="vo-sub-backfill"
-                                                            type="button">Scan library for missing subtitles</button>
+                                                        <button class="test-button" id="vo-sub-open-job"
+                                                            type="button">Missing Subtitles job &rarr;</button>
                                                     </div>
-                                                    <small class="settings-hint"
-                                                        id="vo-sub-backfill-status"></small>
-                                                    <small class="settings-hint">Queues wanted rows for
-                                                        library videos that have no subtitles yet, so the
-                                                        worker fetches them like new imports. Runs in the
-                                                        background; needs Download subtitles on.</small>
+                                                    <small class="settings-hint" id="vo-sub-job-status"></small>
+                                                    <small class="settings-hint">New imports are covered
+                                                        automatically. The Missing Subtitles job on the Tools
+                                                        page checks everything you already own on a schedule
+                                                        and queues what's missing; turn on its Dry Run to
+                                                        review findings first.</small>
                                                 </div>
                                             </div>
 

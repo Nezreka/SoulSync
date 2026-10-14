@@ -96,6 +96,30 @@ def srt_name(video_path: Any, lang: str, hi: bool = False,
     return name + ".srt"
 
 
+def wanted_variants(langs: Any, settings: Any) -> list:
+    """[(lang, hi, forced)] the system wants for a language list: the full
+    track per language, plus a forced (foreign-parts-only) track per language
+    when ``subtitle_forced`` is on — bazarr's "add the language twice, once
+    forced" profile, as one switch. Pure."""
+    also_forced = bool((settings or {}).get("subtitle_forced")) \
+        if isinstance(settings, dict) else False
+    out = []
+    for lang in langs or []:
+        out.append((lang, False, False))
+        if also_forced:
+            out.append((lang, False, True))
+    return out
+
+
+def is_wanted_variant(row: Any, settings: Any) -> bool:
+    """False for a system-created forced row once ``subtitle_forced`` is off
+    (residue the worker deletes). Full rows are always a wanted shape. Pure."""
+    if not bool((row or {}).get("forced")):
+        return True
+    return bool((settings or {}).get("subtitle_forced")) \
+        if isinstance(settings, dict) else False
+
+
 def write_subtitles(video_path: str, langs: list, identity: dict, fetch: Callable, fs: Any) -> None:
     """For each language not already present as ``<stem>.<lang>.srt`` next to the video,
     fetch and write it via the injected ``fetch`` + ``fs`` (``list_dir``, ``write_text``).

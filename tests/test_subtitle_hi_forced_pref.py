@@ -29,13 +29,11 @@ def test_prefer_hi_breaks_exact_ties():
     assert score_candidate(hi, q) > score_candidate(plain, q)
 
 
-def test_prefer_forced_breaks_exact_ties():
+def test_prefer_forced_is_gone_and_reads_as_off():
+    # forced tracks are their own wanted rows now (subtitle_forced); a forced
+    # candidate never gets a bonus toward a full track
     q = _query("prefer_forced")
-    plain = _cand()
-    forced = _cand(forced=True)
-    assert score_candidate(forced, q) > score_candidate(plain, q)
-    # prefer_forced does NOT prefer hi
-    assert score_candidate(_cand(hi=True), q) == score_candidate(plain, q)
+    assert score_candidate(_cand(forced=True), q) == score_candidate(_cand(), q)
 
 
 def test_off_is_stable_no_bonus():
@@ -76,7 +74,7 @@ def test_organization_normalize_hi_forced():
     d = organization.normalize({"subtitle_hi_forced": "prefer_hi"})
     assert d["subtitle_hi_forced"] == "prefer_hi"
     d = organization.normalize({"subtitle_hi_forced": "PREFER_FORCED"})
-    assert d["subtitle_hi_forced"] == "prefer_forced"
+    assert d["subtitle_hi_forced"] == "off" and d["subtitle_forced"] is True
     d = organization.normalize({"subtitle_hi_forced": "bogus"})
     assert d["subtitle_hi_forced"] == "off"
     d = organization.normalize({})
