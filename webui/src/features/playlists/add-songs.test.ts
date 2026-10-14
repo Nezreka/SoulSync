@@ -32,6 +32,15 @@ describe('candidatesFromSearch', () => {
     expect(rows[0]).toMatchObject({ duration_ms: 219000, image_url: '/a.jpg' });
   });
 
+  it('keeps the hit’s id and source for identify, only when it has both', () => {
+    const [withId, without] = candidatesFromSearch([
+      { name: 'A', artist: 'x', id: '0flx', source: 'spotify' },
+      { name: 'B', artist: 'y', source: 'spotify' },
+    ]);
+    expect(withId).toMatchObject({ source: 'spotify', source_id: '0flx' });
+    expect(without).not.toHaveProperty('source_id');
+  });
+
   it('is empty for no results', () => {
     expect(candidatesFromSearch(undefined)).toEqual([]);
   });

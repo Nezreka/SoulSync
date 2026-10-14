@@ -1583,3 +1583,13 @@ def server_tz(monkeypatch):
 def utc_server(server_tz):
     """the server's local time is utc: a stored hour is the hour shown"""
     server_tz('UTC')
+
+
+@pytest.fixture(autouse=True)
+def _no_background_playlist_identify(monkeypatch):
+    """an edit to a user playlist queues a background identify. importing
+    web_server wires that to the real discovery worker, so any test that
+    touches the user-playlist routes afterwards would start real discovery
+    threads. unhooked here; the auto_identify tests hook their own runner."""
+    from core.playlists import auto_identify
+    monkeypatch.setattr(auto_identify, "_runner", None)

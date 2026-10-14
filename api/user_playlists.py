@@ -14,6 +14,7 @@ import os
 
 from flask import Blueprint, jsonify, request, send_file
 
+from core.playlists import auto_identify
 from core.playlists import user_playlists as up
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
@@ -52,6 +53,15 @@ def _cover_base_dir():
     return str(base) if base else None
 
 
+def _identify_soon(playlist_id):
+    """songs went in: identify them in the background so the playlist is
+    always ready to sync. best effort, never fails the request."""
+    try:
+        auto_identify.request(int(playlist_id))
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"could not queue identify for user playlist {playlist_id}: {e}")
+
+
 def _not_found():
     return jsonify({"error": "Playlist not found"}), 404
 
@@ -59,7 +69,19 @@ def _not_found():
 @bp.route('/api/user-playlists', methods=['GET'])
 def list_user_playlists():
     try:
-        return jsonify({"playlists": up.list_playlists(get_database(), get_current_profile_id())})
+        database = get_database()
+        rows = up.list_playlists(database, get_current_profile_id())
+        # playlists made before they identified themselves, or whose last pass
+        # got cut short, catch up here. counting is two indexed queries each,
+        # and a playlist that is all identified costs nothing more
+        for row in rows:
+            try:
+                discovered, total = database.get_mirrored_playlist_discovery_counts(row['id'])
+                if total and discovered < total:
+                    _identify_soon(row['id'])
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"could not count user playlist {row['id']}: {e}")
+        return jsonify({"playlists": rows})
     except Exception as e:
         logger.error(f"Error listing user playlists: {e}")
         return jsonify({"error": "Failed to load playlists"}), 500
@@ -77,6 +99,7 @@ def create_user_playlist():
             result.update(up.add_tracks(
                 database, _own_user_playlist(database, playlist_id), data['tracks'],
             ))
+            _identify_soon(playlist_id)
         return jsonify(result)
     except up.UserPlaylistError as e:
         return jsonify({"error": str(e)}), 400
@@ -99,6 +122,8 @@ def add_user_playlist_tracks(playlist_id):
         result = up.add_tracks(
             database, playlist, tracks, allow_duplicates=data.get('allow_duplicates') is True,
         )
+        if result.get('added'):
+            _identify_soon(playlist_id)
         return jsonify({"success": True, **result})
     except up.UserPlaylistError as e:
         return jsonify({"error": str(e)}), 400
@@ -159,7 +184,10 @@ def like_songs():
     if tracks is None:
         return jsonify({"error": "tracks must be a list"}), 400
     try:
-        return jsonify({"success": True, **up.like(get_database(), get_current_profile_id(), tracks)})
+        result = up.like(get_database(), get_current_profile_id(), tracks)
+        if result.get('added'):
+            _identify_soon(result['id'])
+        return jsonify({"success": True, **result})
     except up.UserPlaylistError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
@@ -194,6 +222,8 @@ def copy_mirror_to_user_playlist(mirror_id):
         if not mirror or up.is_user_playlist(mirror):
             return _not_found()
         result = up.copy_mirror(database, mirror, profile_id, data.get('name'))
+        # the mirror's matches came across; this only finishes what it hadn't
+        _identify_soon(result['id'])
         return jsonify({"success": True, **result})
     except up.UserPlaylistError as e:
         return jsonify({"error": str(e)}), 400
@@ -269,6 +299,7 @@ def duplicate_user_playlist(playlist_id):
         result = up.duplicate_playlist(
             database, playlist, data.get('name'), base_dir=_cover_base_dir(),
         )
+        _identify_soon(result['id'])
         return jsonify({"success": True, **result})
     except up.UserPlaylistError as e:
         return jsonify({"error": str(e)}), 400

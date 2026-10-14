@@ -23478,6 +23478,13 @@ app.register_blueprint(_bp_mpl())
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
 _cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
+# your own playlists identify themselves in the background after every edit,
+# so they are always ready to sync (core/playlists/auto_identify)
+from core.playlists import auto_identify as _auto_identify
+_auto_identify.configure(
+    runner=lambda pls: _run_playlist_discovery_worker(pls, automation_id=None),
+    get_playlist=lambda pid: get_database().get_mirrored_playlist(pid),
+)
 
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc

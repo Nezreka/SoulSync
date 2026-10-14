@@ -95,13 +95,20 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         duration_ms = 0
     image = raw.get('image_url')
-    return {
+    track = {
         'track_name': title,
         'artist_name': artist,
         'album_name': album,
         'duration_ms': duration_ms,
         'image_url': image if isinstance(image, str) and image.startswith(('http://', 'https://', '/')) else None,
     }
+    # where the page got it, when it knows: identify fetches that exact track
+    # by id instead of searching for it (core/playlists/track_origin)
+    from core.playlists.track_origin import clean_origin
+    origin = clean_origin(raw.get('source'), raw.get('source_id'))
+    if origin:
+        track['extra_data'] = {'origin': origin}
+    return track
 
 
 _BRACKETED = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')

@@ -25,6 +25,8 @@ export function songKey(title: string, artist: string): string {
 }
 
 interface SearchTrackLike {
+  id?: string | number;
+  source?: string;
   name?: string;
   artist?: string;
   artists?: (string | { name?: string })[];
@@ -60,6 +62,8 @@ export function candidatesFromSearch(
       album_name: album,
       duration_ms: track.duration_ms ?? 0,
       image_url: track.image_url || null,
+      // so identify fetches this exact track rather than searching for it
+      ...(track.id && track.source ? { source: track.source, source_id: String(track.id) } : {}),
     });
   }
   return out;

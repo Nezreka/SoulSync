@@ -536,4 +536,13 @@ describe('playlistTrackOf', () => {
     expect(playlistTrackOf({ name: 'A' })).toBeNull();
     expect(playlistTrackOf({ artist: 'B' })).toBeNull();
   });
+
+  it('carries the result’s own id, so identify fetches that exact track', async () => {
+    const { playlistTrackOf } = await import('./-search.helpers');
+    expect(
+      playlistTrackOf({ name: 'A', artist: 'B', id: 136340808, source: 'deezer' }),
+    ).toMatchObject({ source: 'deezer', source_id: '136340808' });
+    const noId = playlistTrackOf({ name: 'A', artist: 'B', source: 'deezer' });
+    expect(noId).not.toHaveProperty('source');
+  });
 });

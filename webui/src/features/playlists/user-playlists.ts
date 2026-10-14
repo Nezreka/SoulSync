@@ -18,6 +18,10 @@ export interface UserPlaylistTrack {
   album_name?: string;
   duration_ms?: number;
   image_url?: string | null;
+  /** where the page got it (spotify, deezer, …) and that service's id for it.
+   *  identify fetches the exact track by it instead of searching. */
+  source?: string;
+  source_id?: string;
 }
 
 export interface UserPlaylistSummary {
