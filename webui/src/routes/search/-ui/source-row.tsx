@@ -122,7 +122,7 @@ export function SourcePicker({
     return (
       <span className={styles.source} data-static>
         <SourceLogo source="youtube_videos" />
-        YouTube
+        <span className={styles.sourceLabel}>YouTube</span>
       </span>
     );
   }
@@ -142,7 +142,7 @@ export function SourcePicker({
         }}
       >
         <SourceLogo source={current} />
-        {sourceLabel(current)}
+        <span className={styles.sourceLabel}>{sourceLabel(current)}</span>
         <CaretIcon className={styles.caret} />
       </button>
       {open ? (
