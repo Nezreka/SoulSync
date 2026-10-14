@@ -53,8 +53,10 @@ _FEAT_BRACKET_RE = re.compile(
 )
 # Trailing credit: "Song feat. Z". The lazy tail stops at a bracket so
 # a following "(Live)" survives — with its separating space intact.
+# a name has to follow the keyword, so a title that just ends in the
+# word ("Tribute to Little Feat") is left alone.
 _FEAT_TRAILING_RE = re.compile(
-    r'\s+(?:feat\.?|ft\.?|featuring)\b.*?(?=\s*(?:[\(\[]|$))',
+    r'\s+(?:feat|ft|featuring)\b(?=\.?\s+[^\s\(\[]).*?(?=\s*(?:[\(\[]|$))',
     re.IGNORECASE,
 )
 _FEAT_SEGMENT_HEAD_RE = re.compile(
@@ -176,6 +178,32 @@ def featured_credit_names(title: str) -> list:
                     if sub and sub not in names:
                         names.append(sub)
     return names
+
+
+def _feat_miss_metadata(title: str) -> Optional[Dict[str, Any]]:
+    """what a negative cache row stores for ``title``.
+
+    a feat.-titled miss gets a marker saying the stripped retry already
+    ran (#1705). plain titles store nothing, same as before.
+    """
+    if strip_featuring_credit(title) != title:
+        return {'feat_retry': 1}
+    return None
+
+
+def _is_pre_feat_fix_miss(cached: Dict[str, Any], title: str) -> bool:
+    """true for a negative row on a feat. title with no #1705 marker.
+
+    those were written before the stripped retry existed, so they only
+    prove the feat. phrase search missed. without this every track hit
+    by #1705 stays unmatched until the 30 day negative ttl runs out.
+    """
+    if cached.get('musicbrainz_id'):
+        return False
+    if strip_featuring_credit(title) == title:
+        return False
+    metadata = cached.get('metadata')
+    return not (isinstance(metadata, dict) and metadata.get('feat_retry'))
 
 
 class MusicBrainzService:
@@ -637,7 +665,7 @@ class MusicBrainzService:
         """
         # Check cache first
         cached = self._check_cache('release', album_name, artist_name)
-        if cached:
+        if cached and not _is_pre_feat_fix_miss(cached, album_name):
             logger.debug(f"Cache hit for release '{album_name}'")
             return {
                 'mbid': cached['musicbrainz_id'],
@@ -682,7 +710,8 @@ class MusicBrainzService:
 
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
-                self._save_to_cache('release', album_name, artist_name, None, None, 0)
+                self._save_to_cache('release', album_name, artist_name, None,
+                                    _feat_miss_metadata(album_name), 0)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -703,7 +732,8 @@ class MusicBrainzService:
                 }
             else:
                 logger.info(f"Low confidence match for release '{album_name}' (best: {best_confidence})")
-                self._save_to_cache('release', album_name, artist_name, None, None, best_confidence)
+                self._save_to_cache('release', album_name, artist_name, None,
+                                    _feat_miss_metadata(album_name), best_confidence)
                 return None
                 
         except Exception as e:
@@ -1235,7 +1265,7 @@ class MusicBrainzService:
 
         # Check cache first
         cached = self._check_cache('recording', track_name, cache_artist_name)
-        if cached:
+        if cached and not _is_pre_feat_fix_miss(cached, track_name):
             logger.debug(f"Cache hit for recording '{track_name}'")
             cached_metadata = cached.get('metadata')
             return {
@@ -1360,7 +1390,8 @@ class MusicBrainzService:
                 else:
                     logger.info(f"No MusicBrainz results for recording '{track_name}'")
                 if not isrc_lookup_failed:
-                    self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
+                    self._save_to_cache('recording', track_name, cache_artist_name, None,
+                                        _feat_miss_metadata(track_name), best_confidence)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -1383,7 +1414,8 @@ class MusicBrainzService:
             else:
                 logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
                 if not isrc_lookup_failed:
-                    self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
+                    self._save_to_cache('recording', track_name, cache_artist_name, None,
+                                        _feat_miss_metadata(track_name), best_confidence)
                 return None
 
         except Exception as e:

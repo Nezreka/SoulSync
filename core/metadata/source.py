@@ -325,33 +325,6 @@ def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str
     return detail
 
 
-def _audio_file_isrc(audio_file) -> Optional[str]:
-    """Best-effort ISRC embedded in the downloaded file itself (#1705).
-
-    FLAC/Vorbis files carry it as a plain ``ISRC`` comment, MP3s as the
-    ID3 ``TSRC`` frame, MP4s under the iTunes ISRC atom. Downloads from
-    the streaming sources are tagged with the track's ISRC before this
-    post-processing runs, which makes the file its own exact identifier
-    for the MusicBrainz recording match — the one rung that resolves a
-    feat.-titled track whose name searches all miss. None when absent
-    or unreadable — the match then falls back to name/identity only.
-    Never raises, same contract as `_audio_file_duration_ms`.
-    """
-    if not audio_file:
-        return None
-    try:
-        symbols = get_mutagen_symbols()
-        if not symbols:
-            return None
-        audio = symbols.File(str(audio_file))
-        if audio is None:
-            return None
-        return _isrc_tag_value(audio)
-    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
-        pass
-    return None
-
-
 def _isrc_tag_value(audio) -> Optional[str]:
     """The ISRC out of an already-parsed mutagen file object, or None."""
     for key in ("TSRC", "ISRC", "isrc", "WM/ISRC", "----:com.apple.iTunes:ISRC"):
@@ -1957,6 +1930,15 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         logger.info("Metadata: Using album info clean name: '%s'", metadata["title"])
     else:
         logger.warning("Metadata: Using original title as fallback: '%s'", metadata["title"])
+
+    # the matched track's isrc, for the musicbrainz exact-id rung (#1705).
+    # spotify keeps it under external_ids, deezer/tidal/itunes at the top.
+    for _isrc_src in (track_info, original_search):
+        _ext = _isrc_src.get("external_ids")
+        _isrc = _isrc_src.get("isrc") or (_ext.get("isrc") if isinstance(_ext, dict) else None)
+        if _isrc:
+            metadata["isrc"] = str(_isrc).strip()
+            break
 
     # Resolve canonical artists list. Soulseek matched-download contexts
     # only carry `original_search.artist` (singular string) — the full

@@ -138,6 +138,9 @@ def service():
     ("Plain Title", "Plain Title"),
     ("Live Forever", "Live Forever"),
     ("Featuring Myself", "Featuring Myself"),
+    # a title that just ends in the word is not a credit.
+    ("Tribute to Little Feat", "Tribute to Little Feat"),
+    ("Little Feat (Live)", "Little Feat (Live)"),
 ])
 def test_strip_featuring_credit(title, expected):
     assert strip_featuring_credit(title) == expected
@@ -278,7 +281,7 @@ def test_feat_title_genuine_miss_is_negative_cached_once(service):
         c for c in service._save_to_cache.call_args_list if c.args[0] == "recording"
     ]
     assert recording_writes == [
-        call("recording", FEAT_TITLE, "Clean Bandit", None, None, 0)
+        call("recording", FEAT_TITLE, "Clean Bandit", None, {"feat_retry": 1}, 0)
     ]
 
 
@@ -592,12 +595,13 @@ def test_audio_file_isrc_reads_embedded_tag(monkeypatch):
         pass
 
     fake = _FakeAudio({"ISRC": ["GBAHS1300498"]})
+    fake.info = type("I", (), {"length": 227.5})()
     monkeypatch.setattr(
         source_module, "get_mutagen_symbols",
         lambda: type("S", (), {"File": staticmethod(lambda _p: fake)})())
 
-    assert source_module._audio_file_isrc("/tmp/whatever.flac") == "GBAHS1300498"
-    assert source_module._audio_file_isrc(None) is None
+    assert source_module._audio_file_probes("/tmp/whatever.flac") == ("GBAHS1300498", 227500)
+    assert source_module._audio_file_probes(None) == (None, None)
 
 
 def test_audio_file_isrc_swallows_unreadable_files(monkeypatch):
@@ -610,4 +614,89 @@ def test_audio_file_isrc_swallows_unreadable_files(monkeypatch):
         source_module, "get_mutagen_symbols",
         lambda: type("S", (), {"File": staticmethod(_boom)})())
 
-    assert source_module._audio_file_isrc("/tmp/whatever.flac") is None
+    assert source_module._audio_file_probes("/tmp/whatever.flac") == (None, None)
+
+
+# --- rows cached before the fix ----------------------------------------------
+
+
+def _negative_row(metadata=None):
+    return {"musicbrainz_id": None, "metadata": metadata, "confidence": 0}
+
+
+def test_pre_fix_negative_recording_row_does_not_block_the_retry(service):
+    # every track #1705 hit already has a 30 day "no results" row for its
+    # feat. title. honouring it would keep the reporter's 5 songs
+    # unmatched for a month after updating.
+    service._check_cache.return_value = _negative_row()
+    service.mb_client.search_recording.side_effect = [[], [REC_FEATURED]]
+
+    out = service.match_recording(FEAT_TITLE, "Clean Bandit")
+
+    assert out is not None and out["mbid"] == "rec-featured"
+
+
+def test_post_fix_negative_recording_row_is_honoured(service):
+    service._check_cache.return_value = _negative_row({"feat_retry": 1})
+
+    out = service.match_recording(FEAT_TITLE, "Clean Bandit")
+
+    assert out["mbid"] is None and out["cached"] is True
+    service.mb_client.search_recording.assert_not_called()
+
+
+def test_plain_title_negative_row_is_still_honoured(service):
+    service._check_cache.return_value = _negative_row()
+
+    out = service.match_recording("Rather Be", "Clean Bandit")
+
+    assert out["mbid"] is None and out["cached"] is True
+    service.mb_client.search_recording.assert_not_called()
+
+
+def test_pre_fix_negative_release_row_does_not_block_the_retry(service):
+    service._check_cache.return_value = _negative_row()
+    service.mb_client.search_release.side_effect = [
+        [],
+        [{"id": "rel-1", "title": "Rather Be", "score": 86,
+          "artist-credit": [{"artist": {"name": "Clean Bandit"}}]}],
+    ]
+
+    out = service.match_release(FEAT_TITLE, "Clean Bandit")
+
+    assert out is not None and out["mbid"] == "rel-1"
+
+
+def test_feat_release_miss_is_cached_with_the_marker(service):
+    service.mb_client.search_release.return_value = []
+
+    assert service.match_release(FEAT_TITLE, "Clean Bandit") is None
+    service._save_to_cache.assert_called_once_with(
+        "release", FEAT_TITLE, "Clean Bandit", None, {"feat_retry": 1}, 0)
+
+
+# --- the source metadata isrc -------------------------------------------------
+
+
+@pytest.mark.parametrize("track_info,expected", [
+    ({"isrc": "GBAHS1300498"}, "GBAHS1300498"),
+    ({"external_ids": {"isrc": "GBAHS1300498"}}, "GBAHS1300498"),
+    ({"external_ids": ["junk"]}, None),
+    ({}, None),
+])
+def test_source_metadata_carries_the_matched_track_isrc(monkeypatch, track_info, expected):
+    # _process_musicbrainz_source reads metadata["isrc"]; nothing used to
+    # set it, so that rung of the isrc lookup was dead.
+    from core.metadata import source as source_module
+
+    monkeypatch.setattr(source_module, "get_config_manager",
+                        lambda: type("C", (), {"get": lambda self, k, d=None: d})())
+    context = {
+        "track_info": dict(track_info, name="Rather Be"),
+        "original_search_result": {"title": "Rather Be", "artist": "Clean Bandit"},
+        "source": "spotify",
+    }
+    metadata = source_module.extract_source_metadata(
+        context, {"name": "Clean Bandit"}, {"album_name": "Rather Be"})
+
+    assert metadata.get("isrc") == expected
