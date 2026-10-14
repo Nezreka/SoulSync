@@ -179,6 +179,7 @@ class AcoustIDScannerJob(RepairJob):
         hand_tagged = hand_tagged_path_keys(context.db)
 
         batch_count = 0
+        unread = 0
         # Checkpoint = the last track that FINISHED scanning. Saving the
         # about-to-start track here used to skip one unprocessed track forever
         # on stop/pause (the resume filter keeps only IDs past the checkpoint).
@@ -199,6 +200,7 @@ class AcoustIDScannerJob(RepairJob):
                 # mount that is missing would otherwise "finish" with every
                 # file skipped).
                 pass_dirty = True
+                unread += 1
                 result.skipped += 1
                 continue
 
@@ -259,8 +261,20 @@ class AcoustIDScannerJob(RepairJob):
 
         # Reached the end of the list: promote the pass to the clean cutoff
         # when nothing in it errored or went unread, then clear the checkpoint.
+        # A pass that does not promote is counted and reported, since the only
+        # visible effect would be a library that never gets skipped.
         if pass_started_at is not None and not pass_dirty and result.errors == 0:
             self._set_cfg(context, 'verified_cutoff', pass_started_at)
+            self._set_cfg(context, 'dirty_passes', 0)
+        else:
+            dirty_passes = int(self._get_cfg(context, 'dirty_passes') or 0) + 1
+            self._set_cfg(context, 'dirty_passes', dirty_passes)
+            msg = (f"AcoustID pass did not finish clean ({result.errors} errors and "
+                   f"{unread} unreadable files in this run, earlier runs of the pass may "
+                   f"have had more); {dirty_passes} in a row, skip_verified cutoff not moved")
+            logger.warning(msg)
+            if context.report_progress:
+                context.report_progress(log_line=msg, log_type='warning')
         self._save_checkpoint_id(context, None)
 
         if context.update_progress:

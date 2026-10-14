@@ -1165,3 +1165,20 @@ def test_next_fresh_pass_starts_clean_after_a_dirty_one(monkeypatch, tmp_path):
     lib.run(monkeypatch, error_on="3")
     scanned, _ = lib.run(monkeypatch)
     assert KEY + 'verified_cutoff' in lib.cfg
+
+
+def test_dirty_passes_are_counted_and_reset_by_a_clean_one(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, error_on="3")
+    assert lib.cfg[KEY + 'dirty_passes'] == 1
+    lib.run(monkeypatch, unresolved=("2",))
+    assert lib.cfg[KEY + 'dirty_passes'] == 2
+    lib.run(monkeypatch)
+    assert lib.cfg[KEY + 'dirty_passes'] == 0
+    assert KEY + 'verified_cutoff' in lib.cfg
+
+
+def test_stopped_pass_is_not_counted_as_dirty(monkeypatch, tmp_path):
+    lib = _Library(tmp_path)
+    lib.run(monkeypatch, stop_after=2)
+    assert KEY + 'dirty_passes' not in lib.cfg
