@@ -25282,12 +25282,21 @@ class MusicDatabase:
                                WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                                    AND EXISTS (SELECT 1 FROM tracks ti
-                                                WHERE ti.spotify_track_id = mpt.source_track_id
-                                                   OR ti.deezer_id = mpt.source_track_id
-                                                   OR ti.tidal_id = mpt.source_track_id
-                                                   OR ti.qobuz_id = mpt.source_track_id
-                                                   OR ti.itunes_track_id = mpt.source_track_id))
+                                    -- Separate probes keep each provider lookup indexed.
+                                    -- After ANALYZE, mostly-NULL provider IDs can make
+                                    -- one multi-column OR scan tracks for every mpt row.
+                                    AND (
+                                        EXISTS (SELECT 1 FROM tracks ti
+                                                WHERE ti.spotify_track_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.deezer_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.tidal_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.qobuz_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.itunes_track_id = mpt.source_track_id)
+                                    ))
                                    -- The name join stays exact (case-sensitive):
                                    -- COLLATE NOCASE would defeat idx_artists_name /
                                    -- idx_tracks_title (~18s vs ~6ms on a 300k-track
@@ -25418,12 +25427,20 @@ class MusicDatabase:
                         WHERE mpt.playlist_id = ?
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id
-                                            OR ti.deezer_id = mpt.source_track_id
-                                            OR ti.tidal_id = mpt.source_track_id
-                                            OR ti.qobuz_id = mpt.source_track_id
-                                            OR ti.itunes_track_id = mpt.source_track_id))
+                             -- Keep the same independently indexed provider probes
+                             -- as the batched counts, even after ANALYZE.
+                             AND (
+                                 EXISTS (SELECT 1 FROM tracks ti
+                                         WHERE ti.spotify_track_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.deezer_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.tidal_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.qobuz_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.itunes_track_id = mpt.source_track_id)
+                             ))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
                                        WHERE (a.name = mpt.artist_name
