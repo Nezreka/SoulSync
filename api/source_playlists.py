@@ -5300,6 +5300,7 @@ def _run_sync_task(
     playlist_image_url='',
     sync_mode=None,
     skip_wishlist_add=False,
+    organize_by_playlist=False,
     user_initiated=False,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
@@ -5324,6 +5325,7 @@ def _run_sync_task(
         _build_sync_deps(),
         sync_mode=sync_mode,
         skip_wishlist_add=skip_wishlist_add,
+        organize_by_playlist=organize_by_playlist,
         user_initiated=user_initiated,
     )
 

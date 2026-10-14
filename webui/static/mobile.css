@@ -4624,3 +4624,125 @@ body:has([data-audiobook-overlay]) .hamburger-btn {
         padding: 18px;
     }
 }
+
+/* --- Mirrored playlist detail modal on phones: every action reachable ---
+   Tacobell444's screenshot (#1691): on a phone the modal's action bar ran
+   off the right edge — "Sync & download", Close and Identify were past
+   the modal's clipped edge with no way to reach them, and the track rows
+   squeezed the title into a few characters ("i wan…").
+
+   What was wrong (measured in Chromium, replica markup against the real
+   stylesheets, before this section):
+   - .mm-actions-right is a no-wrap flex row holding five controls whose
+     nowrap buttons measure ~596px together. style.css's <=640px block
+     stacks .mm-actions into a column but never wraps the right group, and
+     .mirrored-modal clips with overflow:hidden — so at 390px the Sync &
+     download button's box started at x=342 on a 390px viewport and ran
+     past the panel, and Close / Identify rendered entirely off-screen.
+     Between 641-768px the bar did not even stack.
+   - The track grid kept its six desktop columns (34+40+56+28px fixed,
+     70px of gaps, 36px of row padding): the title element measured
+     36px wide at 390px, 18px at 360px, 0px at 320px.
+   After this section, same replica (and the vanilla modal's markup,
+   and the editable grid): every action button is fully inside the
+   modal at 390 / 360 / 320px with its label inside its button, and
+   the title element measures 170 / 140 / 100px (its full text fits
+   unclipped at 390px). Nothing
+   above 768px changes; the 641-768px band deliberately takes the phone
+   layout too (it is this app's mobile breakpoint) even though its
+   album column would have fit — the stacked action bar would not.
+   This file loads after style.css, so it wins ties. */
+@media (max-width: 768px) {
+    /* More of the phone for the modal: the panel measured 328px wide
+       on a 390px phone before, 355px after (replica-measured). */
+    .mirrored-modal-overlay {
+        padding: 10px;
+    }
+    .mirrored-modal {
+        max-height: calc(100vh - 20px);
+        max-height: calc(100dvh - 20px);
+    }
+    /* Track rows: the album column goes (the title needs the room more,
+       the same call the download / discover modals made), the fixed
+       columns and gaps shrink, and the title takes the remaining space.
+       The position column keeps 26px so a 3-digit track number still
+       fits on one line. The
+       head's album label is its 4th span; a hidden grid child leaves no
+       gap, so head and rows stay in step, editable grid included. */
+    .mm-list-head,
+    .mm-row {
+        grid-template-columns: 26px 36px minmax(0, 1fr) 48px 28px;
+        gap: 8px;
+        padding: 0 10px;
+    }
+    .mm-list--editable .mm-list-head,
+    .mm-list--editable .mm-row {
+        grid-template-columns: 26px 36px minmax(0, 1fr) 48px 28px 28px;
+    }
+    .mm-list-head > span:nth-child(4),
+    .mm-row-album {
+        display: none;
+    }
+    .mm-row {
+        margin: 1px 4px;
+    }
+    /* Head labels sit over the row cells: rows are inset by their 4px
+       margin, so the head's padding grows by the same 4px. */
+    .mm-list-head {
+        padding: 0 14px;
+    }
+    .mm-row-art {
+        width: 36px;
+        height: 36px;
+    }
+
+    /* Actions: stack, then wrap. The two captioned actions (Refresh,
+       Sync & download) take a full row each — their buttons are the
+       longest labels and their captions finally fit under them — and
+       the bare buttons share what rows remain, growing evenly instead
+       of sizing to their text and pushing each other off-screen.
+       flex-basis 30% (not 0) on the bare buttons: a 0-basis button
+       would share a line with a 100%-basis wrap and end up 0px wide. */
+    .mm-actions {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 14px 16px;
+    }
+    .mm-actions-right {
+        flex-wrap: wrap;
+    }
+    .mm-actions-right > .mm-btn {
+        flex: 1 1 30%;
+        min-width: 0;
+    }
+    .mm-btn-wrap {
+        flex: 1 1 100%;
+        min-width: 0;
+        align-items: stretch;
+    }
+    .mm-btn-wrap > .mm-btn {
+        width: 100%;
+    }
+    .mm-btn-caption {
+        white-space: normal;
+        text-align: center;
+    }
+    /* Button labels wrap inside their buttons instead of spilling out
+       of them: .mm-btn is nowrap, and the shrinkable boxes above go
+       narrower than "Edit Source" / "Auto-Sync" at <=390px in the
+       vanilla modal, whose four bare buttons lay out 3-across + 1. */
+    .mm-actions .mm-btn {
+        white-space: normal;
+    }
+}
+
+/* The stacked hero (style.css stacks .mm-hero-content only at <=640px):
+   the close button then floats over empty hero padding, not over the
+   info column, so the info takes its full width back. Scoped to <=640px
+   on purpose — at 641-768px the hero is still a row and the 44px
+   padding-right is the close button's clearance. */
+@media (max-width: 640px) {
+    .mm-hero-content {
+        padding-right: 0;
+    }
+}
