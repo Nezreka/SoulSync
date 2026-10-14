@@ -177,6 +177,17 @@ def test_complete_album_can_request_all_missing_slots_after_scope_choice():
     assert not worker.start_review_missing_tracks('album-case')['started']
 
 
+def test_bulk_selection_admits_only_explicitly_reviewed_missing_slot_ids():
+    for reviewed, expected in ((False, []), (True, [1])):
+        db = _Database()
+        db.add(1, None, {'album_id': 10, 'album_title': 'Album'},
+               job_id='library_reconciliation', kind='reconciliation_missing')
+        worker = RepairWorker.__new__(RepairWorker)
+        worker.db = db
+        assert worker._pending_fixable_ids(
+            finding_ids=[1], allow_review_ids=reviewed) == expected
+
+
 def test_album_title_cleanup_keeps_edition_and_drops_pressing_plant():
     from core.repair_jobs.library_reconciliation import _clean_album_display_title
 

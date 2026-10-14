@@ -6878,7 +6878,7 @@ class RepairWorker:
                 # Only the review planner may opt exact, already-classified IDs
                 # back into a bulk run. An unscoped job/type sweep must never
                 # cross this boundary.
-                fixable.add('reconciliation_metadata')
+                fixable.update({'reconciliation_metadata', 'reconciliation_missing'})
             if safe_only:
                 fixable -= DESTRUCTIVE_FINDING_TYPES
             if finding_type:
