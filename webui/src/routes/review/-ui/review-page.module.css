@@ -1,6 +1,7 @@
 .page {
-  width: min(1680px, 100%);
-  margin: 0 auto;
+  width: auto;
+  max-width: none;
+  margin: 12px;
   padding: 28px clamp(16px, 2vw, 36px) 64px;
   color: #edf0f7;
 }
@@ -425,46 +426,82 @@
   vertical-align: -2px;
   animation: reviewSpin 0.8s linear infinite;
 }
+.applyBanner {
+  position: sticky;
+  top: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 13px 17px;
+  border: 1px solid #68b594;
+  border-radius: 10px;
+  background: #1c3b31;
+  color: #e3fff0;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 30%);
+}
+.applyBanner .loadingSpinner {
+  border-color: #8de3bb;
+  border-top-color: transparent;
+}
+.applyBanner > span:last-child {
+  margin-left: auto;
+  color: #bce1cd;
+  font-size: 12px;
+}
+.decisionProgress {
+  margin: 0 14px 14px 52px;
+  color: #c6f5dc;
+  font-size: 12px;
+}
 @keyframes reviewSpin {
   to {
     transform: rotate(360deg);
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .loadingSpinner {
+    animation: none;
+  }
+}
 .workflowSteps {
   display: grid;
-  gap: 0;
+  gap: 6px;
   margin-top: 16px;
-  padding-left: 15px;
-  border-left: 2px solid #454a60;
+  padding-left: 22px;
+  border-left: 1px solid #4a5266;
 }
 .workflowSteps button {
   position: relative;
   display: grid;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
-  margin: 0 0 9px 14px;
-  padding: 12px 15px;
-  border: 1px solid #3f669a;
-  border-radius: 10px;
-  background: #1b293d;
-  color: #e7f3eb;
+  margin: 0 0 0 10px;
+  padding: 11px 15px;
+  border: 1px solid #39485d;
+  border-left: 3px solid #78a7e8;
+  border-radius: 8px;
+  background: #1a2230;
+  color: #e7edf7;
   text-align: left;
   cursor: pointer;
 }
 .workflowSteps button::before {
   content: '';
   position: absolute;
-  left: -24px;
-  top: 17px;
-  width: 12px;
-  height: 12px;
+  left: -31px;
+  top: 19px;
+  width: 10px;
+  height: 10px;
   border: 2px solid #78a7e8;
   border-radius: 50%;
   background: #141620;
 }
 .workflowSteps button[data-state='needs-review'] {
   border-color: #987846;
-  background: #30291d;
+  border-left-color: #e2b561;
+  background: #26231e;
 }
 .workflowSteps button[data-state='needs-review']::before {
   border-color: #e2b561;
@@ -475,7 +512,7 @@
   font-weight: 700;
 }
 .workflowSteps strong {
-  font-size: 13px;
+  font-size: 14px;
 }
 .workflowSteps small {
   color: #bec3d0;
@@ -1119,32 +1156,6 @@
   background: #554094;
   color: #fff;
   cursor: pointer;
-}
-.musicBrainzLinks {
-  margin-top: 12px;
-  padding: 12px 16px;
-  border: 1px solid #454a60;
-  border-radius: 10px;
-}
-.musicBrainzLinks summary {
-  cursor: pointer;
-}
-.musicBrainzLinks p {
-  color: #b7bed0;
-}
-.musicBrainzLinks > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-.musicBrainzLinks input {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid #535a73;
-  border-radius: 8px;
-  background: #10121b;
-  color: #eef0f7;
 }
 .trackInspector {
   position: sticky;
@@ -2514,6 +2525,30 @@
   padding: 11px 14px;
   margin-bottom: 14px;
 }
+.extraAction {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 13px;
+  border: 1px solid #a46970;
+  border-radius: 10px;
+  background: #35232a;
+  color: #ffe5e7;
+}
+.extraAction span {
+  color: #dcc6ca;
+  font-size: 13px;
+}
+.extraAction button {
+  justify-self: start;
+  margin-top: 5px;
+  padding: 8px 11px;
+  border: 1px solid #bc7b83;
+  border-radius: 8px;
+  background: #72404b;
+  color: #fff;
+  cursor: pointer;
+}
 .error {
   background: #4c2430;
   border: 1px solid #a45969;
@@ -2673,6 +2708,13 @@
 @media (max-width: 560px) {
   .page {
     padding-inline: 10px;
+    margin: 6px;
+  }
+  .applyBanner {
+    flex-wrap: wrap;
+  }
+  .applyBanner > span:last-child {
+    margin-left: 0;
   }
   .headerTools > button,
   .headerTools .safeAction {

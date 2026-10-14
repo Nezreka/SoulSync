@@ -473,7 +473,9 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('2 of 3 release slots assigned')).toBeTruthy();
     expect(screen.getByText('2 tracks need no decision')).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Use continuous numbering' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Apply continuous numbering to 1 track now' }),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
     expect(screen.getByRole('heading', { name: 'Why this plan was chosen' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));

@@ -187,6 +187,19 @@ def repair_review_queue_apply_album_metadata(case_id):
         logger.error('Error starting album metadata changes: %s', exc, exc_info=True)
         return jsonify({'started': False, 'error': 'Could not start album changes'}), 500
 
+
+@bp.route('/api/repair/review-queue/<path:case_id>/request-missing', methods=['POST'])
+def repair_review_queue_request_missing(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker not initialized'}), 503
+    try:
+        result = worker.start_review_missing_tracks(case_id)
+        return jsonify(result), 200 if result.get('started') else 400
+    except Exception as exc:
+        logger.error('Error requesting album missing tracks: %s', exc, exc_info=True)
+        return jsonify({'started': False, 'error': 'Could not request missing tracks'}), 500
+
 @bp.route('/api/repair/status', methods=['GET'])
 def repair_status():
     """Get repair worker status"""

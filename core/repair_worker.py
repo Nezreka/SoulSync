@@ -1888,6 +1888,24 @@ class RepairWorker:
             review_case_folders=[(case_id, case.get('folder') or '')],
         )
 
+    def start_review_missing_tracks(self, case_id: str) -> dict:
+        """Request the absent slots of an explicitly completed album together."""
+        case = self.get_review_case(case_id, job_id='library_reconciliation')
+        if not case:
+            return {'started': False, 'error': 'This album plan changed; refresh it first'}
+        if any(item.get('finding_type') in ('reconciliation_release', 'reconciliation_intent')
+               for item in case.get('items') or []):
+            return {'started': False,
+                    'error': 'Choose the release and complete-album scope first'}
+        ids = [item['id'] for item in case.get('items') or []
+               if item.get('finding_type') == 'reconciliation_missing']
+        if not ids:
+            return {'started': False, 'error': 'No missing release tracks remain'}
+        return self.start_bulk_fix(
+            finding_ids=ids, allow_review_ids=True, review_approved=True,
+            review_case_folders=[(case_id, case.get('folder') or '')],
+        )
+
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,
                            q: str = None, limit: int = 200) -> List[dict]:

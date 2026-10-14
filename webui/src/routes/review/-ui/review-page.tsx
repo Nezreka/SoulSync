@@ -15,6 +15,7 @@ import {
   runReconciliationScan,
   startReadyChanges,
   startAlbumMetadataChanges,
+  startMissingTrackRequests,
   type AlbumAssignment,
   type ReconciliationRun,
   type ReconciliationScanStatus,
@@ -28,7 +29,6 @@ import {
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
 import { findingTypeLabel } from '../../tools/-tools.core';
-import { musicBrainzBrowserBase, setMusicBrainzBrowserBase } from './musicbrainz-links';
 import { ProviderReleaseId } from './provider-release-id';
 import { ReconciliationEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
 import { ReviewArtwork } from './review-artwork';
@@ -640,6 +640,18 @@ function SelectedActionDetail({
             )}
           />
         )}
+      {finding.finding_type === 'reconciliation_extra' &&
+        finding.file_path &&
+        !versionConflict &&
+        !duplicateChoice && (
+          <div className={styles.extraAction}>
+            <strong>This file is outside the selected release.</strong>
+            <span>Move it to recoverable quarantine and remove its library entry.</span>
+            <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+              Move this file out of the album
+            </button>
+          </div>
+        )}
       {!compact && (
         <section
           className={styles.suggestion}
@@ -781,7 +793,8 @@ function SelectedActionDetail({
             {canApply &&
               finding.finding_type !== 'reconciliation_release' &&
               finding.finding_type !== 'reconciliation_duplicate' &&
-              finding.finding_type !== 'reconciliation_unresolved' && (
+              finding.finding_type !== 'reconciliation_unresolved' &&
+              finding.finding_type !== 'reconciliation_extra' && (
                 <button
                   type="button"
                   disabled={busy}
@@ -837,7 +850,6 @@ export function ReviewPage() {
   const [openGroups, setOpenGroups] = useState<string[]>([]);
   const [previewCandidate, setPreviewCandidate] = useState(0);
   const [releaseIdInput, setReleaseIdInput] = useState('');
-  const [musicBrainzLinkInput, setMusicBrainzLinkInput] = useState(musicBrainzBrowserBase);
   const [manualRelease, setManualRelease] = useState<{
     id: string;
     title: string;
@@ -854,6 +866,7 @@ export function ReviewPage() {
   const [searchInput, setSearchInput] = useState('');
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
+  const [busyDecision, setBusyDecision] = useState('');
   const [scanBusy, setScanBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyProgress, setApplyProgress] = useState('');
@@ -1331,6 +1344,51 @@ export function ReviewPage() {
     }
   };
 
+  const requestAllMissing = async (missingCount: number) => {
+    if (!reviewCase || !missingCount) return;
+    const confirmed = window.showConfirmDialog
+      ? await window.showConfirmDialog({
+          title: 'Request missing album tracks',
+          message: `Request all ${missingCount} absent tracks from the selected release? Each request will be added to the wishlist.`,
+          confirmText: `Request ${missingCount} tracks`,
+        })
+      : window.confirm(`Request ${missingCount} absent tracks?`);
+    if (!confirmed) return;
+    setApplyBusy(true);
+    setError('');
+    setApplyProgress(`Requesting 0 of ${missingCount} missing tracks…`);
+    try {
+      const started = await startMissingTrackRequests(reviewCase.case_id);
+      const poll = async () => {
+        const status = await fetchReviewApplyStatus();
+        if (status.running) {
+          setApplyProgress(
+            `Requesting ${status.done || 0} of ${status.total || missingCount} missing tracks…`,
+          );
+          window.setTimeout(() => void poll(), 750);
+          return;
+        }
+        setApplyBusy(false);
+        setApplyProgress('');
+        if (status.error || status.failed) {
+          setError(
+            `${status.fixed || 0} requested; ${status.failed || 0} failed. ${status.error || status.errors?.[0]?.error || 'Review the affected tracks.'}`,
+          );
+        } else {
+          setNotice(
+            `${status.fixed || started.total || missingCount} missing tracks requested.${status.reconciliation_queued ? ' Reconciliation is queued.' : ''}`,
+          );
+        }
+        await refresh();
+      };
+      window.setTimeout(() => void poll(), 500);
+    } catch (cause) {
+      setApplyBusy(false);
+      setApplyProgress('');
+      setError((cause as Error).message);
+    }
+  };
+
   const act = async (finding: ReviewFinding, action: 'fix' | 'dismiss', override?: string) => {
     let fixAction: string | null = override || null;
     if (action === 'fix' && finding.finding_type === 'reconciliation_extra' && !fixAction) {
@@ -1483,6 +1541,7 @@ export function ReviewPage() {
       : window.confirm(`${verb} ${decision.action_count} proposed actions?`);
     if (!confirmed) return;
     setBusy(true);
+    setBusyDecision(decision.category);
     setError('');
     try {
       const result = await applyReviewDecisionGroup(caseId, decision.category, action);
@@ -1500,6 +1559,7 @@ export function ReviewPage() {
       setError((cause as Error).message);
     } finally {
       setBusy(false);
+      setBusyDecision('');
     }
   };
 
@@ -1701,6 +1761,13 @@ export function ReviewPage() {
       {notice && (
         <div className={styles.notice} role="status">
           {notice}
+        </div>
+      )}
+      {applyBusy && (
+        <div className={styles.applyBanner} role="status" aria-live="polite">
+          <span className={styles.loadingSpinner} aria-hidden="true" />
+          <strong>{applyProgress || 'Applying album changes…'}</strong>
+          <span>Keep this page open while the album is updated.</span>
         </div>
       )}
       {(scanStatus?.current_job?.job_id === 'library_reconciliation' || lastRun) && (
@@ -2119,22 +2186,24 @@ export function ReviewPage() {
                               <div className={styles.decisionActions}>
                                 <button
                                   type="button"
-                                  disabled={busy}
+                                  disabled={busy || reviewCase.refresh?.state === 'running'}
                                   onClick={() => void actGroup(decision, 'fix')}
                                 >
-                                  {decision.category === 'numbering'
-                                    ? reviewCase.album_plan?.numbering_mode === 'digital'
-                                      ? 'Use continuous numbering'
-                                      : 'Use release numbering'
-                                    : decision.category === 'title_conventions'
-                                      ? 'Apply title conventions'
-                                      : decision.label === 'Confirm album artist'
-                                        ? 'Use proposed album artist'
-                                        : `Apply all ${decision.action_count} proposed changes`}
+                                  {busyDecision === decision.category
+                                    ? `Applying ${decision.action_count} changes…`
+                                    : decision.category === 'numbering'
+                                      ? reviewCase.album_plan?.numbering_mode === 'digital'
+                                        ? `Apply continuous numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                        : `Apply release numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                      : decision.category === 'title_conventions'
+                                        ? 'Apply title conventions'
+                                        : decision.label === 'Confirm album artist'
+                                          ? 'Use proposed album artist'
+                                          : `Apply all ${decision.action_count} proposed changes`}
                                 </button>
                                 <button
                                   type="button"
-                                  disabled={busy}
+                                  disabled={busy || reviewCase.refresh?.state === 'running'}
                                   onClick={() => void actGroup(decision, 'dismiss')}
                                 >
                                   {decision.category === 'numbering'
@@ -2144,6 +2213,13 @@ export function ReviewPage() {
                                       : 'Keep current values'}
                                 </button>
                               </div>
+                            )}
+                            {busyDecision === decision.category && (
+                              <p className={styles.decisionProgress} role="status">
+                                <span className={styles.loadingSpinner} aria-hidden="true" />
+                                Applying the selected changes now; the album will be reanalyzed
+                                next.
+                              </p>
                             )}
                             {decision.category === 'album_completeness' &&
                               (() => {
@@ -2159,7 +2235,23 @@ export function ReviewPage() {
                                     busy={busy}
                                     onChoose={(choice) => void act(intent, 'fix', choice)}
                                   />
-                                ) : null;
+                                ) : (
+                                  <div className={styles.decisionActions}>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        applyBusy || busy || reviewCase.refresh?.state === 'running'
+                                      }
+                                      onClick={() => void requestAllMissing(decision.action_count)}
+                                    >
+                                      Request all {decision.action_count} missing track
+                                      {decision.action_count === 1 ? '' : 's'}
+                                    </button>
+                                    <small>
+                                      Each track is added to the wishlist for the selected release.
+                                    </small>
+                                  </div>
+                                );
                               })()}
                           </article>
                           {selected &&
@@ -2703,34 +2795,6 @@ export function ReviewPage() {
                       </div>
                     )}
                   </div>
-                  <details className={styles.musicBrainzLinks}>
-                    <summary>MusicBrainz link destination</summary>
-                    <p>
-                      Use a browser accessible mirror for release and recording links on this
-                      device.
-                    </p>
-                    <div>
-                      <input
-                        aria-label="MusicBrainz browser URL"
-                        value={musicBrainzLinkInput}
-                        onChange={(event) => setMusicBrainzLinkInput(event.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className={styles.secondaryButton}
-                        onClick={() => {
-                          try {
-                            setMusicBrainzBrowserBase(musicBrainzLinkInput);
-                            window.location.reload();
-                          } catch {
-                            setError('Enter an HTTP or HTTPS MusicBrainz browser URL.');
-                          }
-                        }}
-                      >
-                        Save link destination
-                      </button>
-                    </div>
-                  </details>
                   {active?.finding_type === 'reconciliation_release' && (
                     <button
                       type="button"

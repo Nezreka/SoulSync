@@ -261,6 +261,27 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
     recordings = evidence.get('recordings') or []
     slot_title = str(slot.get('title') or slot.get('name') or '')
     slot_artist = str(slot.get('artist') or '')
+    # Repeated titles on one release need their positions kept distinct. A
+    # fuzzy fingerprint title may describe either performance (Mezzanine has
+    # both "Exchange" and "(Exchange)"). Do not let that fuzzy title swap two
+    # numbered files unless an exact recording identity proves the swap.
+    local_number = int(tags.get('track_number') or 0)
+    local_disc = int(tags.get('disc_number') or 1)
+    if (slots and local_number and
+            (local_disc, local_number) !=
+            (int(slot.get('disc_number') or 1), int(slot.get('track_number') or 0)) and
+            any(other is not slot and
+                (int(other.get('disc_number') or 1), int(other.get('track_number') or 0)) ==
+                (local_disc, local_number) and
+                _title_score(str(other.get('title') or other.get('name') or ''), slot_title) >= 0.83
+                for other in slots)):
+        exact_slot_id = _recording_id(slot)
+        if not exact_slot_id or not (
+                tags.get('mbid') == exact_slot_id or
+                any(recording.get('mbid') == exact_slot_id and
+                    float(recording.get('score') or 0) >= 0.90
+                    for recording in recordings)):
+            return 0, []
     reasons: list[str] = []
     fingerprint_weight = 0
     strong_recordings = [recording for recording in recordings

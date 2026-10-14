@@ -360,6 +360,16 @@ export async function startAlbumMetadataChanges(
   );
 }
 
+export async function startMissingTrackRequests(
+  caseId: string,
+): Promise<{ started: boolean; total?: number; error?: string }> {
+  return readJson(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/request-missing`, {
+      method: 'POST',
+    }),
+  );
+}
+
 export async function fetchReviewApplyStatus(): Promise<BulkFixStatus> {
   return readJson<BulkFixStatus>(await fetch('/api/repair/bulk-fix/status'));
 }

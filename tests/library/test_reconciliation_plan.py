@@ -129,6 +129,35 @@ def test_out_of_range_position_and_live_fingerprint_block_renumbering():
                for reason in result['pairs'][0]['ambiguity_reasons'])
 
 
+def test_repeated_exchange_titles_do_not_swap_numbered_files_on_fuzzy_audio():
+    files = [
+        _file('Exchange', '/album/05 - Exchange.flac', 253258,
+              {'mbid': 'other-exchange', 'title': 'Exchange',
+               'artist': 'Massive Attack', 'score': 1.0}),
+        _file('(Exchange)', '/album/11 - (Exchange).flac', 216768,
+              {'mbid': 'another-exchange', 'title': 'Exchange',
+               'artist': 'Zao', 'score': 1.0}),
+    ]
+    for number, file in ((5, files[0]), (11, files[1])):
+        file['tags'].update({'track_number': number, 'disc_number': 1})
+    slots = [
+        {'title': 'Exchange', 'artist': 'Massive Attack',
+         'recording_mbid': 'release-five', 'track_number': 5,
+         'disc_number': 1, 'duration_ms': 251200},
+        {'title': '(Exchange)', 'artist': 'Massive Attack',
+         'recording_mbid': 'release-eleven', 'track_number': 11,
+         'disc_number': 1, 'duration_ms': 250346},
+    ]
+
+    result = reconcile_folder(files, slots)
+
+    assert {(pair['file_index'], pair['slot_index']) for pair in result['pairs']} == {
+        (0, 0),
+    }
+    assert result['extra_files'] == [1]
+    assert result['missing_slots'] == [1]
+
+
 def test_ok_computer_lucky_keeps_its_title_even_when_earlier_song_has_same_length():
     files = [
         _file('The Tourist', '/Radiohead/OK Computer/12 - The Tourist.flac', 323000),

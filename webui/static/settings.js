@@ -8937,11 +8937,34 @@ async function saveSidebarWeatherUnits() {
 // MUSICBRAINZ SERVER SETTINGS
 function loadMusicBrainzServerSettings(settings) {
     document.getElementById('musicbrainz-base-url').value = settings.musicbrainz?.base_url || '';
+    const browserInput = document.getElementById('musicbrainz-browser-url');
+    if (browserInput) browserInput.value = localStorage.getItem('soulsync-review-musicbrainz-browser-url') || '';
     const interval = Number(settings.musicbrainz?.request_interval ?? 1.05);
     document.getElementById('musicbrainz-rate-mode').value = interval === 0 ? 'adaptive' : 'fixed';
     document.getElementById('musicbrainz-request-rate').value = interval > 0
         ? Number((1 / interval).toPrecision(6)) : 10;
     updateMusicBrainzRateControls();
+}
+
+function saveMusicBrainzBrowserUrl() {
+    const input = document.getElementById('musicbrainz-browser-url');
+    if (!input) return;
+    const value = input.value.trim();
+    try {
+        if (!value) {
+            localStorage.removeItem('soulsync-review-musicbrainz-browser-url');
+        } else {
+            const url = new URL(value);
+            if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+                throw new Error('Use a MusicBrainz HTTP(S) URL without credentials, query strings or fragments.');
+            }
+            localStorage.setItem('soulsync-review-musicbrainz-browser-url',
+                `${url.origin}${url.pathname.replace(/\/$/, '')}`);
+        }
+        if (typeof showToast === 'function') showToast('MusicBrainz link destination saved on this device', 'success');
+    } catch (error) {
+        if (typeof showToast === 'function') showToast(error.message || 'Invalid MusicBrainz link URL', 'error');
+    }
 }
 
 function updateMusicBrainzRateControls() {

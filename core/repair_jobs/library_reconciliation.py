@@ -1617,13 +1617,23 @@ class LibraryReconciliationJob(RepairJob):
                         folders[dirpath].append(os.path.join(dirpath, name))
         folders = _group_disc_folders(folders, tracks, roots)
         folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+        target_member_folders: set[str] = set()
         if target_folder is not None:
             target_folder = os.path.normpath(target_folder)
-            # Logical groups can have a parent folder that is not an audio
-            # directory. Only an already inventoried group may be rescanned.
+            # A previously separate download folder may now belong to a
+            # logical album anchored in its sibling. Resolve its old case to
+            # that group so a review action can replan and retire both cases.
+            if target_folder not in folders:
+                matches = [folder for folder, paths in folders.items()
+                           if any(os.path.dirname(path) == target_folder
+                                  for path in paths)]
+                if len(matches) == 1:
+                    target_folder = matches[0]
             if target_folder not in folders:
                 result.stopped_early = 'The album folder was moved; run a library scan'
                 return result
+            target_member_folders = {target_folder} | {
+                os.path.dirname(path) for path in folders[target_folder]}
         inventory_seconds = time.perf_counter() - scan_started
         observed: set[tuple[str, str, str]] = set()
         observed_plans: set[str] = set()
@@ -2519,10 +2529,16 @@ class LibraryReconciliationJob(RepairJob):
                     context.update_progress(folder_index + 1, len(folders))
             if completed and not context.check_stop() and context.create_finding:
                 cache.checkpoint()
-                _retire_stale_findings(context.db, observed, target_folder)
-                if plans_complete:
-                    retire_unseen_plans(context.db, observed_plans,
-                                        target_folder=target_folder)
+                if target_folder is None:
+                    _retire_stale_findings(context.db, observed)
+                    if plans_complete:
+                        retire_unseen_plans(context.db, observed_plans)
+                else:
+                    for member_folder in target_member_folders:
+                        _retire_stale_findings(context.db, observed, member_folder)
+                        if plans_complete:
+                            retire_unseen_plans(context.db, observed_plans,
+                                                target_folder=member_folder)
         finally:
             elapsed_seconds = time.perf_counter() - scan_started
             cache.metrics['inventory_seconds'] = round(inventory_seconds, 3)

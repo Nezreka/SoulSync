@@ -156,6 +156,27 @@ def test_album_apply_all_includes_reviewed_metadata_but_not_other_decisions():
     assert not worker.start_review_album_metadata('album-case')['started']
 
 
+def test_complete_album_can_request_all_missing_slots_after_scope_choice():
+    worker = RepairWorker.__new__(RepairWorker)
+    case = {
+        'folder': '/music/album',
+        'items': [
+            {'id': 1, 'finding_type': 'reconciliation_missing'},
+            {'id': 2, 'finding_type': 'reconciliation_missing'},
+            {'id': 3, 'finding_type': 'reconciliation_metadata'},
+        ],
+    }
+    worker.get_review_case = lambda *_args, **_kwargs: case
+    captured = {}
+    worker.start_bulk_fix = lambda **kwargs: captured.update(kwargs) or {'started': True}
+
+    assert worker.start_review_missing_tracks('album-case')['started']
+    assert captured['finding_ids'] == [1, 2]
+    assert captured['review_case_folders'] == [('album-case', '/music/album')]
+    case['items'].append({'id': 4, 'finding_type': 'reconciliation_intent'})
+    assert not worker.start_review_missing_tracks('album-case')['started']
+
+
 def test_album_title_cleanup_keeps_edition_and_drops_pressing_plant():
     from core.repair_jobs.library_reconciliation import _clean_album_display_title
 
