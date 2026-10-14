@@ -65999,6 +65999,12 @@ body.max-performance #page-particles-canvas {
 
 /* ---- Nav Badge ---- */
 
+/* requests / issues navs hide until there's something to manage.
+   the page you're on keeps its button. */
+.nav-button.nav-idle:not(.active) {
+    display: none;
+}
+
 .dl-nav-badge {
     position: absolute;
     top: 50%;
