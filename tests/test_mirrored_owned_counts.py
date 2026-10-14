@@ -11,6 +11,8 @@ exact-name join still holds.
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from database.music_database import MusicDatabase
@@ -104,7 +106,9 @@ def test_owned_counts_stay_bounded_after_analyze(tmp_path, monkeypatch, batched)
         db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]
         if batched else db.get_mirrored_playlist_status_counts(10)
     )
-    assert steps < 200_000, "Status counts exhausted the SQLite work budget"
+    assert steps < 200_000, (
+        f"Status counts exhausted the SQLite work budget (SQLite {sqlite3.sqlite_version})"
+    )
     expected = {"total": 103, "discovered": 0, "wishlisted": 0, "in_library": 2}
     if batched:
         expected["library_checked"] = 0

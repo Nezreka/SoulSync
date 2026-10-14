@@ -25283,20 +25283,25 @@ class MusicDatabase:
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
                                     -- Separate probes avoid a multi-column OR scan.
-                                    -- INDEXED BY also forces seeks on older SQLite:
-                                    -- after ANALYZE, mostly-NULL IDs can otherwise
-                                    -- cause even a single-column probe to scan its index.
+                                    -- INDEXED BY selects the provider index; IS NOT NULL
+                                    -- skips NULL entries even on SQLite 3.45, which can
+                                    -- otherwise scan an all-NULL index after ANALYZE.
                                     AND (
                                         EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_spotify_id
-                                                WHERE ti.spotify_track_id = mpt.source_track_id)
+                                                WHERE ti.spotify_track_id IS NOT NULL
+                                                  AND ti.spotify_track_id = mpt.source_track_id)
                                         OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_deezer_id
-                                                   WHERE ti.deezer_id = mpt.source_track_id)
+                                                   WHERE ti.deezer_id IS NOT NULL
+                                                     AND ti.deezer_id = mpt.source_track_id)
                                         OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_tidal_id
-                                                   WHERE ti.tidal_id = mpt.source_track_id)
+                                                   WHERE ti.tidal_id IS NOT NULL
+                                                     AND ti.tidal_id = mpt.source_track_id)
                                         OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_qobuz_id
-                                                   WHERE ti.qobuz_id = mpt.source_track_id)
+                                                   WHERE ti.qobuz_id IS NOT NULL
+                                                     AND ti.qobuz_id = mpt.source_track_id)
                                         OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_itunes_id
-                                                   WHERE ti.itunes_track_id = mpt.source_track_id)
+                                                   WHERE ti.itunes_track_id IS NOT NULL
+                                                     AND ti.itunes_track_id = mpt.source_track_id)
                                     ))
                                    -- The name join stays exact (case-sensitive):
                                    -- COLLATE NOCASE would defeat idx_artists_name /
@@ -25428,19 +25433,24 @@ class MusicDatabase:
                         WHERE mpt.playlist_id = ?
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             -- Force the same provider-index seeks as the batched
-                             -- counts, including on older SQLite after ANALYZE.
+                             -- Use the same indexed, non-NULL provider probes as
+                             -- the batched counts, including on SQLite 3.45.
                              AND (
                                  EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_spotify_id
-                                         WHERE ti.spotify_track_id = mpt.source_track_id)
+                                         WHERE ti.spotify_track_id IS NOT NULL
+                                           AND ti.spotify_track_id = mpt.source_track_id)
                                  OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_deezer_id
-                                            WHERE ti.deezer_id = mpt.source_track_id)
+                                            WHERE ti.deezer_id IS NOT NULL
+                                              AND ti.deezer_id = mpt.source_track_id)
                                  OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_tidal_id
-                                            WHERE ti.tidal_id = mpt.source_track_id)
+                                            WHERE ti.tidal_id IS NOT NULL
+                                              AND ti.tidal_id = mpt.source_track_id)
                                  OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_qobuz_id
-                                            WHERE ti.qobuz_id = mpt.source_track_id)
+                                            WHERE ti.qobuz_id IS NOT NULL
+                                              AND ti.qobuz_id = mpt.source_track_id)
                                  OR EXISTS (SELECT 1 FROM tracks ti INDEXED BY idx_tracks_itunes_id
-                                            WHERE ti.itunes_track_id = mpt.source_track_id)
+                                            WHERE ti.itunes_track_id IS NOT NULL
+                                              AND ti.itunes_track_id = mpt.source_track_id)
                              ))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
