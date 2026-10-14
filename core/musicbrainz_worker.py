@@ -215,7 +215,7 @@ class MusicBrainzWorker:
 
             # Priority 3: Unattempted tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, t.duration, t.track_artist
+                SELECT t.id, t.title, ar.name AS artist_name, t.duration, t.track_artist, t.isrc
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.musicbrainz_match_status IS NULL AND t.id IS NOT NULL
@@ -225,7 +225,7 @@ class MusicBrainzWorker:
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'duration': row[3],
-                        'track_artist': row[4]}
+                        'track_artist': row[4], 'isrc': row[5]}
 
             # Priority 4: Retry 'not_found' artists after retry_days
             not_found_cutoff = datetime.now() - timedelta(days=self.retry_days)
@@ -256,7 +256,7 @@ class MusicBrainzWorker:
 
             # Priority 6: Retry 'not_found' tracks
             cursor.execute("""
-                SELECT t.id, t.title, ar.name AS artist_name, t.duration, t.track_artist
+                SELECT t.id, t.title, ar.name AS artist_name, t.duration, t.track_artist, t.isrc
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
                 WHERE t.musicbrainz_match_status IN ('not_found', 'error') AND t.musicbrainz_last_attempted < ?
@@ -266,7 +266,7 @@ class MusicBrainzWorker:
             row = cursor.fetchone()
             if row:
                 return {'type': 'track', 'id': row[0], 'name': row[1], 'artist': row[2], 'duration': row[3],
-                        'track_artist': row[4]}
+                        'track_artist': row[4], 'isrc': row[5]}
 
             return None
 
@@ -455,7 +455,11 @@ class MusicBrainzWorker:
                     result = self.mb_service.match_recording(
                         item_name, artist_name,
                         artist_mbid=artist_mbid,
-                        duration_ms=item.get('duration'))
+                        duration_ms=item.get('duration'),
+                        # #1705: the track's stored ISRC, when an earlier
+                        # source pass recorded one — the exact-identifier
+                        # rung inside match_recording.
+                        isrc=item.get('isrc'))
                     if result and result.get('mbid'):
                         break
                 if result and result.get('mbid'):

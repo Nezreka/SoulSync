@@ -325,6 +325,78 @@ def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str
     return detail
 
 
+def _audio_file_isrc(audio_file) -> Optional[str]:
+    """Best-effort ISRC embedded in the downloaded file itself (#1705).
+
+    FLAC/Vorbis files carry it as a plain ``ISRC`` comment, MP3s as the
+    ID3 ``TSRC`` frame, MP4s under the iTunes ISRC atom. Downloads from
+    the streaming sources are tagged with the track's ISRC before this
+    post-processing runs, which makes the file its own exact identifier
+    for the MusicBrainz recording match — the one rung that resolves a
+    feat.-titled track whose name searches all miss. None when absent
+    or unreadable — the match then falls back to name/identity only.
+    Never raises, same contract as `_audio_file_duration_ms`.
+    """
+    if not audio_file:
+        return None
+    try:
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return None
+        audio = symbols.File(str(audio_file))
+        if audio is None:
+            return None
+        return _isrc_tag_value(audio)
+    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
+        pass
+    return None
+
+
+def _isrc_tag_value(audio) -> Optional[str]:
+    """The ISRC out of an already-parsed mutagen file object, or None."""
+    for key in ("TSRC", "ISRC", "isrc", "WM/ISRC", "----:com.apple.iTunes:ISRC"):
+        try:
+            value = audio.get(key)
+        except Exception:  # noqa: BLE001, S112 — one bad frame says nothing about the others
+            continue
+        if not value:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "ignore")
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _audio_file_probes(audio_file):
+    """(isrc, duration_ms) for the MusicBrainz pass from ONE parse.
+
+    `_process_musicbrainz_source` needs both values for the same file;
+    parsing it twice (once per probe) doubled the mutagen I/O on every
+    post-processed download. Same fail-soft contract as the individual
+    probes: (None, None) when anything is unknown or unreadable.
+    """
+    if not audio_file:
+        return None, None
+    try:
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return None, None
+        audio = symbols.File(str(audio_file))
+        if audio is None:
+            return None, None
+        duration_ms = None
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and float(length) > 0:
+            duration_ms = int(float(length) * 1000)
+        return _isrc_tag_value(audio), duration_ms
+    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
+        return None, None
+
+
 def _audio_file_duration_ms(audio_file) -> Optional[int]:
     """Best-effort duration (ms) of the downloaded file for the MusicBrainz
     recording match (#1509 duration gate). None when unknown — the gate
@@ -372,10 +444,34 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     details = {}
     searched_recording = None
+    # #1705: the track's ISRC, from wherever this pipeline already knows
+    # it. The downloaded file's own embedded tag is probed FIRST: it
+    # describes these exact bytes, while source metadata describes the
+    # listing the download claimed to be — when the two disagree (a
+    # radio-edit ISRC on an album-version listing), the file is the one
+    # being matched. The remaining sources, in order: the download's
+    # source metadata, then the pp ISRC slots seeded from the download's
+    # cached metadata before the source loop (tidal/hifi; the deezer /
+    # qobuz slots are also read for custom post-process orders that run
+    # those sources before musicbrainz — in the default order they are
+    # still empty here). Nothing is probed when a release is pinned:
+    # the recording lookup is skipped entirely then, and a mutagen
+    # parse spent on a value nobody reads is waste.
+    track_isrc = None
+    file_duration_ms = None
+    if not pinned_release:
+        file_isrc, file_duration_ms = _audio_file_probes(audio_file)
+        track_isrc = (
+            file_isrc
+            or metadata.get("isrc")
+            or pp.get("tidal_isrc") or pp.get("hifi_isrc")
+            or pp.get("deezer_isrc") or pp.get("qobuz_isrc")
+        )
     result = None if pinned_release else _call_source_lookup(
         "MusicBrainz recording", mb_service.match_recording, track_title, artist_name,
         artist_mbid=pp.get("artist_mbid"),
-        duration_ms=_audio_file_duration_ms(audio_file))
+        duration_ms=file_duration_ms,
+        isrc=track_isrc)
     if result and result.get("mbid"):
         pp["recording_mbid"] = result["mbid"]
         searched_recording = result["mbid"]
