@@ -97,6 +97,7 @@ export async function addRecentAlbumToPlaylist(
         track_name: track.title,
         artist_name: album.artistName,
         album_name: album.albumName,
+        image_url: album.cover || null,
       })),
       anchor,
     );
@@ -132,7 +133,12 @@ export async function queueRecentPlay(play: RecentPlay): Promise<void> {
 
 export function addRecentPlayToPlaylist(play: RecentPlay, anchor: HTMLElement): void {
   openAddToPlaylist(
-    { track_name: play.title, artist_name: play.artist, album_name: play.album },
+    {
+      track_name: play.title,
+      artist_name: play.artist,
+      album_name: play.album,
+      image_url: play.imageUrl,
+    },
     anchor,
   );
 }

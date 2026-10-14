@@ -166,8 +166,8 @@ describe('the Recently Added buttons', () => {
     await addRecentAlbumToPlaylist(album(), anchor);
     expect(openAddToPlaylist).toHaveBeenCalledWith(
       [
-        { track_name: 'Readymade', artist_name: 'Ado', album_name: 'Kyougen' },
-        { track_name: 'Odo', artist_name: 'Ado', album_name: 'Kyougen' },
+        { track_name: 'Readymade', artist_name: 'Ado', album_name: 'Kyougen', image_url: 'k.jpg' },
+        { track_name: 'Odo', artist_name: 'Ado', album_name: 'Kyougen', image_url: 'k.jpg' },
       ],
       anchor,
     );
@@ -211,7 +211,7 @@ describe('the Recently Played buttons', () => {
     const anchor = document.createElement('button');
     addRecentPlayToPlaylist(play, anchor);
     expect(openAddToPlaylist).toHaveBeenCalledWith(
-      { track_name: 'Odo', artist_name: 'Ado', album_name: 'Kyougen' },
+      { track_name: 'Odo', artist_name: 'Ado', album_name: 'Kyougen', image_url: 'o.jpg' },
       anchor,
     );
   });

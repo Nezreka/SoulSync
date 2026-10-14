@@ -38,8 +38,11 @@ import {
   timeAgo,
 } from '../-sync.mirrored';
 import { skippedNoteText } from '../-sync.modal-core';
+import { AddSongsPanel } from '../../../features/playlists/add-songs-panel';
 import { AddToPlaylistButton } from '../../../features/playlists/add-to-playlist';
+import { playPlaylist, type PlaylistPlayMode } from '../../../features/playlists/play-playlist';
 import {
+  isLikedPlaylist,
   clearPlaylistCover,
   isUserPlaylist,
   movedOrder,
@@ -48,6 +51,7 @@ import {
   setPlaylistDescription,
   uploadPlaylistCover,
 } from '../../../features/playlists/user-playlists';
+import { LikedArt } from './playlist-art';
 
 export interface MirroredDetailModalProps {
   playlistId: number;
@@ -76,11 +80,83 @@ export interface MirroredDetailModalProps {
   onRefresh: () => void;
   /** copy the whole playlist; the tab opens the new one. */
   onDuplicate?: () => Promise<void>;
+  /** a mirror only: an editable copy in My Playlists; the tab opens it. */
+  onMakeMine?: () => Promise<void>;
+}
+
+export type TrackSort = 'custom' | 'title' | 'artist' | 'album' | 'added' | 'duration';
+
+export const TRACK_SORTS: { value: TrackSort; label: string }[] = [
+  { value: 'custom', label: 'Custom order' },
+  { value: 'added', label: 'Date added' },
+  { value: 'title', label: 'Title' },
+  { value: 'artist', label: 'Artist' },
+  { value: 'album', label: 'Album' },
+  { value: 'duration', label: 'Duration' },
+];
+
+/** the rows in a display order. the playlist's own order never changes:
+ *  positions stay the track's, so remove still hits the right row. date added
+ *  is newest first; rows from before it was recorded keep their order at the
+ *  end. */
+export function sortTracks(tracks: readonly MirroredTrack[], sort: TrackSort): MirroredTrack[] {
+  if (sort === 'custom') return [...tracks];
+  const text = (v: string | undefined) => (v ?? '').toLocaleLowerCase();
+  const by: Record<Exclude<TrackSort, 'custom'>, (a: MirroredTrack, b: MirroredTrack) => number> = {
+    title: (a, b) => text(a.track_name).localeCompare(text(b.track_name)),
+    artist: (a, b) =>
+      text(a.artist_name).localeCompare(text(b.artist_name)) ||
+      text(a.album_name).localeCompare(text(b.album_name)),
+    album: (a, b) => text(a.album_name).localeCompare(text(b.album_name)),
+    duration: (a, b) => (a.duration_ms ?? 0) - (b.duration_ms ?? 0),
+    added: (a, b) => {
+      if (!a.added_at || !b.added_at) return a.added_at ? -1 : b.added_at ? 1 : 0;
+      return b.added_at.localeCompare(a.added_at);
+    },
+  };
+  // a stable sort, ties fall back to the playlist's own order
+  return tracks
+    .map((t, i) => ({ t, i }))
+    .sort((x, y) => by[sort](x.t, y.t) || x.i - y.i)
+    .map((x) => x.t);
+}
+
+function PlayGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ShuffleGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        d="M16 4h4v4M4 20 20 4M20 16v4h-4M15 15l5 5M4 4l5 5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function QueueGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path d="M4 10h12v2H4zm0-4h12v2H4zm0 8h8v2H4zm10 0v6l5-3z" fill="currentColor" />
+    </svg>
+  );
 }
 
 interface EditProps {
   index: number;
   busy: boolean;
+  /** off while the list shows a sorted view: a drag there means nothing */
+  canDrag: boolean;
   dragging: boolean;
   over: boolean;
   onRemove: () => void;
@@ -95,9 +171,9 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
   return (
     <div
       className={cls}
-      draggable={edit && !edit.busy ? true : undefined}
+      draggable={edit && edit.canDrag && !edit.busy ? true : undefined}
       onDragStart={
-        edit
+        edit?.canDrag
           ? (e) => {
               e.dataTransfer.effectAllowed = 'move';
               // firefox won't start a drag without data
@@ -107,7 +183,7 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
           : undefined
       }
       onDragOver={
-        edit
+        edit?.canDrag
           ? (e) => {
               e.preventDefault();
               edit.onDragOver();
@@ -115,7 +191,7 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
           : undefined
       }
       onDrop={
-        edit
+        edit?.canDrag
           ? (e) => {
               e.preventDefault();
               edit.onDrop();
@@ -156,6 +232,7 @@ function TrackRow({ track, edit }: { track: MirroredTrack; edit?: EditProps }) {
           artist_name: track.artist_name ?? '',
           album_name: track.album_name ?? '',
           duration_ms: track.duration_ms ?? 0,
+          image_url: track.image_url ?? null,
         }}
         className="mm-row-add"
         size={15}
@@ -215,10 +292,30 @@ export function MirroredDetailModal({
   onReorder,
   onRefresh,
   onDuplicate,
+  onMakeMine,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const own = isUserPlaylist(data);
+  const liked = isLikedPlaylist(data);
+  const [sort, setSort] = useState<TrackSort>(liked ? 'added' : 'custom');
+  // an empty playlist of yours opens straight onto finding songs for it
+  const [addOpen, setAddOpen] = useState(own && tracks.length === 0);
+  const [playing, setPlaying] = useState<PlaylistPlayMode | null>(null);
+  const [makingMine, setMakingMine] = useState(false);
+  const shownTracks = sortTracks(tracks, sort);
+  // dragging only means something in the playlist's own order
   const editable = own && Boolean(onRemoveTrack && onReorder);
+  const draggable = editable && sort === 'custom';
+  const runPlay = async (mode: PlaylistPlayMode) => {
+    if (playing) return;
+    setPlaying(mode);
+    try {
+      // what you see is what plays: a sorted view plays in that order
+      await playPlaylist(shownTracks, data.display_name || data.name || 'this playlist', mode);
+    } finally {
+      setPlaying(null);
+    }
+  };
   // cover + description state. meta edits refetch through onRefresh, so the
   // modal always shows what's saved, same as the track edits below.
   const [coverOpen, setCoverOpen] = useState(false);
@@ -341,7 +438,11 @@ export function MirroredDetailModal({
           <div className="mm-hero-content">
             {own ? (
               <div className="mm-cover-wrap" ref={coverWrapRef}>
-                {heroArt ? (
+                {liked && !data.image_url ? (
+                  <div className="mm-cover mm-cover-liked">
+                    <LikedArt />
+                  </div>
+                ) : heroArt ? (
                   <div className="mm-cover" style={{ backgroundImage: `url('${heroArt}')` }} />
                 ) : (
                   <div className="mm-cover mm-cover-empty soulsync">{sourceIcon}</div>
@@ -545,12 +646,114 @@ export function MirroredDetailModal({
                 </span>
               </div>
               {skippedNote ? <div className="mm-skipped-note">{skippedNote}</div> : null}
+              {/* play is the one big thing; the rest sit beside it, quiet */}
+              <div className="mm-play-row">
+                <button
+                  type="button"
+                  className="mm-play"
+                  aria-label={`Play ${data.display_name || data.name || 'this playlist'}`}
+                  title="Play"
+                  disabled={tracks.length === 0 || playing !== null}
+                  aria-busy={playing === 'play' || undefined}
+                  onClick={() => void runPlay('play')}
+                >
+                  {playing === 'play' ? (
+                    <span className="mm-play-spin" aria-hidden="true" />
+                  ) : (
+                    <PlayGlyph />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="mm-round"
+                  aria-label="Shuffle play"
+                  title="Shuffle play"
+                  disabled={tracks.length === 0 || playing !== null}
+                  aria-busy={playing === 'shuffle' || undefined}
+                  onClick={() => void runPlay('shuffle')}
+                >
+                  <ShuffleGlyph />
+                </button>
+                <button
+                  type="button"
+                  className="mm-round"
+                  aria-label="Add to queue"
+                  title="Add to queue"
+                  disabled={tracks.length === 0 || playing !== null}
+                  aria-busy={playing === 'queue' || undefined}
+                  onClick={() => void runPlay('queue')}
+                >
+                  <QueueGlyph />
+                </button>
+                {editable ? (
+                  <button
+                    type="button"
+                    className={`mm-pill${addOpen ? ' mm-pill--on' : ''}`}
+                    aria-expanded={addOpen}
+                    onClick={() => setAddOpen((v) => !v)}
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                      <path
+                        d="M12 5v14M5 12h14"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    Add songs
+                  </button>
+                ) : null}
+                {!own && onMakeMine ? (
+                  <button
+                    type="button"
+                    className="mm-pill"
+                    title="An editable copy in My Playlists, with its matches. This mirror keeps syncing from its source"
+                    disabled={makingMine}
+                    onClick={() => {
+                      setMakingMine(true);
+                      void onMakeMine().finally(() => setMakingMine(false));
+                    }}
+                  >
+                    {makingMine ? 'Copying…' : 'Copy to My Playlists'}
+                  </button>
+                ) : null}
+              </div>
             </div>
           </div>
           <button type="button" className="mm-close" onClick={onClose} aria-label="Close">
             &times;
           </button>
         </div>
+        {addOpen && editable ? (
+          <AddSongsPanel
+            playlistId={playlistId}
+            playlistName={data.display_name || data.name || 'this playlist'}
+            existing={tracks}
+            onAdded={onRefresh}
+            onClose={() => setAddOpen(false)}
+          />
+        ) : null}
+        {tracks.length > 1 ? (
+          <div className="mm-sortbar">
+            <label className="mm-sort">
+              <span>Sort</span>
+              <select
+                value={sort}
+                aria-label="Sort tracks"
+                onChange={(e) => setSort(e.target.value as TrackSort)}
+              >
+                {TRACK_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {editable && sort !== 'custom' ? (
+              <span className="mm-sort-note">Back to custom order to drag tracks around</span>
+            ) : null}
+          </div>
+        ) : null}
         <div className={`mm-list${editable ? ' mm-list--editable' : ''}`}>
           <div className="mm-list-head">
             <span>#</span>
@@ -562,7 +765,7 @@ export function MirroredDetailModal({
             {editable ? <span /> : null}
           </div>
           {tracks.length > 0 ? (
-            tracks.map((track, index) => (
+            shownTracks.map((track, index) => (
               <TrackRow
                 key={`${track.position ?? index}-${track.track_name ?? ''}`}
                 track={track}
@@ -571,6 +774,7 @@ export function MirroredDetailModal({
                     ? {
                         index,
                         busy,
+                        canDrag: draggable,
                         dragging: dragFrom === index,
                         over: dragOver === index && dragFrom !== null && dragFrom !== index,
                         onRemove: () => {
@@ -599,7 +803,7 @@ export function MirroredDetailModal({
           ) : (
             <div className="mm-empty">
               {own
-                ? 'Nothing in here yet. Add songs with the + on any track.'
+                ? 'Nothing in here yet. Use Add songs above, or the + on any track.'
                 : 'No tracks in this mirror yet.'}
             </div>
           )}

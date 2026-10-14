@@ -13,6 +13,11 @@ import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { useSourceVertical } from '../-sync.use-vertical';
 import { MirroredTab } from './mirrored-tab';
 
+// card play goes through the shared playlist player; what matters here is
+// that the card hands it the playlist's real tracks
+const playPlaylist = vi.hoisted(() => vi.fn(async () => true));
+vi.mock('../../../features/playlists/play-playlist', () => ({ playPlaylist }));
+
 interface Call {
   url: string;
   method: string;
@@ -1591,5 +1596,55 @@ describe('MirroredTab — My Playlists scope', () => {
     await waitFor(() => expect(screen.queryByText('One')).toBeNull());
     expect(screen.getByText('Two')).toBeInTheDocument();
     expect(removed).toBe(true);
+  });
+});
+
+describe('play from a card, and copy a mirror to My Playlists', () => {
+  const TRACKS = [{ position: 1, track_name: 'Alright', artist_name: 'Kendrick Lamar' }];
+
+  it('the card play fetches the playlist and plays its tracks, without opening it', async () => {
+    stubFetch();
+    playPlaylist.mockClear();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? { ...ROW, tracks: TRACKS }
+          : { states: [] };
+    render(<Harness />);
+    fireEvent.click(await screen.findByLabelText('Play Road Trip'));
+    await waitFor(() => expect(playPlaylist).toHaveBeenCalledTimes(1));
+    expect(playPlaylist).toHaveBeenCalledWith(TRACKS, 'Road Trip');
+    expect(document.querySelector('#mirrored-track-modal')).toBeNull();
+  });
+
+  it('Copy to My Playlists makes the copy and opens it, editable', async () => {
+    stubFetch();
+    window.showToast = vi.fn();
+    responder = (url, method) => {
+      if (url === '/api/mirrored-playlists') return [ROW];
+      if (url === '/api/mirrored-playlists/3') return { ...ROW, tracks: TRACKS };
+      if (url === '/api/user-playlists/from-mirror/3' && method === 'POST')
+        return { success: true, id: 9, name: 'Road Trip' };
+      if (url === '/api/mirrored-playlists/9')
+        return {
+          id: 9,
+          name: 'Road Trip',
+          source: 'soulsync',
+          source_playlist_id: 'x',
+          tracks: TRACKS,
+        };
+      return { states: [] };
+    };
+    render(<Harness />);
+    fireEvent.click(await screen.findByText('Road Trip'));
+    fireEvent.click(await screen.findByText('Copy to My Playlists'));
+    await waitFor(() => expect(screen.getByText('Your Playlist')).toBeInTheDocument());
+    expect(
+      calls.some((c) => c.url === '/api/user-playlists/from-mirror/3' && c.method === 'POST'),
+    ).toBe(true);
+    expect(window.showToast).toHaveBeenCalledWith('“Road Trip” is in My Playlists now', 'success');
+    // it is yours now: the copy offers what a mirror never had
+    expect(screen.getByRole('button', { name: 'Add songs' })).toBeInTheDocument();
   });
 });

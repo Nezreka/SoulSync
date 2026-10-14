@@ -10,6 +10,7 @@ import type { CompactRow, DiscoverMix, MixAction } from '../-discover.mixes';
 
 import {
   compactRows,
+  MIX_COVER_PLACEHOLDER,
   mixActions,
   mixCoverArt,
   mixMetaLine,
@@ -151,7 +152,12 @@ function CompactTrackRow({
       {/* EMPTY for an unknown length — "0:00" claims a fact we do not have. */}
       <div className="track-compact-duration">{row.duration}</div>
       <AddToPlaylistButton
-        track={{ track_name: row.name, artist_name: row.artist, album_name: row.album }}
+        track={{
+          track_name: row.name,
+          artist_name: row.artist,
+          album_name: row.album,
+          image_url: row.cover === MIX_COVER_PLACEHOLDER ? null : row.cover,
+        }}
         className={`track-compact-add ${addStyles.button}`}
         size={15}
       />

@@ -107,6 +107,101 @@ def add_user_playlist_tracks(playlist_id):
         return jsonify({"error": "Failed to add to playlist"}), 500
 
 
+def _tracks_arg(data):
+    tracks = data.get('tracks')
+    return tracks if isinstance(tracks, list) else None
+
+
+@bp.route('/api/user-playlists/<int:playlist_id>/tracks/remove', methods=['POST'])
+def remove_matching_user_playlist_tracks(playlist_id):
+    """the picker's untick: drop these songs wherever they are in the list."""
+    data = request.get_json(silent=True) or {}
+    tracks = _tracks_arg(data)
+    if tracks is None:
+        return jsonify({"error": "tracks must be a list"}), 400
+    try:
+        database = get_database()
+        playlist = _own_user_playlist(database, playlist_id)
+        if not playlist:
+            return _not_found()
+        return jsonify({"success": True, **up.remove_matching(database, playlist, tracks)})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error removing songs from user playlist {playlist_id}: {e}")
+        return jsonify({"error": "Failed to remove from playlist"}), 500
+
+
+@bp.route('/api/user-playlists/membership', methods=['POST'])
+def user_playlist_membership():
+    """which of your playlists already have these songs, for the picker's ticks."""
+    data = request.get_json(silent=True) or {}
+    tracks = _tracks_arg(data)
+    if tracks is None:
+        return jsonify({"error": "tracks must be a list"}), 400
+    try:
+        result = up.membership(get_database(), get_current_profile_id(), tracks)
+        # json object keys are strings either way; say so rather than let it happen
+        return jsonify({
+            "success": True,
+            "total": result['total'],
+            "playlists": {str(k): v for k, v in result['playlists'].items()},
+        })
+    except Exception as e:
+        logger.error(f"Error checking user playlist membership: {e}")
+        return jsonify({"error": "Failed to check your playlists"}), 500
+
+
+@bp.route('/api/user-playlists/liked', methods=['POST'])
+def like_songs():
+    data = request.get_json(silent=True) or {}
+    tracks = _tracks_arg(data)
+    if tracks is None:
+        return jsonify({"error": "tracks must be a list"}), 400
+    try:
+        return jsonify({"success": True, **up.like(get_database(), get_current_profile_id(), tracks)})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error liking songs: {e}")
+        return jsonify({"error": "Failed to like"}), 500
+
+
+@bp.route('/api/user-playlists/liked/remove', methods=['POST'])
+def unlike_songs():
+    data = request.get_json(silent=True) or {}
+    tracks = _tracks_arg(data)
+    if tracks is None:
+        return jsonify({"error": "tracks must be a list"}), 400
+    try:
+        return jsonify({"success": True, **up.unlike(get_database(), get_current_profile_id(), tracks)})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error unliking songs: {e}")
+        return jsonify({"error": "Failed to unlike"}), 500
+
+
+@bp.route('/api/user-playlists/from-mirror/<int:mirror_id>', methods=['POST'])
+def copy_mirror_to_user_playlist(mirror_id):
+    """make a mirrored playlist yours: an editable copy in My Playlists. the
+    mirror itself is untouched and keeps syncing from its source."""
+    data = request.get_json(silent=True) or {}
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        mirror = database.get_mirrored_playlist(mirror_id, profile_id=profile_id)
+        if not mirror or up.is_user_playlist(mirror):
+            return _not_found()
+        result = up.copy_mirror(database, mirror, profile_id, data.get('name'))
+        return jsonify({"success": True, **result})
+    except up.UserPlaylistError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error copying mirror {mirror_id} to a user playlist: {e}")
+        return jsonify({"error": "Failed to copy the playlist"}), 500
+
+
 @bp.route('/api/user-playlists/<int:playlist_id>/tracks/<int:position>', methods=['DELETE'])
 def remove_user_playlist_track(playlist_id, position):
     try:

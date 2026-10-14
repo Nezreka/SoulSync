@@ -137,6 +137,8 @@ export interface MirroredTrack {
   album_name?: string;
   duration_ms?: number;
   image_url?: string;
+  /** when it joined the playlist, for sort by date added */
+  added_at?: string | null;
 }
 
 /** Hero artwork: playlist cover → the first track that has art → none (1092). */

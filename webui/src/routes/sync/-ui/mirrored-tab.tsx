@@ -91,10 +91,13 @@ import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { playPlaylist } from '../../../features/playlists/play-playlist';
 import {
+  copyMirrorToUserPlaylist,
   createUserPlaylist,
   duplicateUserPlaylist,
   isUserPlaylist,
+  pinLikedFirst,
   removeFromUserPlaylist,
   reorderUserPlaylist,
 } from '../../../features/playlists/user-playlists';
@@ -1090,7 +1093,7 @@ export function MirroredTab({
           </div>
         ) : (
           <div className="pl-grid">
-            {librarySortedRows(visibleRows, sort).map((row) => {
+            {pinLikedFirst(librarySortedRows(visibleRows, sort)).map((row) => {
               const displayName = row.display_name || row.name || '';
               // The live phase line, unchanged — its percentages and its
               // Discovered N/M are information the resting meta line cannot
@@ -1173,6 +1176,15 @@ export function MirroredTab({
                     ) : null
                   }
                   onOpen={() => onCardClick(row)}
+                  onPlay={async () => {
+                    try {
+                      const data = await fetchMirroredPlaylist(row.id);
+                      if (data.error) throw new Error(data.error);
+                      await playPlaylist(data.tracks ?? [], displayName);
+                    } catch {
+                      window.showToast?.(`Could not load ${displayName}`, 'error');
+                    }
+                  }}
                   selecting={selecting}
                   selected={selected.has(row.id)}
                   onToggleSelect={() => toggleSelected(row.id)}
@@ -1373,6 +1385,23 @@ export function MirroredTab({
               : undefined
           }
           onRefresh={() => editTracks(detail.playlistId, async () => {})}
+          onMakeMine={
+            isUserPlaylist(detail.data)
+              ? undefined
+              : async () => {
+                  try {
+                    const copy = await copyMirrorToUserPlaylist(detail.playlistId);
+                    const data = await fetchMirroredPlaylist(copy.id);
+                    if (!data.error) setDetail({ playlistId: copy.id, data });
+                    window.showToast?.(`“${copy.name}” is in My Playlists now`, 'success');
+                  } catch (err) {
+                    window.showToast?.(
+                      err instanceof Error ? err.message : 'Could not copy the playlist',
+                      'error',
+                    );
+                  }
+                }
+          }
           onDuplicate={
             isUserPlaylist(detail.data)
               ? async () => {

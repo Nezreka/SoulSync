@@ -87542,3 +87542,322 @@ body.src-modal-open { overflow: hidden; }
     stroke-linecap: round;
     stroke-linejoin: round;
 }
+
+/* ── playlists: play, shuffle, queue, sort, add songs, liked (oct 2026) ─────
+   the detail modal's hero gets a play row (one big accent play, quiet round
+   shuffle and queue, pills for add songs / copy to my playlists), the list
+   gets a sort bar, and your own playlists get the add-songs panel. */
+.mm-play-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+.mm-play {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    color: #0b0b0f;
+    cursor: pointer;
+    box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.35);
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.mm-play svg { margin-left: 3px; }
+.mm-play:hover:not(:disabled) {
+    transform: scale(1.06);
+    background: rgb(var(--accent-light-rgb));
+}
+.mm-round {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--white-a12);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--white-a85);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.mm-round:hover:not(:disabled) {
+    transform: scale(1.06);
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+}
+.mm-pill {
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 16px;
+    border: 1px solid var(--white-a12);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.mm-pill:hover:not(:disabled) { background: rgba(0, 0, 0, 0.5); border-color: var(--white-a20); }
+.mm-pill--on,
+.mm-pill--on:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: rgb(var(--accent-light-rgb));
+}
+.mm-play:disabled,
+.mm-round:disabled,
+.mm-pill:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+.mm-play-spin,
+.as-spin,
+.pl-card-play-spin {
+    width: 18px;
+    height: 18px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: mm-spin 0.7s linear infinite;
+}
+@keyframes mm-spin { to { transform: rotate(360deg); } }
+
+.mm-cover-liked {
+    display: grid;
+    overflow: hidden;
+}
+.playlist-liked-art {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.25), transparent 55%),
+        linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.35) 60%, #2a1c4a);
+}
+
+/* sort: a quiet bar over the list */
+.mm-sortbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 26px 0;
+    background: #121212;
+}
+.mm-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--white-a50);
+}
+.mm-sort select {
+    height: 30px;
+    padding: 0 28px 0 12px;
+    border: 1px solid var(--white-a10);
+    border-radius: 999px;
+    background: var(--white-a05);
+    color: #fff;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.mm-sort select:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
+.mm-sort-note { font-size: 12px; color: var(--white-a40); }
+
+/* the add-songs panel, between the hero and the list */
+.as-panel {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    /* leaves the playlist itself a few rows of room underneath */
+    max-height: min(40vh, 400px);
+    margin: 14px 16px 4px;
+    padding: 18px 18px 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 16px;
+    background:
+        radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 60%),
+        #18171f;
+    box-shadow: inset 0 1px 0 var(--white-a06);
+    animation: as-in 0.2s ease-out;
+}
+@keyframes as-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+.as-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.as-heading { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -0.2px; color: #fff; }
+.as-lede { margin: 3px 0 0; font-size: 12.5px; color: var(--white-a55); }
+.as-close {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--white-a06);
+    color: var(--white-a70);
+    cursor: pointer;
+}
+.as-close:hover { background: var(--white-a12); color: #fff; }
+.as-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 46px;
+    margin-top: 14px;
+    padding: 0 16px;
+    border: 1px solid var(--white-a10);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--white-a50);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.as-search:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+}
+.as-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    outline: none;
+}
+.as-input::-webkit-search-cancel-button { filter: invert(1) opacity(0.5); }
+.as-spin--search { width: 16px; height: 16px; color: rgb(var(--accent-light-rgb)); }
+.as-section {
+    margin: 14px 4px 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--white-a40);
+}
+.as-list { min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 2px; }
+.as-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 8px;
+    border-radius: 12px;
+    transition: background-color 0.12s ease;
+}
+.as-row:hover { background: var(--white-a05); }
+.as-art {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--white-a06);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.as-art--blank {
+    display: grid;
+    place-items: center;
+    color: var(--white-a70);
+    background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.45), rgba(var(--accent-rgb), 0.08));
+}
+.as-text { display: flex; flex-direction: column; min-width: 0; }
+.as-title,
+.as-sub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.as-title { font-size: 13.5px; font-weight: 600; color: #fff; }
+.as-sub { margin-top: 2px; font-size: 12px; color: var(--white-a50); }
+.as-dur { font-size: 12px; color: var(--white-a40); font-variant-numeric: tabular-nums; }
+.as-add {
+    min-width: 76px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.55);
+    border-radius: 999px;
+    background: transparent;
+    color: rgb(var(--accent-light-rgb));
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.as-add--idle:hover { background: rgb(var(--accent-rgb)); color: #0b0b0f; transform: scale(1.04); }
+.as-add--adding { cursor: progress; }
+.as-add--added { border-color: transparent; background: rgb(var(--accent-rgb)); color: #0b0b0f; }
+.as-add--in { border-color: transparent; background: var(--white-a06); color: var(--white-a55); }
+.as-add:disabled { cursor: default; }
+.as-add .as-spin { width: 14px; height: 14px; }
+.as-row--done .as-title { color: var(--white-a85); }
+.as-row--skeleton:hover { background: none; }
+.as-row--skeleton .as-art { box-shadow: none; animation: as-pulse 1.2s ease-in-out infinite; }
+.as-bar {
+    display: block;
+    width: 60%;
+    height: 10px;
+    margin: 3px 0;
+    border-radius: 5px;
+    background: var(--white-a08);
+    animation: as-pulse 1.2s ease-in-out infinite;
+}
+.as-bar--short { width: 35%; }
+@keyframes as-pulse { 50% { opacity: 0.45; } }
+.as-note { padding: 18px 8px; font-size: 13px; color: var(--white-a50); text-align: center; }
+
+/* the card's play disc, over the art on hover */
+.pl-card-play {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    color: #0b0b0f;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.pl-card-play svg { width: 16px; height: 16px; margin-left: 2px; }
+.pl-card-play .pl-card-play-spin { width: 14px; height: 14px; }
+.pl-card:hover .pl-card-play,
+.pl-card:focus-within .pl-card-play,
+.pl-card-play[aria-busy='true'] {
+    opacity: 1;
+    transform: none;
+}
+.pl-card-play:hover { background: rgb(var(--accent-light-rgb)); }
+@media (hover: none) {
+    .pl-card-play { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .as-panel,
+    .mm-play-spin,
+    .as-spin,
+    .pl-card-play-spin,
+    .as-bar,
+    .as-row--skeleton .as-art { animation: none; }
+}

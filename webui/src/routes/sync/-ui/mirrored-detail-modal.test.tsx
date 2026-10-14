@@ -222,11 +222,17 @@ describe('MirroredDetailModal — a user playlist', () => {
     expect(document.querySelector('.mm-row')?.getAttribute('draggable')).toBeNull();
   });
 
-  it('an empty one says how to fill it', () => {
+  it('an empty one says how to fill it, and opens straight onto Add songs', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ success: true, tracks: [] }))),
+    );
     renderModal({ ...MINE, tracks: [] }, { onRemoveTrack: vi.fn(), onReorder: vi.fn() });
     expect(
-      screen.getByText('Nothing in here yet. Add songs with the + on any track.'),
+      screen.getByText('Nothing in here yet. Use Add songs above, or the + on any track.'),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText('Search for songs')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });
 

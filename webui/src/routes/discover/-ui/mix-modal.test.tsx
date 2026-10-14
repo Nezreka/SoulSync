@@ -469,7 +469,9 @@ describe('add to playlist', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (init?.method === 'POST') posts.push(JSON.parse(init.body as string));
+        // the picker's tick check is a read, not the add
+        if (init?.method === 'POST' && !_url.endsWith('/membership'))
+          posts.push(JSON.parse(init.body as string));
         return new Response(
           JSON.stringify(
             init?.method === 'POST'
@@ -490,7 +492,13 @@ describe('add to playlist', () => {
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({
       tracks: [
-        { track_name: 'Xtal', artist_name: 'Aphex Twin', album_name: 'Selected Ambient Works' },
+        {
+          track_name: 'Xtal',
+          artist_name: 'Aphex Twin',
+          album_name: 'Selected Ambient Works',
+          // the row's cover rides along: the picker's header glows with it
+          image_url: '/img/saw.jpg',
+        },
       ],
       allow_duplicates: false,
     });
@@ -505,7 +513,9 @@ describe('add to playlist', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (init?.method === 'POST') posts.push(JSON.parse(init.body as string));
+        // the picker's tick check is a read, not the add
+        if (init?.method === 'POST' && !_url.endsWith('/membership'))
+          posts.push(JSON.parse(init.body as string));
         return new Response(
           JSON.stringify(
             init?.method === 'POST'
