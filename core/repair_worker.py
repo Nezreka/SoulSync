@@ -1875,10 +1875,10 @@ class RepairWorker:
         if not case:
             return {'started': False, 'error': 'This album plan changed; refresh it first'}
         decisions = (case.get('plan') or {}).get('decisions') or []
-        blocked = {'release_conflicts', 'album_completeness'}
+        blocked = {'release_conflicts', 'album_completeness', 'numbering'}
         if any(row.get('category') in blocked for row in decisions):
             return {'started': False,
-                    'error': 'Choose the release and album scope before applying metadata'}
+                    'error': 'Choose the release, album scope, and numbering before applying metadata'}
         ids = [row['id'] for row in case.get('items') or []
                if row.get('finding_type') == 'reconciliation_metadata']
         if not ids:

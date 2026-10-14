@@ -1293,12 +1293,12 @@ export function ReviewPage() {
         allMetadata && scopeCaseId
           ? await startAlbumMetadataChanges(scopeCaseId)
           : await startReadyChanges(scopeCaseId, organize);
-      setApplyProgress(`Applying 0 of ${started.total || count} ready changes…`);
+      setApplyProgress(`Applying 0 of ${started.total || count} album changes…`);
       const poll = async () => {
         const status = await fetchReviewApplyStatus();
         if (status.running) {
           setApplyProgress(
-            `Applying ${status.done || 0} of ${status.total || started.total || count} ready changes…`,
+            `Applying ${status.done || 0} of ${status.total || started.total || count} album changes…`,
           );
           window.setTimeout(() => void poll(), 750);
           return;
@@ -1316,7 +1316,9 @@ export function ReviewPage() {
           setNotice(
             organize
               ? `${applied} ready edit${applied === 1 ? '' : 's'} applied; folder organization was queued. Recheck this album after reanalysis for any remaining edits.${status.reconciliation_queued ? ' Reconciliation is queued.' : ''}`
-              : `${applied} ready change${applied === 1 ? '' : 's'} applied.${status.reconciliation_queued ? ' Reconciliation is queued.' : ''}`,
+              : allMetadata
+                ? `${applied} album metadata edit${applied === 1 ? '' : 's'} applied.${status.reconciliation_queued ? ' Reconciliation is queued.' : ''}`
+                : `${applied} ready change${applied === 1 ? '' : 's'} applied.${status.reconciliation_queued ? ' Reconciliation is queued.' : ''}`,
           );
         }
         await refresh();
@@ -1513,7 +1515,7 @@ export function ReviewPage() {
           Apply {plan.ready} ready change
           {plan.ready === 1 ? '' : 's'}
         </button>
-        {plan.can_organize && reviewCase.album_id != null && (
+        {plan.can_organize && reviewMetadataCount === 0 && reviewCase.album_id != null && (
           <button
             type="button"
             disabled={applyBusy}
