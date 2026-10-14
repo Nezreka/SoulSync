@@ -9,6 +9,7 @@ Uses the same no-network `_Session`/`_client` harness as
 
 from __future__ import annotations
 
+import pytest
 import requests
 
 from core.musicbrainz_client import (
@@ -106,6 +107,28 @@ def test_transport_exception_returns_empty(monkeypatch):
     monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *a: None)
 
     assert client.lookup_recordings_by_isrc(ISRC) == []
+
+
+def test_raise_on_error_reraises_a_transport_failure(monkeypatch):
+    """#1705: the enrichment match passes raise_on_error=True so an
+    outage on the ISRC rung is not folded into "no such ISRC" and then
+    negative-cached by the caller."""
+    session = _Session([requests.exceptions.ConnectionError("dns blew up")])
+    client = _client(session)
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *a: None)
+
+    with pytest.raises(requests.exceptions.ConnectionError):
+        client.lookup_recordings_by_isrc(ISRC, raise_on_error=True)
+
+
+def test_raise_on_error_still_returns_empty_for_a_404(monkeypatch):
+    """A 404 is MusicBrainz answering "no recording carries this ISRC"
+    — an answer, not a transport failure, even under raise_on_error."""
+    session = _Session([_Response(status_code=404)])
+    client = _client(session)
+    monkeypatch.setattr('core.musicbrainz_client._wait_for_musicbrainz_slot', lambda *a: None)
+
+    assert client.lookup_recordings_by_isrc(ISRC, raise_on_error=True) == []
 
 
 def test_rate_limiting_is_honoured(monkeypatch):

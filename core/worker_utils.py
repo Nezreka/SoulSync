@@ -354,8 +354,13 @@ def priority_pending_item(cursor, service, entity, type_overrides=None):
 
     # track
     cursor.execute(
-        f"SELECT t.id, t.title, ar.name FROM tracks t JOIN artists ar ON t.artist_id = ar.id "
+        f"SELECT t.id, t.title, ar.name, t.isrc FROM tracks t JOIN artists ar ON t.artist_id = ar.id "
         f"WHERE t.{ms} IS NULL AND t.id IS NOT NULL ORDER BY t.id ASC LIMIT 1"
     )
     r = cursor.fetchone()
-    return {'type': type_overrides.get('track', 'track'), 'id': r[0], 'name': r[1], 'artist': r[2]} if r else None
+    # 'isrc' rides along for the MusicBrainz worker's exact-identifier
+    # rung (#1705): without it, a manually prioritised track — exactly
+    # the kind a user is waiting on — silently lost the rung the normal
+    # queue path provides. Other workers ignore the extra key.
+    return {'type': type_overrides.get('track', 'track'), 'id': r[0], 'name': r[1], 'artist': r[2],
+            'isrc': r[3]} if r else None
