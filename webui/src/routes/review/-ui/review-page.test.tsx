@@ -939,9 +939,7 @@ describe('library reconciliation review queue', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some(([url]) =>
-          String(url).endsWith('/folder%3A1%3Aloose/reanalyze'),
-        ),
+        fetchMock.mock.calls.some(([url]) => String(url).endsWith('/folder%3A1%3Aloose/reanalyze')),
       ).toBe(true),
     );
   });
