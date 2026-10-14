@@ -4,17 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 /**
  * Mobile CSS Oct 13 batch (Boulder's phone screenshots + videos,
- * catalog M-01..M-19 in ~/workspace/soulsync-mobile-issues-oct13/REPORT.md),
- * including the fold round that answered REVIEW-FINDINGS.md in the same
- * folder.
+ * issue ids M-01..M-19).
  *
  * Every mechanism was measured live in Chromium first (harness replicas +
  * the real pages at 390/360/412px); these pin the declarations and hooks
  * those measurements depend on, in the same style as the batch #2 pins.
  * Pins are string-presence checks by design — they guard against a later
  * refactor silently dropping a declaration, and each one can fail: every
- * string below is absent from the base tree (verified by running this
- * file against it; the count is in FIX-REPORT.md).
+ * string below is absent from the base tree.
  */
 
 const read = (p: string) => readFileSync(resolve(process.cwd(), p), 'utf8').replace(/\r\n/g, '\n');
@@ -121,8 +118,40 @@ describe('M-14 — mini player phone layout', () => {
 
 describe('M-02/M-04 — hamburger hides behind the modals the React-root cap exposes', () => {
   it('hides behind EVERY open .modal-overlay (the React-root z-1 cap traps them all, not just the playlist modal)', () => {
-    expect(MOBILE).toContain('body:has(.modal-overlay:not(.hidden)) .hamburger-btn');
+    expect(MOBILE).toContain('body:has(.modal-overlay:not(.hidden)');
     expect(MOBILE).not.toContain('.modal-overlay .playlist-modal');
+  });
+
+  it('comes back once an overlay closes, however it closes', () => {
+    // runs the real selector list, not a string pin. automation run history
+    // and the spotify / deezer arl playlist details close with
+    // style.display = 'none' and stay in the dom; the first version only
+    // let go on .hidden, so one open hid the hamburger until a reload.
+    const start = MOBILE.indexOf('html.download-modal-open .hamburger-btn,');
+    expect(start).toBeGreaterThan(-1);
+    const selector = MOBILE.slice(start, MOBILE.indexOf('{', start)).trim();
+    document.body.innerHTML = '<button class="hamburger-btn"></button>';
+    const burger = document.querySelector('.hamburger-btn') as HTMLElement;
+    expect(burger.matches(selector)).toBe(false);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.display = 'flex';
+    document.body.appendChild(overlay);
+    expect(burger.matches(selector)).toBe(true);
+
+    overlay.style.display = 'none';
+    expect(burger.matches(selector)).toBe(false);
+
+    overlay.removeAttribute('style');
+    overlay.classList.add('hidden');
+    expect(burger.matches(selector)).toBe(false);
+
+    // markup written as style="display:none" is not re-serialized
+    overlay.className = 'modal-overlay';
+    overlay.setAttribute('style', 'display:none');
+    expect(burger.matches(selector)).toBe(false);
+    document.body.innerHTML = '';
   });
 
   it('hides behind the year story via its data-attribute hook', () => {
@@ -165,7 +194,7 @@ describe('M-01 — video page chrome clears the hamburger', () => {
   });
 });
 
-describe('M-19 — the no-op crew-line pin is gone (status: unresolved, see FIX-REPORT)', () => {
+describe('M-19 — the no-op crew-line pin is gone (status: unresolved)', () => {
   it('mobile.css carries no white-space declaration for the crew line', () => {
     expect(MOBILE).not.toMatch(/\.vd-crew-line\s*\{[^}]*white-space/);
   });
@@ -186,7 +215,7 @@ describe('M-03 — Discover sticky chip bar clears the hamburger', () => {
   });
 });
 
-describe('M-06/M-07 — search fields stay inside their containers', () => {
+describe('M-06 — the search field stays inside its container', () => {
   it('the search page source pill is capped so the input keeps its room', () => {
     const at = SEARCH_CSS.indexOf('@media (max-width: 640px)');
     expect(at).toBeGreaterThan(-1);
@@ -200,12 +229,6 @@ describe('M-06/M-07 — search fields stay inside their containers', () => {
     expect(label).toContain('min-width: 0');
     expect(blockAfter(SEARCH_CSS, '.caret {')).toContain('flex-shrink: 0');
     expect(SOURCE_ROW_TSX).toContain('styles.sourceLabel');
-  });
-
-  it('the Deezer editorial search carries a defensive sizing pin (mechanism unknown — not a claimed fix)', () => {
-    expect(blockAfter(PREMIER, '.dz-ed-search {\n        max-width: 100% !important;')).toContain(
-      'box-sizing: border-box !important',
-    );
   });
 });
 

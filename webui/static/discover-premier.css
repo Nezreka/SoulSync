@@ -1862,18 +1862,6 @@
 
     .dz-ed-search {
         max-width: 100% !important;
-        /* Oct 13 batch, M-07 — status after the fold: NOT REPRODUCIBLE in
-           the harness and the mechanism is UNKNOWN. (An earlier draft of
-           this comment claimed the phone build predated the app's
-           border-box reset; that is false — the universal-selector
-           border-box rule is the global reset (style.css:61) and long
-           predates the screenshot. The shot also shows genre chips and
-           the card rail crossing the panel edge, which no input-sizing
-           story explains.)
-           These two declarations stay as a harmless defensive pin on the
-           input itself; they are not claimed as the fix. */
-        box-sizing: border-box !important;
-        min-width: 0 !important;
     }
 
     .discover-hub-row--tools {

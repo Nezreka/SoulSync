@@ -4366,10 +4366,11 @@ html.download-modal-open body {
    (fold): EVERY .modal-overlay family is trapped the same way (playlist
    detail, mix, playlist-preview, your-artists, artist-info, blacklist,
    station, sync discovery, sources, artist-detail modals, watchlist
-   modals, …), not just the playlist one. Lifecycle check: persistent
-   vanilla overlays (account, blocklist, the static index.html ones) keep
-   a .hidden class while closed, and React families only mount while
-   open, so :not(.hidden) is exact for both. Hiding the hamburger behind
+   modals, …), not just the playlist one. closed overlays don't all use
+   .hidden: some vanilla ones (automation run history, the spotify and
+   deezer arl playlist details) close with style.display='none' and stay
+   in the dom, which hid the hamburger for good after one open. so an
+   inline display:none counts as closed too. Hiding the hamburger behind
    the account modal also keeps the nav drawer from being opened over it
    (the drawer is z-10001, one rung above it). The Artist Map / Artist Web
    container joins the list for the same reason — it is z-index 100, far
@@ -4389,7 +4390,7 @@ body:has(.watchadd-modal-overlay.visible) .hamburger-btn,
 body:has(.server-disambig-overlay.visible) .hamburger-btn,
 body:has(.genre-browser-modal-overlay.active) .hamburger-btn,
 body:has([data-audiobook-overlay]) .hamburger-btn,
-body:has(.modal-overlay:not(.hidden)) .hamburger-btn,
+body:has(.modal-overlay:not(.hidden):not([style*="display: none"]):not([style*="display:none"])) .hamburger-btn,
 body:has(.artist-map-container) .hamburger-btn,
 body:has([data-year-story-overlay]) .hamburger-btn {
     display: none !important;
@@ -4740,8 +4741,7 @@ body:has(.artist-map-container) #gsearch-bar {
 /* --- Oct 13 mobile batch (Boulder's phone screenshots + videos) ---
    Every mechanism below was measured live in Chromium against the real
    stylesheets (harness replicas + the real pages at 390 / 360 / 412px)
-   before fixing; the investigation catalog is
-   ~/workspace/soulsync-mobile-issues-oct13/REPORT.md (M-01..M-19). */
+   before fixing. M-numbers are the issue ids from that pass. */
 @media (max-width: 768px) {
     /* M-01 — the video detail Back pill is sticky at top:14px with a 22px
        left margin, i.e. directly under the fixed hamburger (16..60px on
@@ -4755,13 +4755,6 @@ body:has(.artist-map-container) #gsearch-bar {
     .vst-page .vd-back {
         margin-left: 76px;
     }
-
-    /* M-19 — UNRESOLVED (fold). The first pass pinned a white-space
-       declaration on the crew line here; that restated the property's
-       initial value (no rule sets nowrap on the element or any
-       ancestor), so it changed nothing and it is removed. The hunt
-       for the real mechanism is documented in FIX-REPORT.md; no fix
-       is claimed for the crew line. */
 
     /* M-08 — Playlist Explorer empty state. .explorer-tree keeps desktop
        canvas geometry on phones (min-width: max-content, 58px side

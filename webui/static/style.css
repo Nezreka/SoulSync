@@ -6665,8 +6665,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex; align-items: center; justify-content: center;
 }
 .notif-history-modal {
-    width: 640px; max-width: 94vw; max-height: 80vh;
- max-height: 80dvh;
+    width: 640px; max-width: 94vw; max-height: 80vh; max-height: 80dvh;
     background: rgba(14, 14, 20, 0.98); border: 1px solid var(--white-a08);
     border-radius: var(--radius-xl); box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     display: flex; flex-direction: column;
@@ -28743,8 +28742,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ── Watch All Unwatched Modal ──────────────────────────── */
 .watch-all-modal {
-    width: 880px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh;
+    width: 880px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -37352,8 +37350,7 @@ div.artist-hero-badge {
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
-    width: 480px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh;
+    width: 480px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--white-a06);
     overflow: hidden; position: relative;
@@ -38358,8 +38355,7 @@ div.artist-hero-badge {
 /* Genre picker modal */
 .artmap-genre-picker-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%);
-    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh;
- max-height: 75dvh;
+    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh; max-height: 75dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
@@ -38476,8 +38472,7 @@ div.artist-hero-badge {
 /* Your Artists Modal */
 .ya-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 800px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh;
+    width: 800px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
@@ -47349,8 +47344,7 @@ div.artist-hero-badge {
     background: linear-gradient(135deg, #1c1c1c 0%, #131313 100%);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
     border-radius: var(--radius-xl);
-    width: 90%; max-width: 560px; max-height: 86vh;
- max-height: 86dvh;
+    width: 90%; max-width: 560px; max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
     transform: scale(0.96);
@@ -50593,8 +50587,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
 
 .automation-history-modal {
-    max-width: 560px; width: 90%; max-height: 75vh;
- max-height: 75dvh; display: flex; flex-direction: column;
+    max-width: 560px; width: 90%; max-height: 75vh; max-height: 75dvh; display: flex; flex-direction: column;
 }
 .history-modal-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -52411,8 +52404,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .discog-modal-overlay.visible { opacity: 1; }
 
 .discog-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: rgba(14, 14, 14, 0.97);
     border: 1px solid var(--white-a08);
     border-radius: 18px;
@@ -52818,8 +52810,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Mobile */
 @media (max-width: 768px) {
-    .discog-modal { max-width: 100vw; max-height: 100vh;
- max-height: 100dvh; border-radius: 0; }
+    .discog-modal { max-width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
     .discog-grid { grid-template-columns: 1fr; }
     .discog-filter-bar { flex-wrap: wrap; gap: 8px; }
 }
@@ -56460,8 +56451,7 @@ tr.tag-diff-same {
 
 /* ── Cache Health Modal ── */
 .cache-health-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -56900,8 +56890,7 @@ tr.tag-diff-same {
 /* ── Failed MB Lookups Modal ── */
 .failed-mb-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 720px; max-width: 95vw; max-height: 85vh;
- max-height: 85dvh; display: flex; flex-direction: column;
+    width: 720px; max-width: 95vw; max-height: 85vh; max-height: 85dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
 .failed-mb-header {
@@ -56971,8 +56960,7 @@ tr.tag-diff-same {
 /* ── MB Search Sub-Modal ── */
 .mb-search-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 620px; max-width: 95vw; max-height: 80vh;
- max-height: 80dvh; display: flex; flex-direction: column;
+    width: 620px; max-width: 95vw; max-height: 80vh; max-height: 80dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
 .mb-search-header {
@@ -76507,8 +76495,7 @@ body.em-scroll-lock { overflow: hidden; }
     --ss-brand: #7c5cff; /* panels override with the active service's color */
     background: linear-gradient(160deg, #181a21 0%, #121319 100%);
     border: 1px solid var(--white-a08);
-    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh;
- max-height: 86dvh;
+    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
 }
@@ -85254,8 +85241,7 @@ body.src-modal-open { overflow: hidden; }
 
 @media (max-width: 620px) {
     .src-tile-row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-    .src-modal { max-height: 92vh;
- max-height: 92dvh; }
+    .src-modal { max-height: 92vh; max-height: 92dvh; }
     .src-modal-overlay { padding: 10px; }
 }
 
