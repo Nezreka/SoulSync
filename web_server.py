@@ -1640,6 +1640,10 @@ def _register_automation_handlers():
         bulk_fix_repair_findings=(
             (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
             if repair_worker else None),
+        get_repair_findings=(lambda **kw: repair_worker.get_findings(**kw)) if repair_worker else None,
+        queue_album_completion=lambda **kw: __import__("core.automation.album_completion_queue", fromlist=["queue_album_completion"]).queue_album_completion(**kw, deps=__import__("types").SimpleNamespace(profile_id=get_current_profile_id(), verify_missing_tracks=lambda album_id, tracks, profile_id: __import__("core.automation.album_completion_verify", fromlist=["filter_still_missing"]).filter_still_missing(get_database(), album_id, tracks, profile_id), download_batches=download_batches, tasks_lock=tasks_lock, submit=lambda bid, pid, tracks: missing_download_executor.submit(_run_full_missing_tracks_process, bid, pid, tracks))),
+        get_current_album_pin=lambda album_id: __import__("core.automation.album_pin", fromlist=["get_current_album_pin"]).get_current_album_pin(get_database(), album_id),
+        fetch_canonical_release=lambda **kw: __import__("core.search.enriched_download", fromlist=["fetch_release"]).fetch_release(kw["canonical_source"], kw["canonical_album_id"], kw["album_title"], kw["artist"]),
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -16244,14 +16248,17 @@ def _tracks_with_mirrored_quality_profile(
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     batch = download_batches.get(batch_id, {})
-    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
-        batch.get('playlist_id') or playlist_id,
-        batch.get('playlist_name'),
-        tracks_json,
-        profile_id=batch.get('profile_id', 1),
-        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
-        source=batch.get('playlist_source'),
-    )
+    if batch.get("album_completion_only"):
+        quality_profile_id = None
+    else:
+        tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+            batch.get('playlist_id') or playlist_id,
+            batch.get('playlist_name'),
+            tracks_json,
+            profile_id=batch.get('profile_id', 1),
+            explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+            source=batch.get('playlist_source'),
+        )
     if quality_profile_id is not None:
         batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
