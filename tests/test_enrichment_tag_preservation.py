@@ -101,3 +101,46 @@ def test_core_tags_written_on_happy_path_artless_file(flac_path):
     f = FLAC(flac_path)
     assert f.get("album") == ["Parachutes"]
     assert f.get("artist") == ["Coldplay"]
+
+
+def _run_extract_crash(flac_path, *, context, artist, album_info):
+    with patch.object(enrichment, "get_config_manager", return_value=_Cfg()), \
+         patch.object(enrichment, "strip_all_non_audio_tags"), \
+         patch.object(enrichment, "extract_source_metadata",
+                      side_effect=AttributeError("'int' object has no attribute 'strip'")):
+        return enrichment.enhance_file_metadata(
+            flac_path, context=context, artist=artist, album_info=album_info)
+
+
+def test_crash_before_any_tag_was_built_writes_fallback_tags(flac_path):
+    """oct 2026: an int album id crashed extract_source_metadata, so nothing
+    was in memory to persist and 25 downloads landed as Unknown Album. the
+    folder came from the same context, so the tags can too."""
+    FLAC(flac_path).save()
+    result = _run_extract_crash(
+        flac_path,
+        context={"original_search_result": {"title": "ZAMA ZAMA"}},
+        artist={"name": "Die Antwoord"},
+        album_info={"album_name": "ZAMA ZAMA", "track_number": 1, "disc_number": 1},
+    )
+    assert result is False
+    f = FLAC(flac_path)
+    assert f.get("title") == ["ZAMA ZAMA"]
+    assert f.get("artist") == ["Die Antwoord"]
+    assert f.get("albumartist") == ["Die Antwoord"]
+    assert f.get("album") == ["ZAMA ZAMA"]
+    assert f.get("tracknumber") == ["1"]
+
+
+def test_fallback_never_writes_placeholders(flac_path):
+    result = _run_extract_crash(
+        flac_path,
+        context={"original_search_result": {"title": "Debbie"}},
+        artist={"name": "Unknown Artist"},
+        album_info={"album_name": "[Unknown Album]"},
+    )
+    assert result is False
+    f = FLAC(flac_path)
+    assert f.get("title") == ["Debbie"]
+    assert f.get("artist") is None
+    assert f.get("album") is None
