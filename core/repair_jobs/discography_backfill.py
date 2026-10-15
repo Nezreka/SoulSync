@@ -102,15 +102,18 @@ class DiscographyBackfillJob(RepairJob):
         window = self._rotation_window(context, artists, max_artists)
 
         total = len(window)
+        # say where this run starts so the user can see the rotation working
+        start_name = window[0].get('name') if window else '-'
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
             context.report_progress(
-                phase=f'Scanning discography for {total} artists...',
+                phase=f'Scanning discography for {total} of {len(artists)} artists, starting at {start_name}...',
                 total=total,
             )
 
-        logger.info("Discography backfill: scanning %d artists (of %d total)", total, len(artists))
+        logger.info("Discography backfill: scanning %d artists (of %d total), starting at %s",
+                    total, len(artists), start_name)
         primary_source = get_primary_source()
 
         last_completed = None
