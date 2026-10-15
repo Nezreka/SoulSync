@@ -227,3 +227,124 @@ def test_an_empty_answer_still_produces_the_same_result_when_remembered(tmp_path
     a = mca.MissingCoverArtJob().scan(ctx())
     b = mca.MissingCoverArtJob().scan(ctx())
     assert (a.scanned, a.skipped, a.findings_created) == (b.scanned, b.skipped, b.findings_created)
+
+
+# ---- real clients: a failure they swallow is still a failure ---------------
+
+def _reply(status, body=b'{}'):
+    import requests
+    response = requests.Response()
+    response.status_code = status
+    response._content = body
+    return response
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    """What the network answers, under the real clients' own sessions."""
+    import core.repair_jobs.empty_lookup_memory as elm
+    from core import deezer_client, itunes_client
+
+    elm._install()
+    state = SimpleNamespace(reply=_reply(200), requests=0)
+
+    def send(self, request, *args, **kwargs):
+        state.requests += 1
+        if isinstance(state.reply, Exception):
+            raise state.reply
+        return state.reply
+
+    monkeypatch.setattr(elm, '_send', send)
+    quiet = SimpleNamespace(get_search_results=lambda *a, **k: None,
+                            store_search_results=lambda *a, **k: None)
+    for module in (deezer_client, itunes_client):
+        monkeypatch.setattr(module, 'get_metadata_cache', lambda: quiet)
+    monkeypatch.setattr('time.sleep', lambda *_: None)
+    return state
+
+
+def _real(source, name, monkeypatch):
+    from core.deezer_client import DeezerClient
+    from core.itunes_client import iTunesClient
+    client = DeezerClient() if name == 'deezer' else iTunesClient()
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: name)
+    monkeypatch.setattr(mca, 'get_source_priority', lambda primary: [name])
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client)
+    return client
+
+
+def _runs(tmp_path):
+    db = _album_db(tmp_path)
+    ctx = lambda: _ctx(db, remember_empty_lookups=True)  # noqa: E731
+    mca.MissingCoverArtJob().scan(ctx())
+    return lambda: mca.MissingCoverArtJob().scan(ctx())
+
+
+@pytest.mark.parametrize('name,failure', [
+    ('deezer', _reply(503)),
+    ('deezer', _reply(200, b'{"error": {"type": "Exception", "message": "Quota limit exceeded", "code": 4}}')),
+    ('deezer', ConnectionError('down')),
+    ('itunes', _reply(403)),
+    ('itunes', _reply(503)),
+])
+def test_a_failure_the_real_client_swallows_is_not_remembered(tmp_path, source, wire, monkeypatch, name, failure):
+    _real(source, name, monkeypatch)
+    wire.reply = failure
+    again = _runs(tmp_path)
+    first = wire.requests
+    assert first > 0
+    again()
+    assert wire.requests == first * 2
+
+
+@pytest.mark.parametrize('name,answer', [
+    ('deezer', _reply(200, b'{"data": [], "total": 0}')),
+    ('deezer', _reply(200, b'{"error": {"type": "DataException", "message": "no data", "code": 800}}')),
+    ('itunes', _reply(200, b'{"resultCount": 0, "results": []}')),
+    ('itunes', _reply(404)),
+])
+def test_a_real_empty_answer_is_still_remembered(tmp_path, source, wire, monkeypatch, name, answer):
+    _real(source, name, monkeypatch)
+    wire.reply = answer
+    again = _runs(tmp_path)
+    first = wire.requests
+    assert first > 0
+    again()
+    assert wire.requests == first
+
+
+def test_watching_ignores_other_threads_and_nests(wire):
+    import threading
+    from core.repair_jobs.empty_lookup_memory import watch_lookup_failures
+    import requests
+    wire.reply = _reply(503)
+
+    def other():
+        try:
+            requests.Session().get('http://127.0.0.1/x')
+        except Exception:  # noqa: BLE001
+            pass
+
+    with watch_lookup_failures() as outer:
+        with watch_lookup_failures() as inner:
+            t = threading.Thread(target=other)
+            t.start()
+            t.join()
+            assert inner.count == 0
+            requests.Session().get('http://127.0.0.1/x')
+            assert inner.count == 1
+        requests.Session().get('http://127.0.0.1/x')
+        assert outer.count == 1
+
+
+def test_the_memory_is_closed_when_the_scan_throws(tmp_path, source, monkeypatch):
+    closed = []
+    real_close = EmptyLookupMemory.close
+    monkeypatch.setattr(EmptyLookupMemory, 'close',
+                        lambda self: (closed.append(1), real_close(self))[-1])
+    db = _album_db(tmp_path)
+    ctx = _ctx(db, remember_empty_lookups=True)
+    ctx.check_stop = lambda: (_ for _ in ()).throw(RuntimeError('boom'))
+    with pytest.raises(RuntimeError):
+        mca.MissingCoverArtJob().scan(ctx)
+    assert closed
