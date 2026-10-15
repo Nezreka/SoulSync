@@ -242,7 +242,7 @@ def _reply(status, body=b'{}'):
 @pytest.fixture
 def wire(monkeypatch):
     """What the network answers, under the real clients' own sessions."""
-    import core.repair_jobs.empty_lookup_memory as elm
+    import core.lookup_failures as elm
     from core import deezer_client, itunes_client
 
     elm._install()
@@ -315,7 +315,7 @@ def test_a_real_empty_answer_is_still_remembered(tmp_path, source, wire, monkeyp
 
 def test_watching_ignores_other_threads_and_nests(wire):
     import threading
-    from core.repair_jobs.empty_lookup_memory import watch_lookup_failures
+    from core.lookup_failures import watch_lookup_failures
     import requests
     wire.reply = _reply(503)
 
@@ -348,3 +348,68 @@ def test_the_memory_is_closed_when_the_scan_throws(tmp_path, source, monkeypatch
     with pytest.raises(RuntimeError):
         mca.MissingCoverArtJob().scan(ctx)
     assert closed
+
+
+# ---- Hydrabase talks over a websocket, not requests -------------------------
+
+class _Socket:
+    """The shared websocket Hydrabase sends through."""
+
+    def __init__(self, connected=True, reply=None, raises=None):
+        self.connected = connected
+        self._reply = reply
+        self._raises = raises
+        self.sent = 0
+
+    def settimeout(self, _):
+        pass
+
+    def send(self, _):
+        self.sent += 1
+
+    def recv(self):
+        if self._raises:
+            raise self._raises
+        return self._reply
+
+
+def _hydrabase(socket, monkeypatch):
+    import threading
+    from core.hydrabase_client import HydrabaseClient
+    client = HydrabaseClient(lambda: (socket, threading.Lock()))
+    socket.asked = 0
+    real = client._send_and_recv
+
+    def counted(*a, **k):
+        socket.asked += 1
+        return real(*a, **k)
+
+    client._send_and_recv = counted
+    monkeypatch.setattr(mca, 'get_primary_source', lambda: 'hydrabase')
+    monkeypatch.setattr(mca, 'get_source_priority', lambda primary: ['hydrabase'])
+    monkeypatch.setattr(mca, 'get_client_for_source', lambda s: client)
+    return client
+
+
+@pytest.mark.parametrize('socket', [
+    _Socket(connected=False),
+    _Socket(raises=TimeoutError('slow')),
+    _Socket(reply='not json'),
+], ids=['disconnected', 'timeout', 'garbage'])
+def test_a_hydrabase_failure_is_not_remembered(tmp_path, source, monkeypatch, socket):
+    _hydrabase(socket, monkeypatch)
+    again = _runs(tmp_path)
+    first = socket.asked
+    assert first > 0
+    again()
+    assert socket.asked == first * 2
+
+
+def test_a_hydrabase_empty_answer_is_remembered(tmp_path, source, monkeypatch):
+    socket = _Socket(reply='[]')
+    _hydrabase(socket, monkeypatch)
+    again = _runs(tmp_path)
+    first = socket.asked
+    assert first > 0
+    again()
+    assert socket.asked == first

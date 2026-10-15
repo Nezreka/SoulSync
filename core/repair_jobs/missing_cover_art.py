@@ -10,8 +10,8 @@ from core.metadata.art_apply import file_has_embedded_art, folder_has_cover_side
 from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
-from core.repair_jobs.empty_lookup_memory import (
-    EmptyLookupMemory, LookupFailures, watch_lookup_failures)
+from core.lookup_failures import LookupFailures, watch_lookup_failures
+from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, hand_tagged_path_keys, is_hand_tagged_path
 from utils.logging_config import get_logger
 
