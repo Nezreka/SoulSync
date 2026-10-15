@@ -1494,6 +1494,8 @@ def _track_own_provider_album(
 
     for src, src_name in ((sp_album, "spotify"), (os_album, "search")):
         v = src.get("id")
+        if isinstance(v, int) and not isinstance(v, bool) and v:
+            v = str(v)
         if isinstance(v, str) and v.strip():
             album_id = v.strip()
             id_source = src_name
@@ -1700,8 +1702,9 @@ def _album_identity_disagrees(own_album: Dict[str, Any], album_ctx: Any) -> bool
         return False
     own = own_album or {}
 
-    own_id = (own.get("id") or "").strip()
-    ctx_id = (album_ctx.get("id") or "").strip()
+    # deezer/mirror payloads carry the album id as an int
+    own_id = str(own.get("id") or "").strip()
+    ctx_id = str(album_ctx.get("id") or "").strip()
     own_real = is_real_provider_album_id(own_id)
     ctx_real = is_real_provider_album_id(ctx_id)
 
@@ -1811,7 +1814,7 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     # disagreement there is a nuance like #1607, not poison), and a Various
     # Artists credit is a genuine multi-artist compilation — both stay
     # trusted. Empty ground truth never fires.
-    _ctx_album_id = (album_ctx.get("id") or "").strip()
+    _ctx_album_id = str(album_ctx.get("id") or "").strip()
     _ctx_artist_norm = (own_album_artist or "").strip().casefold()
     _ctx_artist_untrusted = (
         bool(track_own_artists)
