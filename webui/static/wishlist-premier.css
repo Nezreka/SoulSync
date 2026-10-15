@@ -334,6 +334,11 @@
   box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 var(--white-a12);
 }
 
+/* Music releases filed as audiobooks: listed under the Audiobooks tab. */
+.wlp-routed { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--white-a09); }
+.wlp-routed-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--text-1); }
+.wlp-routed-note { margin: 0 0 14px; font-size: 13px; color: var(--white-a40); }
+
 /* ── Nebula field ───────────────────────────────────────────────────── */
 .wlp .wl-nebula-field {
   gap: 26px 22px;

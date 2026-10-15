@@ -177,3 +177,9 @@ describe('WishlistList bulk actions', () => {
     });
   });
 });
+
+// The routed-artist lookup has its own tests (features/audiobook-routes); these
+// files exercise the list itself without a QueryClient.
+vi.mock('@/features/audiobook-routes/audiobook-routes.queries', () => ({
+  useRoutedArtists: () => new Set<string>(),
+}));

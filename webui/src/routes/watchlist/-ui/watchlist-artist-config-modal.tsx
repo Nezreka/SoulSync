@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 
+import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
+
 import type {
   WatchlistArtistConfig,
   WatchlistArtistConfigResponse,
@@ -327,6 +329,18 @@ export function WatchlistArtistConfigModal({
                     </small>
                   </div>
                 </div>
+
+                {artist?.name ? (
+                  <div className="config-section">
+                    <h3 className="config-section-title">Audiobooks</h3>
+                    <p className="config-section-subtitle">
+                      For spoken-word releases such as children&apos;s audio plays: file this
+                      artist&apos;s downloads in the audiobook library instead of the music library.
+                      Applies to every download, not only the watchlist.
+                    </p>
+                    <AudiobookRouteToggle name={String(artist.name)} />
+                  </div>
+                ) : null}
 
                 <div className="config-section">
                   <h3 className="config-section-title">Download Preferences</h3>

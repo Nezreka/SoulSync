@@ -79,7 +79,17 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 26;
  * - 3D book cover depth with spine sheen and hover elevation
  * - Narrator lock toggles and series badges
  */
-export function WishlistAudiobooks({ onClearAll }: { onClearAll?: () => void } = {}) {
+export function WishlistAudiobooks({
+  onClearAll,
+  onSearchAlso,
+}: {
+  onClearAll?: () => void;
+  /**
+   * Also search whatever else is filed as an audiobook but wanted elsewhere (audio
+   * plays from the music search). Resolves to a sentence for the notice, or ''.
+   */
+  onSearchAlso?: () => Promise<string>;
+} = {}) {
   const [items, setItems] = useState<AudiobookWishlistEntry[]>([]);
   const [counts, setCounts] = useState<AudiobookWishlistCounts | null>(null);
   const [worker, setWorker] = useState<AudiobookWishlistSummary | null>(null);
@@ -146,18 +156,22 @@ export function WishlistAudiobooks({ onClearAll }: { onClearAll?: () => void } =
   const searchNow = async () => {
     setSearching(true);
     setNotice('');
-    const summary = await runWishlistPass();
+    const [summary, also] = await Promise.all([
+      runWishlistPass(),
+      onSearchAlso ? onSearchAlso() : Promise.resolve(''),
+    ]);
     setSearching(false);
+    let books: string;
     if (!summary) {
-      setNotice('Could not run a search pass.');
+      books = 'Could not run a search pass.';
     } else {
       const checked = summary.checked ?? 0;
-      setNotice(
+      books =
         checked === 0
           ? 'Nothing was due for another look yet.'
-          : `Checked ${checked}, sent ${summary.grabbed ?? 0} to downloads.`,
-      );
+          : `Checked ${checked}, sent ${summary.grabbed ?? 0} to downloads.`;
     }
+    setNotice([books, also].filter(Boolean).join(' '));
     await load();
   };
 
