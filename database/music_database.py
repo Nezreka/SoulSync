@@ -15497,7 +15497,7 @@ class MusicDatabase:
             cursor.execute(
                 "SELECT kind, route_key, label, created_at FROM audiobook_routes "
                 "ORDER BY label COLLATE NOCASE, route_key")
-            return [dict(zip([c[0] for c in cursor.description], row)) for row in cursor.fetchall()]
+            return [dict(zip([c[0] for c in cursor.description], row, strict=True)) for row in cursor.fetchall()]
 
     def add_to_wishlist_ignore(self, track_id: str, track_name: str = "",
                                artist_name: str = "", reason: str = "removed",
