@@ -190,6 +190,23 @@ def test_a_share_that_refuses_file_metadata_still_imports(tmp_path, monkeypatch)
     assert not [p for p in dst.parent.iterdir() if ".tmp." in p.name]
 
 
+def test_an_nfs_share_that_refuses_the_acl_xattr_still_imports(tmp_path, monkeypatch):
+    """#1713: nfs source to nfs destination, copystat raised errno 524
+    (kernel ENOTSUPP, no python name) setting system.nfs4_acl."""
+    src = tmp_path / "dl" / "Movie.2024.mkv"
+    src.parent.mkdir()
+    src.write_bytes(b"m" * 4096)
+    dst = tmp_path / "lib" / "Movie (2024).mkv"
+    dst.parent.mkdir()
+
+    def refuse(*a, **k):
+        raise OSError(524, "Unknown error 524")
+    monkeypatch.setattr(imp.shutil, "copystat", refuse)
+    atomic_verified_copy(str(src), str(dst))
+    assert dst.read_bytes() == b"m" * 4096
+    assert not [p for p in dst.parent.iterdir() if ".tmp." in p.name]
+
+
 def test_a_move_whose_source_can_not_be_deleted_still_imports(tmp_path, monkeypatch):
     """cross-device move: the verified copy landed, then deleting the slskd-
     owned download raised EACCES and the whole import read as failed."""
