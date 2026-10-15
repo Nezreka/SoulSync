@@ -1,6 +1,6 @@
 # soulsync 3.5.6: `dev` → `main`
 
-a quick follow-up to 3.5.5. playlist sync stops grabbing the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, and auto-import skips what you already own. scope: everything on dev since 3.5.5.
+a quick follow-up to 3.5.5. playlist sync stops grabbing the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, auto-import skips what you already own, and run now on update discovery actually runs. scope: everything on dev since 3.5.5.
 
 ## playlist sync
 
@@ -16,6 +16,11 @@ a quick follow-up to 3.5.5. playlist sync stops grabbing the wrong song and stop
 - auto-import skips what you own. the library pre-check only ran on the manual import page, so staging drops went through the whole pipeline. now they ask the same gate, the inbox shows "3 imported · 9 already in library" with a per-track list of what happened, and skipped files count as remnants so a half-imported folder isn't picked up again every scan.
 - new opt-in "clear finished folders" removes a folder from staging once every track was imported or already owned. never the staging root, never a folder with music or unknown files left in it.
 - the album modal knows what you own the moment it opens. opened from a discography, every track sat on pending until begin analysis, which goes straight on to downloading. the ownership check runs on open now.
+- youtube imports survive a share that refuses file metadata. moving a youtube download across drives copied the file, then failed copying its timestamps when the nfs share refused them (errno 524), so a good copy read as a failed import. the timestamps are a courtesy now, same as movie and tv imports since 3.4.7 (thanks @hilburn) (#1713).
+
+## discovery
+
+- run now on the update discovery automation always refreshes. the 6 hour cooldown that stops the schedule from over-polling also swallowed a manual press, so changed settings didn't apply until it ran out. scheduled and event runs keep the cooldown (thanks @mikedaf) (#1719, #1720).
 
 ## validation
 

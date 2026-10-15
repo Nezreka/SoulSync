@@ -10,4 +10,6 @@ Auto-import runs the same library check as the import page, so staging drops ski
 
 The album modal shows found and missing tracks as soon as it opens.
 
+Run Now on the Update Discovery automation always refreshes instead of waiting out the 6 hour cooldown (thanks @mikedaf). YouTube imports onto NFS shares stop failing on file metadata the share refuses (thanks @hilburn).
+
 Full notes on GitHub.

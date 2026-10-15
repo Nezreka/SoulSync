@@ -3466,6 +3466,8 @@ const WHATS_NEW = {
         { title: 'Reorganize resumes where it stopped', desc: 'Library reorganize saves the last album it finished and picks up right after it, queues moves as it goes so a stopped run keeps what it planned, and goes back to the top after a full pass (thanks @QT3496) (#1716).', page: 'tools' },
         { title: 'Auto-import skips what you own', desc: 'Staging drops run the same library check as the import page. Each import in history says what it did with a per-track list, and an opt-in Clear finished folders switch removes a folder once every track is in.', page: 'import' },
         { title: 'Album modal knows what you own', desc: 'A release opened from a discography shows found and missing per track as soon as it opens, instead of waiting for Begin Analysis.' },
+        { title: 'Run Now refreshes discovery', desc: 'Run Now on the Update Discovery automation always refreshes, so changed settings apply right away. Scheduled runs keep the 6 hour cooldown (thanks @mikedaf) (#1719).', page: 'automations' },
+        { title: 'YouTube imports on NFS', desc: 'A share that refuses file metadata (errno 524) no longer fails a YouTube import after the file landed (thanks @hilburn) (#1713).' },
         { title: 'Earlier versions', desc: '3.5.5 brought playable and likeable playlists, per-playlist sync mode, Deezer previews and a big speed pass.' },
     ],
     '3.5.5': [
@@ -3516,12 +3518,13 @@ const WHATS_NEW = {
 const VERSION_MODAL_SECTIONS = [
     {
         title: '3.5.6: playlist sync fixes, reorganize resume and smarter auto-import',
-        description: 'A follow-up to 3.5.5. Playlist sync stops matching the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, and auto-import skips what you already own.',
+        description: 'A follow-up to 3.5.5. Playlist sync stops matching the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, auto-import skips what you already own, and Run Now on Update Discovery actually runs.',
         features: [
             'Playlist sync: the album fallback needs the artist to match, and one song your server no longer has is skipped instead of blocking the playlist (thanks @kevin2xk) (#1715).',
             'Library reorganize resumes after the last album it finished and keeps the moves a stopped run planned (thanks @QT3496) (#1716).',
             'Auto-import runs the library check, says what each import did, and can clear finished staging folders.',
             'The album modal shows found and missing tracks as soon as it opens.',
+            'Run Now on Update Discovery skips the 6 hour cooldown (thanks @mikedaf) (#1719), and YouTube imports survive NFS shares that refuse file metadata (thanks @hilburn) (#1713).',
         ],
     },
     {
