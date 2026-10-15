@@ -1112,6 +1112,71 @@ def test_update_discovery_pool_incremental_uses_source_priority(monkeypatch):
     assert spotify_client.album_calls == []
 
 
+def test_update_discovery_pool_incremental_skips_within_cooldown_by_default():
+    # #1719: the 6-hour cooldown still gates ordinary (scheduled) runs.
+    scanner = _build_scanner({"tracks": {"items": []}}, [_build_artist("Cooldown Artist")])
+    gate_args = []
+    scanner.database.should_populate_discovery_pool = (
+        lambda hours_threshold=6, profile_id=1: gate_args.append((hours_threshold, profile_id)) or False)
+    fetched = []
+    scanner.database.get_watchlist_artists = lambda profile_id=1: fetched.append(profile_id) or []
+
+    scanner.update_discovery_pool_incremental(profile_id=1)
+
+    assert gate_args == [(6, 1)]  # gate consulted with the 6-hour threshold
+    assert fetched == []  # returned at the gate, before any artist work
+    assert scanner.database.discovery_pool_calls == []
+
+
+def test_update_discovery_pool_incremental_force_bypasses_cooldown(monkeypatch):
+    # #1719: force=True (a manual Run Now press) runs even when the pool
+    # was updated < 6 hours ago — end to end, tracks still land.
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "time", types.SimpleNamespace(sleep=lambda *_args, **_kwargs: None))
+    monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(watchlist_scanner_module, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+
+    artist = _build_artist("Forced Artist")
+    artist.spotify_artist_id = None
+    artist.deezer_artist_id = None
+
+    release = types.SimpleNamespace(
+        id="dz-release-9",
+        name="Forced Release",
+        release_date=_RECENT_RELEASE_DATE,
+        album_type="album",
+        image_url="https://example.com/forced-release.jpg",
+    )
+    deezer_client = _FakeSourceClient(
+        artist_id="dz-artist",
+        albums=[release],
+        image_url="https://example.com/forced-artist.jpg",
+        album_payload={
+            "id": "dz-release-9",
+            "name": "Forced Release",
+            "images": [{"url": "https://example.com/forced-release.jpg"}],
+            "release_date": _RECENT_RELEASE_DATE,
+            "popularity": 10,
+            "tracks": {"items": [{"id": "dz-track-9", "name": "Forced Track", "artists": [{"name": "Forced Artist"}], "duration_ms": 180000}]},
+            "artists": [{"id": "dz-artist"}],
+        },
+    )
+    monkeypatch.setattr(watchlist_scanner_module, "get_client_for_source",
+                        lambda source: {"deezer": deezer_client}.get(source))
+
+    scanner = _build_scanner({"tracks": {"items": []}}, [artist])
+    gate_calls = []
+    scanner.database.should_populate_discovery_pool = (
+        lambda hours_threshold=6, profile_id=1: gate_calls.append(hours_threshold) or False)
+
+    scanner.update_discovery_pool_incremental(profile_id=1, force=True)
+
+    assert gate_calls == []  # forced: the cooldown gate is never consulted
+    assert scanner.database.discovery_pool_calls
+    assert scanner.database.discovery_pool_calls[0][0]["deezer_track_id"] == "dz-track-9"
+    assert deezer_client.album_calls
+
+
 def test_curate_discovery_playlists_uses_source_priority_for_recent_albums(monkeypatch):
     monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
     monkeypatch.setattr(watchlist_scanner_module, "get_primary_source", lambda: "deezer")
