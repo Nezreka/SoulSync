@@ -657,3 +657,26 @@ def test_matching_musicbrainz_disambiguation_preserves_useful_version_detail():
     slot = {'title': 'Home', 'recording_disambiguation': 'live'}
 
     assert title_difference_kind('Home (Live)', slot) == 'version_detail'
+
+
+def test_alternate_extended_exact_identity_pairs_but_requires_version_review():
+    file = _file('If You Want My Love - Alternate Extended Version',
+                 '/album/02 - If You Want My Love - Alternate Extended Version.flac',
+                 266800, {'mbid': 'alternate', 'title': 'If You Want My Love (alternate, extra bridge version)',
+                          'artist': 'Cheap Trick', 'score': 0.98})
+    slot = {'title': 'If You Want My Love (alternate, extra bridge version)',
+            'artist': 'Cheap Trick', 'recording_mbid': 'alternate',
+            'duration_ms': 266800, 'disc_number': 2, 'track_number': 6}
+    result = reconcile_folder([file], [slot])
+    assert not result['extra_files'] and not result['missing_slots']
+    assert result['pairs'][0]['confidence'] == 'ambiguous'
+    assert any('wording' in reason for reason in result['pairs'][0]['ambiguity_reasons'])
+    # Duration alone or a conflicting performance must not join the pair.
+    file['acoustid']['recordings'][0]['mbid'] = 'another-recording'
+    assert reconcile_folder([file], [slot])['missing_slots'] == [0]
+    file['acoustid']['recordings'][0]['mbid'] = 'alternate'
+    file['tags']['duration_ms'] = 290000
+    assert reconcile_folder([file], [slot])['missing_slots'] == [0]
+    file['tags']['duration_ms'] = 266800
+    file['tags']['title'] += ' (live)'
+    assert reconcile_folder([file], [slot])['missing_slots'] == [0]

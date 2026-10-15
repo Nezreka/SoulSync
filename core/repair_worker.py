@@ -1164,6 +1164,17 @@ class RepairWorker:
             except Exception:   # noqa: BLE001 - events never disturb the scan
                 logger.debug("repair scan event emit failed", exc_info=True)
 
+        if job_id == 'library_reconciliation':
+            with self._album_refresh_lock:
+                for key, refresh in list(self._album_refreshes.items()):
+                    requested_at = refresh.get('global_requested_at')
+                    if requested_at is not None and requested_at <= start_time:
+                        self._album_refreshes[key] = {
+                            'state': 'complete' if run_status == 'completed' else 'error',
+                            'error': run_error or ('' if run_status == 'completed'
+                                                   else 'Album reanalysis did not complete'),
+                        }
+
         # Notify rich progress system of completion
         if self._on_job_finish:
             try:
@@ -1676,6 +1687,16 @@ class RepairWorker:
                 state = self._album_refreshes.get(case_id) or {}
                 if state.get('state') == 'running' and state.get('snapshot'):
                     case = dict(state['snapshot'])
+        if case is None and status == 'pending':
+            # A known case with only historical findings is a successful terminal
+            # outcome, not a missing resource. Unknown IDs still return 404.
+            history = next((previous for previous in (
+                repair_review_queue.get_case(self.db, case_id, status=terminal, job_id=job_id)
+                for terminal in ('resolved', 'dismissed', 'auto_fixed')
+            ) if previous), None)
+            if history:
+                case = {**history, 'items': [], 'count': 0, 'status': 'completed',
+                        'plan': repair_review_queue.classify_case([]), 'decisions': []}
         if case is not None:
             if hasattr(self, '_album_refresh_lock'):
                 with self._album_refresh_lock:
@@ -1683,6 +1704,9 @@ class RepairWorker:
                                            {'state': 'idle'})
             else:
                 case['refresh'] = {'state': 'idle'}
+            bulk = getattr(self, '_bulk_fix_state', {})
+            if bulk.get('running') and case_id in bulk.get('review_case_ids', []):
+                case['refresh'] = {'state': 'running'}
         return case
 
     def _schedule_review_refresh(self, case_id: str, folder: str,
@@ -1787,7 +1811,11 @@ class RepairWorker:
             if action == 'fix':
                 result = self.fix_finding(finding_id, fix_action=fix_action,
                                           review_approved=True)
-                if (result.get('success') or result.get('partial')) and schedule_refresh:
+                if result.get('refresh_required') and schedule_refresh:
+                    result['refresh_queued'] = self._schedule_review_refresh(
+                        case_id, case.get('folder') or '', case)
+                if ((result.get('success') or result.get('partial')) and schedule_refresh
+                        and result.get('action') != 'wishlisted'):
                     result['refresh_queued'] = self._schedule_review_refresh(
                         case_id, case.get('folder') or '', case)
                 return result
@@ -1826,10 +1854,32 @@ class RepairWorker:
                 if not tracks:
                     return {'success': False, 'error': 'That release has no track list'}
                 if preview:
-                    return {'success': True, 'release_title': release.get('title') or '',
-                            'track_count': len(tracks),
-                            'tracks': [track.get('title') or track.get('recording', {}).get('title') or ''
-                                       for track in tracks]}
+                    from core.repair_jobs.library_reconciliation import (
+                        candidate_preview, _score_release_candidates, _read_file_tags,
+                    )
+                    from core.library.reconciliation_evidence import ReconciliationEvidence
+                    paths = list(dict.fromkeys(row['file_path'] for row in plan.get('assignments') or []
+                                               if row.get('file_path')))
+                    if not paths:
+                        return {'success': False, 'error': 'Reanalyze this album before comparing another edition'}
+                    cache = ReconciliationEvidence(self.db, self.acoustid_client)
+                    files = []
+                    try:
+                        for path in paths:
+                            resolved = _resolve_file_path(path, self.transfer_folder,
+                                                          config_manager=self._config_manager)
+                            if not resolved:
+                                return {'success': False, 'error': 'Album files changed; reanalyze before comparing editions'}
+                            files.append({'path': resolved,
+                                          'tags': cache.read_tags(resolved, _read_file_tags),
+                                          'acoustid': cache.identify(resolved)})
+                    finally:
+                        cache.close()
+                    scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id})
+                    if not scored:
+                        return {'success': False, 'error': 'Could not analyze this release track list'}
+                    return {'success': True, 'candidate': candidate_preview(
+                        files, scored[0], release, plan.get('numbering_mode') or '')}
                 candidate = candidate or {'source': source, 'release_id': release_id,
                                           'clear': 0, 'matched': 1}
             if not candidate:
@@ -1925,7 +1975,6 @@ class RepairWorker:
             return {'started': False, 'error': 'No missing release tracks remain'}
         return self.start_bulk_fix(
             finding_ids=ids, allow_review_ids=True, review_approved=True,
-            review_case_folders=[(case_id, case.get('folder') or '')],
         )
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
@@ -2424,7 +2473,20 @@ class RepairWorker:
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
 
             if result.get('success'):
-                self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
+                if finding_type == 'reconciliation_missing' and result.get('action') == 'wishlisted':
+                    # Acquisition changes request state, not file-to-slot evidence.
+                    # Keep the absent slot pending until an import fills it.
+                    details.pop('_fix_action', None)
+                    details['fulfillment_state'] = 'wishlisted'
+                    conn = self.db._get_connection()
+                    conn.execute('''UPDATE repair_findings SET details_json = ?,
+                                    last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = ?''', (json.dumps(details), finding_id))
+                    conn.commit()
+                    conn.close()
+                    conn = None
+                else:
+                    self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
                 self._set_finding_error(finding_id, None)
             elif result.get('stale'):
                 # The file this finding is ABOUT is gone — reorganised, renamed
@@ -4759,10 +4821,12 @@ class RepairWorker:
                     stored_path, self.transfer_folder, config_manager=self._config_manager)
                 if not current_path:
                     return {'success': False,
-                            'error': 'A duplicate track changed; rescan before applying'}
+                            'refresh_required': True,
+                            'error': 'Duplicate library references changed. Refreshing the copies; review them again before choosing a keeper.'}
                 if not _same_reviewed_file(current_path, reviewed_path):
                     return {'success': False,
-                            'error': 'A duplicate track changed; rescan before applying'}
+                            'refresh_required': True,
+                            'error': 'Duplicate library references changed. Refreshing the copies; review them again before choosing a keeper.'}
                 error = self._reconciliation_file_guard(reviewed_path, copy)
                 if error:
                     return {'success': False, 'error': error}
@@ -7180,6 +7244,8 @@ class RepairWorker:
             # could make that copy raise mid-iteration.
             self._bulk_fix_state = {
                 'running': True,
+                'operation_id': uuid.uuid4().hex,
+                'review_case_ids': [key for key, _ in review_case_folders or []],
                 'total': len(ids),
                 'done': 0,
                 'fixed': 0,
@@ -7207,7 +7273,8 @@ class RepairWorker:
             self._bulk_fix_thread.start()
             logger.info("Background bulk fix started: %d finding(s)%s",
                         len(ids), f" for {job_id}" if job_id else "")
-            return {'started': True, 'total': len(ids)}
+            return {'started': True, 'total': len(ids),
+                    'operation_id': self._bulk_fix_state['operation_id']}
 
     def _types_for_findings(self, ids: List[int]) -> Dict[int, str]:
         """finding_id → finding_type, read once so the bulk loop can tally per
@@ -7297,8 +7364,20 @@ class RepairWorker:
                               for key, folder in valid_cases]
                     state['reconciliation_queued'] = any(queued)
                 else:
+                    # Keep albums pending until the queued sweep actually
+                    # finishes. A sweep already underway cannot certify edits
+                    # that happened after it visited an album.
+                    with self._album_refresh_lock:
+                        for key, _folder in valid_cases:
+                            self._album_refreshes[key] = {
+                                'state': 'running', 'global_requested_at': time.time()}
                     state['reconciliation_queued'] = self.run_job_now(
                         'library_reconciliation')
+                    if not state['reconciliation_queued']:
+                        with self._album_refresh_lock:
+                            for key, _folder in valid_cases:
+                                self._album_refreshes[key] = {
+                                    'state': 'error', 'error': 'Could not queue album reanalysis'}
         except Exception as e:
             logger.error("Background bulk fix crashed: %s", e, exc_info=True)
             state['error'] = str(e)

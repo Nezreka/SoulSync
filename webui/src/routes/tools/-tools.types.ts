@@ -151,6 +151,8 @@ export interface RepairFindingCounts {
 }
 
 export interface BulkFixStatus {
+  operation_id?: string;
+  review_approved?: boolean;
   running?: boolean;
   done?: number;
   total?: number;

@@ -362,6 +362,7 @@
 
 .albumViews {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   margin: 14px 0 4px;
   border-bottom: 1px solid #343849;
@@ -467,78 +468,6 @@
   .loadingSpinner {
     animation: none;
   }
-}
-.workflowSteps {
-  position: relative;
-  display: grid;
-  gap: 6px;
-  margin-top: 16px;
-  padding-left: 22px;
-}
-.workflowSteps::before {
-  content: '';
-  position: absolute;
-  top: 20px;
-  bottom: 47px;
-  left: 7px;
-  width: 2px;
-  background: #596174;
-}
-.workflowSteps button {
-  position: relative;
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  margin: 0 0 0 10px;
-  padding: 11px 15px;
-  border: 1px solid #39485d;
-  border-left: 3px solid #687286;
-  border-radius: 8px;
-  background: #1c202b;
-  color: #e7edf7;
-  text-align: left;
-  cursor: pointer;
-}
-.workflowSteps button::before {
-  content: '';
-  position: absolute;
-  left: -31px;
-  top: 19px;
-  width: 10px;
-  height: 10px;
-  border: 2px solid #8a93a4;
-  border-radius: 50%;
-  background: #141620;
-}
-.workflowSteps button[data-state='current'],
-.workflowSteps button[data-state='needs-review'] {
-  border-color: #987846;
-  border-left-color: #e2b561;
-  background: #26231e;
-}
-.workflowSteps button[data-state='current']::before,
-.workflowSteps button[data-state='needs-review']::before {
-  border-color: #e2b561;
-}
-.workflowSteps button[data-state='pending'] {
-  border-color: #363b49;
-  border-left-color: #4e5666;
-  background: #191c26;
-  color: #a3acbd;
-}
-.workflowSteps button[data-state='pending']::before {
-  border-color: #727b8c;
-}
-.workflowSteps span {
-  color: #bca8ff;
-  font-size: 11px;
-  font-weight: 700;
-}
-.workflowSteps strong {
-  font-size: 14px;
-}
-.workflowSteps small {
-  color: #bec3d0;
 }
 .review[data-refresh='running'] .decisionActions button,
 .review[data-refresh='running'] .actions button,
@@ -710,7 +639,7 @@
 }
 .releaseChoiceList article {
   display: grid;
-  grid-template-columns: 26px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 26px 48px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 12px;
@@ -1114,15 +1043,10 @@
   border: 0;
   border-radius: 0;
 }
-.trackWorkspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(330px, 0.9fr);
-  gap: 14px;
-  align-items: start;
-}
+.trackWorkspace,
 .tabWorkspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.34fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(330px, 0.9fr);
   gap: 14px;
   align-items: start;
 }
@@ -1135,9 +1059,9 @@
 .tabContext {
   position: sticky;
   top: 16px;
-  margin-top: 16px;
-  padding: 18px;
-  border: 1px solid #3b4053;
+  margin-top: 0;
+  padding: 0;
+  border: 0;
   border-radius: 14px;
   background: #151824;
   color: #e7edf7;
@@ -2322,7 +2246,7 @@
 .checkedFiles small {
   overflow-wrap: anywhere;
 }
-.actions {
+.findingDetail .actions {
   justify-content: flex-start;
   flex-wrap: wrap;
   position: sticky;
@@ -2443,9 +2367,9 @@
   gap: 7px;
   margin: 12px 0;
 }
-.releaseSelector > button {
+.candidateCard > button:first-child {
   display: grid;
-  grid-template-columns: 26px 48px minmax(0, 1fr) auto;
+  grid-template-columns: 26px 48px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -2458,11 +2382,11 @@
   text-align: left;
   cursor: pointer;
 }
-.releaseSelector > button[data-selected='true'] {
+.candidateCard > button:first-child[data-selected='true'] {
   border-color: #a58be4;
   background: #25223b;
 }
-.releaseSelector > button > span:nth-child(3) {
+.candidateCard > button:first-child > span:nth-child(3) {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -2781,7 +2705,7 @@
   .albumCandidates article small {
     grid-column: 2;
   }
-  .releaseSelector > button {
+  .candidateCard > button:first-child {
     grid-template-columns: 26px 48px minmax(0, 1fr);
   }
   .releaseSelector .candidateStats {
@@ -2901,11 +2825,12 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .caseList {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
     gap: 7px;
-    max-height: none;
-    overflow-x: auto;
-    overflow-y: hidden;
+    max-height: 260px;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   .caseButton,
   .selectedCase {
@@ -2987,4 +2912,205 @@
   .selectedCase {
     flex-basis: 190px;
   }
+}
+
+/* Shared review components adapt to the actual panel width. */
+.releaseSection {
+  container-type: inline-size;
+  min-width: 0;
+}
+.candidateCard {
+  min-width: 0;
+  border: 1px solid #42485e;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #1d2130;
+}
+.candidateCard[data-selected='true'] {
+  border-color: #a58be4;
+  background: #25223b;
+}
+.candidateCard > button:first-child {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.candidateCard .candidateStats {
+  grid-column: 2 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.candidateUse {
+  margin: 0 10px 10px;
+  padding: 9px 14px;
+  border: 1px solid #a58be4;
+  border-radius: 7px;
+  color: #f5efff;
+  background: #504079;
+  cursor: pointer;
+}
+.trackFilters {
+  flex-wrap: wrap;
+}
+.trackFilters > *,
+.trackFilters select {
+  min-width: 0;
+  max-width: 100%;
+}
+.tabMain,
+.tabContext,
+.trackInspector {
+  min-width: 0;
+}
+.tabContext > .planContext {
+  margin-top: 0;
+  margin-bottom: 14px;
+}
+.tabContext .planContext dl {
+  grid-template-columns: 1fr;
+}
+.tabContext .planContext dl > div {
+  border-right: 0;
+  border-bottom: 1px solid #363b4d;
+}
+.tabContext .planContext dl > div:last-child {
+  border-bottom: 0;
+}
+.tabContext .readySummaryList {
+  grid-template-columns: 1fr;
+}
+.tabContext a {
+  color: #c4b5fd;
+  overflow-wrap: anywhere;
+}
+.matrixRow[data-status='settled'] {
+  background: #282338;
+  border-left: 4px solid #b59be6;
+}
+.matrixRow[data-status='change'] {
+  background: #182c40;
+  border-left: 4px solid #71a9df;
+}
+.matrixRow[data-status='confirmed'] {
+  border-left: 4px solid #60b98f;
+}
+.rowStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.decisionGrid {
+  padding-left: 34px;
+  gap: 8px;
+}
+.decisionGrid > article {
+  overflow: visible;
+  position: relative;
+}
+.decisionGrid > article::before {
+  content: '';
+  position: absolute;
+  left: -25px;
+  top: 0;
+  bottom: -9px;
+  width: 2px;
+  background: #596174;
+}
+.decisionGrid > article:first-child::before {
+  top: 27px;
+}
+.decisionGrid > article:last-child::before {
+  bottom: auto;
+  height: 27px;
+}
+.decisionGrid > article:only-child::before {
+  display: none;
+}
+.decisionGrid .decisionStep {
+  position: absolute;
+  left: -36px;
+  top: 16px;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  box-sizing: border-box;
+  border: 2px solid #d5ad53;
+  background: #27231b;
+}
+.decisionGrid .decisionSelect {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.decisionGrid .decisionActions {
+  padding-left: 14px;
+  margin-left: 0;
+}
+.decisionGrid article[data-state='complete'] {
+  border-color: #3d6251;
+  background: #19271f;
+}
+.decisionGrid article[data-state='complete'] .decisionStep {
+  border-color: #65bd92;
+  color: #b8f0d2;
+  background: #1b3528;
+}
+.decisionGrid article[data-state='ready'] {
+  border-color: #4f7fac;
+  background: #1b2c40;
+}
+.decisionGrid article[data-state='ready'] .decisionStep {
+  border-color: #71a9df;
+  color: #c5e0ff;
+  background: #1b2c40;
+}
+.decisionGrid article[data-state='pending'] {
+  border-color: #424857;
+  background: #1b1e27;
+  color: #aab2c3;
+}
+.decisionGrid article[data-state='pending'] .decisionStep {
+  border-color: #768094;
+  background: #1b1e27;
+}
+@container (max-width: 380px) {
+  .candidateCard > button:first-child {
+    grid-template-columns: 24px 40px minmax(0, 1fr);
+    gap: 7px;
+  }
+  .candidateCard .candidateStats {
+    grid-column: 1 / -1;
+  }
+  .candidateTrackList > div {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .candidateTrackList > div > span {
+    flex: 1 1 180px;
+  }
+}
+@media (max-width: 600px) {
+  .queueModes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decisionGrid .decisionSelect {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .decisionGrid .decisionSelect > b {
+    grid-column: 1;
+  }
+  .caseList {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: 220px;
+  }
+}
+
+.tabMain > :first-child {
+  margin-top: 0;
+}
+.competingFileNotice {
+  padding: 10px 12px;
+  border: 1px solid #72603b;
+  border-radius: 8px;
+  background: #29241b;
+  color: #e9d4a3;
+  overflow-wrap: anywhere;
 }

@@ -186,3 +186,18 @@ def test_a_finished_run_never_reports_already_running(tmp_path):
 
     again = w.start_bulk_fix()
     assert 'already_running' not in again, again
+
+
+def test_large_review_batch_waits_for_its_followup_scan(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    for index in range(4):
+        _add_genre_finding(db, f'AR{index}', index)
+    worker = _worker(db, tmp_path)
+    worker.run_job_now = lambda job: job == 'library_reconciliation'
+    cases = [(f'album:1:{index}', f'/music/{index}') for index in range(4)]
+    started = worker.start_bulk_fix(review_case_folders=cases)
+    assert started['operation_id']
+    status = _wait_done(worker)
+    assert status['reconciliation_queued'] and status['fixed'] == 4
+    assert status['review_case_ids'] == [key for key, _ in cases]
+    assert all(worker._album_refreshes[key]['state'] == 'running' for key, _ in cases)

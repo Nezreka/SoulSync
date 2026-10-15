@@ -284,6 +284,7 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
             return 0, []
     reasons: list[str] = []
     fingerprint_weight = 0
+    alternate_wording = False
     strong_recordings = [recording for recording in recordings
                          if float(recording.get('score') or 0) >= 0.90]
     if not versions_compatible(file, slot):
@@ -301,7 +302,22 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
         # title is bare, an exact high-score recording MBID may supply the
         # missing version identity and safely populate the newly stored MB
         # disambiguation field.
-        if local_versions or local_disambiguation or not exact_audio_identity:
+        # An alternate extended title and an alternate extra-bridge title can
+        # describe the same recording. Keep this a reviewable hypothesis only
+        # with independent exact audio identity, artist and duration support.
+        # Never relax live/studio, remix, acoustic or instrumental boundaries.
+        release_versions = slot_version_markers(slot)
+        delta = _duration_delta_ms(file, slot)
+        alternate_wording = (
+            exact_audio_identity and delta is not None and delta <= 1000
+            and 'alternate' in local_versions.intersection(release_versions)
+            and local_versions.symmetric_difference(release_versions) == {'extended'}
+            and any(recording.get('mbid') == _recording_id(slot)
+                    and recording.get('artist') and slot_artist
+                    and _artist_credit_supports(recording['artist'], slot_artist)
+                    for recording in strong_recordings)
+        )
+        if not alternate_wording and (local_versions or local_disambiguation or not exact_audio_identity):
             return 0, []
     if strong_recordings and all(
         recording.get('mbid') != _recording_id(slot)
@@ -348,6 +364,8 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None) -> tup
                 fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
                 reasons = ['AcoustID base recording title matches release slot']
 
+    if alternate_wording:
+        reasons.append('Exact audio identity supports alternate version wording; review qualifiers')
     tag_title = _title_score(str(tags.get('title') or ''), slot_title)
     filename_title = _title_score(_filename_title(str(file.get('path') or '')), slot_title)
     if not fingerprint_weight and max(tag_title, filename_title) < 0.83:
@@ -572,7 +590,11 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             unresolved_competing_file(other_index)
             for other_index in range(len(files))
         )
+        version_wording_review = bool(file_version_markers(files[file_index])) and not versions_compatible(
+            files[file_index], slot)
         ambiguity_reasons = []
+        if version_wording_review:
+            ambiguity_reasons.append('Recording identity agrees, but the local and release version wording differs')
         if ambiguous:
             ambiguity_reasons.append(
                 'AcoustID returned competing identities not resolved by the other evidence')
@@ -602,7 +624,7 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             'duration_delta_ms': assigned_duration_delta,
             'ambiguity_reasons': ambiguity_reasons,
             'confidence': 'manual' if forced_pairs.get(file_index) == slot_index else
-                          'ambiguous' if ambiguous or close_alternative or competing_file or outlying_version
+                          'ambiguous' if ambiguous or close_alternative or competing_file or outlying_version or version_wording_review
                           else 'clear' if weight >= 4500 else 'likely',
         })
     # A fingerprint can still name the predominant song when audio from the

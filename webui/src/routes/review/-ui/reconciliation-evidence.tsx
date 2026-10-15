@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 
-import type { ReviewFinding } from '../-review.api';
+import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
 import { ProviderReleaseId } from './provider-release-id';
@@ -519,6 +519,7 @@ export function ReleaseComparison({
   currentRelease,
   fallbackArtwork,
   numberingMode,
+  view = 'all',
 }: {
   candidates: Data[];
   selected: number;
@@ -528,6 +529,7 @@ export function ReleaseComparison({
   currentRelease?: Data;
   fallbackArtwork?: string;
   numberingMode?: string;
+  view?: 'all' | 'list' | 'detail';
 }) {
   const [inspectedPair, setInspectedPair] = useState<number | null>(null);
   useEffect(() => setInspectedPair(null), [selected]);
@@ -559,183 +561,203 @@ export function ReleaseComparison({
   );
   return (
     <section className={styles.releaseSection} aria-label="Compare release candidates">
-      <div className={styles.sectionHeading}>
-        <div>
-          <h4>
-            <EvidenceIcon name="disc" /> Compare {candidates.length} release candidates
-          </h4>
-          <p>
-            {allEquivalent
-              ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
-              : 'Select an edition to inspect its track mapping and unmatched files.'}
-          </p>
-        </div>
-      </div>
-      <div className={styles.releaseSelector}>
-        {candidates.map((candidate, index) => {
-          const isCurrent =
-            Boolean(currentRelease?.release_id) &&
-            currentRelease?.source === candidate.source &&
-            String(currentRelease?.release_id) === String(candidate.release_id);
-          return (
-            <button
-              key={`${label(candidate.source)}-${label(candidate.release_id)}-${index}`}
-              type="button"
-              data-selected={selected === index || undefined}
-              onClick={() => onSelect(index)}
-            >
-              <span className={styles.candidateRank}>{index + 1}</span>
-              <ReviewArtwork
-                title={label(candidate.release_title) || 'Release'}
-                url={label(candidate.image_url)}
-                fallbackUrl={fallbackArtwork}
-                size="release"
-              />
-              <span>
-                <strong>{label(candidate.release_title) || `Candidate ${index + 1}`}</strong>
-                <small>
-                  {[
-                    candidate.source,
-                    candidate.country,
-                    candidate.format,
-                    candidate.date,
-                    candidate.disambiguation,
-                  ]
-                    .map(label)
-                    .filter(Boolean)
-                    .join(' · ')}
-                </small>
-                {isCurrent && <small>Current library release</small>}
-              </span>
-              <CandidateFit candidate={candidate} />
-            </button>
-          );
-        })}
-      </div>
-      {fallbackArtwork && (
-        <p className={styles.muted}>
-          Candidates without catalog artwork show the current library cover.
-        </p>
-      )}
-      <div className={styles.releaseDetail}>
-        <div className={styles.releaseDetailHeader}>
-          <div>
-            <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
-            <small>
-              {label(active.source)}{' '}
-              <ProviderReleaseId
-                source={label(active.source)}
-                releaseId={label(active.release_id)}
-              />
-            </small>
-          </div>
-          {onPin && (
-            <button type="button" disabled={busy} onClick={() => onPin(selected)}>
-              Use this release
-            </button>
-          )}
-        </div>
-        {pairs.length > 0 ? (
-          <div className={styles.candidateTrackList}>
-            {pairs.map((pair, index) => (
-              <div key={`${label(pair.file)}-${index}`}>
-                <b>
-                  {formatTrackPosition(
-                    label(pair.disc_number || 1),
-                    label(pair.track_number || pair.slot_number),
-                    numberingMode,
-                    label(pair.display_track_number) || undefined,
-                  )}
-                </b>
-                <span>
-                  <strong>{label(pair.slot_title)}</strong>
-                  <small>
-                    {label(pair.file)}
-                    {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
-                  </small>
-                  {label(pair.confidence) !== 'clear' && (
-                    <small className={styles.reason}>
-                      {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
-                        ? label(pair.ambiguity_reasons[0])
-                        : 'The assignment has a competing match; inspect the evidence.'}
-                    </small>
-                  )}
-                </span>
-                <StatusChip
-                  tone={label(pair.confidence) === 'clear' ? 'good' : 'warning'}
-                  icon={label(pair.confidence) === 'clear' ? 'check' : 'warning'}
-                >
-                  {label(pair.confidence) === 'clear' ? 'Strong match' : 'Needs review'}
-                </StatusChip>
-                {label(pair.confidence) !== 'clear' && (
-                  <button type="button" onClick={() => setInspectedPair(index)}>
-                    Inspect match
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.muted}>No local files could be assigned to this release.</p>
-        )}
-        {inspectedPair !== null && pairs[inspectedPair] && (
-          <div className={styles.candidateInspection}>
-            <h5>Candidate track evidence</h5>
-            <TrackRows pairs={[pairs[inspectedPair]]} />
-            {Boolean(pairs[inspectedPair].file_path) && (
-              <ReviewAudio
-                localPath={label(pairs[inspectedPair].file_path)}
-                localTitle={label(pairs[inspectedPair].local_title || pairs[inspectedPair].file)}
-                localDurationMs={count(pairs[inspectedPair].file_duration_ms)}
-                comparisonTitle={label(pairs[inspectedPair].slot_title)}
-                comparisonDurationMs={count(pairs[inspectedPair].slot_duration_ms)}
-                previewUrl={label(pairs[inspectedPair].slot_preview_url)}
-                previewSource={label(active.source)}
-                previewTrackId={label(pairs[inspectedPair].slot_source_track_id)}
-              />
-            )}
-            <p className={styles.muted}>
-              Choose this release to create its actionable track review.
-            </p>
-          </div>
-        )}
-        {(missing.length > 0 || extra.length > 0) && (
-          <div>
-            {possibleVersionPairs.length > 0 && (
-              <div className={styles.versionPairNotice}>
-                <strong>Possible version difference</strong>
-                {possibleVersionPairs.map(({ releaseName, file }) => (
-                  <span key={`${releaseName}-${file}`}>
-                    {file} may be a different version of the release track “{releaseName}”.
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className={styles.candidateExceptions}>
-              {missing.length > 0 && (
-                <section>
-                  <strong>{missing.length} absent release tracks</strong>
-                  <ul>
-                    {missing.map((name, index) => (
-                      <li key={`${name}-${index}`}>{name}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-              {extra.length > 0 && (
-                <section>
-                  <strong>{extra.length} unassigned local files</strong>
-                  <ul>
-                    {extra.map((name, index) => (
-                      <li key={`${name}-${index}`}>{name}</li>
-                    ))}
-                  </ul>
-                </section>
-              )}
+      {view !== 'detail' && (
+        <>
+          <div className={styles.sectionHeading}>
+            <div>
+              <h4>
+                <EvidenceIcon name="disc" /> Compare {candidates.length} release candidates
+              </h4>
+              <p>
+                {allEquivalent
+                  ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
+                  : 'Select an edition to inspect its track mapping and unmatched files.'}
+              </p>
             </div>
           </div>
-        )}
-      </div>
+          <div className={styles.releaseSelector}>
+            {candidates.map((candidate, index) => {
+              const isCurrent =
+                Boolean(currentRelease?.release_id) &&
+                currentRelease?.source === candidate.source &&
+                String(currentRelease?.release_id) === String(candidate.release_id);
+              return (
+                <div
+                  className={styles.candidateCard}
+                  data-selected={selected === index || undefined}
+                  key={`${label(candidate.source)}-${label(candidate.release_id)}-${index}`}
+                >
+                  <button
+                    type="button"
+                    data-selected={selected === index || undefined}
+                    onClick={() => onSelect(index)}
+                  >
+                    <span className={styles.candidateRank}>{index + 1}</span>
+                    <ReviewArtwork
+                      title={label(candidate.release_title) || 'Release'}
+                      url={label(candidate.image_url)}
+                      fallbackUrl={fallbackArtwork}
+                      size="release"
+                    />
+                    <span>
+                      <strong>{label(candidate.release_title) || `Candidate ${index + 1}`}</strong>
+                      <small>
+                        {[
+                          candidate.source,
+                          candidate.country,
+                          candidate.format,
+                          candidate.date,
+                          candidate.disambiguation,
+                        ]
+                          .map(label)
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </small>
+                      {isCurrent && <small>Current library release</small>}
+                    </span>
+                    <CandidateFit candidate={candidate} />
+                  </button>
+                  {selected === index && onPin && (
+                    <button
+                      className={styles.candidateUse}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onPin(index)}
+                    >
+                      Use this release
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {fallbackArtwork && (
+            <p className={styles.muted}>
+              Candidates without catalog artwork show the current library cover.
+            </p>
+          )}
+        </>
+      )}
+      {view !== 'list' && (
+        <div className={styles.releaseDetail}>
+          <div className={styles.releaseDetailHeader}>
+            <div>
+              <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
+              <small>
+                {label(active.source)}{' '}
+                <ProviderReleaseId
+                  source={label(active.source)}
+                  releaseId={label(active.release_id)}
+                />
+              </small>
+            </div>
+          </div>
+          {pairs.length > 0 ? (
+            <div className={styles.candidateTrackList}>
+              {pairs.map((pair, index) => (
+                <div key={`${label(pair.file)}-${index}`}>
+                  <b>
+                    {formatTrackPosition(
+                      label(pair.disc_number || 1),
+                      label(pair.track_number || pair.slot_number),
+                      numberingMode,
+                      label(pair.display_track_number) || undefined,
+                    )}
+                  </b>
+                  <span>
+                    <strong>{label(pair.slot_title)}</strong>
+                    <small>
+                      {label(pair.file)}
+                      {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
+                    </small>
+                    {label(pair.confidence) !== 'clear' && (
+                      <small className={styles.reason}>
+                        {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
+                          ? label(pair.ambiguity_reasons[0])
+                          : 'The assignment has a competing match; inspect the evidence.'}
+                      </small>
+                    )}
+                  </span>
+                  <StatusChip
+                    tone={label(pair.confidence) === 'clear' ? 'good' : 'warning'}
+                    icon={label(pair.confidence) === 'clear' ? 'check' : 'warning'}
+                  >
+                    {label(pair.confidence) === 'clear' ? 'Strong match' : 'Needs review'}
+                  </StatusChip>
+                  {label(pair.confidence) !== 'clear' && (
+                    <button type="button" onClick={() => setInspectedPair(index)}>
+                      Inspect match
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.muted}>No local files could be assigned to this release.</p>
+          )}
+          {inspectedPair !== null && pairs[inspectedPair] && (
+            <div className={styles.candidateInspection}>
+              <h5>Candidate track evidence</h5>
+              <TrackRows pairs={[pairs[inspectedPair]]} />
+              {Boolean(pairs[inspectedPair].file_path) && (
+                <ReviewAudio
+                  localPath={label(pairs[inspectedPair].file_path)}
+                  localTitle={label(pairs[inspectedPair].local_title || pairs[inspectedPair].file)}
+                  localDurationMs={count(pairs[inspectedPair].file_duration_ms)}
+                  comparisonTitle={label(pairs[inspectedPair].slot_title)}
+                  comparisonDurationMs={count(pairs[inspectedPair].slot_duration_ms)}
+                  previewUrl={label(pairs[inspectedPair].slot_preview_url)}
+                  previewSource={label(active.source)}
+                  previewTrackId={label(pairs[inspectedPair].slot_source_track_id)}
+                />
+              )}
+              <p className={styles.muted}>
+                Choose this release to create its actionable track review.
+              </p>
+            </div>
+          )}
+          {(missing.length > 0 || extra.length > 0) && (
+            <div>
+              {possibleVersionPairs.length > 0 && (
+                <div className={styles.versionPairNotice}>
+                  <strong>Possible version difference</strong>
+                  {possibleVersionPairs.map(({ releaseName, file }) => (
+                    <span key={`${releaseName}-${file}`}>
+                      {file} may be a different version of the release track “{releaseName}”.
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className={styles.candidateExceptions}>
+                {missing.length > 0 && (
+                  <section>
+                    <strong>
+                      {missing.length} absent release track{missing.length === 1 ? '' : 's'}
+                    </strong>
+                    <ul>
+                      {missing.map((name, index) => (
+                        <li key={`${name}-${index}`}>{name}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                {extra.length > 0 && (
+                  <section>
+                    <strong>
+                      {extra.length} unassigned local file{extra.length === 1 ? '' : 's'}
+                    </strong>
+                    <ul>
+                      {extra.map((name, index) => (
+                        <li key={`${name}-${index}`}>{name}</li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -769,7 +791,7 @@ function CheckedFiles({ details }: { details: Data }) {
   );
 }
 
-function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) {
+function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>; details: Data }) {
   const tags = object(details.current_tags);
   const currentTitle = label(tags.title || details.current_title);
   const replacement = object(details.replacement_track);
@@ -900,6 +922,51 @@ function Facts({ finding, details }: { finding: ReviewFinding; details: Data }) 
         </dl>
       </section>
     </div>
+  );
+}
+
+export function AssignmentEvidence({ row, album }: { row: AlbumAssignment; album: ReviewCase }) {
+  const details: Data = {
+    current_tags: row.current_tags || { title: row.current_title },
+    current_title: row.current_title,
+    expected_title: row.slot_title,
+    file_duration_ms: row.file_duration_ms,
+    expected_duration_ms: row.slot_duration_ms,
+    album_folder: row.file_path?.split('/').slice(0, -1).join('/') || album.folder,
+    album_title: album.album,
+    artist_name: album.artist,
+    source: album.album_plan?.source,
+    release_id: album.album_plan?.release_id,
+    acoustid: row.acoustid,
+  };
+  return (
+    <section className={styles.findingDetail}>
+      <h3>{row.current_title || row.slot_title || 'Track assignment'}</h3>
+      <p>
+        {row.status === 'confirmed'
+          ? 'Confirmed match · no metadata edit is pending.'
+          : row.status === 'not_owned'
+            ? 'This track is intentionally not collected.'
+            : 'No pending action for this assignment.'}
+      </p>
+      <ReviewAudio
+        localPath={row.file_path || ''}
+        localTitle={row.current_title || ''}
+        localDurationMs={row.file_duration_ms || 0}
+        comparisonTitle={row.slot_title || ''}
+        comparisonDurationMs={row.slot_duration_ms || 0}
+        previewUrl={row.slot_preview_url || ''}
+        previewSource={album.album_plan?.source || ''}
+      />
+      <Facts finding={{ file_path: row.file_path || null }} details={details} />
+      {row.acoustid && <AudioEvidence details={details} />}
+      {Boolean(row.reasons?.length) && (
+        <section className={styles.technicalCard}>
+          <h5>Why this track was paired</h5>
+          <p>{row.reasons?.join(' · ')}</p>
+        </section>
+      )}
+    </section>
   );
 }
 

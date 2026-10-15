@@ -75,12 +75,14 @@ const finding = {
 
 function auxiliary(url: string) {
   if (url === '/api/repair/finding-types') return reply({ types: [] });
+  if (url === '/api/repair/bulk-fix/status') return reply({ running: false });
   if (url === '/api/repair/status') return reply({ current_job: null });
   if (url === '/api/repair/history?limit=50') return reply({ runs: [] });
   return null;
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   window.history.replaceState(null, '', '/review');
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -760,7 +762,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
-    await waitFor(() => expect(screen.getByText('1 ready change applied.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy());
   });
 
   it('puts required choices before independent safe changes on a mixed album', async () => {

@@ -78,6 +78,10 @@ export interface AlbumAssignment {
   slot_duration_ms?: number | null;
   slot_preview_url?: string;
   playlists?: string[];
+  current_tags?: Record<string, unknown>;
+  acoustid?: Record<string, unknown>;
+  reasons?: string[];
+  ambiguity_reasons?: string[];
 }
 
 export interface AlbumReconciliationPlan {
@@ -303,6 +307,7 @@ export async function pinReviewRelease(
   release_title?: string;
   track_count?: number;
   tracks?: string[];
+  candidate?: Record<string, unknown>;
 }> {
   const response = await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/release`, {
     method: 'POST',
@@ -315,12 +320,7 @@ export async function pinReviewRelease(
       ...options,
     }),
   });
-  return (await response.json()) as {
-    success: boolean;
-    message?: string;
-    error?: string;
-    refresh_queued?: boolean;
-  };
+  return readJson(response);
 }
 
 export async function runReconciliationScan(): Promise<void> {
@@ -371,7 +371,13 @@ export async function applyReviewDecision(
 export async function startReadyChanges(
   caseId?: string,
   organize = false,
-): Promise<{ started: boolean; total?: number; error?: string; already_running?: boolean }> {
+): Promise<{
+  started: boolean;
+  operation_id?: string;
+  total?: number;
+  error?: string;
+  already_running?: boolean;
+}> {
   return readJson(
     await fetch('/api/repair/review-queue/apply-ready', {
       method: 'POST',
@@ -383,7 +389,7 @@ export async function startReadyChanges(
 
 export async function startAlbumMetadataChanges(
   caseId: string,
-): Promise<{ started: boolean; total?: number; error?: string }> {
+): Promise<{ started: boolean; operation_id?: string; total?: number; error?: string }> {
   return readJson(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/apply-metadata`, {
       method: 'POST',
@@ -393,7 +399,7 @@ export async function startAlbumMetadataChanges(
 
 export async function startMissingTrackRequests(
   caseId: string,
-): Promise<{ started: boolean; total?: number; error?: string }> {
+): Promise<{ started: boolean; operation_id?: string; total?: number; error?: string }> {
   return readJson(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/request-missing`, {
       method: 'POST',

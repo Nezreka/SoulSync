@@ -774,6 +774,9 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     # even though there is no finding per missing slot.
                     finding = intent_finding
                 if finding:
+                    fulfillment = (finding.get('details') or {}).get('fulfillment_state')
+                    if fulfillment:
+                        assignment['fulfillment_state'] = fulfillment
                     assignment['finding_id'] = finding['id']
                     assignment['review_tier'] = finding.get('review_tier')
                     assignment['action_state'] = (

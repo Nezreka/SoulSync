@@ -106,7 +106,7 @@ def test_release_candidate_can_be_pinned_without_release_finding():
     assert stale['stale']
 
 
-def test_manual_musicbrainz_release_is_previewed_before_pinning():
+def test_manual_musicbrainz_release_is_previewed_before_pinning(monkeypatch, tmp_path):
     release_id = '301434dc-e59a-467d-b950-abfa9a2ad32e'
     class AlbumDatabase:
         selected = None
@@ -129,8 +129,29 @@ def test_manual_musicbrainz_release_is_previewed_before_pinning():
     worker._schedule_album_refresh = lambda *_args: True
     args = {'case_id': 'case', 'source': 'musicbrainz', 'release_id': release_id,
             'expected_source': 'itunes', 'expected_release_id': 'old'}
+    from core.library.reconciliation_evidence import ReconciliationEvidence
+    from core.repair_jobs import library_reconciliation as job
+    path = tmp_path / 'Song one.flac'
+    path.write_bytes(b'audio')
+    worker.transfer_folder = str(tmp_path)
+    worker._config_manager = None
+    worker._acoustid_client = None
+    case = worker.get_review_case('case')
+    case['album_plan']['assignments'] = [{'file_path': str(path)}]
+    worker.get_review_case = lambda *_args, **_kwargs: case
+    monkeypatch.setattr(ReconciliationEvidence, '__init__', lambda *args: None)
+    monkeypatch.setattr(ReconciliationEvidence, 'close', lambda *args: None)
+    monkeypatch.setattr(ReconciliationEvidence, 'read_tags', lambda *args: {'title': 'Song one', 'duration_ms': 200000})
+    monkeypatch.setattr(ReconciliationEvidence, 'identify', lambda *args: {'recordings': []})
+    monkeypatch.setattr(job, 'get_album_tracks_for_source', lambda *args, **kwargs: [
+        {'name': 'Song one', 'track_number': 1, 'duration_ms': 200000},
+        {'name': 'Song two', 'track_number': 2, 'duration_ms': 210000},
+    ])
     preview = worker.pin_review_release(**args, preview=True)
-    assert preview['success'] and preview['track_count'] == 2
+    assert preview['success'] and preview['candidate']['total_slots'] == 2
+    assert preview['candidate']['matched'] == 1
+    assert preview['candidate']['missing_tracks'] == ['Song two']
+    assert preview['candidate']['pairs'][0]['slot_title'] == 'Song one'
     assert worker.db.selected is None
     selected = worker.pin_review_release(**args, manual=True)
     assert selected['success'] and worker.db.selected == (7, 'musicbrainz', release_id, True)
@@ -172,7 +193,7 @@ def test_complete_album_can_request_all_missing_slots_after_scope_choice():
 
     assert worker.start_review_missing_tracks('album-case')['started']
     assert captured['finding_ids'] == [1, 2]
-    assert captured['review_case_folders'] == [('album-case', '/music/album')]
+    assert not captured.get('review_case_folders')
     case['items'][1]['details'] = {'fulfillment_state': 'wishlisted'}
     assert worker.start_review_missing_tracks('album-case')['started']
     assert captured['finding_ids'] == [1]
@@ -987,3 +1008,59 @@ def test_album_stays_in_review_queue_during_scoped_reanalysis(tmp_path):
     assert queue['items'][0]['refreshing'] is True
     assert queue['items'][0]['album'] == 'The Wall'
     assert case['refresh']['state'] == 'running'
+
+
+def test_known_completed_case_is_explicit_but_unknown_case_is_missing():
+    db = _Database()
+    db.add(1, '/music/Album/01.flac', {'album_id': 10}, status='resolved',
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    case = worker.get_review_case('album:1:10', job_id='library_reconciliation')
+    assert case['status'] == 'completed' and case['items'] == []
+    assert worker.get_review_case('album:1:404') is None
+    db.add(2, '/music/Album/02.flac', {'album_id': 10},
+           job_id='library_reconciliation', kind='reconciliation_unresolved')
+    assert worker.get_review_case('album:1:10')['status'] != 'completed'
+
+
+def test_requested_missing_track_stays_pending_without_reanalysis():
+    db = _Database()
+    details = {'album_id': 10, 'album_folder': '/music/Album',
+               'missing_tracks': [{'source_track_id': 'recording', 'name': 'Song',
+                                   'disc_number': 1, 'track_number': 2}]}
+    db.add(1, None, details, job_id='library_reconciliation', kind='reconciliation_missing')
+    case_id = list_cases(db)['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._config_manager = None
+    worker._review_apply_lock = threading.Lock()
+    worker._execute_fix = lambda *args: {'success': True, 'action': 'wishlisted'}
+    worker._schedule_review_refresh = lambda *args: (_ for _ in ()).throw(AssertionError('No rescan needed'))
+    case = worker.get_review_case(case_id)
+    result = worker.apply_review_decision(case_id, 1, evidence_token=case['items'][0]['evidence_token'], action='fix')
+    assert result['success'] and not result.get('refresh_queued')
+    updated = worker.get_review_case(case_id)
+    assert updated['status'] != 'completed'
+    assert updated['items'][0]['details']['fulfillment_state'] == 'wishlisted'
+    assert updated['decisions'][0]['category'] == 'pending_fulfillment'
+
+
+def test_stale_duplicate_library_id_refreshes_without_removing_a_file(tmp_path):
+    db = _Database()
+    db.conn.execute('CREATE TABLE tracks (id TEXT, file_path TEXT)')
+    path = tmp_path / 'Song.flac'
+    path.write_bytes(b'unchanged audio')
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker.transfer_folder = str(tmp_path)
+    worker._config_manager = None
+    worker._reconciliation_release_guard = lambda details: None
+    worker._fix_duplicates = lambda *args: (_ for _ in ()).throw(AssertionError('Must not remove stale copies'))
+    result = worker._fix_reconciliation_duplicate('track', 'old', str(path), {
+        '_fix_action': 'keep:old', 'duplicate_copies': [
+            {'track_id': 'old', 'file_path': str(path)},
+            {'track_id': 'other-old', 'file_path': str(path)},
+        ]})
+    assert not result['success'] and result['refresh_required']
+    assert path.read_bytes() == b'unchanged audio'

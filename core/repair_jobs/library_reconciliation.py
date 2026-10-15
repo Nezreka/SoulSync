@@ -1070,6 +1070,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'slot_disc_number': slot.get('disc_number') or 1,
             'display_track_number': display_slot.get('track_number'),
             'title_difference': title_kind, 'changes': changes,
+            'current_tags': tags, 'acoustid': file.get('acoustid') or {},
             'confidence': pair['confidence'], 'reasons': pair.get('reasons') or [],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
             'file_duration_ms': tags.get('duration_ms') or file.get('duration_ms') or 0,
@@ -1118,6 +1119,47 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'playlists': list(file.get('playlists') or []),
         })
     return assignments, sorted(categories)
+
+
+def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
+                      numbering_mode: str = '') -> dict:
+    release_slots, candidate_plan = row[5], row[6]
+    media = release_meta.get('media') or []
+    formats = [str(medium.get('format') or '') for medium in media
+               if isinstance(medium, dict) and medium.get('format')]
+    return {
+        'source': row[3], 'release_id': row[4], 'clear': row[0],
+        'release_title': release_meta.get('name') or release_meta.get('title') or '',
+        'country': release_meta.get('country') or '',
+        'date': release_meta.get('date') or release_meta.get('release_date') or '',
+        'disambiguation': release_meta.get('disambiguation') or '',
+        'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
+        'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
+        'matched': row[1], 'total_slots': len(release_slots),
+        'missing': len(candidate_plan['missing_slots']),
+        'extra': len(candidate_plan['extra_files']),
+        'continuous_numbering': bool(_continuous_numbering(row)),
+        'pairs': [{
+            'file': os.path.basename(files[pair['file_index']]['path']),
+            'file_path': files[pair['file_index']]['path'],
+            'local_title': (files[pair['file_index']].get('tags') or {}).get('title') or '',
+            'file_duration_ms': (files[pair['file_index']].get('tags') or {}).get('duration_ms') or 0,
+            'slot_title': release_slots[pair['slot_index']].get('title') or '',
+            'slot_duration_ms': release_slots[pair['slot_index']].get('duration_ms') or 0,
+            'slot_preview_url': release_slots[pair['slot_index']].get('preview_url') or '',
+            'slot_source_track_id': release_slots[pair['slot_index']].get('source_track_id') or '',
+            'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
+            'track_number': release_slots[pair['slot_index']].get('track_number'),
+            'display_track_number': _numbered_slot(
+                release_slots[pair['slot_index']], pair['slot_index'],
+                numbering_mode, release_slots).get('track_number'),
+            'confidence': pair.get('confidence') or '',
+        } for pair in candidate_plan['pairs']],
+        'missing_tracks': [release_slots[index].get('title') or ''
+                           for index in candidate_plan['missing_slots']],
+        'extra_files': [os.path.basename(files[index]['path'])
+                        for index in candidate_plan['extra_files']],
+    }
 
 
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
@@ -1181,45 +1223,6 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                                        for row in assignments)
                  else 'confirmed')
     candidate_rows = candidates or [scored]
-    def candidate_preview(row: tuple) -> dict:
-        release_slots, candidate_plan = row[5], row[6]
-        release_meta = (candidate_metadata or {}).get((row[3], row[4])) or {}
-        media = release_meta.get('media') or []
-        formats = [str(medium.get('format') or '') for medium in media
-                   if isinstance(medium, dict) and medium.get('format')]
-        return {
-            'source': row[3], 'release_id': row[4], 'clear': row[0],
-            'release_title': release_meta.get('name') or release_meta.get('title') or '',
-            'country': release_meta.get('country') or '',
-            'date': release_meta.get('date') or release_meta.get('release_date') or '',
-            'disambiguation': release_meta.get('disambiguation') or '',
-            'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
-            'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
-            'matched': row[1], 'total_slots': len(release_slots),
-            'missing': len(candidate_plan['missing_slots']),
-            'extra': len(candidate_plan['extra_files']),
-            'continuous_numbering': bool(_continuous_numbering(row)),
-            'pairs': [{
-                'file': os.path.basename(files[pair['file_index']]['path']),
-                'file_path': files[pair['file_index']]['path'],
-                'local_title': (files[pair['file_index']].get('tags') or {}).get('title') or '',
-                'file_duration_ms': (files[pair['file_index']].get('tags') or {}).get('duration_ms') or 0,
-                'slot_title': release_slots[pair['slot_index']].get('title') or '',
-                'slot_duration_ms': release_slots[pair['slot_index']].get('duration_ms') or 0,
-                'slot_preview_url': release_slots[pair['slot_index']].get('preview_url') or '',
-                'slot_source_track_id': release_slots[pair['slot_index']].get('source_track_id') or '',
-                'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
-                'track_number': release_slots[pair['slot_index']].get('track_number'),
-                'display_track_number': _numbered_slot(
-                    release_slots[pair['slot_index']], pair['slot_index'],
-                    numbering_mode, release_slots).get('track_number'),
-                'confidence': pair.get('confidence') or '',
-            } for pair in candidate_plan['pairs']],
-            'missing_tracks': [release_slots[index].get('title') or ''
-                               for index in candidate_plan['missing_slots']],
-            'extra_files': [os.path.basename(files[index]['path'])
-                            for index in candidate_plan['extra_files']],
-        }
     try:
         return persist_album_plan(db, common, {
             'source': source, 'release_id': release_id, 'state': state,
@@ -1228,7 +1231,9 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'release_track_count': len(slots), 'local_file_count': len(files),
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
-            'candidates': [candidate_preview(row) for row in candidate_rows[:6]],
+            'candidates': [candidate_preview(files, row,
+                            (candidate_metadata or {}).get((row[3], row[4])) or {},
+                            numbering_mode) for row in candidate_rows[:6]],
         })
     except Exception as exc:
         # The snapshot is a review read model. A transient persistence problem
