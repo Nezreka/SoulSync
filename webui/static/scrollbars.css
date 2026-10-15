@@ -108,9 +108,11 @@ html *::-webkit-scrollbar-track:horizontal {
    wrong — it would punch the scrollbar itself out of the mask.
 
    Notes:
-   - The fade is static, not scroll-aware: a rail that happens to fit shows
-     the fade anyway. The scrollbar itself only renders when there is overflow,
-     so it remains the truthful signal; the fade is the enhancement.
+   - each edge only fades when there's content hidden past it (the left fade
+     used to sit on the first card at scroll 0). a scroll-driven animation
+     ramps --hscroll-fade-l / -r over the first and last fade-size of the
+     scroll range. a rail that fits has no scroll timeline, so both stay 0.
+     browsers without animation-timeline fall back to a right-only fade.
    - `.discover-grid` is deliberately NOT in the fade list: in the
      "Your Albums" section it becomes a non-scrolling multi-row grid, where
      a static fade would wrongly dim cards. */
@@ -124,12 +126,14 @@ html *::-webkit-scrollbar-track:horizontal {
   .explorer-picker-scroll
 ) {
   --hscroll-fade-size: 32px;
+  --hscroll-fade-l: 0px;
+  --hscroll-fade-r: var(--hscroll-fade-size);
   -webkit-mask-image:
     linear-gradient(
       to right,
       transparent,
-      #000 var(--hscroll-fade-size),
-      #000 calc(100% - var(--hscroll-fade-size)),
+      #000 var(--hscroll-fade-l),
+      #000 calc(100% - var(--hscroll-fade-r)),
       transparent
     ),
     linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
@@ -138,12 +142,64 @@ html *::-webkit-scrollbar-track:horizontal {
     linear-gradient(
       to right,
       transparent,
-      #000 var(--hscroll-fade-size),
-      #000 calc(100% - var(--hscroll-fade-size)),
+      #000 var(--hscroll-fade-l),
+      #000 calc(100% - var(--hscroll-fade-r)),
       transparent
     ),
     linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
   mask-composite: add;
+}
+
+/* registered so the animation interpolates them as lengths */
+@property --hscroll-fade-l {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --hscroll-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes hscroll-fade-in-left {
+  from {
+    --hscroll-fade-l: 0px;
+  }
+  to {
+    --hscroll-fade-l: var(--hscroll-fade-size);
+  }
+}
+
+@keyframes hscroll-fade-out-right {
+  from {
+    --hscroll-fade-r: var(--hscroll-fade-size);
+  }
+  to {
+    --hscroll-fade-r: 0px;
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .hscroll-fade,
+  :is(
+    .discover-carousel,
+    .discover-mixes-grid,
+    .dsc-video-rail-track,
+    .vd-rail,
+    .dash-rail,
+    .explorer-picker-scroll
+  ) {
+    --hscroll-fade-r: 0px;
+    animation:
+      hscroll-fade-in-left linear both,
+      hscroll-fade-out-right linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0px var(--hscroll-fade-size),
+      calc(100% - var(--hscroll-fade-size)) 100%;
+  }
 }
 
 /* When keyboard-navigating a rail, drop the fade so focus rings stay fully

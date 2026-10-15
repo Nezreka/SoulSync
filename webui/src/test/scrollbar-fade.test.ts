@@ -159,6 +159,35 @@ describe('fading scrollbar — CSS contract', () => {
   });
 });
 
+// measured in chromium: scroll 0 -> l 0 r 32, 10px -> l 10, end -> l 32 r 0,
+// a rail that fits -> 0 / 0. jsdom can't run scroll timelines, so pin the text.
+describe('rail edge fade — only on the side with hidden content', () => {
+  const section3 = CSS.slice(CSS.indexOf('/* ── 3.'), SECTION4_AT);
+
+  it('the gradient stops read the per-edge vars, not the shared size', () => {
+    expect(section3).toContain('#000 var(--hscroll-fade-l)');
+    expect(section3).toContain('#000 calc(100% - var(--hscroll-fade-r))');
+    expect(section3).not.toContain('#000 var(--hscroll-fade-size)');
+  });
+
+  it('the left edge starts clear, the fallback fades the right only', () => {
+    expect(section3).toMatch(
+      /--hscroll-fade-l: 0px;\s*--hscroll-fade-r: var\(--hscroll-fade-size\);/,
+    );
+  });
+
+  it('a scroll timeline ramps each edge over its fade-size', () => {
+    const supports = section3.slice(section3.indexOf('@supports (animation-timeline: scroll())'));
+    expect(supports).toContain('--hscroll-fade-r: 0px;');
+    expect(supports).toContain('animation-timeline: scroll(self inline), scroll(self inline);');
+    expect(supports).toMatch(
+      /0px var\(--hscroll-fade-size\),\s*calc\(100% - var\(--hscroll-fade-size\)\) 100%;/,
+    );
+    expect(section3).toMatch(/@property --hscroll-fade-l \{\s*syntax: '<length>';/);
+    expect(section3).toMatch(/@property --hscroll-fade-r \{\s*syntax: '<length>';/);
+  });
+});
+
 describe('fading scrollbar — marker behaviour', () => {
   beforeAll(() => {
     vi.useFakeTimers();
