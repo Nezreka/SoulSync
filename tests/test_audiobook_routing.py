@@ -434,3 +434,51 @@ def test_refresh_api(folders):
     app.register_blueprint(create_blueprint())
     reply = app.test_client().post("/api/audiobook-routes/Bobby & Max/refresh").get_json()
     assert reply == {"success": True, "written": 1, "unchanged": 0}
+
+
+# ---------------------------------------------------------------------------
+# genre
+# ---------------------------------------------------------------------------
+
+def _tag_flac(tmp_path, monkeypatch, db, artist, *, routed):
+    """Run the real tag writer on a tiny FLAC whose source says the genre is Rock."""
+    from unittest.mock import patch
+
+    pytest.importorskip("mutagen")
+    from mutagen.flac import FLAC
+
+    import core.metadata.enrichment as enrichment
+
+    path = str(tmp_path / "t.flac")
+    with open(path, "wb") as f:
+        f.write(b"fLaC" + b"\x80\x00\x00\x22" + b"\x00\x10\x00\x10" + b"\x00" * 6
+                + b"\x0a\xc4\x42\xf0" + b"\x00" * 20)
+    FLAC(path).save()
+    if routed:
+        routing.add_route(artist, db)
+    monkeypatch.setattr("database.music_database.get_database", lambda: db)
+    monkeypatch.setattr(routing, "audiobook_root", lambda: str(tmp_path / "audiobooks"))
+    meta = {"title": "Kapitel 1", "artist": artist, "album_artist": artist, "album": "Folge 1",
+            "track_number": 1, "total_tracks": 2, "disc_number": 1, "genre": "Rock"}
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return default
+
+    with patch.object(enrichment, "get_config_manager", return_value=_Cfg()), \
+         patch.object(enrichment, "strip_all_non_audio_tags"), \
+         patch.object(enrichment, "extract_source_metadata", return_value=meta), \
+         patch.object(enrichment, "embed_source_ids"), \
+         patch.object(enrichment, "verify_metadata_written", return_value=True), \
+         patch.object(enrichment, "embed_album_art_metadata", return_value=False):
+        enrichment.enhance_file_metadata(
+            path, context=_context(artist), artist={"name": artist}, album_info={})
+    return FLAC(path).get("genre")
+
+
+def test_routed_album_is_tagged_as_audiobook(tmp_path, db, monkeypatch):
+    assert _tag_flac(tmp_path, monkeypatch, db, "Bobby & Max", routed=True) == ["Audiobook"]
+
+
+def test_unrouted_album_keeps_its_source_genre(tmp_path, db, monkeypatch):
+    assert _tag_flac(tmp_path, monkeypatch, db, "Coldplay", routed=False) == ["Rock"]

@@ -117,7 +117,7 @@ function TrackRow({
           ? `${outcome.ok ? '✓ ' : '✗ '}${outcome.message}`
           : track.retry > 0
             ? `${track.failing ? '⚠ ' : ''}${track.retry} tries`
-            : 'queued'}
+            : 'waiting'}
       </span>
       <span className="wl-list-last" title={track.lastTried || undefined}>
         {track.lastTried || '—'}
