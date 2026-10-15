@@ -29,6 +29,7 @@ import {
   watchAllState,
   heroWatchlistButtonState,
   heroWatchlistCheckBody,
+  heroPicksForModal,
 } from './-discover.hero';
 
 const artist = (over: Partial<DiscoverHeroArtist> = {}): DiscoverHeroArtist =>
@@ -317,5 +318,17 @@ describe('heroIds', () => {
         musicbrainz_artist_id: 'mb',
       }),
     ).toEqual({ spotify: 'sp', musicbrainz: 'mb' });
+  });
+});
+
+describe('the hero picks as see-all cards', () => {
+  it('keeps every pick, in order, under the id the hero would use', () => {
+    const cards = heroPicksForModal([
+      artist({ artist_id: 'a1', artist_name: 'Project Pat' }),
+      artist({ artist_id: null, spotify_artist_id: 'sp', artist_name: 'Memphis Bleek' }),
+    ]);
+    expect(cards.map((c) => c.artist_name)).toEqual(['Project Pat', 'Memphis Bleek']);
+    // a null active id falls back like the hero's own buttons, never 'null'
+    expect(cards.map((c) => c.artist_id)).toEqual(['a1', 'sp']);
   });
 });
