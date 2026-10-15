@@ -34,6 +34,28 @@ Before implementation, a consistent SQLite read transaction copied scan results,
 - Shared Review/Tools UI regression: 662 tests passed. Frontend checks: zero errors, 548 existing warnings. Production frontend build succeeded.
 - Browser checks exercised Plan, Release, Tracks and Evidence at 1800, 1100, 840 and 390 pixels: no document overflow or JavaScript errors. The mobile track inspector remained within the viewport and scrollable.
 
+## Deployed verification
+
+Test image `localhost/soulsync:test-67889b3a80a5` is running on the Kubernetes cluster. The documented test-deployment script completed successfully; the deployment is Ready and SoulSync's Flux reconciliation remains suspended for feature review. No upstream push was made. Imports also passed inside the built Python 3.11 image.
+
+A fresh full-library scan (run 799) completed with 13,810 files, zero errors and no automatic file fixes. It took 1,869.53 seconds (31m 10s), compared with 1,966.11 seconds (32m 46s) for the previous scan. These are observations under different cache/provider conditions, not a controlled whole-scan benchmark. The new scan's inventory took 11.3 seconds; it reused 13,780 fingerprints and 13,806 tag reads.
+
+The before/after comparison covers all 1,567 plans:
+
+- No logical album was added or removed.
+- 1,561 plans were identical after excluding the new operational inventory record.
+- Five plans differed only in expiring Deezer preview URL parameters; their media paths were unchanged.
+- One plan freshly observed ISRC tags on four Paramore files. Its assignments, confidence and proposed edits were unchanged.
+- All assignment decisions and proposed metadata edits matched the baseline.
+
+Pending findings increased from 1,180 to 1,467, and queue albums from 562 to 602 (518 needs-input, 80 ready, four file-action albums; ready-action count 494). Every one of the 287 newly pending findings had unchanged evidence and a prior resolved finding whose existing seven-day recurrence grace expired between the two scans. This is existing time-dependent behavior, not a changed classification or matching threshold. Historical resolution times were October 8 at 05:13:29, 05:56:19 and 18:25:04 UTC.
+
+A live scope check on **North (Deluxe Edition)** selected 28 known album rows in 0.014 seconds. Discovery selected 90 related rows under its artist directory; the normal album reanalysis completed in 3.876 seconds with an identical plan. No metadata application, quarantine or download was performed for verification.
+
+All 16 live viewport/tab combinations passed without document overflow or JavaScript errors. A stalled local Kubernetes port-forward was replaced before completing the mobile checks.
+
+Local comparison artifacts are under `test-data/review-optimization-baseline-20261015/` and `test-data/review-optimization-after-20261015/` in the main workspace. Each contains a compressed SQLite snapshot and manifest; the after directory also contains validation logs and the explanation of every observed difference. These datasets are not committed.
+
 ## Complexity and boundaries
 
 Pair scoring no longer repeats a full slot search for each applicable edge. Its repeated alternative-search work moves toward `O(F × S × R)` from `O(F × S² × R)`, where F is files, S slots and R recording candidates. Assignment remains `O(F² × max(F, S))`. Per-analysis caches use additional memory proportional to the facts actually evaluated.
