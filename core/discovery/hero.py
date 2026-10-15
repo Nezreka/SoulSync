@@ -90,7 +90,8 @@ def get_discover_hero():
         from core.discovery.feedback import Taste
         _hero_taste = Taste.load(database, get_current_profile_id())
         _cached = _HERO_CACHE.get(_cache_key)
-        if _cached and _time.time() < _cached[0]:
+        from core.discovery.warm_refresh import refreshing
+        if _cached and _time.time() < _cached[0] and not refreshing():
             if _hero_taste.is_empty:
                 return jsonify(_cached[1])
             # less like this ranks lower everywhere: sink disliked artists

@@ -188,6 +188,8 @@ export interface ArtApplyResult {
   server_updated?: boolean;
   /** the artist path's artist.jpg. */
   disk_written?: boolean;
+  /** why artist.jpg wasn't written, when the artist has no folder of their own. */
+  disk_skipped?: string | null;
   /** the album path's cover.jpg. */
   cover_written?: boolean;
 }
@@ -229,7 +231,9 @@ export function artistArtAppliedMessage(result: ArtApplyResult): string {
   const parts = [];
   if (result.server_updated) parts.push('server');
   if (result.disk_written) parts.push('artist.jpg');
-  return 'Artist photo updated' + (parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '');
+  const message =
+    'Artist photo updated' + (parts.length ? ' (also updated: ' + parts.join(', ') + ')' : '');
+  return result.disk_skipped ? `${message}. ${result.disk_skipped}` : message;
 }
 
 /** the album twin: the server poster and cover.jpg now get the pick too. */

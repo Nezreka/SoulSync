@@ -68,9 +68,7 @@ export function PodcastSeasonTabs({
         </button>
 
         {searchFilter && (
-          <span style={{ fontSize: 12, color: 'rgba(255, 255, 255, 0.5)' }}>
-            ({filteredCount} matched)
-          </span>
+          <span style={{ fontSize: 12, color: 'var(--white-a50)' }}>({filteredCount} matched)</span>
         )}
       </div>
     </div>

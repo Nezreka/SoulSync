@@ -15,7 +15,7 @@ function makeClient() {
 }
 
 function renderPanel(props: {
-  trackId: number | null;
+  trackId: string | null;
   activeStem?: StemName | null;
   onSelectStem?: (stem: StemName | null) => void;
 }) {
@@ -32,7 +32,7 @@ function renderPanel(props: {
 }
 
 const doneInfo = {
-  track_id: 7,
+  track_id: '7',
   status: 'done',
   stems: ['drums', 'vocals', 'bass', 'other'],
   backend: 'demucs',
@@ -45,7 +45,7 @@ describe('StemsPanel', () => {
 
   beforeEach(() => {
     posted = [];
-    statusBody = { track_id: 7, status: 'idle', stems: [], stems_available: true };
+    statusBody = { track_id: '7', status: 'idle', stems: [], stems_available: true };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -81,19 +81,19 @@ describe('StemsPanel', () => {
   });
 
   it('offers separation when the track has no stems', async () => {
-    renderPanel({ trackId: 7 });
+    renderPanel({ trackId: '7' });
     expect(await screen.findByText('Separate stems')).toBeInTheDocument();
     expect(screen.getByText(/Split this track into drums/i)).toBeInTheDocument();
   });
 
   it('posts separation and shows the four stems with solo/mute', async () => {
-    renderPanel({ trackId: 7 });
+    renderPanel({ trackId: '7' });
 
     fireEvent.click(await screen.findByText('Separate stems'));
 
     // POST went out with the track id…
     await waitFor(() => expect(posted).toHaveLength(1));
-    expect(posted[0]).toEqual({ track_id: 7 });
+    expect(posted[0]).toEqual({ track_id: '7' });
 
     // …and the panel lands on the four-stem mixer.
     for (const name of ['Drums', 'Vocals', 'Bass', 'Other']) {
@@ -105,16 +105,16 @@ describe('StemsPanel', () => {
   });
 
   it('shows the failed state with a retry button', async () => {
-    statusBody = { track_id: 7, status: 'error: disk full', stems: [], stems_available: true };
-    renderPanel({ trackId: 7 });
+    statusBody = { track_id: '7', status: 'error: disk full', stems: [], stems_available: true };
+    renderPanel({ trackId: '7' });
     expect(await screen.findByText('Separation failed')).toBeInTheDocument();
     expect(screen.getByText('disk full')).toBeInTheDocument();
     expect(screen.getByText('Try again')).toBeInTheDocument();
   });
 
   it('shows the setup note instead of the button when stems are unavailable', async () => {
-    statusBody = { track_id: 7, status: 'idle', stems: [], stems_available: false };
-    renderPanel({ trackId: 7 });
+    statusBody = { track_id: '7', status: 'idle', stems: [], stems_available: false };
+    renderPanel({ trackId: '7' });
     expect(await screen.findByText('Stem separation needs one small install')).toBeInTheDocument();
     expect(screen.queryByText('Separate stems')).not.toBeInTheDocument();
     expect(screen.getByText('pip install onnxruntime')).toBeInTheDocument();
@@ -122,8 +122,8 @@ describe('StemsPanel', () => {
   });
 
   it('shows the setup note instead of retry when a failed track has no backend', async () => {
-    statusBody = { track_id: 7, status: 'error: boom', stems: [], stems_available: false };
-    renderPanel({ trackId: 7 });
+    statusBody = { track_id: '7', status: 'error: boom', stems: [], stems_available: false };
+    renderPanel({ trackId: '7' });
     expect(await screen.findByText('Stem separation needs one small install')).toBeInTheDocument();
     expect(screen.queryByText('Try again')).not.toBeInTheDocument();
   });
@@ -134,7 +134,7 @@ describe('StemsPanel', () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = input instanceof Request ? input.url : String(input);
         const method = input instanceof Request ? input.method : (init?.method ?? 'GET');
-        const running = { track_id: 7, status: 'running', stems: [], stems_available: true };
+        const running = { track_id: '7', status: 'running', stems: [], stems_available: true };
         if (method === 'POST') {
           return new Response(JSON.stringify({ success: true, data: running, error: null }));
         }
@@ -143,7 +143,7 @@ describe('StemsPanel', () => {
         );
       }),
     );
-    renderPanel({ trackId: 7 });
+    renderPanel({ trackId: '7' });
     fireEvent.click(await screen.findByText('Separate stems'));
     expect(await screen.findByText(/Separating… 42%/)).toBeInTheDocument();
   });
@@ -151,7 +151,7 @@ describe('StemsPanel', () => {
   it('selecting a stem notifies the parent', async () => {
     statusBody = doneInfo;
     const onSelectStem = vi.fn();
-    renderPanel({ trackId: 7, onSelectStem });
+    renderPanel({ trackId: '7', onSelectStem });
 
     const drumsButton = await screen.findByRole('button', { name: '○ Drums' });
     fireEvent.click(drumsButton);

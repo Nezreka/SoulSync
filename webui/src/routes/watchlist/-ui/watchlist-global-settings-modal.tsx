@@ -23,6 +23,7 @@ const CONTENT_FILTER_KEYS = [
   'include_acoustic',
   'include_compilations',
   'include_instrumentals',
+  'include_other_artists',
 ] as const;
 
 const ALL_INCLUDE_KEYS = [...RELEASE_TYPE_KEYS, ...CONTENT_FILTER_KEYS] as const;
@@ -62,6 +63,11 @@ const OPTION_COPY: Record<IncludeKey, { icon: string; title: string; description
     title: 'Include Instrumentals',
     description: 'Instrumental, karaoke, and backing track versions',
   },
+  include_other_artists: {
+    icon: '👥',
+    title: 'Include Other Artists',
+    description: 'Tracks by other artists found on tributes, soundtracks and compilations',
+  },
 };
 
 export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
@@ -74,6 +80,7 @@ export const EMPTY_GLOBAL_CONFIG: WatchlistGlobalConfig = {
   include_acoustic: false,
   include_compilations: false,
   include_instrumentals: false,
+  include_other_artists: false,
   exclude_terms: '',
   global_auto_download: true,
   // #1450: defaults match the server ("all" = today's behaviour, opt-in).

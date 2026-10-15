@@ -38,6 +38,7 @@ def test_preflight_answered_for_api_options():
     assert headers["Access-Control-Allow-Origin"] == "*"
     assert "Authorization" in headers["Access-Control-Allow-Headers"]
     assert "Content-Type" in headers["Access-Control-Allow-Headers"]
+    assert "X-API-Key" in headers["Access-Control-Allow-Headers"]
     assert "GET" in headers["Access-Control-Allow-Methods"]
     assert "POST" in headers["Access-Control-Allow-Methods"]
     assert "OPTIONS" in headers["Access-Control-Allow-Methods"]

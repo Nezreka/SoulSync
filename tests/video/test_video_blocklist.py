@@ -21,9 +21,13 @@ from flask import Flask
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
-_DLPAGE_JS = (_ROOT / "webui" / "static" / "video" / "video-downloads-page.js").read_text(encoding="utf-8")
-_HISTORY_JS = (_ROOT / "webui" / "static" / "video" / "video-download-history.js").read_text(encoding="utf-8")
-_INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
+# The legacy vanilla-JS pages were rewritten in React for the unified downloads
+# page (PR #1651). Blocklist UI now lives in the React components below; the
+# blocklist itself moved inline into the Review pane (was a modal).
+_VDL = _ROOT / "webui" / "src" / "routes" / "active-downloads"
+_VDL_UI = _VDL / "-ui"
+_VDL_API = (_VDL / "-vdl.api.ts").read_text(encoding="utf-8")
+_VDL_HELPERS = (_VDL / "-vdl.helpers.ts").read_text(encoding="utf-8")
 
 
 @pytest.fixture()
@@ -295,20 +299,30 @@ def test_blocklist_api_from_history_row(client):
 
 
 # ── frontend contracts ───────────────────────────────────────────────────────
-def test_downloads_page_has_block_button_and_modal():
-    assert "data-vdpg-block" in _DLPAGE_JS
-    assert "'/api/video/downloads/blocklist'" in _DLPAGE_JS
+def test_downloads_page_has_block_button_and_wiring():
+    lst = (_VDL_UI / "vdl-list.tsx").read_text(encoding="utf-8")
+    assert "vdpg-row-block" in lst
+    assert "vdlCanBlock(d)" in lst
+    assert "post('video/downloads/blocklist'" in _VDL_API
     # failed rows block-and-retry; import_failed only blocks
-    assert "data-was" in _DLPAGE_JS and "wasFailed" in _DLPAGE_JS
+    assert "export function vdlCanBlock(" in _VDL_HELPERS
+    assert "(d.status === 'failed' || d.status === 'import_failed')" in _VDL_HELPERS
+    assert "'Block this release and retry with another'" in lst
+    assert "'Block this release'" in lst
     # YT rows never show it (no slskd release identity)
-    btn = _DLPAGE_JS.split("var blockBtn =")[1].split("var actHTML")[0]
-    assert "dlType(d.kind) !== 'youtube'" in btn and "d.username && d.filename" in btn
-    for fn in ("function blkOpen", "function blkLoad", "data-vblk-remove", "data-vblk-clear"):
-        assert fn in _DLPAGE_JS, fn
-    assert "showConfirmDialog" in _DLPAGE_JS      # clear-all is guarded
+    assert "vdlType(d.kind) !== 'youtube'" in _VDL_HELPERS
+    assert "Boolean(d.username) &&" in _VDL_HELPERS
+    # blocklist management lives inline in the Review pane now (was a modal)
+    review = (_VDL_UI / "vdl-review.tsx").read_text(encoding="utf-8")
+    for fn in ("fetchVideoBlocklist", "unblockVideoRelease", "clearVideoBlocklist"):
+        assert fn in review, fn
+    assert "showConfirmDialog" in review      # clear-all is guarded
 
 
-def test_history_modal_and_header_wiring():
-    assert "data-vdh-block" in _HISTORY_JS
-    assert "/api/video/downloads/blocklist" in _HISTORY_JS
-    assert "data-vblk-open" in _INDEX             # header button opens the modal
+def test_history_modal_and_review_wiring():
+    hist = (_VDL_UI / "vdl-history.tsx").read_text(encoding="utf-8")
+    assert "onBlockRelease" in hist and "onBlockUploader" in hist
+    assert "post('video/downloads/blocklist'" in _VDL_API
+    # the blocklist is browsable inline in the Review pane (was a header modal)
+    header = (_VDL_UI / "vdl-header.tsx").read_text(encoding="utf-8")
+    assert "Recycle bin + release blocklist" in header

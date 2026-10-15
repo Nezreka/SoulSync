@@ -52,8 +52,35 @@ DEFAULTS = {
     "carry_subtitles": True,
     "save_artwork": True,    # nfo + artwork sidecars on by default (cheap, local) — best-in-class
     "write_nfo": True,
-    "download_subtitles": False,   # opt-in: fetches from OpenSubtitles (external, rate-limited)
+    "download_subtitles": True,    # on by default for new imports: fetches from the subtitle providers (external, rate-limited)
     "subtitle_langs": "en",
+    "subtitle_provider_order": '["opensubtitles"]',   # JSON list string: provider fetch chain, most-preferred first
+    "subtitle_min_score": 24.0,      # candidate score gate: below this a subtitle is a miss, never downloaded
+    "subtitle_hi_forced": "off",      # hearing-impaired preference: off | prefer_hi (tiebreak only, never a filter)
+    "subtitle_forced": False,         # also grab a forced (foreign-parts-only) track per language, on top of the full one
+    # "have it" rules (bazarr parity): embedded tracks count as present unless
+    # switched off, and bitmap/ass codecs can be ignored the same way bazarr does.
+    "subtitle_use_embedded": True,
+    "subtitle_ignore_pgs": False,
+    "subtitle_ignore_vobsub": False,
+    "subtitle_ignore_ass": False,
+    "subtitle_autosync": False,       # opt-in: ffsubsync downloaded subs against the video audio (worker only)
+    "subtitle_worker_interval_min": 30,  # wanted-loop retry cadence (minutes)
+    "subtitle_worker_batch": 10,     # max wanted rows attempted per worker cycle
+    "subtitle_daily_quota": 20,      # max subtitle DOWNLOADS per provider per day (UTC)
+    "subtitle_upgrade_min_delta": 15.0,  # upgrade loop: a new candidate must beat the current subtitle's history score by this much to replace it
+    # Whisper local transcription (Phase 4): fully optional, off by default.
+    # Nothing downloads or transcribes unless the user enables it AND downloads
+    # a model via the settings UI. The *_downloaded/*_path/*_size_bytes/
+    # *_downloaded_at keys are written by the model-download endpoint and
+    # echoed back by the settings page (same echo pattern as
+    # subtitle_provider_order) so a settings save never wipes them.
+    "whisper_enabled": False,         # transcribe locally as a last resort
+    "whisper_model": "small",          # tiny | base | small (allowlisted)
+    "whisper_model_downloaded": False,
+    "whisper_model_path": "",
+    "whisper_model_size_bytes": 0,
+    "whisper_model_downloaded_at": "",
     # Recycle bin: deletes (upgrade-replaced copies, retention-cleaned YouTube
     # episodes, dismissed imports) move into an ss_recycle folder under the
     # file's library root instead of unlinking; purged after recycle_keep_days.
@@ -106,6 +133,39 @@ def normalize(raw: Any) -> dict:
             d["recycle_keep_days"] = max(1, min(365, int(raw.get("recycle_keep_days"))))
         except (TypeError, ValueError):
             pass
+    if "subtitle_min_score" in raw:
+        try:
+            d["subtitle_min_score"] = max(0.0, min(200.0, float(raw.get("subtitle_min_score"))))
+        except (TypeError, ValueError):
+            pass
+    if "subtitle_hi_forced" in raw:
+        from core.video.subtitles.scoring import HI_FORCED_PREFS
+        _pref = str(raw.get("subtitle_hi_forced") or "").strip().lower()
+        if _pref in HI_FORCED_PREFS:
+            d["subtitle_hi_forced"] = _pref
+        elif _pref == "prefer_forced" and "subtitle_forced" not in raw:
+            # the old "prefer forced" meant "i want forced subs" — that's the
+            # also-grab-forced toggle now
+            d["subtitle_forced"] = True
+    for _key in ("subtitle_forced", "subtitle_use_embedded", "subtitle_ignore_pgs",
+                 "subtitle_ignore_vobsub", "subtitle_ignore_ass"):
+        if _key in raw:
+            d[_key] = bool(raw.get(_key))
+    if "subtitle_autosync" in raw:
+        d["subtitle_autosync"] = bool(raw.get("subtitle_autosync"))
+    if "subtitle_upgrade_min_delta" in raw:
+        try:
+            d["subtitle_upgrade_min_delta"] = max(0.0, min(200.0, float(raw.get("subtitle_upgrade_min_delta"))))
+        except (TypeError, ValueError):
+            pass
+    for _key, _lo, _hi in (("subtitle_worker_interval_min", 5, 1440),
+                           ("subtitle_worker_batch", 1, 200),
+                           ("subtitle_daily_quota", 1, 1000)):
+        if _key in raw:
+            try:
+                d[_key] = max(_lo, min(_hi, int(raw.get(_key))))
+            except (TypeError, ValueError):
+                pass
     if "recycle_path" in raw:
         d["recycle_path"] = str(raw.get("recycle_path") or "").strip()
     if "min_free_disk_gb" in raw:
@@ -123,7 +183,38 @@ def normalize(raw: Any) -> dict:
         d["transfer_mode"] = tm
     if "subtitle_langs" in raw:
         from core.video.subtitles import parse_langs
+        # parse_langs DROPS tokens that aren't valid language codes: a code
+        # flows into the sidecar filename (srt_name), so '../../evil' here
+        # would otherwise write outside the media folder (path traversal).
         d["subtitle_langs"] = ",".join(parse_langs(raw.get("subtitle_langs")))
+    if "subtitle_provider_order" in raw:
+        from core.video.subtitles import parse_provider_order
+        d["subtitle_provider_order"] = json.dumps(
+            parse_provider_order(raw.get("subtitle_provider_order")))
+    # Whisper local transcription (Phase 4). The model name is allowlisted —
+    # a bad value keeps the default rather than flowing anywhere. The
+    # downloaded-state keys are echoed by the settings page; a save that
+    # omits them must not wipe them (they're only in raw when echoed).
+    if "whisper_enabled" in raw:
+        d["whisper_enabled"] = bool(raw.get("whisper_enabled"))
+    if "whisper_model" in raw:
+        from core.video.subtitles.providers.whisper import valid_model_name
+        _wm = valid_model_name(raw.get("whisper_model"))
+        if _wm is not None:
+            d["whisper_model"] = _wm
+    if "whisper_model_downloaded" in raw:
+        d["whisper_model_downloaded"] = bool(raw.get("whisper_model_downloaded"))
+    if "whisper_model_path" in raw:
+        d["whisper_model_path"] = str(raw.get("whisper_model_path") or "")
+    if "whisper_model_size_bytes" in raw:
+        try:
+            d["whisper_model_size_bytes"] = max(
+                0, int(raw.get("whisper_model_size_bytes") or 0))
+        except (TypeError, ValueError):
+            pass
+    if "whisper_model_downloaded_at" in raw:
+        d["whisper_model_downloaded_at"] = str(
+            raw.get("whisper_model_downloaded_at") or "")
     return d
 
 

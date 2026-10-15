@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nezreka/SoulSync/releases"><img alt="Version" src="https://img.shields.io/badge/version-3.4.7-8b5cf6?style=flat-square"></a>
+  <a href="https://github.com/Nezreka/SoulSync/releases"><img alt="Version" src="https://img.shields.io/github/v/release/Nezreka/SoulSync?style=flat-square&label=version&color=8b5cf6"></a>
   <a href="https://hub.docker.com/r/boulderbadgedad/soulsync"><img alt="Docker" src="https://img.shields.io/badge/docker-boulderbadgedad%2Fsoulsync-2496ED?style=flat-square&logo=docker&logoColor=white"></a>
   <a href="https://discord.gg/wGvKqVQwmy"><img alt="Discord" src="https://img.shields.io/badge/discord-join-5865F2?style=flat-square&logo=discord&logoColor=white"></a>
   <a href="./license.txt"><img alt="License" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
@@ -363,7 +363,7 @@ The image runs as a non-root user with `PUID` / `PGID` / `UMASK` support, and bu
 | Channel | Image | What it is |
 |---|---|---|
 | **Stable** | `boulderbadgedad/soulsync:latest` | Promoted from `dev` to `main` when a release is ready. Recommended. |
-| **Pinned** | `boulderbadgedad/soulsync:3.4.7` or `ghcr.io/nezreka/soulsync:3.4.7` | A permanent tag for each stable release |
+| **Pinned** | `boulderbadgedad/soulsync:3.4.9` or `ghcr.io/nezreka/soulsync:3.4.9` | A permanent tag for each stable release |
 | **Dev** | `ghcr.io/nezreka/soulsync:dev` | Rebuilt on every push to `dev`. New features first, occasional rough edges |
 | **Nightly** | `ghcr.io/nezreka/soulsync:nightly` | Built at 04:00 UTC when `dev` changed that day |
 | **Snapshot** | `ghcr.io/nezreka/soulsync:dev-YYYYMMDD-<sha>` | An exact dev build to pin to |

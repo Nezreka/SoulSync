@@ -14,6 +14,7 @@ from utils.logging_config import get_logger
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.compilation import is_various_artists_credit
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
@@ -521,6 +522,12 @@ def get_album_type_display(raw_type, track_count, source: str = "", locked: bool
     return "Album"
 
 
+def _first_album_artist_id(album_ctx) -> str:
+    artists = album_ctx.get("artists") if isinstance(album_ctx, dict) else None
+    first = artists[0] if isinstance(artists, list) and artists else None
+    return str(first.get("id") or "").strip() if isinstance(first, dict) else ""
+
+
 def _replace_template_variables(template: str, context: dict) -> str:
     clean_context = sanitize_context_values(context)
     result = template
@@ -529,9 +536,17 @@ def _replace_template_variables(template: str, context: dict) -> str:
     collab_mode = _get_config_manager().get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and album_artist_value:
         artists_list = context.get("_artists_list")
-        if artists_list and len(artists_list) > 1:
-            first = artists_list[0]
-            album_artist_value = first.get("name", first) if isinstance(first, dict) else str(first)
+        # match on the raw name: the list's names aren't sanitized either
+        _raw_album_artist = str(context.get("albumartist") or context.get("artist") or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary:
+            # the album list can be the combined name itself while the track
+            # names the primary on its own
+            track_list = context.get("_track_artists_list")
+            if track_list:
+                primary = listed_primary_of(_raw_album_artist, track_list[0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             itunes_artist_id = context.get("_itunes_artist_id")
             if itunes_artist_id and ("," in album_artist_value or " & " in album_artist_value):
@@ -1062,6 +1077,27 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     source = get_import_source(context)
     artist_name = extract_artist_name(artist_context)
 
+    # R4F3: when the batch album context was distrusted (verdict stashed on
+    # the context by pipeline.py before filing), the stranger's album
+    # identity must not shape the filing path. Substitute the track's own
+    # album year/type/artist at the read sites below. The album NAME is left
+    # alone — it may be unrecoverable (the honest #1567 limit) — but the
+    # file is now filed under the track's own artist, not the stranger's,
+    # and never under the stranger's year or a poisoned Compilations/ type.
+    _path_distrusted = bool(
+        isinstance(context, dict) and context.get("_batch_album_distrusted"))
+    _path_own_album = (
+        (context.get("_track_own_provider_album") or {})
+        if isinstance(context, dict) else {})
+    _path_own_artist = ""
+    _path_own_artists = (
+        (context.get("_track_own_artist_display_names") or [])
+        if isinstance(context, dict) else [])
+    if _path_own_artists and _path_own_artists[0]:
+        _path_own_artist = str(_path_own_artists[0])
+    if _path_distrusted and _path_own_artist:
+        artist_name = _path_own_artist
+
     source_info = track_info.get("source_info") or {}
     if isinstance(source_info, str):
         try:
@@ -1096,35 +1132,49 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     year = ""
     if album_context and album_context.get("release_date"):
         year = _extract_year_from_release_date(album_context["release_date"])
+    if _path_distrusted:
+        # R4F3: the stranger's year (e.g. 2001) must not date the folder —
+        # use the track's own provider album year, or no year at all.
+        _own_release_date = _path_own_album.get("release_date") or ""
+        year = _extract_year_from_release_date(_own_release_date) if _own_release_date else ""
 
     raw_album_type = ""
-    if album_context:
-        raw_album_type = (
-            album_context.get("album_type", "")
-            or album_context.get("record_type", "")
-            or ""
-        )
-    if not raw_album_type and isinstance(album_info, dict):
-        raw_album_type = (
-            album_info.get("album_type", "")
-            or album_info.get("record_type", "")
-            or ""
-        )
-    if not raw_album_type and isinstance(context, dict):
-        raw_album_type = (
-            context.get("album_type", "")
-            or context.get("record_type", "")
-            or ""
-        )
+    if not _path_distrusted:
+        # R4F3: when distrusted, none of the type sources are trustworthy
+        # (the batch context's "compilation" claim is the stranger's) —
+        # leave the type empty so the track files as a regular album under
+        # its own artist instead of under Compilations/.
+        if album_context:
+            raw_album_type = (
+                album_context.get("album_type", "")
+                or album_context.get("record_type", "")
+                or ""
+            )
+        if not raw_album_type and isinstance(album_info, dict):
+            raw_album_type = (
+                album_info.get("album_type", "")
+                or album_info.get("record_type", "")
+                or ""
+            )
+        if not raw_album_type and isinstance(context, dict):
+            raw_album_type = (
+                context.get("album_type", "")
+                or context.get("record_type", "")
+                or ""
+            )
     raw_album_type = str(raw_album_type or "").strip().lower()
     if raw_album_type in ("compile", "compilations"):
         raw_album_type = "compilation"
 
-    is_explicit_comp = (
-        (album_context and bool(album_context.get("is_compilation")))
-        or (isinstance(album_info, dict) and bool(album_info.get("is_compilation")))
-        or (isinstance(context, dict) and bool(context.get("is_compilation")))
-    )
+    # R4F3: when distrusted, the "explicit compilation" flags are the
+    # stranger's — skip them (raw_album_type stays empty, see above).
+    is_explicit_comp = False
+    if not _path_distrusted:
+        is_explicit_comp = (
+            (album_context and bool(album_context.get("is_compilation")))
+            or (isinstance(album_info, dict) and bool(album_info.get("is_compilation")))
+            or (isinstance(context, dict) and bool(context.get("is_compilation")))
+        )
     if is_explicit_comp:
         raw_album_type = "compilation"
 
@@ -1208,6 +1258,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             _ext = _album_ctx.get("external_urls", {})
             if isinstance(_ext, dict) and _ext.get("itunes_artist_id"):
                 _itunes_aid = _ext["itunes_artist_id"]
+        # an itunes album names its primary's id even when the download
+        # context's artist carries none
+        if not _itunes_aid and source == "itunes" and _album_ctx:
+            _aid = _first_album_artist_id(_album_ctx)
+            if _aid.isdigit():
+                _itunes_aid = _aid
 
         _artist_name = artist_name
         if raw_album_type in ("compilation", "compile") and _artists:
@@ -1221,7 +1277,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         _album_artist_name = artist_name
         _album_artists_for_collab = None
         _explicit_artist_ctx = track_info.get("_explicit_artist_context") if isinstance(track_info, dict) else None
-        if isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get("name"):
+        if _path_distrusted and _path_own_artist:
+            # R4F3: the explicit artist context is the stranger's — the
+            # album-artist slot takes the track's own artist.
+            _album_artist_name = _path_own_artist
+        elif isinstance(_explicit_artist_ctx, dict) and _explicit_artist_ctx.get("name"):
             _album_artist_name = _explicit_artist_ctx["name"]
             _album_artists_for_collab = [_explicit_artist_ctx]
         elif isinstance(_explicit_artist_ctx, str) and _explicit_artist_ctx:
@@ -1253,15 +1313,17 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             raw_album_type = "compilation"
             album_type_display = "Compilation"
 
-        # On compilations (or when album artist differs), ensure $artist reflects the track artist
-        if (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp):
-            if _artists:
-                _first_ta = _artists[0]
-                _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
-                if _track_artist_cand:
-                    _artist_name = _track_artist_cand
-            elif track_info.get("artist"):
-                _artist_name = track_info["artist"]
+        # $artist is the track's artist, $albumartist the album's. only checking
+        # compilations named a label comp credited to its dj after the dj, while
+        # the tags said the real artist ("Vlad Jet - Blue Skies" by Framewerk)
+        if _artists:
+            _first_ta = _artists[0]
+            _track_artist_cand = _first_ta.get("name") if isinstance(_first_ta, dict) else str(_first_ta)
+            if _track_artist_cand:
+                _artist_name = _track_artist_cand
+        elif (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp) \
+                and track_info.get("artist"):
+            _artist_name = track_info["artist"]
 
         template_context = {
             "artist": _artist_name,
@@ -1275,6 +1337,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "albumtype": album_type_display,
             "atypes": atypes_value,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
+            "_track_artists_list": _artists,
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
             "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
@@ -1453,6 +1516,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         _ext = _album_ctx.get("external_urls", {})
         if isinstance(_ext, dict) and _ext.get("itunes_artist_id"):
             _itunes_aid = _ext["itunes_artist_id"]
+    # an itunes album names its primary's id even when the download
+    # context's artist carries none
+    if not _itunes_aid and source == "itunes" and _album_ctx:
+        _aid = _first_album_artist_id(_album_ctx)
+        if _aid.isdigit():
+            _itunes_aid = _aid
 
     template_context = {
         "artist": artist_name,

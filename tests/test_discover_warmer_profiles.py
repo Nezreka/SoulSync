@@ -57,3 +57,78 @@ def test_a_refused_sweep_is_reported_not_silent(ws, monkeypatch):
     monkeypatch.setattr(se, '_epoch', lambda pid, load: 5 if pid == 1 else 0)
     stats = ws._discover_warm_sweep(paths=[PATH])
     assert (1, PATH, 401) in stats['failed']
+
+
+# ---------------------------------------------------------------------------
+# every other sweep refreshed nothing. the warmer runs every 25 min, the shelf
+# cache lasts 30, so a sweep that read the cache like a user found everything
+# still valid. the answers then expired at 30 and sat cold until ~50, and the
+# live log showed sweeps alternating 90 s / 2.5 s. sweeps recompute now.
+# ---------------------------------------------------------------------------
+
+def _plant_sentinel(routes, func_name):
+    keys = [k for k in routes._DISCOVER_SHELF_CACHE if k[0] == func_name and k[2] == 1]
+    assert keys, "the first sweep cached nothing to refresh"
+    key = keys[0]
+    expiry, (_body, status, ctype) = routes._DISCOVER_SHELF_CACHE[key]
+    routes._DISCOVER_SHELF_CACHE[key] = (expiry, (b'{"sentinel": true}', status, ctype))
+    return key
+
+
+def test_a_sweep_recomputes_a_still_valid_answer(ws):
+    import api.discover_routes as routes
+
+    ws._discover_warm_sweep(paths=[PATH])
+    key = _plant_sentinel(routes, 'get_available_decades')
+    ws._discover_warm_sweep(paths=[PATH])
+    assert b'sentinel' not in routes._DISCOVER_SHELF_CACHE[key][1][0]
+
+
+def test_a_user_request_still_reads_the_cache(ws):
+    import api.discover_routes as routes
+
+    ws._discover_warm_sweep(paths=[PATH])
+    _plant_sentinel(routes, 'get_available_decades')
+    with ws.app.test_client() as client:
+        with client.session_transaction() as sess:
+            sess['profile_id'] = 1
+            sess['profile_epoch'] = int((ws.get_database().get_profile(1) or {}).get('session_epoch') or 0)
+            sess['login_authenticated'] = True
+            sess['launch_pin_verified'] = True
+        resp = client.get(PATH)
+    assert resp.status_code == 200
+    assert resp.get_json() == {'sentinel': True}
+
+
+def test_the_refresh_flag_is_off_outside_a_sweep():
+    from core.discovery.warm_refresh import refresh, refreshing
+
+    assert refreshing() is False
+    with refresh():
+        assert refreshing() is True
+        with refresh():
+            assert refreshing() is True
+        assert refreshing() is True
+    assert refreshing() is False
+
+
+def test_the_refresh_flag_never_leaks_to_another_thread():
+    import threading
+
+    from core.discovery.warm_refresh import refresh, refreshing
+
+    seen = []
+    with refresh():
+        t = threading.Thread(target=lambda: seen.append(refreshing()))
+        t.start()
+        t.join()
+    assert seen == [False]
+
+
+def test_the_hero_cache_read_honours_the_refresh_flag():
+    import inspect
+
+    from core.discovery import hero
+
+    src = inspect.getsource(hero.get_discover_hero)
+    assert "if _cached and _time.time() < _cached[0] and not refreshing():" in src

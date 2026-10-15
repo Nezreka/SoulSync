@@ -260,13 +260,13 @@ class DuplicateDetectorJob(RepairJob):
             raw_track_artist, album_artist = row[10], row[11] or ''
             if raw_track_artist:
                 continue  # already has a per-track credit
-            album_artist_norm = album_artist.strip().lower()
+            album_artist_norm = album_artist.strip().casefold()
             if album_artist_norm not in VARIOUS_ARTIST_NAMES:
                 continue
             tag_artist = _embedded_artist_name(file_path)
             if not tag_artist:
                 continue
-            tag_norm = tag_artist.lower()
+            tag_norm = tag_artist.casefold()
             if tag_norm in VARIOUS_ARTIST_NAMES:
                 continue  # the file says so too — nothing learned
             if tag_norm == album_artist_norm:

@@ -124,10 +124,11 @@ class SABnzbdAdapter:
                 return None
             return resp.json()
         except http_requests.exceptions.RequestException as e:
-            logger.error("SABnzbd mode=%s request failed: %s", mode, e)
+            # requests errors can include API keys and nested signed NZB URLs.
+            logger.error("SABnzbd mode=%s request failed (%s)", mode, type(e).__name__)
             return None
         except ValueError as e:
-            logger.error("SABnzbd mode=%s response was not JSON: %s", mode, e)
+            logger.error("SABnzbd mode=%s response was not JSON (%s)", mode, type(e).__name__)
             return None
 
     def _post_sync(self, mode: str, files=None, **extra) -> Optional[dict]:
@@ -147,10 +148,10 @@ class SABnzbdAdapter:
                 return None
             return resp.json()
         except http_requests.exceptions.RequestException as e:
-            logger.error("SABnzbd POST mode=%s failed: %s", mode, e)
+            logger.error("SABnzbd POST mode=%s failed (%s)", mode, type(e).__name__)
             return None
         except ValueError as e:
-            logger.error("SABnzbd POST mode=%s response was not JSON: %s", mode, e)
+            logger.error("SABnzbd POST mode=%s response was not JSON (%s)", mode, type(e).__name__)
             return None
 
     async def add_nzb(

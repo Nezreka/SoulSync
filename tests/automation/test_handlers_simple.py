@@ -137,28 +137,28 @@ class TestProcessWishlist:
 
 class TestScanWatchlist:
     def test_fresh_scan_reports_summary_stats(self):
-        # Worker reassigns the state dict mid-run — handler detects
-        # via id() change and reports stats.
-        states = [
-            {'summary': {}},
-            {'summary': {
+        # Worker resets the shared state dict in place with a new
+        # started_at mid-run — handler detects via timestamp change
+        # and reports stats.
+        from datetime import datetime, timedelta
+
+        t0 = datetime.now()
+        shared = {'started_at': t0, 'summary': {}}
+
+        def stub(**_kwargs):
+            # simulate the worker resetting state mid-run (in place,
+            # same dict object — like scan_state.reset_state())
+            shared['started_at'] = t0 + timedelta(seconds=30)
+            shared['summary'] = {
                 'total_artists': 5,
                 'successful_scans': 4,
                 'new_tracks_found': 12,
                 'tracks_added_to_wishlist': 8,
-            }},
-        ]
-        idx = {'i': 0}
-
-        def get_state():
-            return states[idx['i']]
-
-        def stub(**_kwargs):
-            idx['i'] = 1  # simulate the worker swapping the dict
+            }
 
         deps = _build_deps(
             process_watchlist_scan_automatically=stub,
-            get_watchlist_scan_state=get_state,
+            get_watchlist_scan_state=lambda: shared,
         )
         result = auto_scan_watchlist({}, deps)
         assert result == {
@@ -170,8 +170,8 @@ class TestScanWatchlist:
         }
 
     def test_no_fresh_scan_returns_bare_completed(self):
-        # Same dict identity before and after = no fresh scan ran.
-        same_dict = {'summary': {'total_artists': 999}}
+        # Same started_at before and after = no fresh scan ran.
+        same_dict = {'started_at': None, 'summary': {'total_artists': 999}}
         deps = _build_deps(
             process_watchlist_scan_automatically=lambda **_k: None,
             get_watchlist_scan_state=lambda: same_dict,
@@ -213,6 +213,22 @@ class TestScanLibrary:
         deps = _build_deps(web_scan_manager=None)
         result = auto_scan_library({'_automation_id': 'a'}, deps)
         assert result == {'status': 'error', 'reason': 'Scan manager not available'}
+
+    def test_a_batch_with_more_coming_leaves_the_scan_to_the_last_one(self):
+        # #1615: one scan per download run, not one per album batch
+        scanner = _StubScanManager()
+        deps = _build_deps(web_scan_manager=scanner)
+        result = auto_scan_library(
+            {'_automation_id': 'a', '_event_data': {'more_batches_pending': 'true'}}, deps)
+        assert result['status'] == 'skipped'
+        assert scanner.request_calls == []
+
+    def test_the_last_batch_scans(self):
+        scanner = _StubScanManager(status_responses=[{'status': 'idle'}])
+        deps = _build_deps(web_scan_manager=scanner)
+        auto_scan_library(
+            {'_automation_id': 'a', '_event_data': {'more_batches_pending': 'false'}}, deps)
+        assert scanner.request_calls == ['Automation trigger']
 
     def test_already_tracked_returns_skipped(self):
         # Pre-set the state flag — handler should short-circuit.

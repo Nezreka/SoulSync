@@ -132,6 +132,7 @@ describe('addArtistToWatchlist', () => {
       include_acoustic: false,
       include_compilations: false,
       include_instrumentals: false,
+      include_other_artists: false,
       auto_download_pref: 'on',
     });
     expect(seen.map((s) => s.url)).toEqual([

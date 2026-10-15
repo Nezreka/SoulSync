@@ -27,7 +27,7 @@
 .subtitle {
   margin: 6px 0 0;
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
 }
 
 /* a member's request limit, quiet under the subtitle */
@@ -46,9 +46,9 @@
 
 .tab {
   padding: 7px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--white-a08);
+  background: var(--white-a03);
   color: rgba(255, 255, 255, 0.62);
   font-size: 13px;
   font-weight: 600;
@@ -60,14 +60,14 @@
 }
 
 .tab:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--white-a07);
   color: #fff;
 }
 
 .tabActive,
 .tabActive:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--white-a12);
+  border-color: var(--white-a20);
   color: #fff;
 }
 
@@ -86,7 +86,7 @@
   gap: 16px;
   padding: 14px 16px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--white-a06);
   background: rgba(255, 255, 255, 0.025);
   transition: border-color 0.15s;
 }
@@ -99,9 +99,9 @@
   flex: 0 0 auto;
   width: 64px;
   height: 64px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--white-a06);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -116,7 +116,7 @@
 
 .thumbGlyph {
   font-size: 22px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--white-a35);
 }
 
 .main {
@@ -147,15 +147,15 @@
   letter-spacing: 0.03em;
   text-transform: uppercase;
   padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius-pill);
+  background: var(--white-a07);
+  color: var(--white-a55);
 }
 
 .sub {
   margin-top: 3px;
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -178,7 +178,7 @@
   margin: 10px 0 0;
   padding-left: 20px;
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--white-a60);
   line-height: 1.7;
 }
 
@@ -192,7 +192,7 @@
 
 .status {
   font-size: 12.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   white-space: nowrap;
 }
 
@@ -211,10 +211,10 @@
 .more {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--white-a55);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
@@ -222,7 +222,7 @@
 
 .more:hover,
 .more[data-popup-open] {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   color: #fff;
 }
 
@@ -233,25 +233,25 @@
 .menu {
   min-width: 190px;
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: rgba(24, 24, 28, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a10);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   outline: none;
 }
 
 .menuItem {
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--white-a85);
   cursor: pointer;
   outline: none;
   user-select: none;
 }
 
 .menuItem[data-highlighted] {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--white-a08);
   color: #fff;
 }
 

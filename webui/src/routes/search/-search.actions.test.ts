@@ -202,6 +202,28 @@ describe('modal payloads', () => {
     expect(enrichSingleTrack(track()).artists).toEqual(['Aphex Twin']);
   });
 
+  it('sends the real album id and nothing made up when the search knows it (#1605)', () => {
+    // a deezer soundtrack song. calling it a one-track single tagged it 4/1
+    // under its singer instead of the album's artist
+    const enriched = enrichSingleTrack(
+      track({ album: 'Moana (Deluxe)', album_id: '14582002', source: 'deezer' }),
+    );
+    expect(enriched.album).toEqual({
+      name: 'Moana (Deluxe)',
+      id: '14582002',
+      images: [],
+      release_date: null,
+    });
+  });
+
+  it('still wraps the track as a one-track single when there is no album id', () => {
+    expect(enrichSingleTrack(track()).album).toMatchObject({
+      id: null,
+      album_type: 'single',
+      total_tracks: 1,
+    });
+  });
+
   it('wraps a single track as a one-track single', () => {
     const built = buildSingleTrackAlbum(track({ image_url: 'https://cdn/t.jpg' }));
     expect(built).toMatchObject({

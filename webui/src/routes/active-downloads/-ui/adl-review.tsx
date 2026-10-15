@@ -216,6 +216,62 @@ export function AdlUnverifiedRow({
   );
 }
 
+function quarantineLibraryTitle(entry: AdlQuarantineEntry): string {
+  const match = entry.library_match;
+  return [
+    'Already in library',
+    match?.album,
+    match?.quality,
+    match?.verification_status.replaceAll('_', ' '),
+    match?.filename,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function quarantineAlbumTitle(entry: AdlQuarantineEntry): string {
+  const source = entry.album_extra?.download_source.toLowerCase();
+  const label = source === 'usenet' ? 'Usenet ' : source === 'torrent' ? 'Torrent ' : '';
+  return [`Additional track from ${label}album import`, entry.album_extra?.album]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** Small hints; only actual presence and extra imports add icons. Library
+ *  presence decides what to do with the row, so it carries the verified green. */
+function QuarantinePresenceIcons({ entry }: { entry: AdlQuarantineEntry }) {
+  if (entry.library_status !== 'present' && !entry.album_extra) return null;
+  return (
+    <span className="verif-presence-icons">
+      {entry.library_status === 'present' ? (
+        <span
+          className="verif-presence-library"
+          role="img"
+          aria-label={quarantineLibraryTitle(entry)}
+          title={quarantineLibraryTitle(entry)}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M2 3v10M6 3v10M10 3l3 10M1 13h13" />
+          </svg>
+        </span>
+      ) : null}
+      {entry.album_extra ? (
+        <span
+          role="img"
+          aria-label={quarantineAlbumTitle(entry)}
+          title={quarantineAlbumTitle(entry)}
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" />
+            <circle cx="8" cy="8" r="1.5" />
+            <path d="M4 8a4 4 0 0 1 4-4" />
+          </svg>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function AdlQuarantineRow({
   entry,
   open,
@@ -238,7 +294,17 @@ export function AdlQuarantineRow({
   const sourceLabel = quarantineSourceLabel(entry);
   const ago = timeAgo(entry.timestamp);
 
+  const libraryDetail =
+    entry.library_status === 'present'
+      ? quarantineLibraryTitle(entry)
+      : entry.library_status === 'missing'
+        ? 'No matching library copy found'
+        : entry.library_status === 'unknown'
+          ? 'Library check unavailable'
+          : '';
   const details = [
+    libraryDetail ? { label: 'Library:', value: libraryDetail } : null,
+    entry.album_extra ? { label: 'Origin:', value: quarantineAlbumTitle(entry) } : null,
     entry.reason ? { label: 'Reason:', value: entry.reason } : null,
     entry.source_username ? { label: 'Source uploader:', value: entry.source_username } : null,
     entry.source_filename
@@ -258,6 +324,7 @@ export function AdlQuarantineRow({
       <div className="adl-row-info">
         <div className="verif-quar-title-row">
           <div className="adl-row-title">{title}</div>
+          <QuarantinePresenceIcons entry={entry} />
           {/* right by the name, where you're already reading. the old "▾ 3
               more" sat grey on the far right and nobody saw it. */}
           {attempts ? (

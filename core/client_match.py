@@ -443,10 +443,53 @@ def import_copy(kind: str, match: Dict[str, Any], folder: str, files: list, runt
                     "error": "None of the files matched that album's tracks."}
         result, status = album_process(runtime, {"album": payload["album"], "matches": matches,
                                                  "source": payload.get("source")})
-        processed = int(result.get("processed") or 0) if isinstance(result, dict) else 0
-        if status >= 400 or not processed:
-            return {"ok": False, "imported": processed,
-                    "error": (result or {}).get("error") or "The import failed."}
+        if status >= 400 or not isinstance(result, dict):
+            error_msg = (result.get("error") if isinstance(result, dict) else None) \
+                or "The import failed."
+            return {"ok": False, "imported": 0, "error": error_msg}
+        processed = int(result.get("processed") or 0)
+        # "Already owned" skips don't increment processed — an album that is
+        # fully owned is a successful no-op, not a failure.
+        summary = result.get("summary") or {}
+        skipped = int(summary.get("skipped_owned") or 0)
+        errors_list = result.get("errors") or []
+        total = len(matches)
+        # Discard the temp copies of confirmed duplicates so they don't
+        # land in the manual staging inbox just to be skipped again.
+        # (Originals remain in the download folder; these are working
+        # copies.) Applies to partial skips too, not just all-skipped.
+        for disp in result.get("dispositions") or []:
+            if disp.get("decision") == "skipped_owned":
+                temp_file = os.path.join(folder, disp.get("file_name") or "")
+                if os.path.isfile(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except OSError:
+                        pass
+        if processed == 0 and skipped == total and total > 0 and not errors_list:
+            # Every track was a confirmed duplicate: the temp copies are
+            # redundant (originals remain in the download folder). Remove
+            # them instead of pushing noise to the manual staging inbox,
+            # where they'd just be skipped again.
+            try:
+                import shutil
+                shutil.rmtree(folder, ignore_errors=True)
+                runtime.logger.info(
+                    "[Import] %s: all %d tracks already owned — "
+                    "discarding duplicate copies",
+                    match.get("name") or "album", total,
+                )
+            except Exception as exc:  # noqa: BLE001 - temp cleanup is best-effort
+                runtime.logger.debug("[Import] temp folder cleanup failed: %s", exc)
+        if not processed and not skipped:
+            # result["error"] is only set on top-level failures; per-track
+            # failures live in result["errors"] — surface the real reason.
+            err_msg = (
+                result.get("error")
+                or (errors_list[0] if errors_list else None)
+                or "The import failed."
+            )
+            return {"ok": False, "imported": 0, "error": err_msg}
         return {"ok": True, "imported": processed, "error": ""}
 
     # a single: the largest audio file is the track, anything else is extras

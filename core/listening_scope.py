@@ -137,6 +137,43 @@ def owner_clause(owner: Optional[int], alias: str = "") -> str:
     return f"+{prefix}profile_id = {owner_i}"
 
 
+def play_duration_sql(alias: str = "") -> str:
+    """sql for how long one play lasted, in ms.
+
+    only web-player plays carry a duration. plex, last.fm and listenbrainz
+    plays come in without one, so 689 plays summed to 45 minutes. those fall
+    back to the length of the library track the play is linked to. the cast
+    matters: db_track_id is an integer and tracks.id is text, and without it
+    sqlite scans every track for every play.
+    """
+    col = f"{alias}." if alias else "listening_history."
+    return (f"(CASE WHEN {col}duration_ms > 0 THEN {col}duration_ms "
+            f"ELSE COALESCE((SELECT _pt.duration FROM tracks _pt "
+            f"WHERE _pt.id = CAST({col}db_track_id AS TEXT)), 0) END)")
+
+
+def total_play_ms_sql(rows: str) -> str:
+    """sql aggregate for the summed length of the plays in `rows`, the same
+    number as SUM(play_duration_sql()) over them.
+
+    play_duration_sql looks the track up once per play. over a whole history
+    that's 150k lookups for 11k distinct tracks. this counts the fallback
+    plays per track first and looks each track up once.
+
+    `rows` names the table or cte the outer SELECT reads (it needs
+    duration_ms and db_track_id). it's read twice, so make it a MATERIALIZED
+    cte of the plays you want or the history gets scanned twice."""
+    return (
+        "(COALESCE(SUM(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) + "
+        "COALESCE((SELECT SUM(_pp.n * COALESCE(_pt.duration, 0)) FROM ("
+        f"SELECT db_track_id AS tid, COUNT(*) AS n FROM {rows} "
+        # the plays play_duration_sql sends to the track, null duration included
+        "WHERE NOT COALESCE(duration_ms > 0, 0) AND db_track_id IS NOT NULL "
+        "GROUP BY db_track_id) _pp "
+        "JOIN tracks _pt ON _pt.id = CAST(_pp.tid AS TEXT)), 0))"
+    )
+
+
 def owner_key(base: str, owner: Optional[int]) -> str:
     """a metadata key per pile. the shared pile keeps the old bare key so every
     cache and import state written before this still reads."""

@@ -369,6 +369,13 @@
             renderPrevNext(page.id);
 
         content.scrollTop = 0;
+        // Oct 13 batch, M-12: on mobile the sidebar is a drawer over the
+        // article. Nav clicks (and section titles, and prev/next) all land
+        // here, and until now nothing closed the drawer on this path — the
+        // tapped page loaded behind it and the drawer stayed open covering
+        // it, so the article looked unreachable. Any page render closes it.
+        const _layout = document.querySelector('.docs-layout');
+        if (_layout) _layout.classList.remove('dd-sidebar-open');
         syncNav(page.id);
         renderToc(toc);
         wireContent(content);
@@ -1335,7 +1342,7 @@
         let html = `<h2 style="margin:0 0 6px;font-size:19px;color:#fff;">🧪 API Explorer</h2>` +
             `<p style="margin:0 0 16px;font-size:13.5px;color:rgba(255,255,255,0.6);max-width:72ch;">` +
             `Try every endpoint live against this server — requests run from your browser against ` +
-            `<code style="color:#fff;">${_DD_API_BASE}</code> with your key as a Bearer token (or <code style="color:#fff;">?api_key=</code>). ` +
+            `<code style="color:#fff;">${_DD_API_BASE}</code> with your key as a Bearer token (or an <code style="color:#fff;">X-API-Key</code> header, or <code style="color:#fff;">?api_key=</code>). ` +
             `An API key acts with <strong style="color:#fff;">admin rights</strong>: POST / PUT / PATCH / DELETE endpoints act on your live library.</p>`;
 
         // API key bar

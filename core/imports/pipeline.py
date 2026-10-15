@@ -80,6 +80,7 @@ from core.metadata.common import strip_musicbrainz_identity_tags, wipe_source_ta
 from core.imports.tag_policy import should_wipe_tags_on_enhancement_failure
 from core.imports.quality_replace import is_profile_upgrade
 from core.metadata.enrichment import enhance_file_metadata
+from core.metadata.source import evaluate_batch_album_distrust
 from core.imports.paths import (
     build_final_path_for_track,
     build_simple_download_destination,
@@ -144,7 +145,14 @@ def _batch_force_replace(context: dict) -> bool:
     ``force_download_all``: the wishlist sets that on every background batch
     (it means "skip ownership checks" there) and Wing It auto-enables it —
     neither may ever overwrite library files. Anything missing or unreadable
-    → False, i.e. the protective default."""
+    → False, i.e. the protective default.
+
+    A file the user approved out of quarantine is replace-intent too: the
+    approve endpoint stamps ``_approved_quarantine_trigger``, and without this
+    the guard deleted the approved file as "redundant" whenever the wrong file
+    already sat at its destination."""
+    if (context or {}).get('_approved_quarantine_trigger'):
+        return True
     try:
         batch_id = (context or {}).get('batch_id')
         if not batch_id:
@@ -733,6 +741,12 @@ def _merge_upgraded_album_folder(context, artist_context, album_info, old_album_
         logger.info("[M5] Merged upgraded album folder %s -> %s", old_folder, new_folder)
     except Exception as e:
         logger.error("[M5] Album folder merge failed (non-fatal): %s", e)
+
+
+def owning_batch_id(context):
+    """the batch a file was downloaded for. the verification wrapper pops
+    batch_id (it owns the completion callbacks) and keeps it here instead."""
+    return context.get('batch_id') or context.get('_owning_batch_id')
 
 
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
@@ -1415,6 +1429,41 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 album_info['album_name'] = _regrouped
             _group_upgraded_from = album_info.pop('_album_group_upgraded_from', None)
 
+        # R4F3: the filing path is built BEFORE metadata enhancement computes
+        # the batch-album distrust verdict — a poisoned batch context would
+        # otherwise stamp the stranger's folder/year/type. Compute the verdict
+        # here (pure function of the per-track inputs) and stash it on the
+        # shared context dict: build_final_path_for_track substitutes the
+        # track's own album year/type/artist when distrusted, and
+        # extract_source_metadata + the library row writer reuse the verdict
+        # instead of recomputing (this also covers enhancement-disabled
+        # imports, where the verdict was never stashed before).
+        try:
+            _f3_track_info = get_import_track_info(context)
+            _f3_verdict = evaluate_batch_album_distrust(
+                get_import_original_search(context),
+                _f3_track_info,
+                get_import_context_album(context),
+                _f3_track_info.get("_explicit_artist_context")
+                if isinstance(_f3_track_info, dict) else None,
+            )
+            if _f3_verdict.get("distrusted"):
+                context["_batch_album_distrust_verdict"] = _f3_verdict
+                context["_batch_album_distrusted"] = True
+                context["_track_own_provider_album"] = dict(
+                    _f3_verdict.get("own_album") or {})
+                context["_track_own_artist_display_names"] = list(
+                    _f3_verdict.get("own_artist_display_names") or [])
+                logger.warning(
+                    "[Import] batch album context distrusted before filing: %s",
+                    _f3_verdict.get("reason") or "",
+                )
+        except Exception:  # noqa: BLE001 — a filing-path verdict must never fail an import
+            logger.warning(
+                "[Import] batch-album distrust pre-check failed; filing without distrust")
+            logger.debug(
+                "[Import] batch-album distrust pre-check traceback", exc_info=True)
+
         final_path, _final_is_replace = build_final_path_for_track(context, artist_context, album_info, file_ext)
         if _group_upgraded_from and not _final_is_replace:
             # M5: this track upgraded the group — relocate tracks already
@@ -1708,7 +1757,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
         try:
             completed_path = context.get('_final_processed_path', final_path)
-            batch_id_for_consistency = context.get('batch_id')
+            batch_id_for_consistency = owning_batch_id(context)
             if completed_path and batch_id_for_consistency and album_info and album_info.get('is_album'):
                 _file_info = {
                     'path': str(completed_path),
@@ -1850,8 +1899,14 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # (no extra context key), and popped again before the wrapper continues.
         if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
             context['_atomic_publish_batch_id'] = original_batch_id
+        # the album-consistency registration needs the batch too. without it
+        # no batched download ever reached the album pass (#1618).
+        # the staging route never puts batch_id in its context, so the argument
+        # is the fallback.
+        context['_owning_batch_id'] = original_batch_id or batch_id
         post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=metadata_runtime)
         context.pop('_atomic_publish_batch_id', None)
+        context.pop('_owning_batch_id', None)
         if original_task_id:
             context['task_id'] = original_task_id
         if original_batch_id:

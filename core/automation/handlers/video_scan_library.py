@@ -47,8 +47,8 @@ def _default_run_video_scan(mode: str, media_type: str = "all") -> Dict[str, Any
     scopes it to one library ('movie' / 'show'); 'all' does both."""
     from api.video import get_video_db
     from core.video.scanner import get_video_scanner
-    from core.video.sources import get_active_video_source
-    return get_video_scanner(get_video_db()).scan_sync(get_active_video_source, mode, media_type)
+    from core.video.sources import scan_video_source
+    return get_video_scanner(get_video_db()).scan_sync(scan_video_source, mode, media_type)
 
 
 def auto_video_scan_library(

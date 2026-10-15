@@ -113,3 +113,17 @@ export function PlaylistArt({ url, glyph, fallback }: PlaylistArtProps) {
     />
   );
 }
+
+/** Liked Songs' cover: a heart on the accent, the way every music app marks it. */
+export function LikedArt() {
+  return (
+    <span className="playlist-liked-art" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="44%" height="44%">
+        <path
+          d="M12 20.5s-7.5-4.6-9.3-9.2C1.4 8 3.6 4.5 7.1 4.5c2 0 3.6 1.1 4.9 2.9 1.3-1.8 2.9-2.9 4.9-2.9 3.5 0 5.7 3.5 4.4 6.8-1.8 4.6-9.3 9.2-9.3 9.2z"
+          fill="currentColor"
+        />
+      </svg>
+    </span>
+  );
+}

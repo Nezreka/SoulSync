@@ -169,8 +169,10 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
             if history_id is None:
                 values = [event.get("track_id"), event["title"], event.get("artist", ""),
                           event.get("album", ""), event["played_at"], event.get("duration_ms", 0),
-                          source, event.get("db_track_id"), owner]
-                cols = "track_id, title, artist, album, played_at, duration_ms, server_source, db_track_id, profile_id"
+                          source, event.get("db_track_id"), owner,
+                          1 if event.get("scrobble_eligible") else 0]
+                cols = ("track_id, title, artist, album, played_at, duration_ms, "
+                        "server_source, db_track_id, profile_id, scrobble_eligible")
                 if has_account:
                     cols += ", server_account_id"
                     values.append(event.get("server_account_id"))
@@ -197,6 +199,13 @@ def insert_import_events(database, events, source, profile_id=SHARED_OWNER):
             if event.get("db_track_id") is not None:
                 conn.execute("UPDATE listening_history SET db_track_id = COALESCE(db_track_id, ?) WHERE id = ?",
                              (event["db_track_id"], history_id))
+            # An attested play (server/import) matched onto a row that isn't
+            # scrobble-eligible yet (e.g. a web-player 10s log the user's own
+            # Last.fm client also scrobbled): the attestation upgrades it.
+            # Only ever flips 0 -> 1, never downgrades.
+            if event.get("scrobble_eligible"):
+                conn.execute("UPDATE listening_history SET scrobble_eligible = 1 "
+                             "WHERE id = ? AND scrobble_eligible = 0", (history_id,))
             conn.execute("""
                 INSERT OR IGNORE INTO listening_import_events
                     (source, title, artist, listened_at, history_id, profile_id) VALUES (?, ?, ?, ?, ?, ?)

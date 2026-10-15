@@ -6,15 +6,15 @@
   flex-wrap: wrap;
   margin: 0 0 24px;
   padding: 16px 20px;
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   background: linear-gradient(
     180deg,
     rgba(var(--accent-rgb), 0.1) 0%,
     rgba(var(--accent-rgb), 0.04) 45%,
-    rgba(255, 255, 255, 0.02) 100%
+    var(--white-a02) 100%
   );
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-top-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--white-a07);
+  border-top-color: var(--white-a10);
   position: relative;
   overflow: hidden;
 }
@@ -96,7 +96,7 @@
 .subtitle {
   margin: 0;
   font-size: 0.85rem;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--white-a45);
   line-height: 1.4;
 }
 

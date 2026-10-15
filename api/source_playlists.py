@@ -190,7 +190,15 @@ def search_spotify_tracks():
         else:
             if _hydrabase_worker() and _dev_mode_enabled():
                 _hydrabase_worker().enqueue(query, 'tracks')
-            tracks = _spotify_client().search_tracks(query, limit=limit)
+            client = _spotify_client()
+            # with a title to aim at, spotify answers first and the fallback
+            # source gets search_song, not the plain free-text search the
+            # client falls back to. deezer's free text leaves originals out
+            # and the rerank can't surface what never came back (#1601).
+            tracks = client.search_tracks(query, limit=limit, allow_fallback=not track_q)
+            if not tracks and track_q:
+                from core.metadata.song_search import search_song
+                tracks = search_song(client._fallback, track_q, artist_q, limit=limit)
 
         # Local rerank — same helper Deezer + iTunes use. Spotify's
         # ranking is usually clean but karaoke / cover variants do
@@ -1463,6 +1471,8 @@ def get_tidal_playlist_tracks(playlist_id):
             'owner': getattr(full_playlist, 'owner', 'Unknown'),
             'track_count': len(full_playlist.tracks),
             'image_url': getattr(full_playlist, 'image_url', None),
+            # what tidal never handed over, so the mirror can say so (#1613)
+            'source_skipped': _playlist_skipped_counts(full_playlist),
             'tracks': []
         }
 
@@ -1507,12 +1517,29 @@ def start_tidal_discovery(playlist_id):
         if not target_playlist.tracks:
             return jsonify({"error": "Playlist has no tracks"}), 400
 
+        # a fresh fetch has fresh counts, keep the mirror's note current
+        try:
+            from database.music_database import get_database as _get_db
+            _get_db().set_mirrored_playlist_source_skipped(
+                'tidal', playlist_id, _playlist_skipped_counts(target_playlist),
+                profile_id=get_current_profile_id(),
+            )
+        except Exception as e:
+            logger.debug("tidal skipped counts not saved to mirror: %s", e)
+
         # Initialize discovery state if it doesn't exist, or update existing state
         if playlist_id in tidal_discovery_states:
             existing_state = tidal_discovery_states[playlist_id]
             if existing_state['phase'] == 'discovering':
                 return jsonify({"error": "Discovery already in progress"}), 400
-            # Update existing state for discovery
+            # Update existing state for discovery. take the playlist we just
+            # fetched, or a re-run walks the old track list (#1613).
+            existing_state['playlist'] = target_playlist
+            existing_state['spotify_total'] = len(target_playlist.tracks)
+            existing_state['spotify_matches'] = 0
+            existing_state['discovery_progress'] = 0
+            existing_state['discovery_results'] = []
+            existing_state['wing_it_count'] = 0
             existing_state['phase'] = 'discovering'
             existing_state['status'] = 'discovering'
             existing_state['last_accessed'] = time.time()
@@ -1688,7 +1715,8 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             db_id_to_track[mt['id']] = mt
             sid = mt.get('source_track_id', '')
             if sid:
-                source_id_to_db_id[str(sid)] = mt['id']
+                # a playlist can hold the same track twice, one row each
+                source_id_to_db_id.setdefault(str(sid), []).append(mt['id'])
             pos = mt.get('position')
             if pos is not None:
                 position_to_db_id[pos] = mt['id']
@@ -1715,8 +1743,11 @@ def _sync_discovery_results_to_mirrored(source_type, source_playlist_id, discove
             # Method 1: match by source track ID
             source_track = result.get('tidal_track') or result.get('source_track') or {}
             source_tid = str(source_track.get('id', '')) if source_track else ''
-            if source_tid and source_tid in source_id_to_db_id:
-                db_track_id = source_id_to_db_id[source_tid]
+            if source_tid and source_id_to_db_id.get(source_tid):
+                # hand the rows out in order so each duplicate gets one result,
+                # the last row keeps answering if results outnumber rows
+                rows = source_id_to_db_id[source_tid]
+                db_track_id = rows.pop(0) if len(rows) > 1 else rows[0]
 
             # Method 2: match by position/index
             if not db_track_id:
@@ -1904,6 +1935,7 @@ from core.discovery.endpoints import (
     update_playlist_phase as _update_playlist_phase_core,
     save_bubble_snapshot as _save_bubble_snapshot_core,
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
+    playlist_skipped_counts as _playlist_skipped_counts,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
     playlist_name_obj as _pl_name_obj,
@@ -1981,12 +2013,11 @@ def _submit_sync_task(sync_playlist_id, playlist_name, spotify_tracks, playlist_
     Used by ALL per-source discovery syncs (Spotify-Public/Tidal/Deezer/Qobuz/
     YouTube/iTunes-link/ListenBrainz/Beatport). These have no per-request mode
     selector, so honor the configured default (Settings > Playlist sync mode) —
-    otherwise they always ran 'replace' regardless of the setting (#792)."""
-    from core.sync.playlist_edit import normalize_sync_mode
-    _mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'reconcile'))
+    otherwise they always ran 'replace' regardless of the setting (#792).
+    No mode passed: _run_sync_task resolves the global one."""
     return sync_executor.submit(
         _run_sync_task, sync_playlist_id, playlist_name, spotify_tracks,
-        None, get_current_profile_id(), playlist_image_url, _mode,
+        None, get_current_profile_id(), playlist_image_url, None,
     )
 
 
@@ -5259,6 +5290,21 @@ def _build_sync_deps():
     )
 
 
+def _mirror_own_sync_mode(playlist_id):
+    """The stored sync mode of the mirror behind an auto_mirror_<id> sync id,
+    or None (not a mirror, no mode of its own, or the lookup failed)."""
+    m = re.fullmatch(r'auto_mirror_(\d+)', str(playlist_id or ''))
+    if not m:
+        return None
+    try:
+        from database.music_database import get_database
+        mirror = get_database().get_mirrored_playlist(int(m.group(1)))
+    except Exception as e:
+        logger.debug("mirror sync mode lookup for %s: %s", playlist_id, e)
+        return None
+    return (mirror or {}).get('sync_mode')
+
+
 def _run_sync_task(
     playlist_id,
     playlist_name,
@@ -5268,6 +5314,8 @@ def _run_sync_task(
     playlist_image_url='',
     sync_mode=None,
     skip_wishlist_add=False,
+    organize_by_playlist=False,
+    user_initiated=False,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5277,9 +5325,9 @@ def _run_sync_task(
     # Append/Reconcile (#823 carlosjfcasero). The global default is now
     # 'reconcile' (#1289), so default users get the safer behavior; only users
     # who explicitly set a mode get something different. (Mirrors _submit_sync_task.)
-    if sync_mode is None:
-        from core.sync.playlist_edit import normalize_sync_mode
-        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'reconcile'))
+    # a mode a mirror or pipeline stored itself (#1704) wins, junk means global
+    from core.sync.playlist_edit import resolve_sync_mode
+    sync_mode = resolve_sync_mode(sync_mode, config_manager.get('playlist_sync.mode', 'reconcile'))
     tracks_json, _quality_profile_id = _tracks_with_mirrored_quality_profile(
         playlist_id,
         playlist_name,
@@ -5291,6 +5339,8 @@ def _run_sync_task(
         _build_sync_deps(),
         sync_mode=sync_mode,
         skip_wishlist_add=skip_wishlist_add,
+        organize_by_playlist=organize_by_playlist,
+        user_initiated=user_initiated,
     )
 
 
@@ -5338,9 +5388,14 @@ def start_playlist_sync_from_payload(data):
     # Per-request sync_mode wins; otherwise use the configured default
     # (Settings > Playlist sync mode). Default 'reconcile' (#1289) preserves
     # server edits.
-    from core.sync.playlist_edit import normalize_sync_mode
-    sync_mode = normalize_sync_mode(data.get('sync_mode'),
-                                    config_manager.get('playlist_sync.mode', 'reconcile'))
+    # a mirror re-synced from history (auto_mirror_<id>, no mode sent) keeps
+    # its own mode, or an append-only mirror got reconciled (#1704)
+    from core.sync.playlist_edit import normalize_sync_mode, resolve_sync_mode
+    _global_mode = config_manager.get('playlist_sync.mode', 'reconcile')
+    if data.get('sync_mode'):
+        sync_mode = normalize_sync_mode(data.get('sync_mode'), _global_mode)
+    else:
+        sync_mode = resolve_sync_mode(_mirror_own_sync_mode(playlist_id), _global_mode)
 
     if not all([playlist_id, playlist_name, tracks_json]):
         return jsonify({"success": False, "error": "Missing playlist_id, name, or tracks."}), 400

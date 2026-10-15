@@ -181,6 +181,9 @@
             var n = isAdmin() ? (d.counts.open || 0) : (d.counts.updates || 0);
             b.textContent = n;
             b.classList.toggle('hidden', n === 0);
+            // nothing open and no news = no button
+            var c = d.counts, nav = b.closest('.nav-button');
+            if (nav) nav.classList.toggle('nav-idle', !((c.open || 0) + (c.in_progress || 0) + (c.updates || 0)));
         });
     }
 

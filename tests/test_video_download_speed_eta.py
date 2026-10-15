@@ -18,7 +18,11 @@ from core.video.slskd_download import eta_seconds, flatten_downloads
 from database.video_database import VideoDatabase
 
 _ROOT = Path(__file__).resolve().parent.parent
-_DL_JS = (_ROOT / "webui" / "static" / "video" / "video-downloads-page.js").read_text(encoding="utf-8")
+# The legacy vanilla-JS page (webui/static/video/video-downloads-page.js) was
+# rewritten in React for the unified downloads page (PR #1651). Its row
+# rendering now lives here:
+_VDL_UI = _ROOT / "webui" / "src" / "routes" / "active-downloads" / "-ui"
+_VDL_HELPERS = _ROOT / "webui" / "src" / "routes" / "active-downloads" / "-vdl.helpers.ts"
 
 
 def _slskd_payload(state="InProgress, Downloading", speed=2_000_000):
@@ -83,7 +87,9 @@ def test_columns_migrate_and_patch_persists(tmp_path):
 
 
 def test_queue_row_renders_speed_and_eta():
-    assert "fmtEta(d.eta_seconds)" in _DL_JS
-    assert "'↓ ' + fmtSpeed(d.speed_bps)" in _DL_JS
-    fn = _DL_JS.split("function fmtEta")[1].split("function pad2")[0]
+    tsx = (_VDL_UI / "vdl-list.tsx").read_text(encoding="utf-8")
+    assert "vdlFmtEta(d.eta_seconds)" in tsx
+    assert "vdlFmtSpeed(d.speed_bps)" in tsx
+    helpers = _VDL_HELPERS.read_text(encoding="utf-8")
+    fn = helpers.split("export function vdlFmtEta")[1].split("export function vdlPad2")[0]
     assert "left" in fn     # human phrasing, not a bare number

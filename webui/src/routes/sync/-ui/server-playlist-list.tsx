@@ -81,7 +81,7 @@ function SkeletonGrid() {
           </div>
           <div
             className="server-pl-card-footer"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 12 }}
+            style={{ borderTop: '1px solid var(--white-a05)', paddingTop: 12 }}
           >
             <div className="skeleton-box" style={{ width: 60, height: 10, borderRadius: 3 }} />
           </div>

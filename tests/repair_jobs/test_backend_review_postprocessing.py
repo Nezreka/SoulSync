@@ -323,7 +323,9 @@ def test_s2_single_dedup_file_delete_failure_keeps_db_row(tmp_path: Path, monkey
     single = tmp_path / "single.flac"
     single.write_bytes(b"fake")
     _track(db, 1, str(single))
-    _track(db, 2, str(tmp_path / "album.flac"))
+    album = tmp_path / "album.flac"
+    album.write_bytes(b"other")   # a real separate album copy, so the delete is reached
+    _track(db, 2, str(album))
     _fail_remove(monkeypatch)
 
     res = _worker(db, tmp_path)._fix_single_album_redundant(
@@ -333,6 +335,7 @@ def test_s2_single_dedup_file_delete_failure_keeps_db_row(tmp_path: Path, monkey
     )
 
     assert res["success"] is False
+    assert "Permission denied" in res["error"]
     assert single.exists()
     conn = db._get_connection()
     assert conn.execute("SELECT COUNT(*) FROM tracks WHERE id = 1").fetchone()[0] == 1

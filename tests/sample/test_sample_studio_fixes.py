@@ -109,12 +109,12 @@ def test_retry_clears_recorded_error(db_only):
 
     # Without retry: sticky error, no re-queue.
     assert sample_api.fetch_analysis(4243)[0]["status"].startswith("error:")
-    assert 4243 not in sample_worker._pending
+    assert "4243" not in sample_worker._pending
 
     # With retry: re-queued to pending, then fails again (it really re-ran).
     payload, _ = sample_api.fetch_analysis(4243, retry=True)
     assert payload["status"] == "pending"
-    assert 4243 in sample_worker._pending
+    assert "4243" in sample_worker._pending
     _wait_for_status(4243, "error:")
 
 
@@ -148,6 +148,8 @@ def test_ffmpeg_timeout_surfaces_as_error(monkeypatch):
     def _hang(*a, **k):
         raise subprocess.TimeoutExpired("ffmpeg", 180)
 
+    # ci has no ffmpeg; this test is about the timeout, not the lookup
+    monkeypatch.setattr(analyze_mod, "ffmpeg_bin", lambda: "ffmpeg")
     monkeypatch.setattr(analyze_mod.subprocess, "run", _hang)
     with pytest.raises(RuntimeError, match="timed out"):
         analyze_mod._decode_via_ffmpeg("/music/x.flac")

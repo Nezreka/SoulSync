@@ -139,7 +139,7 @@ export function AdventurousnessDial({ value, onChange, onCommit }: Adventurousne
             // white ring (99-100).
             color: styles.color,
             background: styles.colorBright,
-            boxShadow: `0 0 9px 0 ${styles.color}, inset 0 0 0 2px rgba(255,255,255,0.5)`,
+            boxShadow: `0 0 9px 0 ${styles.color}, inset 0 0 0 2px var(--white-a50)`,
           }}
         />
         {/* the real control. transparent and stretched over the wave, so the

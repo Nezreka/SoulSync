@@ -1,15 +1,17 @@
-**SoulSync 3.5.2 is out** :musical_note:
+**SoulSync 3.5.4 is out** :musical_note:
 
-Sign in with Plex: everyone you share your server with can log in with their own Plex account, and their playlists land in their own Plex. Profiles can also connect Plex from My Account (thanks SeadogsBooty).
+Subtitles grow up to replace Bazarr: providers are pluggable, a wanted loop retries misses with hash-first scoring, per-title language overrides, proper hi/forced naming for Plex and Jellyfin, an upgrade loop, manual search — and optional local Whisper transcription as the last resort. Fetching is on by default for new imports.
 
-Listening history is per person now. Plex plays go to whoever played them, so the kids' plays stay out of your stats, mixes and Last.fm, and plays stop counting twice when your scrobbles come back from Last.fm or ListenBrainz (existing history gets cleaned up once, with a backup first). Kids profiles can play library music again.
+Audiobooks: follow a whole series (backfill every volume or new books only), an optional m4b merge on import, and imports are staged so Plex only ever sees the finished book. Complete books stop being held for having a different narration than the wishlisted edition (thanks SeadogsBooty).
 
-Download Discography has a Wishlist + Watchlist button, and a new edition preference stops the watchlist grabbing both standard and deluxe. Non-admin profiles can request music videos and single episodes. The dashboard got a refresh, and the sidebar shows live weather with holiday decorations.
+One downloads page for music and video, video wishlist downloads capped per run (thanks @c5pie), and Usenet can pull a requested song out of an album release — with an option to keep the album's other tracks too.
 
-The duplicate detector shows which copy is in a playlist and Keep Best keeps it, so cleanups never break playlists. Deezer downloads find the original song instead of the reprise or karaoke version (thanks @cremonies), and explicit tracks stop failing AcoustID (thanks @mateusguilherme).
+Your own playlists get covers, descriptions and a duplicate button. Imports skip tracks you already own instead of reprocessing them (thanks SeadogsBooty), and the inbox stays honest while a scan is running.
 
-Video: the wishlist stops grabbing the same release every hour, usenet grabs import instead of sitting at 100%, and mixed Jellyfin libraries can be picked.
+Big phone pass: 22 screenshots' worth of layout fixes. The player button is round and the EQ is reachable, settings titles and popups clear the menu button, the watchlist scrolls, and the dashboard cards stack instead of clipping (thanks @Thibs, @c5pie, gzetk).
 
-Also: mirrored tracks identified by their own Deezer or Spotify ID, Navidrome libraries under a different mount stop breaking playlist writes, MP3s get their MusicBrainz recording ID, audiobooks import from single-file torrents (thanks SeadogsBooty), Soulseek cleanup only touches its own transfers (thanks @splitsec2), plus repair fixes from @mandos21 and @nick2000713.
+Scrobbling no longer dies with the listening stats toggle, and the web player scrobbles by Last.fm's rule (thanks @cin). Mirror playlists are safe from empty refreshes and empty payloads (thanks @splitsec2). Quarantine tells you when a song already arrived another way, and slowed/sped-up versions stop landing as the original (thanks @nick2000713).
+
+Also: the subtitle chain is a settings widget with a backfill for your existing library, the audiobook wishlist matches the music design, scrollbars fade as you scroll, standalone library scans work, Deezer re-logins when its session dies, AcoustID keys apply without a restart, the UI follows your accent color, dead CSS deleted by the thousand lines (thanks @Thundernerd), the watchlist only wishlists tracks credited to the artist you watch, playlist sync matches again, and a stack of library and import fixes.
 
 Full notes on GitHub.

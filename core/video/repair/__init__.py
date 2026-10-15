@@ -19,6 +19,7 @@ _JOB_MODULES = [
     "youtube_ghosts",
     "watched_cleanup",
     "naming_conformance",
+    "missing_subtitles",
 ]
 
 

@@ -72,16 +72,24 @@ def invalidate_plex_server_cache() -> None:
 
 
 def _plex_server(db=None):
-    """A connected PlexServer (cached ~60s so a 3s poll doesn't reconnect each
-    time). Returns None when Plex isn't configured or is unreachable."""
+    """A connected PlexServer. Returns None when Plex isn't configured or is
+    unreachable.
+
+    a working connection is kept until a call on it fails (that marks it
+    unreachable) or the credentials change. it used to be rebuilt every 60 s,
+    a round trip to plex for nothing. a failure is still remembered for 60 s
+    so a down server isn't hammered."""
     cfg = _plex_config(db)
     if not cfg["base_url"] or not cfg["token"]:
         return None
     key = hashlib.sha256(f"{cfg['base_url']}|{cfg['token']}".encode()).hexdigest()
     with _server_cache_lock:
         now = time.time()
-        if _server_cache["key"] == key and 0 <= now - _server_cache["at"] < 60:
-            return _server_cache["srv"]
+        if _server_cache["key"] == key:
+            if _server_cache["srv"] is not None:
+                return _server_cache["srv"]
+            if 0 <= now - _server_cache["at"] < 60:
+                return None
         try:
             from plexapi.server import PlexServer
             srv = PlexServer(cfg["base_url"], cfg["token"], timeout=_PLEX_TIMEOUT)

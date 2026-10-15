@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.2"
+_SOULSYNC_BASE_VERSION = "3.5.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -156,6 +156,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -606,6 +607,16 @@ def _require_login_enabled():
             _last_known_require_login, e
         )
         return _last_known_require_login
+
+
+# --- API key scope (before_request hook) ---
+# Registered ahead of the login / launch-PIN / profile gates on purpose: each of
+# them waves a valid key through, so a read-scope key has to be held to its
+# narrower access before any of them sees it.
+@app.before_request
+def _enforce_api_key_scope():
+    from api.auth import enforce_read_key_scope
+    return enforce_read_key_scope()
 
 
 # --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
@@ -1614,7 +1625,7 @@ def _register_automation_handlers():
         process_watchlist_scan_automatically=_process_watchlist_scan_automatically,
         is_wishlist_actually_processing=is_wishlist_actually_processing,
         is_watchlist_actually_scanning=is_watchlist_actually_scanning,
-        get_watchlist_scan_state=lambda: watchlist_scan_state,
+        get_watchlist_scan_state=lambda: _watchlist_scan_state.get_state(),
         run_playlist_discovery_worker=_run_playlist_discovery_worker,
         run_sync_task=_run_sync_task,
         run_playlist_organize_download=_run_playlist_organize_download,
@@ -1783,12 +1794,39 @@ def library_tracks_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
+@app.route('/api/library/tracks/recent', methods=['GET'])
+def library_recent_tracks_web():
+    """Newest library tracks for the Sample Studio panel before you search.
+
+    /api/library/recently-added is the dashboard's album rail, which is why
+    this has its own path.
+    """
+    try:
+        from api.sample import recent_library_tracks
+
+        try:
+            limit = min(100, max(1, int(request.args.get('limit') or 50)))
+        except (TypeError, ValueError):
+            limit = 50
+        return jsonify({"success": True, "data": {"tracks": recent_library_tracks(limit)}, "error": None})
+    except Exception as e:
+        logger.error(f"web /api/library/tracks/recent failed: {e}")
+        return jsonify({"success": False, "data": None, "error": str(e)}), 500
+
+
+def _sample_track_key(raw):
+    """a sample studio track id as text. jellyfin and navidrome ids aren't
+    numbers, and int() turned every request from those libraries into a 400."""
+    from core.sample.ids import track_key
+    return track_key(raw)
+
+
 @app.route('/api/sample/analysis', methods=['GET'])
 def sample_analysis_web():
     try:
         from api.sample import fetch_analysis, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1808,7 +1846,7 @@ def sample_analyze_web():
         from api.sample import enqueue_track_analysis, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -1830,10 +1868,10 @@ def sample_peaks_web():
     try:
         from api.sample import fetch_peaks, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
             buckets = int(request.args.get('buckets') or 1500)
         except (TypeError, ValueError):
-            return jsonify({"success": False, "data": None, "error": "track_id and buckets must be integers"}), 400
+            return jsonify({"success": False, "data": None, "error": "track_id is required and buckets must be a whole number"}), 400
         try:
             payload, status = fetch_peaks(track_id, buckets, stem=request.args.get('stem') or None)
             return jsonify({"success": True, "data": payload, "error": None}), status
@@ -1988,7 +2026,7 @@ def sample_stems_web():
         from api.sample import separate_stems, SampleHttpError
         data = request.get_json(silent=True) or {}
         try:
-            track_id = int(data.get('track_id') or 0)
+            track_id = _sample_track_key(data.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2006,7 +2044,7 @@ def sample_stems_status_web():
     try:
         from api.sample import stems_status, SampleHttpError
         try:
-            track_id = int(request.args.get('track_id') or 0)
+            track_id = _sample_track_key(request.args.get('track_id'))
         except (TypeError, ValueError):
             return jsonify({"success": False, "data": None, "error": "track_id is required"}), 400
         try:
@@ -2019,7 +2057,7 @@ def sample_stems_status_web():
         return jsonify({"success": False, "data": None, "error": str(e)}), 500
 
 
-@app.route('/api/sample/stems/<int:track_id>/<stem>/audio', methods=['GET'])
+@app.route('/api/sample/stems/<track_id>/<stem>/audio', methods=['GET'])
 def sample_stem_audio_web(track_id, stem):
     try:
         from api.sample import stem_audio_path, SampleHttpError
@@ -2818,6 +2856,7 @@ _EDITION_BARE_RE = _re.compile(
 
 # Stream-prep worker logic lives in core/streaming/prepare.py.
 from core.streaming import prepare as _streaming_prepare
+from core.streaming import deezer_preview as _deezer_preview
 
 
 def _build_prepare_stream_deps(sess, sid):
@@ -4101,8 +4140,13 @@ def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
     from api import key_store
     from api.helpers import api_success
+    from api.auth import SCOPE_ADMIN, VALID_SCOPES
+    from api.helpers import api_error
     body = request.get_json(silent=True) or {}
-    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    scope = body.get("scope", SCOPE_ADMIN)
+    if scope not in VALID_SCOPES:
+        return api_error("BAD_REQUEST", f"scope must be one of: {', '.join(VALID_SCOPES)}.", 400)
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""), scope)
     return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
@@ -4307,6 +4351,8 @@ def handle_settings():
                 genius_worker._init_client()
             if tidal_enrichment_worker:
                 tidal_enrichment_worker.client = tidal_client
+            if repair_worker and hasattr(repair_worker, 'refresh_acoustid_config'):
+                repair_worker.refresh_acoustid_config()
             if 'spotify' in new_settings:
                 publish_spotify_status(
                     connected=False,
@@ -6367,6 +6413,8 @@ def stream_enhanced_search_track():
     artist_name = data.get('artist_name', '').strip()
     album_name = data.get('album_name', '').strip()
     duration_ms = data.get('duration_ms', 0)
+    # the player queue asking for a deezer clip in place of a skip (#1312)
+    preview_only = bool(data.get('preview_only'))
 
     if not track_name or not artist_name:
         return jsonify({"error": "Track name and artist name are required"}), 400
@@ -6383,8 +6431,13 @@ def stream_enhanced_search_track():
             download_orchestrator=download_orchestrator,
             matching_engine=matching_engine,
             run_async=run_async,
+            deezer_client=(_get_deezer_client()
+                           if _search_stream.is_deezer_preview_source(config_manager) else None),
+            preview_only=preview_only,
         )
         if result is None:
+            if preview_only:
+                return jsonify({"success": False, "error": "No preview available"}), 404
             return jsonify({
                 "success": False,
                 "error": "No suitable track found after trying multiple search strategies",
@@ -10971,6 +11024,10 @@ def library_log_play():
 
     Fire-and-forget from the frontend ~10s into a track. Best-effort: a logging
     failure never affects playback, so we always return 200-ish.
+
+    Returns the listening_history row id as play_id. The row is NOT
+    scrobble-eligible yet: the frontend marks it eligible via
+    /api/library/log-play/eligible once the Last.fm threshold is reached.
     """
     try:
         from core.playback.play_log import build_play_event
@@ -10986,10 +11043,33 @@ def library_log_play():
         from core.listening_scope import listening_owner
         db = get_database()
         event['profile_id'] = listening_owner(db, get_current_profile_id())
-        db.record_web_player_play(event)
-        return jsonify({"success": True})
+        play_id = db.record_web_player_play(event)
+        return jsonify({"success": True, "play_id": play_id})
     except Exception as e:
         logger.debug(f"log-play failed (non-fatal): {e}")
+        return jsonify({"success": False, "error": str(e)}), 200
+
+
+@app.route('/api/library/log-play/eligible', methods=['POST'])
+def library_log_play_eligible():
+    """Mark a web-player listening_history row as scrobble-eligible.
+
+    Fire-and-forget from the frontend once playback crosses the Last.fm
+    threshold (half the track or 4 minutes, whichever comes first). A 10s
+    log-play is a "play" for SoulSync's own stats; only an eligible row may
+    be scrobbled to Last.fm / ListenBrainz. Best-effort, always 200-ish.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        from core.listening_scope import listening_owner
+        db = get_database()
+        # same pile the play was logged into: one profile's ping can never
+        # flip another pile's row.
+        owner = listening_owner(db, get_current_profile_id())
+        ok = db.mark_play_scrobble_eligible(data.get('play_id'), profile_id=owner)
+        return jsonify({"success": ok})
+    except Exception as e:
+        logger.debug(f"log-play/eligible failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
 _enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
@@ -12461,9 +12541,25 @@ def stream_start():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                # a library track played through the media server (#809) or
+                # a deezer preview left this set, and /stream/audio serves
+                # stream_url first, so the new track would play the old one
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })
+
+        # deezer preview (#1312): nothing to download, the clip is ready now.
+        # resolved here, not in the search, because preview urls expire.
+        if _deezer_preview.is_preview_request(data):
+            track_id = _deezer_preview.preview_track_id(data)
+            client = _get_deezer_client() if track_id else None
+            preview_url = client.get_track_preview_url(track_id) if client else None
+            if not preview_url:
+                return jsonify({"success": False, "error": "Deezer preview unavailable"}), 404
+            with sess.lock:
+                sess.update(_deezer_preview.session_state_for(data, preview_url))
+            return jsonify({"success": True, "message": "Preview ready", "preview": True})
 
         # Start new background streaming task for this session.
         fut = stream_executor.submit(_prepare_stream_task, data, sess, sid)
@@ -12713,6 +12809,7 @@ def stream_stop():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })
@@ -14883,10 +14980,14 @@ def _apply_path_template(template: str, context: dict) -> str:
         # Only splits when we have multiple distinct artist objects (Spotify provides these)
         # Avoids string splitting which breaks names like "Tyler, the Creator" or "Simon & Garfunkel"
         artists_list = context.get('_artists_list')
-        if artists_list and len(artists_list) > 1:
-            # Multiple artist objects (Spotify) — use first
-            first = artists_list[0]
-            album_artist_value = first.get('name', first) if isinstance(first, dict) else str(first)
+        # same rule as core/imports/paths.py: a lone listed name counts when
+        # the album artist is that name plus collaborators
+        _raw_album_artist = str(context.get('albumartist') or context.get('artist') or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary and context.get('_track_artists_list'):
+            primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
@@ -16222,6 +16323,7 @@ def _build_post_processing_deps():
         enhance_file_metadata=_enhance_file_metadata,
         wipe_source_tags=_wipe_source_tags,
         post_process_with_verification=_post_process_matched_download_with_verification,
+        process_release_file=_post_process_matched_download,
         mark_task_completed=_mark_task_completed,
         on_download_completed=_on_download_completed,
     )
@@ -19413,7 +19515,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -20052,6 +20154,7 @@ from core.discovery.endpoints import (  # noqa: E402
     playlist_name_attr_or_unknown as _pl_name_attr_or_unknown,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
+    source_skipped_counts as _source_skipped_counts,
 )
 
 # ── per-source playlist systems live in api/source_playlists.py now ──────────
@@ -20530,12 +20633,10 @@ from api.user_profiles import _get_lb_credentials_for_profile  # one outside cal
 # the chat/labels/beatport/repair blueprints below) ---
 # --- Watchlist Auto-Scanning System ---
 
-watchlist_scan_state = {
-    'status': 'idle',
-    'results': [],
-    'summary': {},
-    'error': None
-}
+# Shared scan state lives in core/watchlist/scan_state.py — single source of
+# truth for both manual scans (api/artist_watchlist.py) and auto-scans here.
+# The socket emit loop and the API endpoint read the same dict.
+from core.watchlist import scan_state as _watchlist_scan_state
 
 # Watchlist auto-scan logic lives in core/watchlist/auto_scan.py.
 from core.watchlist import auto_scan as _watchlist_auto_scan
@@ -20570,11 +20671,13 @@ def _build_watchlist_auto_scan_deps():
         watchlist_auto_scanning_heartbeat = value
 
     def _get_state():
-        return watchlist_scan_state
+        return _watchlist_scan_state.get_state()
 
     def _set_state(value):
-        global watchlist_scan_state
-        watchlist_scan_state = value
+        # Mutate in place to preserve the shared object identity.
+        state = _watchlist_scan_state.get_state()
+        state.clear()
+        state.update(value)
 
     return _watchlist_auto_scan.WatchlistAutoScanDeps(
         app=app,
@@ -20895,6 +20998,33 @@ def mirror_playlist_endpoint():
 
         database = get_database()
         profile_id = get_current_profile_id()
+
+        # #1656: refuse to REPLACE a non-empty mirror with an empty track
+        # list. An empty payload is what a failed client-side fetch looks
+        # like, and storing it deletes every track the mirror had — the
+        # #990 guard only refuses a non-empty list of blank tracks, so an
+        # empty list sailed straight through with success:true. A brand-new
+        # mirror (or one that is already empty) may still be saved with zero
+        # tracks — a genuinely empty upstream playlist is legal.
+        if not tracks:
+            existing = database.get_mirrored_playlist_by_source(
+                source, str(source_playlist_id), profile_id
+            )
+            if existing and (existing.get('track_count') or 0) > 0:
+                # NB: include success:false — the callers check
+                # res.success === false strictly, and readJson doesn't throw
+                # on a 400, so a bare {"error": ...} would fall through to
+                # the success branch in the UI.
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        f"Refusing to replace non-empty mirror '{name}' with an empty "
+                        f"track list — the payload looks like a failed fetch. If the "
+                        f"upstream playlist is genuinely empty, delete the mirror and "
+                        f"re-mirror it."
+                    ),
+                }), 400
+
         quality_profile_id = data.get('quality_profile_id')
         if quality_profile_id is not None:
             try:
@@ -20913,7 +21043,9 @@ def mirror_playlist_endpoint():
             quality_profile_id=quality_profile_id,
             description=data.get('description'),
             owner=data.get('owner'),
-            image_url=data.get('image_url')
+            image_url=data.get('image_url'),
+            # only a source that reports skips sends the key; leaving it out keeps the stored counts
+            **({'source_skipped': data.get('source_skipped')} if 'source_skipped' in data else {}),
         )
 
         if playlist_id is None:
@@ -21864,6 +21996,9 @@ _DISCOVER_WARM_PATHS = [
 ]
 
 
+from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
+
+
 def _discover_warm_sweep(paths=None):
     """one pass over the discover shelves, as every profile.
 
@@ -21898,7 +22033,11 @@ def _discover_warm_sweep(paths=None):
                 sess['launch_pin_verified'] = True
             for p in (paths or _DISCOVER_WARM_PATHS):
                 try:
-                    status = client.get(p).status_code
+                    # recompute, don't read. a sweep inside the 30 min ttl
+                    # otherwise finds every answer still valid and refreshes
+                    # nothing, so every other sweep was a no-op
+                    with refresh_discover_caches():
+                        status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
                     status = 'error'
@@ -23342,8 +23481,15 @@ app.register_blueprint(_bp_mpl())
 
 # user playlists (made inside soulsync, stored as mirrored playlists)
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
-_cfg_upl(get_database=get_database)
+_cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
+# your own playlists identify themselves in the background after every edit,
+# so they are always ready to sync (core/playlists/auto_identify)
+from core.playlists import auto_identify as _auto_identify
+_auto_identify.configure(
+    runner=lambda pls: _run_playlist_discovery_worker(pls, automation_id=None),
+    get_playlist=lambda pid: get_database().get_mirrored_playlist(pid),
+)
 
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc
@@ -23722,7 +23868,8 @@ def _emit_enrichment_status_loop():
                     w.paused = True
                     _download_auto_paused.add(name)
                     _auto_yield_cause[name] = reason
-                    logger.debug(f"Auto-paused {name} during active {reason}")
+                    # once per pause (guarded by `not w.paused`), so it can be info
+                    logger.info(f"Auto-paused {name} during active {reason}")
                 elif not reason and name in _download_auto_paused:
                     # Don't override an explicit user pause. If config says the worker
                     # was paused via the UI, leave it paused and just drop the auto-pause
@@ -24147,6 +24294,9 @@ def _emit_discovery_progress_loop():
                             'results': state.get('discovery_results', state.get('results', [])),
                             'complete': state.get('phase') == 'discovered',
                         }
+                        skipped = _source_skipped_counts(state)
+                        if skipped:
+                            payload['source_skipped'] = skipped
                         socketio.emit('discovery:progress', payload, room=f'discovery:{pid}')
                     except Exception as e:
                         logger.debug("discovery progress emit failed: %s", e)
@@ -24162,7 +24312,7 @@ def _emit_scan_status_loop():
             continue
         # Watchlist scan
         try:
-            state = watchlist_scan_state.copy()
+            state = _watchlist_scan_state.get_state().copy()
             if state.get('started_at'):
                 state['started_at'] = state['started_at'].isoformat()
             if state.get('completed_at'):

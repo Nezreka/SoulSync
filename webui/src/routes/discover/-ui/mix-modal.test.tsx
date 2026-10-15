@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DiscoverMix } from '../-discover.mixes';
 
-import { CompactPlaylist, MixModal, MixSelectionBarView } from './mix-modal';
+import {
+  CompactPlaylist,
+  MixModal,
+  MixModalHeader,
+  MixSelectionBarView,
+  PlayIcon,
+  TrackListHead,
+} from './mix-modal';
 
 /**
  * The compact track list and the mix modal.
@@ -138,9 +145,7 @@ describe('the compact playlist', () => {
 
 describe('the selection bar', () => {
   const bar = (over: Partial<Parameters<typeof MixSelectionBarView>[0]> = {}) => ({
-    total: 3,
-    selected: [],
-    onSelectAll: vi.fn(),
+    selected: [1],
     onClearSelection: vi.fn(),
     onDownloadSelected: vi.fn(),
     ...over,
@@ -150,52 +155,24 @@ describe('the selection bar', () => {
     const { container } = render(<MixSelectionBarView {...bar()} />);
     for (const sel of [
       '#mix-modal-selbar.mix-modal-selbar',
-      '.mix-selbar-all #mix-select-all',
       '#mix-sel-count.mix-sel-count',
-      '.mix-selbar-spacer',
       '#mix-dl-selected',
     ]) {
       expect(container.querySelector(sel), sel).not.toBeNull();
     }
   });
 
-  it('counts the selection and disables download at zero', () => {
-    render(<MixSelectionBarView {...bar()} />);
-    expect(screen.getByText('0 selected')).toBeInTheDocument();
-    expect(screen.getByText('Download selected')).toBeDisabled();
-  });
-
-  it('puts the count in the download label once there is one', () => {
+  it('puts the count in the download label', () => {
     render(<MixSelectionBarView {...bar({ selected: [0, 2] })} />);
     expect(screen.getByText('2 selected')).toBeInTheDocument();
     expect(screen.getByText('Download selected (2)')).not.toBeDisabled();
   });
 
-  it('ticks select-all only when everything is selected, never on empty', () => {
-    const { container, rerender } = render(<MixSelectionBarView {...bar({ selected: [0, 1] })} />);
-    const box = () => container.querySelector('#mix-select-all') as HTMLInputElement;
-    expect(box().checked).toBe(false);
-    rerender(<MixSelectionBarView {...bar({ selected: [0, 1, 2] })} />);
-    expect(box().checked).toBe(true);
-    // 0 === 0 would otherwise show select-all ticked on a list with no rows.
-    rerender(<MixSelectionBarView {...bar({ total: 0, selected: [] })} />);
-    expect(box().checked).toBe(false);
-  });
-
-  it('selects everything, clears everything — as DIFFERENT actions', () => {
-    // Clear exists even when nothing is "all": it unticks whatever subset is
-    // ticked, which select-all(false) only does from the fully-ticked state.
-    const p = bar({ selected: [1] });
-    const { container } = render(<MixSelectionBarView {...p} />);
-    fireEvent.click(container.querySelector('#mix-select-all')!);
-    expect(p.onSelectAll).toHaveBeenCalledWith([0, 1, 2]);
+  it('clears and downloads the selection', () => {
+    const p = bar();
+    render(<MixSelectionBarView {...p} />);
     fireEvent.click(screen.getByText('Clear'));
     expect(p.onClearSelection).toHaveBeenCalled();
-  });
-
-  it('downloads the selection', () => {
-    const p = bar({ selected: [1] });
-    render(<MixSelectionBarView {...p} />);
     fireEvent.click(screen.getByText('Download selected (1)'));
     expect(p.onDownloadSelected).toHaveBeenCalled();
   });
@@ -237,17 +214,39 @@ describe('the mix modal', () => {
     }
   });
 
-  it('puts the subtitle ABOVE the title as an eyebrow, falling back to Mix', () => {
+  it('reads eyebrow, title, then the subtitle as the why', () => {
     const { container, rerender } = render(
       <MixModal {...props({ mix: mix({ subtitle: 'by ListenBrainz' }) })} />,
     );
-    const header = container.querySelector('.mix-modal-header > div')!;
-    expect(header.children[0]).toHaveClass('mix-modal-subtitle');
-    expect(header.children[0].textContent).toBe('by ListenBrainz');
-    expect(header.children[1]).toHaveClass('mix-modal-title');
-    expect(header.children[1].textContent).toBe('Your Mix');
+    const heading = container.querySelector('.mix-modal-heading')!;
+    expect(heading.children[0]).toHaveClass('mix-modal-eyebrow');
+    expect(heading.children[0].textContent).toBe('Mix');
+    expect(heading.children[1]).toHaveClass('mix-modal-title');
+    expect(heading.children[1].textContent).toBe('Your Mix');
+    expect(heading.children[2]).toHaveClass('mix-modal-subtitle');
+    expect(heading.children[2].textContent).toBe('by ListenBrainz');
+    // no subtitle, no empty line for one
     rerender(<MixModal {...props()} />);
-    expect(container.querySelector('.mix-modal-subtitle')!.textContent).toBe('Mix');
+    expect(container.querySelector('.mix-modal-subtitle')).toBeNull();
+  });
+
+  it('makes a mosaic from four different covers, one cover from fewer', () => {
+    const art = (n: number) =>
+      track({ album: { name: `a${n}`, images: [{ url: `/img/${n}.jpg` }] } });
+    const { container, rerender } = render(
+      <MixModal {...props({ tracks: [art(1), art(2), art(2), art(3), art(4)] })} />,
+    );
+    const cover = () => container.querySelector('.mix-modal-cover')!;
+    expect(cover()).toHaveClass('is-mosaic');
+    expect([...cover().querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([
+      '/img/1.jpg',
+      '/img/2.jpg',
+      '/img/3.jpg',
+      '/img/4.jpg',
+    ]);
+    rerender(<MixModal {...props({ tracks: [art(1), art(2)] })} />);
+    expect(cover()).not.toHaveClass('is-mosaic');
+    expect(cover().querySelectorAll('img')).toHaveLength(1);
   });
 
   it('leaves the meta EMPTY until a lazy mix has tracks', () => {
@@ -255,13 +254,14 @@ describe('the mix modal', () => {
     const { container, rerender } = render(<MixModal {...props({ tracks: undefined })} />);
     expect(container.querySelector('.mix-modal-meta')!.textContent).toBe('');
     rerender(<MixModal {...props()} />);
-    expect(container.querySelector('.mix-modal-meta')!.textContent).toBe('1 tracks');
+    expect(container.querySelector('.mix-modal-meta')!.textContent).toBe('1 track · 5 min');
   });
 
-  it('builds Download and Sync from a syncKey, in btn--sm classes', () => {
+  it('builds Download and Sync from a syncKey, with Play the one filled button', () => {
     render(<MixModal {...props()} />);
+    expect(screen.getByText('Play')).toHaveClass('btn', 'btn--sm', 'btn--primary');
     expect(screen.getByText('Download')).toHaveClass('btn', 'btn--sm', 'btn--secondary');
-    expect(screen.getByText('Sync')).toHaveClass('btn', 'btn--sm', 'btn--primary');
+    expect(screen.getByText('Sync')).toHaveClass('btn', 'btn--sm', 'btn--secondary');
   });
 
   it('gives the SYNC button the id the live poller re-enables it by', () => {
@@ -276,11 +276,12 @@ describe('the mix modal', () => {
       <MixModal {...props({ mix: mix({ actions: [{ label: 'Rebuild', onclick: 'x' }] }) })} />,
     );
     expect(screen.getByText('Rebuild')).toBeInTheDocument();
-    expect(screen.getByText('▶ Play')).toBeInTheDocument();
+    expect(screen.getByText('Play')).toBeInTheDocument();
     expect(screen.queryByText('Sync')).toBeNull();
     rerender(<MixModal {...props({ mix: mix({ syncKey: undefined }) })} />);
-    // play + close: even an action-less mix is listenable now
-    expect(container.querySelectorAll('.mix-modal-actions button')).toHaveLength(2);
+    // just play: even an action-less mix is listenable now. close sits in the
+    // corner, outside the actions.
+    expect(container.querySelectorAll('.mix-modal-actions button')).toHaveLength(1);
   });
 
   it('reports the whole action, so the caller can honour closeFirst', () => {
@@ -320,13 +321,47 @@ describe('the mix modal', () => {
     expect(container.querySelector('#your-mix-sync-status')).toBeNull();
   });
 
-  it('hides the selection bar until there are tracks to select', () => {
+  it('floats the selection bar in only once something is ticked', () => {
     const { container, rerender } = render(<MixModal {...props({ tracks: undefined })} />);
     expect(container.querySelector('#mix-modal-selbar')).toBeNull();
-    rerender(<MixModal {...props({ tracks: [] })} />);
-    expect(container.querySelector('#mix-modal-selbar')).toBeNull();
     rerender(<MixModal {...props()} />);
+    expect(container.querySelector('#mix-modal-selbar')).toBeNull();
+    expect(container.querySelector('.mix-modal')).not.toHaveClass('has-selection');
+    rerender(<MixModal {...props({ selected: [0] })} />);
     expect(container.querySelector('#mix-modal-selbar')).not.toBeNull();
+    // the body makes room under the last row for it
+    expect(container.querySelector('.mix-modal')).toHaveClass('has-selection');
+  });
+
+  it('puts select-all in the column head, and only over a list', () => {
+    const { container, rerender } = render(<MixModal {...props({ tracks: [] })} />);
+    expect(container.querySelector('#mix-select-all')).toBeNull();
+    rerender(<MixModal {...props({ tracks: undefined, loading: true })} />);
+    expect(container.querySelector('#mix-select-all')).toBeNull();
+    rerender(<MixModal {...props()} />);
+    expect(container.querySelector('.mix-modal-colhead #mix-select-all')).not.toBeNull();
+  });
+
+  it('ticks select-all only when everything is selected', () => {
+    const p = props({ tracks: [track(), track(), track()], selected: [0, 1] });
+    const { container, rerender } = render(<MixModal {...p} />);
+    const box = () => container.querySelector('#mix-select-all') as HTMLInputElement;
+    expect(box().checked).toBe(false);
+    fireEvent.click(box());
+    expect(p.onSelectAll).toHaveBeenCalledWith([0, 1, 2]);
+    rerender(<MixModal {...p} selected={[0, 1, 2]} />);
+    expect(box().checked).toBe(true);
+    fireEvent.click(box());
+    expect(p.onSelectAll).toHaveBeenLastCalledWith([]);
+  });
+
+  it('tints the ticked rows', () => {
+    const { container } = render(
+      <MixModal {...props({ tracks: [track(), track()], selected: [1] })} />,
+    );
+    const rows = container.querySelectorAll('.discover-playlist-track-compact');
+    expect(rows[0]).not.toHaveClass('is-selected');
+    expect(rows[1]).toHaveClass('is-selected');
   });
 
   it('always renders its rows SELECTABLE', () => {
@@ -434,7 +469,9 @@ describe('add to playlist', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (_url: string, init?: RequestInit) => {
-        if (init?.method === 'POST') posts.push(JSON.parse(init.body as string));
+        // the picker's tick check is a read, not the add
+        if (init?.method === 'POST' && !_url.endsWith('/membership'))
+          posts.push(JSON.parse(init.body as string));
         return new Response(
           JSON.stringify(
             init?.method === 'POST'
@@ -455,7 +492,13 @@ describe('add to playlist', () => {
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({
       tracks: [
-        { track_name: 'Xtal', artist_name: 'Aphex Twin', album_name: 'Selected Ambient Works' },
+        {
+          track_name: 'Xtal',
+          artist_name: 'Aphex Twin',
+          album_name: 'Selected Ambient Works',
+          // the row's cover rides along: the picker's header glows with it
+          image_url: '/img/saw.jpg',
+        },
       ],
       allow_duplicates: false,
     });
@@ -463,18 +506,76 @@ describe('add to playlist', () => {
     vi.unstubAllGlobals();
   });
 
-  it('the selection bar sends only the ticked rows, and waits for a tick', () => {
-    const onAdd = vi.fn();
-    render(
-      <MixSelectionBarView
-        total={3}
-        selected={[]}
-        onSelectAll={vi.fn()}
-        onClearSelection={vi.fn()}
-        onDownloadSelected={vi.fn()}
-        onAddSelectedToPlaylist={onAdd}
-      />,
+  it('the selection bar sends only the ticked rows', async () => {
+    const { AddToPlaylistHost, closeAddToPlaylist } =
+      await import('@/features/playlists/add-to-playlist');
+    const posts: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        // the picker's tick check is a read, not the add
+        if (init?.method === 'POST' && !_url.endsWith('/membership'))
+          posts.push(JSON.parse(init.body as string));
+        return new Response(
+          JSON.stringify(
+            init?.method === 'POST'
+              ? { added: 2, duplicates: [], track_count: 2 }
+              : { playlists: [{ id: 1, name: 'Mine', track_count: 0 }] },
+          ),
+        );
+      }),
     );
-    expect(screen.getByText('Add to playlist')).toBeDisabled();
+    render(
+      <>
+        <MixModal
+          mix={{ key: 'm', title: 'M' }}
+          tracks={[track({ name: 'One' }), track({ name: 'Two' }), track({ name: 'Three' })]}
+          selected={[0, 2]}
+          onClose={vi.fn()}
+          onAction={vi.fn()}
+          onSelectAll={vi.fn()}
+          onClearSelection={vi.fn()}
+          onToggleTrack={vi.fn()}
+          onPlayTrack={vi.fn()}
+          onDownloadSelected={vi.fn()}
+        />
+        <AddToPlaylistHost />
+      </>,
+    );
+    fireEvent.click(screen.getByText('Add to playlist'));
+    fireEvent.click(await screen.findByText('Mine'));
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(
+      (posts[0] as { tracks: { track_name: string }[] }).tracks.map((t) => t.track_name),
+    ).toEqual(['One', 'Three']);
+    closeAddToPlaylist();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('the shared shell pieces', () => {
+  it('MixModalHeader shows a plain tile when there is no art, and no empty action row', () => {
+    const { container } = render(
+      <MixModalHeader titleId="t" eyebrow="Station" title="X" covers={[]} onClose={vi.fn()} />,
+    );
+    expect(container.querySelector('.mix-modal-cover-blank')).not.toBeNull();
+    expect(container.querySelector('.mix-modal-actions')).toBeNull();
+    expect(container.querySelector('#t')!.textContent).toBe('X');
+  });
+
+  it('TrackListHead has a select-all column only when asked for one', () => {
+    const onChange = vi.fn();
+    const { container, rerender } = render(<TrackListHead />);
+    expect(container.querySelector('input')).toBeNull();
+    expect(container.querySelector('.mix-modal-colhead')).not.toHaveClass('has-select');
+    rerender(<TrackListHead selectAll={{ id: 'all', checked: false, onChange }} />);
+    expect(container.querySelector('.mix-modal-colhead')).toHaveClass('has-select');
+    fireEvent.click(container.querySelector('#all')!);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it('PlayIcon is decorative', () => {
+    const { container } = render(<PlayIcon />);
+    expect(container.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
   });
 });

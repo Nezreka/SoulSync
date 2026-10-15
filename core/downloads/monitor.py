@@ -303,6 +303,15 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         if not username or not filename:
             return False
 
+        # Content was fetched successfully but failed verification. The same
+        # identified release from another indexer cannot repair those bytes.
+        # Transport retries elsewhere only mark an endpoint in used_sources.
+        release_id = task.get('release_id')
+        if release_id:
+            failed = set(task.get('failed_release_ids') or ())
+            failed.add(release_id)
+            task['failed_release_ids'] = failed
+
         total_count = task.get('quarantine_retry_count', 0)
 
         if config_manager.get('post_processing.retry_exhaustive', False):
@@ -790,6 +799,7 @@ class WebUIDownloadMonitor:
                         'bytesTransferred': download.transferred,
                         'averageSpeed': download.speed,
                         'error': getattr(download, 'error', None),
+                        'failure_kind': getattr(download, 'failure_kind', None),
                     }
                     live_transfers[key] = transfer_row
                     id_key = _download_id_key(download.id)
@@ -938,6 +948,12 @@ class WebUIDownloadMonitor:
                 if username and download_id:
                     deferred_ops.append(('cancel_download', download_id, username,
                                          'errored_state_retry'))
+
+                if live_info.get('failure_kind') == 'content' and task.get('release_id'):
+                    failed = set(task.get('failed_release_ids') or ())
+                    failed.add(task['release_id'])
+                    task['failed_release_ids'] = failed
+                    task['_quarantine_retry'] = True
 
                 # Mark current source as used to prevent retry loops
                 # CRITICAL: Use full filename (not basename) to match worker's source_key format

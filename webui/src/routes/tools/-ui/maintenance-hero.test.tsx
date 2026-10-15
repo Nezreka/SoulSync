@@ -415,3 +415,69 @@ describe('live repair frames', () => {
     expect(document.querySelector('.repair-progress-phase')?.textContent).toBe('Scanning');
   });
 });
+
+describe('simple mode triage buttons', () => {
+  // discord: "122 suggestions and a bunch for quarantine, but the buttons don't
+  // do anything". the findings list lives in the advanced chassis, which simple
+  // mode hides, and the buttons filtered by severity while the cards count by
+  // destructive / fixable, so orphan files ('info') never showed as quarantine.
+  beforeEach(() => {
+    localStorage.removeItem('soulsync_operations_mode');
+    routes({
+      '/api/repair/jobs': { jobs: [job()] },
+      '/api/repair/findings/groups': {
+        groups: [
+          { finding_type: 'orphan_file', pending: 11, count: 11, severity_max: 'info' },
+          { finding_type: 'missing_lyrics', pending: 2, count: 2, severity_max: 'info' },
+        ],
+      },
+      '/api/repair/finding-types': {
+        types: [
+          {
+            type: 'orphan_file',
+            label: 'Orphan files',
+            verb: 'Move',
+            fixable: true,
+            destructive: true,
+          },
+          {
+            type: 'canonical_version',
+            label: 'Canonical',
+            verb: null,
+            fixable: false,
+            destructive: false,
+          },
+          {
+            type: 'missing_lyrics',
+            label: 'Lyrics',
+            verb: 'Fetch',
+            fixable: true,
+            destructive: false,
+          },
+        ],
+      },
+    });
+  });
+
+  it('inspect quarantine shows the findings, opened on the quarantined type', async () => {
+    const { container } = render(<MaintenanceHero />);
+    await flush();
+    const chassis = container.querySelector('.repair-advanced-chassis') as HTMLElement;
+    expect(chassis.hidden).toBe(true);
+
+    const button = await screen.findByRole('button', { name: /Inspect Quarantine/ });
+    await waitFor(() => expect(button.closest('button')?.disabled).toBe(false));
+    fetchMock.mockClear();
+    fireEvent.click(button);
+    await flush();
+
+    expect(chassis.hidden).toBe(false);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes('finding_type=orphan_file')),
+      ).toBe(true),
+    );
+    // shown for this visit only, the saved preference stays simple
+    expect(localStorage.getItem('soulsync_operations_mode')).toBeNull();
+  });
+});

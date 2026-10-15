@@ -73,7 +73,7 @@ def load_profile_by_id(profile_id) -> dict:
     shape as ``MusicDatabase.get_quality_profile()`` (``ranked_targets`` /
     ``fallback_enabled`` / ``search_mode`` / ``rank_candidates_by_quality``
     plus the full settings bundle — AcoustID strictness, downsample,
-    deep-verify, replace-lower, lossy-copy, folder-artist).
+    deep-verify, replace-lower, lossy-copy and release import policy).
 
     Falls back to the app-wide default profile when ``profile_id`` is falsy,
     not found, or on any error. This is THE resolution primitive of the

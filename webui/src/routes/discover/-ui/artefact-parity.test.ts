@@ -129,7 +129,9 @@ const DELETED_MARKUP_IDS = [
   // 'your-albums-section' left this ledger when the rails redesign gave it
   // real CSS (the wrapping-grid exemption) — the parity test caught the
   // stale claim, exactly as designed.
-  'your-artists-carousel',
+  // 'your-artists-carousel' left the same way in the Oct 13 mobile batch:
+  // mobile.css now carries real rules for the id (the fluid 2-up grid),
+  // which makes it a KNOWN_ID via the stylesheet scan.
   'your-artists-section',
 ];
 const DELETED_MARKUP_CLASSES = ['artweb-size-btn', 'watch-all-text'];

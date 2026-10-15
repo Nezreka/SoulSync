@@ -9,7 +9,7 @@ const entry: StashEntry = {
   id: 11,
   name: 'killer break',
   tags: ['drums', 'loop'],
-  track_id: 7,
+  track_id: '7',
   track_title: 'Midnight Groove',
   artist_name: 'Test Artist',
   start_s: 4,

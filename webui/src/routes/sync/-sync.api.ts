@@ -13,6 +13,7 @@ import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
+import type { SourceSkipped } from './-sync.state';
 import type { RawDiscoveryResult } from './-sync.transform';
 
 import { isServiceExport } from './-sync.export';
@@ -485,6 +486,8 @@ export async function clearMirroredDiscovery(
 export interface MirroredPlaylistDetail {
   error?: string;
   name?: string;
+  /** the rename when there is one, else name */
+  display_name?: string;
   source?: string;
   source_playlist_id?: string;
   source_ref?: string;
@@ -493,6 +496,8 @@ export interface MirroredPlaylistDetail {
   image_url?: string;
   updated_at?: string;
   mirrored_at?: string;
+  /** what the source never handed over when it was mirrored (#1613). */
+  source_skipped?: SourceSkipped | null;
   tracks?: {
     id?: number;
     position?: number;
@@ -502,6 +507,8 @@ export interface MirroredPlaylistDetail {
     duration_ms?: number;
     image_url?: string;
     source_track_id?: string;
+    /** when it joined the playlist; null for rows from before that was kept */
+    added_at?: string | null;
   }[];
 }
 

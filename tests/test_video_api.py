@@ -532,11 +532,14 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         data = client.get("/api/video/libraries").get_json()
         assert data["server"] == "plex"
         assert [m["title"] for m in data["movies"]] == ["Movies"]
-        assert data["selected"]["movies"] is None
+        # one library of each kind and nothing ever picked: they're picked
+        # for you, so a fresh install's first scan reads something
+        assert data["selected"] == {"movies": "Movies", "tv": "TV"}
 
-        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": "TV"}).status_code == 200
+        # "— None —" for tv is a choice and stays one on the next load
+        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": ""}).status_code == 200
         data2 = client.get("/api/video/libraries").get_json()
-        assert data2["selected"] == {"movies": "Movies", "tv": "TV"}
+        assert data2["selected"] == {"movies": "Movies", "tv": ""}
     finally:
         videoapi._video_db = None
 
@@ -594,6 +597,46 @@ def test_enrichment_endpoints(tmp_path):
         eng_mod._engine = None
 
 
+def test_enrichment_test_endpoint_backfill_workers(tmp_path, monkeypatch):
+    # backfill workers (fanart, opensubtitles) have no .client; the test button
+    # used to 500 with AttributeError for them.
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    import core.video.enrichment.engine as eng_mod
+    import core.video.enrichment.backfill as bf
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+
+    class FakeClient:
+        enabled = True
+        def match(self, *a, **k): return None
+        def test(self): return (True, "ok")
+
+    calls = []
+    def fake_get(url, params=None, headers=None, **k):
+        calls.append(url)
+        return {"data": []}
+    monkeypatch.setattr(bf, "_http_get_json", fake_get)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("fanart_api_key", "fk")
+    db.set_setting("opensubtitles_api_key", "ok")
+    videoapi._video_db = db
+    eng_mod._engine = VideoEnrichmentEngine(db, {"tmdb": FakeClient()})
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        for svc in ("fanart", "opensubtitles"):
+            res = client.post("/api/video/enrichment/%s/test" % svc).get_json()
+            assert res["success"] is True, (svc, res)
+        assert any("fanart.tv" in u for u in calls)
+        assert any("opensubtitles.com" in u for u in calls)
+        assert client.post("/api/video/enrichment/tmdb/test").get_json()["success"] is True
+    finally:
+        videoapi._video_db = None
+        eng_mod._engine = None
+
+
 def test_enrichment_config_save_load(tmp_path, monkeypatch):
     import api.video as videoapi
     from database.video_database import VideoDatabase
@@ -611,18 +654,21 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": "",
             "fanart_api_key": "", "opensubtitles_api_key": "", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "", "subsource_api_key": "",
             "ryd_enabled": True, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
                           "fanart_api_key": "fa", "opensubtitles_api_key": "os",
+                          "subdl_api_key": "sdl", "subsource_api_key": "sso",
                           "ryd_enabled": False, "sponsorblock_enabled": True,
                           "billboard_autoplay": False, "watch_region": "gb"})
         assert client.get("/api/video/enrichment/config").get_json() == {
             "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
             "fanart_api_key": "fa", "opensubtitles_api_key": "os", "trakt_api_key": "",
             "mdblist_api_key": "",
+            "subdl_api_key": "sdl", "subsource_api_key": "sso",
             "ryd_enabled": False, "sponsorblock_enabled": True, "dearrow_enabled": True,
             "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
             "billboard_autoplay": False, "watch_region": "GB"}

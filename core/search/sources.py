@@ -133,6 +133,10 @@ def _search_kind_raw(client, query: str, kind: str, source_name: Optional[str] =
                     # were tagged with only the primary artist until a Retag).
                     "source": source_name or "",
                     "album": track.album,
+                    # only sources that know it (deezer). lets a single-track
+                    # download look up its real album instead of posing as a
+                    # one-track single (#1605)
+                    "album_id": getattr(track, "album_id", None),
                     "duration_ms": track.duration_ms,
                     "image_url": track.image_url,
                     "release_date": track.release_date,

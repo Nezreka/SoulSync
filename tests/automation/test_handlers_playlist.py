@@ -304,6 +304,42 @@ class TestRefreshMirrored:
         assert result['errors'] == '1'
         assert result['refreshed'] == '0'
 
+    def test_failed_spotify_fetch_keeps_the_stored_tracks(self):
+        # Since Feb 2026 Spotify answers 403 for the items of a playlist the user
+        # follows but doesn't own. The refresh must count an error and leave the
+        # mirror alone, not store an empty track list over the old one.
+        import spotipy
+        from core.spotify_client import SpotifyClient
+
+        class _ForbiddenItemsSp:
+            def playlist(self, pid):
+                return {'id': pid, 'name': 'Followed', 'description': '', 'public': True,
+                        'collaborative': False, 'owner': {'display_name': 'someone else'},
+                        'items': {'total': 1}}
+
+            def _get_id(self, kind, pid):
+                return pid
+
+            def _get(self, url, **params):
+                raise spotipy.SpotifyException(403, -1, 'Forbidden')
+
+            def playlist_items(self, pid, **params):
+                raise spotipy.SpotifyException(403, -1, 'Forbidden')
+
+        spotify = SpotifyClient.__new__(SpotifyClient)
+        spotify.sp = _ForbiddenItemsSp()
+        spotify.is_spotify_authenticated = lambda: True
+        db = _StubDB(
+            playlists=[{'id': 7, 'name': 'Followed', 'source': 'spotify',
+                        'source_playlist_id': 'spot-followed', 'profile_id': 2}],
+            playlist_tracks={7: [{'source_track_id': 'keep-me'}]},
+        )
+        deps = _build_deps(get_database=lambda: db, spotify_client=spotify)
+        result = auto_refresh_mirrored({'playlist_id': '7'}, deps)
+        assert result['errors'] == '1'
+        assert result['refreshed'] == '0'
+        assert db.mirror_calls == []
+
     def test_spotify_public_missing_source_url_is_reported_as_error(self):
         db = _StubDB(playlists=[
             {'id': 1, 'name': 'No URL', 'source': 'spotify_public', 'source_playlist_id': 'hash'},
@@ -786,6 +822,48 @@ class TestSyncPlaylist:
         assert args[2][0]['quality_profile_id'] == 23
         assert args[4] == 7
 
+    def _sync_kwargs(self, playlist, config):
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        db = _StubDB(playlists=[playlist], playlist_tracks={1: [discovered_track]})
+        sync_calls: List[tuple] = []
+        deps = _build_deps(
+            get_database=lambda: db,
+            run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+        )
+        auto_sync_playlist(config, deps)
+        for _ in range(50):
+            if sync_calls:
+                break
+            import time
+            time.sleep(0.01)
+        assert sync_calls
+        return sync_calls[0][1]
+
+    def test_mirror_sync_mode_reaches_the_sync(self):
+        # #1704: an append-only mirror while the global mode is something else
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': 'append'},
+                               {'playlist_id': '1'})
+        assert kw.get('sync_mode') == 'append'
+
+    def test_pipeline_sync_mode_used_when_mirror_has_none(self):
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': None},
+                               {'playlist_id': '1', 'sync_mode': 'replace'})
+        assert kw.get('sync_mode') == 'replace'
+
+    def test_mirror_sync_mode_beats_the_pipeline(self):
+        kw = self._sync_kwargs({'id': 1, 'name': 'P', 'sync_mode': 'append'},
+                               {'playlist_id': '1', 'sync_mode': 'replace'})
+        assert kw.get('sync_mode') == 'append'
+
     def test_organize_by_playlist_passes_skip_wishlist_add(self):
         discovered_track = {
             'extra_data': json.dumps({
@@ -814,6 +892,128 @@ class TestSyncPlaylist:
             time.sleep(0.01)
         assert sync_calls
         assert sync_calls[0][1].get('skip_wishlist_add') is True
+        # The organize flag rides separately (#1689): it is what lets the
+        # post-sync followup start the organize download batch.
+        assert sync_calls[0][1].get('organize_by_playlist') is True
+
+    def test_pipeline_skip_flag_passes_skip_wishlist_add(self):
+        """#1689: a pipeline run with wishlist skipping resolved on (the
+        automation checkbox or the global toggle) hands skip_wishlist_add
+        to the sync, not just to the wishlist phase — otherwise the sync
+        itself wishlists every missing track it touches."""
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        for config, expected in (
+                ({'playlist_id': '1', 'skip_wishlist_add': True}, True),
+                ({'playlist_id': '1'}, False)):
+            db = _StubDB(
+                playlists=[{'id': 1, 'name': 'P'}],
+                playlist_tracks={1: [discovered_track]},
+            )
+            sync_calls: List[tuple] = []
+            deps = _build_deps(
+                get_database=lambda db=db: db,
+                run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+            )
+            auto_sync_playlist(config, deps)
+            for _ in range(50):
+                if sync_calls:
+                    break
+                import time
+                time.sleep(0.01)
+            assert sync_calls
+            assert sync_calls[0][1].get('skip_wishlist_add') is expected
+            # A pipeline wishlist skip is NOT organize-by-playlist: the
+            # followup must never start an organize batch for it (#1689).
+            assert sync_calls[0][1].get('organize_by_playlist') is False
+
+    def test_standalone_sync_obeys_the_global_wishlist_toggle(self):
+        """#1689: a scheduled "Sync Playlist" automation has no per-click
+        choice, so the global "add missing tracks to the wishlist" toggle
+        decides, as its help text promises. a pipeline's explicit value
+        still wins either way."""
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        cases = (
+            # (toggle on?, config, expected skip)
+            (False, {'playlist_id': '1'}, True),
+            (True, {'playlist_id': '1'}, False),
+            (False, {'playlist_id': '1', 'skip_wishlist_add': False}, False),
+            (True, {'playlist_id': '1', 'skip_wishlist_add': True}, True),
+        )
+        for toggle_on, config, expected in cases:
+            db = _StubDB(
+                playlists=[{'id': 1, 'name': 'P'}],
+                playlist_tracks={1: [discovered_track]},
+            )
+            sync_calls: List[tuple] = []
+            deps = _build_deps(
+                get_database=lambda db=db: db,
+                run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+                config_manager=SimpleNamespace(
+                    get=lambda key, default=None, on=toggle_on: (
+                        on if key == 'playlist_sync.wishlist_missing_tracks' else default),
+                    get_active_media_server=lambda: None,
+                ),
+            )
+            auto_sync_playlist(config, deps)
+            for _ in range(50):
+                if sync_calls:
+                    break
+                import time
+                time.sleep(0.01)
+            assert sync_calls, (toggle_on, config)
+            assert sync_calls[0][1].get('skip_wishlist_add') is expected, (toggle_on, config)
+            assert sync_calls[0][1].get('organize_by_playlist') is False
+
+    def test_user_initiated_rides_to_run_sync_task(self):
+        """#1603: the playlist's own Sync & download click is a user add, a
+        schedule is not."""
+        discovered_track = {
+            'extra_data': json.dumps({
+                'discovered': True,
+                'matched_data': {
+                    'id': 'spot-1', 'name': 'Track', 'artists': [{'name': 'X'}],
+                    'album': {'name': 'Album'}, 'duration_ms': 200000,
+                },
+            }),
+            'artist_name': 'X',
+        }
+        for config, expected in (({'playlist_id': '1', 'user_initiated': True}, True),
+                                 ({'playlist_id': '1'}, False)):
+            db = _StubDB(
+                playlists=[{'id': 1, 'name': 'P'}],
+                playlist_tracks={1: [discovered_track]},
+            )
+            sync_calls: List[tuple] = []
+            deps = _build_deps(
+                get_database=lambda db=db: db,
+                run_sync_task=lambda *a, **k: sync_calls.append((a, k)),
+            )
+            auto_sync_playlist(config, deps)
+            for _ in range(50):
+                if sync_calls:
+                    break
+                import time
+                time.sleep(0.01)
+            assert sync_calls
+            assert sync_calls[0][1].get('user_initiated') is expected
 
     def test_unchanged_since_last_sync_returns_skipped(self):
         discovered_track = {

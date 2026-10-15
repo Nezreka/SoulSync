@@ -29,6 +29,8 @@ import {
   MIX_NO_PLAYBACK,
   MIX_TRACK_GONE,
   compactRows,
+  mixCoverArt,
+  mixMetaLine,
   feederShouldUpsert,
   feederTracks,
   mixSelectionBar,
@@ -382,5 +384,38 @@ describe('the #1079 selection bar', () => {
   it('keeps the preview failure copy', () => {
     expect(MIX_TRACK_GONE).toBe('Track is no longer available');
     expect(MIX_NO_PLAYBACK).toBe('Playback is not available here');
+  });
+});
+
+describe('the modal meta line', () => {
+  const rows = (...secs: number[]) =>
+    compactRows(secs.map((sec) => ({ name: 'x', artists: ['a'], duration_ms: sec * 1000 })));
+
+  it('counts tracks and adds up their length', () => {
+    expect(mixMetaLine(rows(240, 300))).toBe('2 tracks · 9 min');
+    expect(mixMetaLine(rows(3600, 240))).toBe('2 tracks · 1 hr 4 min');
+    expect(mixMetaLine(rows(1800, 1800))).toBe('2 tracks · 1 hr');
+  });
+
+  it('leaves the length off when no row has one', () => {
+    expect(mixMetaLine(rows(0))).toBe('1 track');
+    expect(mixMetaLine([])).toBe('0 tracks');
+  });
+});
+
+describe('mixCoverArt', () => {
+  const rows = (...urls: string[]) =>
+    compactRows(urls.map((url) => ({ name: 'x', artists: ['a'], album: { images: [{ url }] } })));
+
+  it('takes the first four different covers for a mosaic', () => {
+    expect(mixCoverArt(rows('/1', '/1', '/2', '/3', '/4', '/5'))).toEqual(['/1', '/2', '/3', '/4']);
+  });
+
+  it('falls back to one cover, never a part-filled grid', () => {
+    expect(mixCoverArt(rows('/1', '/2', '/2'))).toEqual(['/1']);
+  });
+
+  it('never counts the placeholder', () => {
+    expect(mixCoverArt(compactRows([{ name: 'x', artists: ['a'] }]))).toEqual([]);
   });
 });

@@ -237,3 +237,47 @@ class TestSpotifySearchTracksEndpoint:
         body = resp.get_json()
         ids = [t['id'] for t in body['tracks']]
         assert ids[0] == 'real-1'
+
+    def test_fallback_source_gets_search_song_not_free_text(self, app_test_client, fake_track, monkeypatch):
+        """#1601: with spotify not answering, the client fell back to a plain
+        deezer free-text search, which leaves "How Far I'll Go" by Auli'i
+        Cravalho out. the fallback now goes through search_song."""
+        fallback = object()
+        fake_client = MagicMock()
+        fake_client.is_authenticated.return_value = True
+        fake_client.search_tracks.return_value = []
+        fake_client._fallback = fallback
+        monkeypatch.setattr('web_server.spotify_client', fake_client, raising=False)
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
+        monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
+        calls = []
+
+        def fake_search_song(client, title, artist='', limit=20):
+            calls.append((client, title, artist))
+            return [fake_track("How Far I'll Go", "Auli'i Cravalho", track_id='136340808')]
+        monkeypatch.setattr('core.metadata.song_search.search_song', fake_search_song)
+
+        resp = app_test_client.get(
+            "/api/spotify/search_tracks?track=How+Far+I'll+Go&artist=Auli'i+Cravalho"
+        )
+        body = resp.get_json()
+        assert [t['id'] for t in body['tracks']] == ['136340808']
+        assert body['tracks'][0]['source'] == 'deezer'
+        assert calls == [(fallback, "How Far I'll Go", "Auli'i Cravalho")]
+        assert fake_client.search_tracks.call_args.kwargs['allow_fallback'] is False
+
+    def test_spotify_results_skip_the_fallback(self, app_test_client, fake_track, monkeypatch):
+        fake_client = MagicMock()
+        fake_client.is_authenticated.return_value = True
+        fake_client.search_tracks.return_value = [
+            fake_track('Track', 'Real Artist', track_id='4uLU6hMCjMI75M1A2tKUQC')]
+        monkeypatch.setattr('web_server.spotify_client', fake_client, raising=False)
+        monkeypatch.setattr('api.source_playlists._is_hydrabase_active', lambda: False)
+        monkeypatch.setattr('web_server.hydrabase_worker', None, raising=False)
+        monkeypatch.setattr('web_server.dev_mode_enabled', False, raising=False)
+        monkeypatch.setattr('core.metadata.song_search.search_song',
+                            lambda *a, **k: pytest.fail('fallback asked while spotify answered'))
+
+        body = app_test_client.get('/api/spotify/search_tracks?track=Track&artist=Real+Artist').get_json()
+        assert [t['source'] for t in body['tracks']] == ['spotify']

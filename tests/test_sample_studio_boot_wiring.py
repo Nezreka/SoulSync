@@ -77,4 +77,4 @@ def test_web_peaks_route_passes_the_stem(ws, monkeypatch):
     r = client.get("/api/sample/peaks?track_id=7&buckets=100&stem=drums")
     assert r.status_code == 200, r.get_data(as_text=True)
     r = client.get("/api/sample/peaks?track_id=7&buckets=100")
-    assert calls == [(7, 100, "drums"), (7, 100, None)]
+    assert calls == [("7", 100, "drums"), ("7", 100, None)]

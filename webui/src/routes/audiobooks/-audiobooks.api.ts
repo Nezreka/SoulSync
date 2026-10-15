@@ -849,30 +849,80 @@ export async function fetchFollowedAuthors(): Promise<AudiobookFollowedAuthor[]>
   }
 }
 
+/** What a watchlist row follows. The role is part of its key. */
+export type AudiobookFollowRole = 'author' | 'narrator' | 'series';
+
+/** A watchlist row's role, narrowed. Anything unrecognised is an author, as on the server. */
+export function followRole(row: { role?: string }): AudiobookFollowRole {
+  return row.role === 'narrator' || row.role === 'series' ? row.role : 'author';
+}
+
+/** Extra options when following something other than a plain author. */
+export interface FollowOptions {
+  role?: AudiobookFollowRole;
+  /** The Audible series ASIN, which makes a series match exact. */
+  seriesAsin?: string;
+  /** Take everything already published, not only what comes out from today. */
+  backfill?: boolean;
+}
+
+export interface FollowResult {
+  ok: boolean;
+  /** Volumes put on the wishlist straight away (series followed with backfill). */
+  wishlisted?: number;
+}
+
 /**
- * Follow an author so their new releases get wishlisted.
+ * Follow an author, narrator or series so new releases get wishlisted.
  *
  * The cutoff is the day you follow them — following an author means "tell me
- * about the next one", not "queue the eighty-eight they already wrote".
+ * about the next one", not "queue the eighty-eight they already wrote". A series
+ * is the exception callers opt into with `backfill`, since people usually want
+ * the volumes that already exist.
  */
-export async function followAuthor(name: string, coverUrl = ''): Promise<boolean> {
-  if (!name) return false;
+export async function followAuthor(
+  name: string,
+  coverUrl = '',
+  options: FollowOptions = {},
+): Promise<boolean> {
+  return (await followWatchlist(name, coverUrl, options)).ok;
+}
+
+export async function followWatchlist(
+  name: string,
+  coverUrl = '',
+  options: FollowOptions = {},
+): Promise<FollowResult> {
+  if (!name) return { ok: false };
   try {
-    const data = await readJson<{ success?: boolean }>(
-      audiobookClient.post('audiobooks/watchlist', { json: { name, cover_url: coverUrl } }),
+    const data = await readJson<{ success?: boolean; wishlisted?: number }>(
+      audiobookClient.post('audiobooks/watchlist', {
+        json: {
+          name,
+          cover_url: coverUrl,
+          role: options.role ?? 'author',
+          series_asin: options.seriesAsin ?? '',
+          backfill: Boolean(options.backfill),
+        },
+      }),
     );
-    return Boolean(data?.success);
+    return { ok: Boolean(data?.success), wishlisted: data?.wishlisted };
   } catch (err) {
     console.error(`Failed to follow ${name}:`, err);
-    return false;
+    return { ok: false };
   }
 }
 
-export async function unfollowAuthor(name: string): Promise<boolean> {
+export async function unfollowAuthor(
+  name: string,
+  role: AudiobookFollowRole = 'author',
+): Promise<boolean> {
   if (!name) return false;
   try {
     const data = await readJson<{ success?: boolean }>(
-      audiobookClient.delete(`audiobooks/watchlist/${encodeURIComponent(name)}`),
+      audiobookClient.delete(`audiobooks/watchlist/${encodeURIComponent(name)}`, {
+        searchParams: { role },
+      }),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -881,15 +931,17 @@ export async function unfollowAuthor(name: string): Promise<boolean> {
   }
 }
 
-/** Check followed authors now instead of waiting for the daily automation. */
-/** Change one followed author's settings from their card. */
+/** Change one follow's settings from its card. */
 export async function updateFollowedAuthor(
   name: string,
   fields: { auto_wishlist?: number; narrator_mode?: string; since_date?: string },
+  role: AudiobookFollowRole = 'author',
 ): Promise<boolean> {
   try {
     const data = await readJson<{ success?: boolean }>(
-      audiobookClient.patch(`audiobooks/watchlist/${encodeURIComponent(name)}`, { json: fields }),
+      audiobookClient.patch(`audiobooks/watchlist/${encodeURIComponent(name)}`, {
+        json: { ...fields, role },
+      }),
     );
     return Boolean(data?.success);
   } catch (err) {
@@ -898,6 +950,7 @@ export async function updateFollowedAuthor(
   }
 }
 
+/** Check followed authors, narrators and series now instead of waiting for the daily automation. */
 export async function runAuthorScan(): Promise<Record<string, number> | null> {
   try {
     const data = await readJson<{ success?: boolean; summary?: Record<string, number> }>(

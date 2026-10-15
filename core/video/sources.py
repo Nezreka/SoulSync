@@ -307,9 +307,43 @@ def _load_selection():
 
 def get_active_video_source(*, interactive=False):
     """Source for SCANNING — restricted to the user-mapped Movies/TV libraries.
-    Falls back to all libraries when nothing is mapped yet."""
+    An unmapped kind scans nothing (see scan_problem), never every library."""
     sel = _load_selection() or {}
     return _build_source(sel.get("movies") or None, sel.get("tv") or None, interactive=interactive)
+
+
+def _auto_pick_single_libraries(server, libs, sel, db=None):
+    """a kind nobody ever picked (None; '' means picked none on purpose) takes
+    the server's only library of that kind, saved, so a fresh install's first
+    scan reads something. two or more stays unpicked: that's the user's call."""
+    if not server:
+        return sel
+    sel = dict(sel or {})
+    for key in ("movies", "tv"):
+        found = (libs or {}).get(key) or []
+        if sel.get(key) is None and len(found) == 1 and found[0].get("title"):
+            try:
+                _vdb(db).set_setting(server + "." + key + "_library", found[0]["title"])
+                sel[key] = found[0]["title"]
+                logger.info("video: picked the only %s library on %s: %s", key, server, found[0]["title"])
+            except Exception:
+                logger.exception("video: could not save the auto-picked %s library", key)
+    return sel
+
+
+def scan_video_source():
+    """get_active_video_source for a SCAN: a never-picked kind gets the server's
+    only library of that kind first. kept off the general getter, which runs on
+    every video lookup and shouldn't list libraries each time."""
+    sel = _load_selection() or {}
+    if sel.get("movies") is None or sel.get("tv") is None:
+        src = _build_source()
+        if src is not None:
+            try:
+                sel = _auto_pick_single_libraries(src.server_name, src.available_libraries(), sel)
+            except Exception:
+                logger.debug("video: library auto-pick failed", exc_info=True)
+    return _build_source(sel.get("movies") or None, sel.get("tv") or None)
 
 
 def normalize_media_type(media_type) -> str:
@@ -409,6 +443,26 @@ def list_video_libraries():
     return out
 
 
+def _wanted_libraries(media_type, movies_lib, tv_lib):
+    """(label, kind, picked name) for each library a scan of media_type reads."""
+    wants = []
+    if media_type in ("all", "movie"):
+        wants.append(("Movies", "movie", movies_lib))
+    if media_type in ("all", "show"):
+        wants.append(("TV", "show", tv_lib))
+    return wants
+
+
+def _no_library_message(wants):
+    labels = " or ".join(label for label, _, _ in wants)
+    return ("No %s library is picked to scan. Choose one in Settings → Server Connection." % labels)
+
+
+def _missing_library_message(label, name, server):
+    return ("%s library '%s' isn't on %s anymore, or the selected user can't see it. "
+            "Re-pick it in Settings → Server Connection." % (label, name, server))
+
+
 # ── Plex ──────────────────────────────────────────────────────────────────────
 def _format_from_name(path: str) -> dict:
     """Release-name format tokens (Radarr-style): HDR flavor + Atmos from the
@@ -497,6 +551,16 @@ class PlexVideoSource:
         'this kind isn't mapped' → scan NOTHING (never fall back to all sections).
         Prevents a missing selection from silently pulling every library."""
         return self._sections(kind, name) if name else []
+
+    def scan_problem(self, media_type="all"):
+        """why a scan of media_type would read nothing, or None (see Jellyfin's)."""
+        wants = _wanted_libraries(media_type, self._movies_lib, self._tv_lib)
+        if not any(name for _, _, name in wants):
+            return _no_library_message(wants)
+        for label, kind, name in wants:
+            if name and not self._sections(kind, name):
+                return _missing_library_message(label, name, "Plex")
+        return None
 
     def available_libraries(self) -> dict:
         return {
@@ -1250,6 +1314,20 @@ class JellyfinVideoSource:
         library. (available_libraries still lists all via _views.)"""
         return self._views(collection_type, name) if name else []
 
+    def scan_problem(self, media_type="all"):
+        """why a scan of media_type would read nothing, or None. an unpicked or
+        vanished library used to finish green with 0 items."""
+        wants = _wanted_libraries(media_type, self._movies_lib, self._tv_lib)
+        if not any(name for _, _, name in wants):
+            return _no_library_message(wants)
+        if self._req(f"/Users/{self.uid}/Views") is None:
+            return "Couldn't list Jellyfin libraries (%s)" % (
+                getattr(self._c, "last_error", None) or "no response")
+        for label, kind, name in wants:
+            if name and not self._views("movies" if kind == "movie" else "tvshows", name):
+                return _missing_library_message(label, name, "Jellyfin")
+        return None
+
     def available_libraries(self) -> dict:
         return {
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
@@ -1590,7 +1668,13 @@ class JellyfinVideoSource:
         while True:
             p = dict(params)
             p.update({"StartIndex": str(start), "Limit": str(page_size)})
-            resp = self._req(path, p) or {}
+            resp = self._req(path, p)
+            if resp is None:
+                # a failed page is not the end of the library. reading it as
+                # one finished the scan with nothing, or let a deep scan prune
+                # everything past the page that timed out
+                raise RuntimeError("Jellyfin stopped answering at item %d (%s)" % (
+                    start, getattr(self._c, "last_error", None) or "no response"))
             batch = resp.get("Items", [])
             for it in batch:
                 yield it

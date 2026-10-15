@@ -63,3 +63,23 @@ def test_falls_back_to_playlist_count_when_the_album_lookup_failed(monkeypatch):
     c = _client(monkeypatch, album_payload=None)
     out = c.get_playlist_tracks('p1')
     assert out['tracks'][0]['album']['total_tracks'] == 1582
+
+
+def test_embedded_album_carries_the_albums_own_artist(monkeypatch):
+    """#1605 (cremonies): a moana deluxe track from a playlist got its singer as
+    album artist, so one soundtrack split into several artist folders. the
+    /album/{id} response already names the album artist, keep it."""
+    c = _client(monkeypatch, album_payload=_resp(
+        {'release_date': '2016-11-18', 'nb_tracks': 59,
+         'artist': {'id': 1545788, 'name': 'Lin-Manuel Miranda'}}))
+    out = c.get_playlist_tracks('p1')
+    assert out['tracks'][0]['album']['artists'] == [
+        {'name': 'Lin-Manuel Miranda', 'id': '1545788'}]
+    assert out['tracks'][0]['artists'] == [{'name': 'Some Artist'}]
+
+
+def test_no_album_artist_when_the_album_lookup_failed(monkeypatch):
+    # nothing made up: the download's own album backfill decides later
+    c = _client(monkeypatch, album_payload=None)
+    out = c.get_playlist_tracks('p1')
+    assert 'artists' not in out['tracks'][0]['album']

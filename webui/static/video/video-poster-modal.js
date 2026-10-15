@@ -26,7 +26,7 @@
     // ── one-time styles (kept off the shared 4k-line CSS; mirrors the get-modal) ─
     function ensureStyles() {
         if (document.getElementById('vpm-styles')) return;
-        var A = 'var(--accent-rgb, 88 101 242)';
+        var A = 'var(--accent-rgb)';
         var css =
             '.vpm-overlay{position:fixed;inset:0;z-index:9200;display:flex;align-items:center;justify-content:center;' +
                 'padding:24px;background:rgba(5,5,8,.74);backdrop-filter:blur(10px);opacity:0;transition:opacity .22s ease;}' +

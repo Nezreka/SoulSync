@@ -41,7 +41,24 @@ const ROUTES: Shot[] = [
   { name: 'artist-detail', path: '/artist-detail/library/42' },
   { name: 'watchlist', path: '/watchlist' },
   { name: 'wishlist', path: '/wishlist' },
-  { name: 'settings', path: '/settings' },
+  {
+    name: 'settings',
+    path: '/settings',
+    // Opening /settings runs loadPageData('settings') twice (activatePage,
+    // then navigateToPage's idle callback). Each load calls toggleServer(),
+    // which schedules a full autosave unless the shared boolean
+    // _suppressSettingsAutoSave is up. When one slips through, POST
+    // /api/settings gets `{}` 2s later and the shot catches a "Failed to save
+    // settings" toast. Nothing here edits a field, so pin the flag on.
+    init: (page) =>
+      page.addInitScript(() =>
+        Object.defineProperty(window, '_suppressSettingsAutoSave', {
+          configurable: true,
+          get: () => true,
+          set: () => {},
+        }),
+      ),
+  },
   { name: 'podcasts', path: '/podcasts' },
   { name: 'audiobooks', path: '/audiobooks' },
   { name: 'issues', path: '/issues' },

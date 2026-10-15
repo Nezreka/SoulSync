@@ -60,7 +60,7 @@ export function IssueDomainHost() {
 
   useEffect(() => {
     if (countsQuery.data) {
-      updateBadge(issueBadgeCount(countsQuery.data, isAdmin));
+      updateBadge(issueBadgeCount(countsQuery.data, isAdmin), issueNavHasWork(countsQuery.data));
     }
   }, [countsQuery.data, isAdmin]);
 
@@ -381,11 +381,17 @@ export function issueBadgeCount(counts: IssueCounts, isAdmin: boolean): number {
   return isAdmin ? counts.open || 0 : counts.updates || 0;
 }
 
-function updateBadge(count: number) {
+/** nothing open and no news = the nav button hides */
+export function issueNavHasWork(counts: IssueCounts): boolean {
+  return (counts.open || 0) + (counts.in_progress || 0) + (counts.updates || 0) > 0;
+}
+
+function updateBadge(count: number, hasWork: boolean) {
   const badge = document.getElementById('issues-nav-badge');
   if (!badge) return;
   badge.textContent = String(count || 0);
   badge.classList.toggle('hidden', !count);
+  badge.closest('.nav-button')?.classList.toggle('nav-idle', !hasWork);
 }
 
 function normalizeReportIssueFormValues(

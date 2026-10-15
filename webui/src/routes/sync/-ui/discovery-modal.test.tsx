@@ -121,8 +121,27 @@ describe('phase footers', () => {
     expect(screen.queryByText('🔄 Push to server')).not.toBeInTheDocument();
   });
 
-  it('matches are COUNTER-only, and a converted id keeps Download available (9604-9605)', () => {
-    // Found rows but counter 0 → no sync button; converted id → Download stays.
+  it('found rows count as matches when the counter is 0 (#1603)', () => {
+    // a cached mirrored open: no worker ran, so the counter is 0 while every
+    // row says Found. the vanilla gated on the counter alone and hid Push and
+    // Download until a re-identify.
+    render(
+      <DiscoveryModal
+        config={SYNC_SOURCES.mirrored}
+        state={makeState('mirrored', {
+          phase: 'discovered',
+          spotifyMatches: 0,
+          rows: [FOUND_ROW],
+        })}
+        standalone={false}
+        {...noopHandlers}
+      />,
+    );
+    expect(screen.getByText('🔄 Push to server')).toBeInTheDocument();
+    expect(screen.getByText('🔍 Download Missing Tracks')).toBeInTheDocument();
+  });
+
+  it('no found rows and counter 0: no Push, a converted id keeps Download (9604-9605)', () => {
     // (No info line: the vanilla's "No matches" prepend is unreachable dead
     // code — its startsWith guard is defeated by the wing-it wrap.)
     render(
@@ -131,7 +150,7 @@ describe('phase footers', () => {
         state={makeState('tidal', {
           phase: 'discovered',
           spotifyMatches: 0,
-          rows: [FOUND_ROW],
+          rows: [{ ...FOUND_ROW, status: 'Not Found', status_class: 'not-found' }],
           convertedSpotifyPlaylistId: 'tidal_1',
         })}
         standalone={false}
@@ -404,5 +423,41 @@ describe('chrome', () => {
     expect(document.querySelector('.modal-footer-left > .modal-footer-actions')).not.toBe(null);
     fireEvent.click(screen.getByText('🏠 Close'));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('skipped entries (#1613)', () => {
+  it('says why the matched line is short of the playlist', () => {
+    render(
+      <DiscoveryModal
+        config={SYNC_SOURCES.tidal}
+        state={makeState('tidal', {
+          phase: 'discovered',
+          spotifyMatches: 364,
+          spotifyTotal: 364,
+          rows: [FOUND_ROW],
+          sourceSkipped: { unavailable: 29, videos: 2 },
+        })}
+        standalone={false}
+        {...noopHandlers}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "29 tracks couldn't be loaded from Tidal (removed or not available in your region) · 2 videos skipped",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('stays quiet when nothing was skipped', () => {
+    const { container } = render(
+      <DiscoveryModal
+        config={SYNC_SOURCES.tidal}
+        state={makeState('tidal', { phase: 'discovered', rows: [FOUND_ROW] })}
+        standalone={false}
+        {...noopHandlers}
+      />,
+    );
+    expect(container.querySelector('.progress-skipped-note')).toBeNull();
   });
 });

@@ -3944,7 +3944,7 @@ function _promptNotifyConfig(groupName) {
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
         overlay.innerHTML = `
-            <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary, #fff);font-family:inherit;">
+            <div style="background:var(--bg-secondary, #1e1e2e);border:1px solid rgba(255,255,255,0.1);border-radius:14px;padding:28px;max-width:420px;width:90%;color:var(--text-primary);font-family:inherit;">
                 <h3 style="margin:0 0 6px;font-size:1.1em;">Configure Notifications</h3>
                 <p style="margin:0 0 18px;font-size:0.85em;opacity:0.5;">${groupName} includes notification steps. Choose how to get notified.</p>
                 <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px;">
@@ -3960,7 +3960,7 @@ function _promptNotifyConfig(groupName) {
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;">
                     <button id="deploy-notify-cancel" style="padding:8px 20px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;background:transparent;color:rgba(255,255,255,0.7);cursor:pointer;font-size:0.88em;">Cancel</button>
-                    <button id="deploy-notify-confirm" style="padding:8px 20px;border:none;border-radius:8px;background:var(--accent-color,#1db954);color:#fff;cursor:pointer;font-size:0.88em;font-weight:600;">Deploy</button>
+                    <button id="deploy-notify-confirm" style="padding:8px 20px;border:none;border-radius:8px;background:var(--accent);color:#fff;cursor:pointer;font-size:0.88em;font-weight:600;">Deploy</button>
                 </div>
             </div>
         `;
@@ -5063,7 +5063,7 @@ function _renderPlacedBlock(slotKey, data) {
             <select id="cfg-${slotKey}-condop">${opts}</select>
             <input type="text" id="cfg-${slotKey}-condvalue" value="${_escAttr(cond.value || '')}" placeholder="error" style="width:110px;">
         </div></div>`;
-        if (['discord_webhook', 'pushbullet', 'telegram', 'webhook'].includes(data.type)) {
+        if (['discord_webhook', 'pushbullet', 'telegram', 'ntfy', 'gotify', 'webhook'].includes(data.type)) {
             thenExtraHtml += `<div class="placed-block-config"><div class="config-row">
                 <button type="button" class="btn btn--sm btn--secondary" onclick="_autoTestNotify('${slotKey}')">Send test</button>
                 <span id="cfg-${slotKey}-test-result" style="font-size:11px;opacity:0.6;"></span>
@@ -5265,6 +5265,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 4 phases: Refresh → Discover → Sync → Download Missing</div>`;
     }
     if (blockType === 'personalized_pipeline') {
@@ -5292,6 +5293,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 2 phases: Snapshot → Sync → Download Missing</div>`;
     }
     // Shared variable tags builder for notification types
@@ -5466,6 +5468,20 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         }
     }
     return '';
+}
+
+// #1704: a pipeline's own sync mode, '' = the global Settings mode. the
+// options come from the block's config_fields (core/automation/blocks.py)
+function _autoSyncModeRowHtml(slotKey, value, blockType) {
+    const def = _findBlockDef(blockType);
+    const field = ((def && def.config_fields) || []).find(f => f.key === 'sync_mode');
+    if (!field || !Array.isArray(field.options)) return '';
+    const opts = field.options.map(o => `<option value="${_escAttr(o.value)}"${(value || '') === o.value ? ' selected' : ''}>${_escAttr(o.label)}</option>`).join('');
+    return `<div class="config-row">
+            <label>Sync mode</label>
+            <select id="cfg-${slotKey}-sync_mode">${opts}</select>
+        </div>${blockType === 'playlist_pipeline' ? `
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">A playlist with its own sync mode (set in its ⋯ menu) keeps it</div>` : ''}`;
 }
 
 // One generic config row from a block's config_fields definition.
@@ -5813,6 +5829,7 @@ function _readPlacedConfig(slotKey) {
             playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
             all: allCb ? allCb.checked : false,
             skip_wishlist: skipWl ? skipWl.checked : false,
+            sync_mode: document.getElementById('cfg-' + slotKey + '-sync_mode')?.value || '',
         };
     }
     if (type === 'personalized_pipeline') {
@@ -5833,6 +5850,7 @@ function _readPlacedConfig(slotKey) {
             kinds,
             refresh_first: refreshFirstCb ? refreshFirstCb.checked : false,
             skip_wishlist: skipWl ? skipWl.checked : false,
+            sync_mode: document.getElementById('cfg-' + slotKey + '-sync_mode')?.value || '',
         };
     }
     if (type === 'signal_received' || type === 'fire_signal') {

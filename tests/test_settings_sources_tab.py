@@ -361,7 +361,7 @@ def test_the_page_width_is_one_number():
     """The nav row and the columns have to agree or the tabs and the content
     below them line up differently."""
     css = _strip_comments(_read("webui/static/style.css"))
-    assert "--settings-max-width" in css
+    assert "--settings-max-width:" in _strip_comments(_read("webui/static/tokens.css"))
     for sel in ("#settings-page .settings-nav-row {", "#settings-page .settings-columns {"):
         block = css.split(sel, 1)[1].split("}", 1)[0]
         assert "var(--settings-max-width)" in block, sel

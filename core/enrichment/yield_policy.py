@@ -35,8 +35,40 @@ API_CONTENTION_WORKERS = frozenset({
     'spotify-enrichment', 'itunes-enrichment', 'deezer', 'discogs', 'hydrabase',
 })
 
-# Discovery state phases that mean "nothing running" (idle or terminal).
-_INACTIVE_PHASES = frozenset({'', 'idle', 'discovered', 'error', 'failed', 'cancelled'})
+# Discovery state phases that mean work is hitting the matching apis right now.
+# a list of what's running, not of what's idle: the page sets most phases
+# (fresh, parsed, sync_complete, download_complete...) and they sit in memory
+# until the playlist goes away. counting those as active paused deezer, spotify,
+# itunes, discogs and hydrabase for good (#1612). syncing matches against the
+# library, and a real download yields through its own batch.
+_ACTIVE_PHASES = frozenset({'discovering'})
+
+# enrichment service id (the /api/enrichment/<id> routes) -> its name in the
+# yield loop. a ui resume adds this name to the override set, without it the
+# loop paused the worker again two seconds later (#1612).
+SERVICE_YIELD_NAMES = {
+    'musicbrainz': 'musicbrainz',
+    'audiodb': 'audiodb',
+    'discogs': 'discogs',
+    'deezer': 'deezer',
+    'jiosaavn': 'jiosaavn',
+    'spotify': 'spotify-enrichment',
+    'itunes': 'itunes-enrichment',
+    'lastfm': 'lastfm-enrichment',
+    'genius': 'genius-enrichment',
+    'tidal': 'tidal-enrichment',
+    'qobuz': 'qobuz-enrichment',
+    'amazon': 'amazon-enrichment',
+    'bandcamp': 'bandcamp-enrichment',
+    'similar_artists': 'similar_artists',
+    'hydrabase': 'hydrabase',
+    'soulid': 'soulid',
+}
+
+
+def yield_name_for_service(service_id: str, token: Optional[str] = None) -> Optional[str]:
+    """the yield-loop name for an enrichment service, or None if it never yields."""
+    return token or SERVICE_YIELD_NAMES.get(service_id)
 
 
 def worker_yield_reason(name: str, downloading: bool, discovering: bool) -> Optional[str]:
@@ -54,4 +86,4 @@ def worker_yield_reason(name: str, downloading: bool, discovering: bool) -> Opti
 def discovery_state_active(state: dict) -> bool:
     """True when a per-playlist discovery state dict represents live work."""
     phase = str((state or {}).get('phase', '') or '').lower()
-    return phase not in _INACTIVE_PHASES
+    return phase in _ACTIVE_PHASES

@@ -176,3 +176,55 @@ def test_both_are_wired_into_the_then_action_dispatch():
     src = inspect.getsource(AutomationEngine._execute_then_actions)
     assert "t == 'ntfy'" in src
     assert "t == 'gotify'" in src
+
+
+def test_both_are_wired_into_test_notify_endpoint():
+    """The builder's Test button calls POST /api/automations/test-notify.
+    Both ntfy and gotify must be in its senders map."""
+    import inspect
+    from api.automations import test_automation_notify
+    src = inspect.getsource(test_automation_notify)
+    assert "'ntfy': automation_engine._send_ntfy_notification" in src
+    assert "'gotify': automation_engine._send_gotify_notification" in src
+
+
+def test_test_notify_endpoint_dispatches_ntfy_and_gotify(monkeypatch):
+    """Calling POST /api/automations/test-notify fires the right sender method."""
+    from flask import Flask
+    import api.automations as auto_api
+
+    called = []
+
+    class DummyEngine:
+        _send_discord_notification = None
+        _send_pushbullet_notification = None
+        _send_telegram_notification = None
+        _send_webhook = None
+
+        def _send_ntfy_notification(self, config, variables):
+            called.append(('ntfy', config, variables))
+
+        def _send_gotify_notification(self, config, variables):
+            called.append(('gotify', config, variables))
+
+    app = Flask(__name__)
+    app.register_blueprint(auto_api.bp)
+    monkeypatch.setattr(auto_api, 'automation_engine', DummyEngine())
+
+    client = app.test_client()
+
+    # ntfy
+    r = client.post('/api/automations/test-notify', json={'type': 'ntfy', 'config': {'topic': 'my-topic'}})
+    assert r.status_code == 200
+    assert r.get_json() == {'success': True}
+    assert len(called) == 1
+    assert called[0][0] == 'ntfy'
+    assert called[0][1] == {'topic': 'my-topic'}
+
+    # gotify
+    r = client.post('/api/automations/test-notify', json={'type': 'gotify', 'config': {'server': 'http://nas', 'token': 'app-tok'}})
+    assert r.status_code == 200
+    assert r.get_json() == {'success': True}
+    assert len(called) == 2
+    assert called[1][0] == 'gotify'
+    assert called[1][1] == {'server': 'http://nas', 'token': 'app-tok'}

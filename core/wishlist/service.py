@@ -212,6 +212,7 @@ class WishlistService:
         profile_id: int = 1,
         quality_profile_id: Optional[int] = None,
         detailed: bool = False,
+        user_initiated: bool = False,
     ):
         """Backward-compatible wrapper for `add_track_to_wishlist`.
 
@@ -228,6 +229,7 @@ class WishlistService:
             source_context=source_context,
             profile_id=profile_id,
             quality_profile_id=quality_profile_id,
+            user_initiated=user_initiated,
         )
         return outcome if detailed else outcome["created"]
 

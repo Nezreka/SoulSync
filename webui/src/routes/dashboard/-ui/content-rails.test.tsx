@@ -107,6 +107,28 @@ describe('ContentBand', () => {
     );
   });
 
+  it('Recently Added cards carry play, queue and add-to-playlist; Fresh Releases do not', async () => {
+    feeds([anAlbum], [aRelease]);
+    render(<ContentBand />);
+    const recent = (await screen.findByText('Kyougen')).closest('.ya-card')!;
+    for (const label of ['Play Kyougen', 'Add Kyougen to the queue', 'Add Kyougen to a playlist']) {
+      expect(recent.querySelector(`[aria-label="${label}"]`), label).not.toBeNull();
+    }
+    fireEvent.click(screen.getByText('Fresh Releases'));
+    const fresh = (await screen.findByText('Brand New')).closest('.ya-card')!;
+    expect(fresh.querySelector('.dash-card-actions')).toBeNull();
+  });
+
+  it('a card button does not also fire the card tap', async () => {
+    feeds([anAlbum], []);
+    window.playTrackList = vi.fn();
+    render(<ContentBand />);
+    await screen.findByText('Kyougen');
+    fireEvent.click(screen.getByLabelText('Add Kyougen to the queue'));
+    expect(playLibraryTrack).not.toHaveBeenCalled();
+    delete window.playTrackList;
+  });
+
   it('an owned release wears the library check badge; unowned does not', async () => {
     fetchMock.mockImplementation((url: string) => {
       if (String(url).includes('recently-added')) return ok({ albums: [] });

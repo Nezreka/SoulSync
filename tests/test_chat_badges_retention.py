@@ -190,9 +190,22 @@ class TestRetentionPrune:
         assert mdb.prune_chat_messages(30) == 1
         assert [r["message"] for r in mdb.get_chat_messages("SoulSync")] == ["msg 2", "msg 3"]
 
-    def test_boundary_is_exclusive(self, mdb):
-        # exactly at the cutoff is KEPT (strictly-older-than)
-        cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    def test_boundary_is_exclusive(self, mdb, monkeypatch):
+        # exactly at the cutoff is KEPT (strictly-older-than).
+        # freeze the clock: the test and the prune each call datetime.now(),
+        # and a second ticking between the two calls used to flake this test
+        # (the boundary message then looked older than the prune's cutoff).
+        import database.music_database as music_database_mod
+
+        frozen = datetime.now().replace(microsecond=0)
+        cutoff = (frozen - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+        class _FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return frozen if tz is None else frozen.replace(tzinfo=tz)
+
+        monkeypatch.setattr(music_database_mod, "datetime", _FrozenDateTime)
         mdb.add_chat_messages("SoulSync", [_m(1, ts=cutoff), _m(2, ts=_old_ts(31))])
         assert mdb.prune_chat_messages(30) == 1
         assert [r["message"] for r in mdb.get_chat_messages("SoulSync")] == ["msg 1"]

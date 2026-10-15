@@ -367,14 +367,21 @@ def test_bin_api_routes_exist_and_the_page_wires_the_tabs():
     assert '"/downloads/recycle"' in api_src
     assert '"/downloads/recycle/restore"' in api_src
     assert '"/downloads/recycle/purge"' in api_src
-    tabs_js = (_ROOT / "webui" / "static" / "video" / "video-downloads-tabs.js").read_text(encoding="utf-8")
-    assert "data-vrev-restore" in tabs_js and "data-vrev-purge" in tabs_js
-    assert "/api/clients/" in tabs_js                     # shared adapters, one pane
-    page_js = (_ROOT / "webui" / "static" / "video" / "video-downloads-page.js").read_text(encoding="utf-8")
-    assert "function setView(" in page_js
-    assert 'data-vdpg-view="review"' in _INDEX and 'data-vdpg-view="clients"' in _INDEX
-    assert "data-vdpg-pane" in _INDEX
-    assert "video-downloads-tabs.js" in _INDEX            # the script actually loads
+    # the legacy tabs JS was rewritten in React (PR #1651): the Review pane is
+    # vdl-review.tsx, the Clients pane is the shared adl-clients.tsx, and the
+    # three views switch on dl.view in video-downloads-view.tsx.
+    vdl = _ROOT / "webui" / "src" / "routes" / "active-downloads"
+    review = (vdl / "-ui" / "vdl-review.tsx").read_text(encoding="utf-8")
+    assert "restoreVideoRecycleEntry" in review and "purgeVideoRecycleEntry" in review
+    clients = (vdl / "-ui" / "adl-clients.tsx").read_text(encoding="utf-8")
+    assert "fetchTorrentClient" in clients and "fetchUsenetClient" in clients
+    assert "fetchSlskdClient" in clients                    # the shared adapters, one pane
+    api = (vdl / "-adl.api.ts").read_text(encoding="utf-8")
+    assert "clients/torrent" in api and "clients/usenet" in api and "clients/slskd" in api
+    view = (vdl / "-ui" / "video-downloads-view.tsx").read_text(encoding="utf-8")
+    assert "dl.view === 'review'" in view and "dl.view === 'clients'" in view
+    types = (vdl / "-vdl.types.ts").read_text(encoding="utf-8")
+    assert "VdlView = 'downloads' | 'review' | 'clients'" in types
 
 
 def test_purge_drops_the_manifest_rows_of_the_files_it_deleted(db, tmp_path, monkeypatch):
@@ -404,11 +411,12 @@ def test_purge_drops_the_manifest_rows_of_the_files_it_deleted(db, tmp_path, mon
 
 
 def test_the_clients_pane_stops_polling_when_you_leave_the_page():
-    """The page's own poller checks _onPage(); the clients pane's 10s timer
-    did not, so it kept hitting /api/clients forever after navigation."""
-    js = (_ROOT / "webui" / "static" / "video" / "video-downloads-tabs.js").read_text(encoding="utf-8")
-    tick = js.split("_ctimer = setInterval(", 1)[1].split("}, 10000)", 1)[0]
-    assert "document.hidden" in tick
-    assert "onDownloadsPage()" in tick
-    assert "clearInterval(_ctimer)" in tick
-    assert 'data-video-subpage="video-downloads"' in js
+    """The legacy clients pane's 10s timer kept hitting /api/clients forever
+    after navigation. In the React rewrite the pane unmounts on navigation, and
+    its poller's effect cleanup clears the interval — same guarantee, no
+    manual page check needed."""
+    src = (
+        _ROOT / "webui" / "src" / "routes" / "active-downloads" / "-ui" / "adl-clients.tsx"
+    ).read_text(encoding="utf-8")
+    assert "setInterval(() => void reload(), CLIENTS_POLL_MS)" in src
+    assert "return () => clearInterval(timer);" in src

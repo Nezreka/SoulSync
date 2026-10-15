@@ -125,6 +125,10 @@ class Playlist:
     external_urls: Dict[str, str] = None
     owner: Optional[Dict[str, Any]] = None
     public: bool = True
+    # playlist entries that didn't become tracks: videos, and tracks tidal
+    # didn't return (not in the account's region, or a batch that failed)
+    skipped_videos: int = 0
+    unavailable_tracks: int = 0
     
     def __post_init__(self):
         if self.tracks is None:
@@ -616,6 +620,7 @@ class TidalClient:
         self.refresh_token = None
         self.token_expires_at = 0
         self._collection_needs_reconnect = False
+        self._account_country = None
         self.session.headers.pop('Authorization', None)
         try:
             config_manager.set('tidal_tokens', {})
@@ -623,6 +628,39 @@ class TidalClient:
             logger.warning(f"Failed to clear tidal_tokens config: {e}")
         logger.info("Tidal client disconnected — saved tokens cleared")
     
+    def _get_account_country(self) -> str:
+        """The account's own country code, for fetching the user's playlists.
+
+        tidal hides a track from `/tracks?filter[id]` when it isn't in the
+        countryCode catalogue we ask for, so a non-US account asking with
+        'US' lost every track that's only licensed at home (#1613).
+        falls back to 'US' when /users/me won't say. cached per token, so a
+        lookup that failed before login gets another go after it.
+        """
+        token = getattr(self, 'access_token', None)
+        cached = getattr(self, '_account_country', None)
+        if cached and cached[0] == token:
+            return cached[1]
+        country = 'US'
+        try:
+            response = self.session.get(
+                f"{self.base_url}/users/me",
+                headers={'accept': 'application/vnd.api+json'},
+                timeout=10,
+            )
+            if response.status_code == 200:
+                attrs = (response.json().get('data') or {}).get('attributes') or {}
+                found = str(attrs.get('country') or '').strip().upper()
+                if len(found) == 2 and found.isalpha():
+                    country = found
+            else:
+                logger.debug("tidal /users/me returned %s, using US catalogue", response.status_code)
+        except Exception as e:
+            logger.debug("tidal account country lookup failed, using US: %s", e)
+        logger.info("tidal account country: %s", country)
+        self._account_country = (token, country)
+        return country
+
     def _get_user_id(self):
         """Get current user's ID from /users/me endpoint"""
         try:
@@ -1481,7 +1519,7 @@ class TidalClient:
             headers = {'accept': 'application/vnd.api+json'}
             response = self.session.get(
                 f"{self.base_url}/playlists/{playlist_id}",
-                params={'countryCode': 'US'},
+                params={'countryCode': self._get_account_country()},
                 headers=headers,
                 timeout=10
             )
@@ -1503,6 +1541,8 @@ class TidalClient:
             page_num = 0
             consecutive_failures = 0
             MAX_PAGE_RETRIES = 3
+            skipped_videos = 0
+            unavailable_tracks = 0
 
             while True:
                 page_num += 1
@@ -1537,13 +1577,20 @@ class TidalClient:
                 # Reset failure counter on success
                 consecutive_failures = 0
 
-                # Extract track IDs from this page
+                # Extract track IDs from this page, in playlist order. a
+                # playlist can hold the same track twice (each entry has its
+                # own meta.itemId) and can hold videos, which /tracks never
+                # returns, so both get counted instead of vanishing (#1613).
                 track_ids = []
                 for item in tracks_page.get("data", []):
-                    # In JSON:API, relationship items have both 'type' and 'id'
-                    # The type should be 'tracks' but we'll be defensive
-                    if item.get("type") and item.get("id"):
-                        track_ids.append(item.get("id"))
+                    item_type = item.get("type")
+                    item_id = item.get("id")
+                    if not item_type or not item_id:
+                        continue
+                    if item_type != "tracks":
+                        skipped_videos += 1
+                        continue
+                    track_ids.append(str(item_id))
 
                 if track_ids:
                     # Batch fetch full track details with artists and albums.
@@ -1551,22 +1598,29 @@ class TidalClient:
                     # _COLLECTION_BATCH_SIZE tracks per request, so a relationships
                     # page larger than the cap would be silently truncated if sent
                     # in one shot. Mirrors get_album_tracks. (#867)
-                    batch_tracks = []
-                    for j in range(0, len(track_ids), self._COLLECTION_BATCH_SIZE):
-                        chunk_ids = track_ids[j:j + self._COLLECTION_BATCH_SIZE]
+                    # filter[id] hands back one track per id, so ask once per
+                    # id and lay the results back out in playlist order.
+                    unique_ids = list(dict.fromkeys(track_ids))
+                    by_id = {}
+                    for j in range(0, len(unique_ids), self._COLLECTION_BATCH_SIZE):
+                        chunk_ids = unique_ids[j:j + self._COLLECTION_BATCH_SIZE]
                         try:
-                            batch_tracks.extend(self._get_tracks_batch(chunk_ids))
+                            for t in self._get_tracks_batch(chunk_ids):
+                                by_id[str(t.id)] = t
                         except Exception as e:
                             logger.error(f"Error fetching track details for page {page_num}: {e}")
                             # Lose this chunk but keep going — remaining chunks/pages can still load
                             continue
 
-                    if len(batch_tracks) < len(track_ids):
-                        logger.warning(f"Page {page_num}: requested {len(track_ids)} tracks but only {len(batch_tracks)} returned (some may be unavailable in your region)")
+                    page_tracks = [by_id[tid] for tid in track_ids if tid in by_id]
+                    missing = len(track_ids) - len(page_tracks)
+                    if missing:
+                        unavailable_tracks += missing
+                        logger.warning(f"Page {page_num}: {missing} of {len(track_ids)} tracks didn't come back from Tidal (unavailable in {self._get_account_country()} or failed to load)")
 
-                    tracks.extend(batch_tracks)
-                    total_fetched += len(batch_tracks)
-                    logger.info(f"Fetched {len(batch_tracks)} tracks in this batch, {total_fetched} total so far")
+                    tracks.extend(page_tracks)
+                    total_fetched += len(page_tracks)
+                    logger.info(f"Fetched {len(page_tracks)} tracks in this batch, {total_fetched} total so far")
 
                 # Get next cursor from Tidal's response
                 # Tidal uses: links.meta.nextCursor (confirmed by PR #113)
@@ -1583,7 +1637,9 @@ class TidalClient:
                 description=playlist_attrs.get('description', ''),
                 tracks=tracks,
                 external_urls={'tidal': f"https://listen.tidal.com/playlist/{playlist_id}"},
-                public=playlist_attrs.get('accessType', '') == "PUBLIC"
+                public=playlist_attrs.get('accessType', '') == "PUBLIC",
+                skipped_videos=skipped_videos,
+                unavailable_tracks=unavailable_tracks,
             )
 
             # Extract cover image URL from relationships (same logic as get_user_playlists_metadata_only)
@@ -1597,7 +1653,8 @@ class TidalClient:
             except Exception as _e:
                 logger.debug("tidal playlist image_url extract: %s", _e)
 
-            logger.info(f"Retrieved Tidal playlist '{playlist.name}' with {len(tracks)} tracks")
+            logger.info(f"Retrieved Tidal playlist '{playlist.name}' with {len(tracks)} tracks"
+                        f" ({skipped_videos} videos skipped, {unavailable_tracks} tracks unavailable)")
             return playlist
 
         except Exception as e:
@@ -1608,7 +1665,7 @@ class TidalClient:
     def _get_playlist_tracks_page(self, playlist_id: str, cursor: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Fetch a page of track IDs from a playlist using cursor-based pagination"""
         try:
-            params = {"countryCode": "US"}
+            params = {"countryCode": self._get_account_country()}
             if cursor:
                 params["page[cursor]"] = cursor
 
@@ -1642,7 +1699,7 @@ class TidalClient:
                 return []
 
             params = {
-                "countryCode": "US",
+                "countryCode": self._get_account_country(),
                 "include": "artists,albums",
                 "filter[id]": ",".join(track_ids)
             }
@@ -1898,7 +1955,7 @@ class TidalClient:
             else:
                 url = f"{self.base_url}/{path}"
                 params = {
-                    'countryCode': 'US',
+                    'countryCode': self._get_account_country(),
                     'locale': 'en-US',
                     'include': 'items',
                 }

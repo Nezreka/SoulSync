@@ -46,6 +46,44 @@ def test_source_track_consumed_once():
     assert pairs[1][1] is None          # the one source track was already used
 
 
+TAKE_OVER = [{'name': n, 'track_number': i, 'disc_number': 1} for i, n in enumerate(
+    ['The Taking', 'Geek to the Beat', 'Take Over', 'DJ DJ', 'Antenna', 'Caged Bird, Pt. 1',
+     "In the Mornin' (Caged Bird, Pt. 2)", 'Radio', 'Gumbo', 'Country Baked Yams', "Coastin'",
+     'Juicy Juice', 'Peppermint Patty', 'Bring in the Light', 'Legacy'], start=1)]
+
+
+def test_a_title_naming_another_track_beats_a_wrong_position():
+    """#1610 (kevin2xk): "Coastin'" carried track number 5 and was re-tagged as
+    track 5 "Antenna". the title clearly names track 11, so it pairs there and
+    the plan fixes the number instead of the title."""
+    lib = [{'title': "Coastin'", 'track_number': 5, 'disc_number': 1}]
+    pairs = rp.match_source_tracks(TAKE_OVER, lib)
+    assert pairs[0][1]['name'] == "Coastin'"
+
+    plan = rp.plan_track({'title': "Coastin'", 'track_number': 5, 'disc_number': 1},
+                         pairs[0][1], {'name': 'The Take Over'})
+    assert 'title' not in plan['changes']
+    assert plan['changes']['track_number'] == {'old': '5', 'new': '11'}
+
+
+def test_a_wrong_position_doesnt_steal_the_track_that_belongs_there():
+    # antenna (5) and coastin' (tagged 5 too) in the same album
+    lib = [{'title': "Coastin'", 'track_number': 5, 'disc_number': 1},
+           {'title': 'Antenna', 'track_number': 5, 'disc_number': 1}]
+    pairs = rp.match_source_tracks(TAKE_OVER, lib)
+    assert [p[1]['name'] for p in pairs] == ["Coastin'", 'Antenna']
+
+
+def test_a_junk_title_still_pairs_by_position():
+    lib = [{'title': 'Track 05', 'track_number': 5, 'disc_number': 1}]
+    assert rp.match_source_tracks(TAKE_OVER, lib)[0][1]['name'] == 'Antenna'
+
+
+def test_a_close_title_keeps_its_position():
+    lib = [{'title': 'Coastin (Album Version)', 'track_number': 11, 'disc_number': 1}]
+    assert rp.match_source_tracks(TAKE_OVER, lib)[0][1]['name'] == "Coastin'"
+
+
 # ── per-track diff (overwrite) ──
 
 ALBUM = {'name': 'Real Album', 'artists': [{'name': 'Real Artist'}],

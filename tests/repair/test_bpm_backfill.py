@@ -97,3 +97,118 @@ def test_metadata_fix_does_not_claim_success_when_track_is_gone(tmp_path):
 
     assert result['success'] is False
     assert 'not found' in result['error']
+
+
+# ---------------------------------------------------------------------------
+# discord report (Specialmed): "500 scanned, 0 fixed, 0 findings". the scan
+# stopped at 500, deezer's bpm was never read, and a media-server path
+# skipped every local analysis without a word.
+# ---------------------------------------------------------------------------
+
+def _library_with_tracks(tmp_path, n, deezer=True):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Artist')")
+        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'a1', 'Album')")
+        for i in range(n):
+            conn.execute(
+                "INSERT INTO tracks (id, album_id, artist_id, title, file_path, deezer_id) "
+                "VALUES (?, 'al1', 'a1', ?, ?, ?)",
+                (f't{i}', f'Song {i}', f'/server/music/song{i}.m4a', f'{1000 + i}' if deezer else None),
+            )
+    return db
+
+
+def _context(db, findings, logs=None):
+    from core.repair_jobs.base import JobContext
+
+    def report(**kw):
+        if logs is not None and kw.get('log_line'):
+            logs.append((kw.get('log_type'), kw['log_line']))
+
+    return JobContext(
+        db=db, transfer_folder='/transfer', config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        report_progress=report,
+    )
+
+
+class _Deezer:
+    """a real DeezerClient shape: get_track_details builds the enhanced dict."""
+
+    def get_track_details(self, track_id):
+        from core.deezer_client import DeezerClient
+        raw = {'id': int(track_id), 'title': 'x', 'bpm': 128.0, 'isrc': 'USX', 'artist': {'name': 'a'},
+               'album': {'id': 1, 'title': 'b'}, 'duration': 200}
+        return DeezerClient._build_enhanced_track(None, raw)
+
+
+def test_scan_is_not_capped_at_500(tmp_path, monkeypatch):
+    db = _library_with_tracks(tmp_path, 520)
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source', lambda s: _Deezer())
+    findings = []
+    job = BpmBackfillJob()
+    ctx = _context(db, findings)
+    ctx.sleep_or_stop = lambda s: False
+    result = job.scan(ctx)
+    assert result.scanned == 520
+    assert len(findings) == 520
+    assert job.estimate_scope(ctx) == 520
+
+
+def test_deezer_bpm_and_isrc_reach_the_top_level():
+    from core.deezer_client import DeezerClient
+    out = DeezerClient._build_enhanced_track(None, {'id': 1, 'bpm': 97.5, 'isrc': 'GBX', 'duration': 1})
+    assert out['bpm'] == 97.5
+    assert out['isrc'] == 'GBX'
+
+
+def test_deezer_bpm_becomes_a_finding(tmp_path, monkeypatch):
+    db = _library_with_tracks(tmp_path, 1)
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source', lambda s: _Deezer())
+    findings = []
+    ctx = _context(db, findings)
+    ctx.sleep_or_stop = lambda s: False
+    BpmBackfillJob().scan(ctx)
+    assert findings[0]['details']['bpm'] == 128.0
+    assert findings[0]['details']['bpm_source'] == 'deezer'
+
+
+def test_local_analysis_reads_the_resolved_path(tmp_path, monkeypatch):
+    db = _library_with_tracks(tmp_path, 1, deezer=False)
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source', lambda s: None)
+    seen = {}
+    monkeypatch.setattr(
+        'core.repair_jobs.bpm_backfill.resolve_library_file_path',
+        lambda p, **kw: '/local/music/song0.m4a' if kw.get('transfer_folder') == '/transfer' else None,
+    )
+
+    def fake_analyze(path):
+        seen['path'] = path
+        return {'bpm': 101.2}
+
+    monkeypatch.setattr('core.sample.analyze.analyze_track', fake_analyze)
+    findings = []
+    BpmBackfillJob().scan(_context(db, findings))
+    assert seen['path'] == '/local/music/song0.m4a'
+    assert findings[0]['details']['bpm_source'] == 'local'
+
+
+def test_unreachable_files_and_failed_analysis_are_reported(tmp_path, monkeypatch):
+    db = _library_with_tracks(tmp_path, 2, deezer=False)
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source', lambda s: None)
+    monkeypatch.setattr(
+        'core.repair_jobs.bpm_backfill.resolve_library_file_path',
+        lambda p, **kw: '/local/song0.m4a' if p.endswith('song0.m4a') else None,
+    )
+
+    def boom(path):
+        raise RuntimeError("ffmpeg isn't installed")
+
+    monkeypatch.setattr('core.sample.analyze.analyze_track', boom)
+    logs = []
+    result = BpmBackfillJob().scan(_context(db, [], logs))
+    errors = [line for kind, line in logs if kind == 'error']
+    assert result.errors == 1
+    assert any("ffmpeg isn't installed" in line for line in errors)
+    assert any("1 track files couldn't be found" in line for line in errors)

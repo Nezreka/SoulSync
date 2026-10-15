@@ -69,6 +69,17 @@ describe('what does NOT close it', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('a click on something inside that swaps itself out on click', () => {
+    // the add-to-playlist "New playlist" row turns into the name form when
+    // clicked. react re-renders before the click reaches document, so the
+    // target is already detached and contains() said it was outside.
+    const { onClose } = mount(trigger);
+    const inner = popover.querySelector('#inner') as HTMLElement;
+    inner.addEventListener('click', () => inner.replaceWith(document.createElement('form')));
+    inner.click();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('a click on the TRIGGER — that is the trigger’s own toggle to handle', () => {
     // Without this, both handlers fire on one click and the popover is rebuilt
     // rather than closed.

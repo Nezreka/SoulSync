@@ -28,6 +28,7 @@ import {
 import {
   AutoSyncBoardIntro,
   AutoSyncLane,
+  AutoSyncPickMenu,
   AutoSyncScheduledCard,
   AutoSyncSidebar,
   type AutoSyncCardActions,
@@ -57,6 +58,13 @@ export function AutoSyncBoard({
 }: AutoSyncBoardProps) {
   const [filter, setFilter] = useState('');
   const [expandedKinds, setExpandedKinds] = useState<Set<string>>(() => new Set());
+  // The tap-to-schedule popover's target (see AutoSyncPickMenu in
+  // autosync-shared): the playlist plus where its card sits.
+  const [pick, setPick] = useState<{
+    playlist: MirroredRow;
+    top: number;
+    left: number;
+  } | null>(null);
 
   const matching = playlists.filter((p) => autoSyncMatchesFilter(p, filter));
   const schedulable = matching.filter((p) => autoSyncCanSchedulePlaylist(p));
@@ -99,6 +107,16 @@ export function AutoSyncBoard({
           expandedKinds={expandedKinds}
           onToggleKind={toggleKind}
           onBulkMenu={actions.onBulkMenu}
+          onPickPlaylist={(anchor, playlist) => {
+            const rect = anchor.getBoundingClientRect();
+            // Below the card, right-aligned, clamped off the edge — the
+            // bulk menu's anchor math, for a menu of the same width.
+            setPick({
+              playlist,
+              top: rect.bottom + 4,
+              left: Math.max(8, rect.right - 220),
+            });
+          }}
         />
         <main className="auto-sync-lanes">
           {lanes.map((lane) => (
@@ -140,6 +158,30 @@ export function AutoSyncBoard({
           ))}
         </main>
       </div>
+      {pick ? (
+        <AutoSyncPickMenu
+          playlist={pick.playlist}
+          currentHours={playlistSchedules[String(pick.playlist.id)]?.hours}
+          anchor={{ top: pick.top, left: pick.left }}
+          onSchedule={(hours) => {
+            setPick(null);
+            // The drop handler IS the schedule action — a tap lands
+            // exactly where a drag would.
+            actions.onDrop(Number(pick.playlist.id), hours);
+          }}
+          onUnschedule={
+            playlistSchedules[String(pick.playlist.id)]
+              ? () => {
+                  setPick(null);
+                  actions.onUnschedule(Number(pick.playlist.id));
+                }
+              : undefined
+          }
+          onClose={() => {
+            setPick(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

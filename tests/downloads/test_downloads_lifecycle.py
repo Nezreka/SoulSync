@@ -14,7 +14,8 @@ from core.runtime_state import (
 
 
 @pytest.fixture(autouse=True)
-def reset_state():
+def reset_state(monkeypatch):
+    monkeypatch.setattr(lc, '_scan_owed', False)
     download_tasks.clear()
     download_batches.clear()
     yield
@@ -345,7 +346,7 @@ def test_batch_completion_emits_batch_complete_when_all_done():
     # Final task completes
     lc.on_download_completed('b1', 't2', True, deps)
     assert download_batches['b1']['phase'] == 'complete'
-    assert ('batch_complete', {'playlist_name': 'PL', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0'}) in auto.events
+    assert ('batch_complete', {'playlist_name': 'PL', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
     assert 'b1' in monitor.stopped
 
 
@@ -1191,3 +1192,57 @@ def test_auto_cleanup_preserves_failed_publish_files(tmp_path, real_batch_healer
     real_batch_healer['validate_and_heal_batch_states']()
     assert 'b1' not in download_batches
     assert audio.exists() is failed_publish
+
+
+# ---------------------------------------------------------------------------
+# #1615: one library scan per download run, not one per batch
+# ---------------------------------------------------------------------------
+
+def _finish(batch_id, task_id, ok, deps, other_phase=None):
+    download_tasks[task_id] = {'status': 'completed' if ok else 'failed',
+                               'track_info': {'name': task_id}, 'track_index': 0}
+    download_batches[batch_id] = {
+        'queue': [task_id], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'cancelled_tracks': set(),
+        'permanently_failed_tracks': [] if ok else [{'track_name': task_id}],
+        'playlist_name': batch_id,
+    }
+    lc.on_download_completed(batch_id, task_id, ok, deps)
+
+
+def _pending_flags(auto):
+    return [e[1]['more_batches_pending'] for e in auto.events if e[0] == 'batch_complete']
+
+
+def test_a_batch_with_others_still_queued_says_so():
+    download_batches['later'] = {'queue': ['x'], 'queue_index': 0, 'phase': 'queued'}
+    auto = _FakeAutoEngine()
+    deps, _ = _build_deps(automation=auto)
+    _finish('first', 't1', True, deps)
+    assert _pending_flags(auto) == ['true']
+
+
+def test_finished_and_non_music_batches_do_not_hold_the_scan():
+    download_batches['old'] = {'queue': [], 'phase': 'complete'}
+    download_batches['podcasts'] = {'queue': [], 'phase': 'downloading'}
+    auto = _FakeAutoEngine()
+    deps, _ = _build_deps(automation=auto)
+    _finish('only', 't1', True, deps)
+    assert _pending_flags(auto) == ['false']
+
+
+def test_the_last_batch_scans_for_an_earlier_one_even_if_it_got_nothing():
+    download_batches['later'] = {'queue': ['x'], 'queue_index': 0, 'phase': 'queued'}
+    auto = _FakeAutoEngine()
+    deps, _ = _build_deps(automation=auto)
+    _finish('first', 't1', True, deps)
+    del download_batches['later']
+    _finish('last', 't2', False, deps)
+    assert _pending_flags(auto) == ['true', 'false']
+
+
+def test_nothing_downloaded_and_nothing_owed_still_emits_nothing():
+    auto = _FakeAutoEngine()
+    deps, _ = _build_deps(automation=auto)
+    _finish('only', 't1', False, deps)
+    assert _pending_flags(auto) == []

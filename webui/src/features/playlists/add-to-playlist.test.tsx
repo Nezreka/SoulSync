@@ -8,6 +8,9 @@ import {
   closeAddToPlaylist,
   duplicateMessage,
   openAddToPlaylist,
+  memberState,
+  PlaylistCover,
+  subjectLines,
 } from './add-to-playlist';
 
 interface Call {
@@ -17,6 +20,10 @@ interface Call {
 }
 let calls: Call[] = [];
 let responder: (url: string, method: string, body: unknown) => unknown = () => ({});
+/** what the picker's tick check gets back. kept out of `calls`: the tests
+ *  below count the writes, and this is a read. */
+let membership: unknown = { success: true, total: 1, playlists: {} };
+let membershipCalls: unknown[] = [];
 
 const MINE = [
   { id: 4, name: 'Late night', track_count: 2 },
@@ -25,11 +32,17 @@ const MINE = [
 
 beforeEach(() => {
   calls = [];
+  membership = { success: true, total: 1, playlists: {} };
+  membershipCalls = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
+      if (String(url).endsWith('/membership')) {
+        membershipCalls.push(body);
+        return new Response(JSON.stringify(membership));
+      }
       calls.push({ url, method, body });
       return new Response(JSON.stringify(responder(url, method, body)));
     }),
@@ -124,7 +137,9 @@ describe('the picker', () => {
     renderWithHost(<AddToPlaylistButton track={SONG} />);
     fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
     expect(screen.getByRole('dialog', { name: 'Add to playlist' })).toBeInTheDocument();
-    expect(screen.getByText('"Alright"')).toBeInTheDocument();
+    // the header names the song and who it's by
+    expect(screen.getByText('Alright')).toBeInTheDocument();
+    expect(screen.getByText('Kendrick Lamar')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Late night')).toBeInTheDocument());
     expect(screen.getByText('2 songs')).toBeInTheDocument();
     expect(screen.getByText('0 songs')).toBeInTheDocument();
@@ -250,5 +265,164 @@ describe('the picker', () => {
       "Can't add this one, it has no artist or title",
       'error',
     );
+  });
+});
+
+describe('the playlist art in the picker', () => {
+  const pl = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    name: 'vibes',
+    track_count: 6,
+    ...over,
+  });
+  const srcs = (c: HTMLElement) => [...c.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+
+  it('uses the collage the playlists page draws when there is no cover', () => {
+    const { container } = render(
+      <PlaylistCover
+        playlist={pl({ cover_tiles: ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg', '/e.jpg'] })}
+      />,
+    );
+    expect(srcs(container)).toHaveLength(4);
+    expect(srcs(container).every((s) => s?.includes('.jpg'))).toBe(true);
+  });
+
+  it('shows one cover from fewer than four tiles, never a part-filled grid', () => {
+    const { container } = render(
+      <PlaylistCover playlist={pl({ cover_tiles: ['/a.jpg', '/b.jpg'] })} />,
+    );
+    expect(srcs(container)).toHaveLength(1);
+    expect(srcs(container)[0]).toContain('/a.jpg');
+  });
+
+  it('lets its own cover beat the collage', () => {
+    const { container } = render(
+      <PlaylistCover
+        playlist={pl({
+          image_url: '/own.jpg',
+          cover_tiles: ['/a.jpg', '/b.jpg', '/c.jpg', '/d.jpg'],
+        })}
+      />,
+    );
+    expect(srcs(container)).toHaveLength(1);
+    expect(srcs(container)[0]).toContain('/own.jpg');
+  });
+
+  it('falls to the first letter with no art, or when the art will not load', () => {
+    const { container, rerender } = render(<PlaylistCover playlist={pl()} />);
+    expect(container.textContent).toBe('V');
+    rerender(<PlaylistCover playlist={pl({ cover_tiles: ['/a.jpg'] })} />);
+    fireEvent.error(container.querySelector('img')!);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.textContent).toBe('V');
+  });
+});
+
+describe('the ticks', () => {
+  const LISTS = [
+    { id: 1, name: 'Liked Songs', track_count: 5, liked: true },
+    { id: 4, name: 'Late night', track_count: 2 },
+    { id: 9, name: 'Gym', track_count: 0 },
+  ];
+
+  it('asks which playlists already have the song, once, on open', async () => {
+    responder = () => ({ playlists: MINE });
+    renderWithHost(<AddToPlaylistButton track={SONG} />);
+    fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
+    await waitFor(() => expect(membershipCalls).toHaveLength(1));
+    expect(membershipCalls[0]).toEqual({ tracks: [SONG] });
+  });
+
+  it('ticks a playlist that has it, and a click there takes it out', async () => {
+    membership = { success: true, total: 1, playlists: { '4': 1 } };
+    responder = (url, method) =>
+      method === 'GET' ? { playlists: MINE } : { success: true, removed: 1, track_count: 1 };
+    renderWithHost(<AddToPlaylistButton track={SONG} />);
+    fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Already in this playlist')).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByText('Late night'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Removed from Late night', 'success'),
+    );
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/user-playlists/4/tracks/remove');
+    expect(post?.body).toEqual({ tracks: [SONG] });
+  });
+
+  it('says how many of a batch a playlist already has, and still adds', async () => {
+    membership = { success: true, total: 3, playlists: { '9': 1 } };
+    responder = () => ({ playlists: MINE });
+    renderWithHost(
+      <AddToPlaylistButton
+        track={[SONG, { ...SONG, track_name: 'm.A.A.d city' }, { ...SONG, track_name: 'XXX.' }]}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText('Add to a playlist'));
+    await waitFor(() => expect(screen.getByText('1 of 3 already in')).toBeInTheDocument());
+    expect(screen.queryByLabelText('Already in this playlist')).toBeNull();
+  });
+
+  it('puts Liked Songs behind the heart, not in the list', async () => {
+    responder = () => ({ playlists: LISTS });
+    renderWithHost(<AddToPlaylistButton track={SONG} />);
+    fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
+    await waitFor(() => expect(screen.getByText('Late night')).toBeInTheDocument());
+    expect(screen.queryByText('Liked Songs')).toBeNull();
+    expect(screen.getByLabelText('Add to Liked Songs')).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('the heart likes the song and stays open, and fills in', async () => {
+    responder = (url, method) =>
+      method === 'GET' ? { playlists: LISTS } : { success: true, id: 1, added: 1, track_count: 6 };
+    renderWithHost(<AddToPlaylistButton track={SONG} />);
+    fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
+    const heart = await screen.findByLabelText('Add to Liked Songs');
+    await waitFor(() => expect(heart).not.toBeDisabled());
+    // the server now says Liked Songs has it
+    membership = { success: true, total: 1, playlists: { '1': 1 } };
+    fireEvent.click(heart);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Remove from Liked Songs')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+    expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/user-playlists/liked');
+    expect(screen.getByRole('dialog', { name: 'Add to playlist' })).toBeInTheDocument();
+  });
+
+  it('a filled heart unlikes', async () => {
+    membership = { success: true, total: 1, playlists: { '1': 1 } };
+    responder = (url, method) =>
+      method === 'GET'
+        ? { playlists: LISTS }
+        : { success: true, id: 1, removed: 1, track_count: 4 };
+    renderWithHost(<AddToPlaylistButton track={SONG} />);
+    fireEvent.click(screen.getByLabelText('Add Alright to a playlist'));
+    fireEvent.click(await screen.findByLabelText('Remove from Liked Songs'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Removed from Liked Songs', 'success'),
+    );
+    expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/user-playlists/liked/remove');
+  });
+
+  it('memberState reads all, some and none', () => {
+    const m = { total: 2, playlists: { '1': 2, '2': 1 } };
+    expect(memberState(1, m)).toBe('all');
+    expect(memberState(2, m)).toBe('some');
+    expect(memberState(3, m)).toBe('none');
+    expect(memberState(1, null)).toBe('none');
+  });
+
+  it('subjectLines names one song by its artist, a batch by its album', () => {
+    expect(subjectLines([SONG])).toEqual({ title: 'Alright', by: 'Kendrick Lamar' });
+    const album = [
+      { ...SONG, album_name: 'TPAB' },
+      { ...SONG, track_name: 'u', album_name: 'TPAB' },
+    ];
+    expect(subjectLines(album)).toEqual({ title: '2 songs', by: 'TPAB · Kendrick Lamar' });
+    expect(subjectLines([SONG, { track_name: 'x', artist_name: 'SZA' }]).by).toBe('2 artists');
   });
 });

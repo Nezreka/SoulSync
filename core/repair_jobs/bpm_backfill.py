@@ -12,6 +12,7 @@ not auto-written. The existing _fix_metadata_gap handler applies the bpm field.
 
 import os
 
+from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, not_locked_sql
@@ -31,8 +32,9 @@ class BpmBackfillJob(RepairJob):
         'For each track missing BPM, the job tries:\n'
         '1. Deezer API (via the track\'s Deezer ID) — fast, accurate\n'
         '2. Local audio analysis (librosa) — no API calls, works on any file\n\n'
-        'Results are reported as findings for your review. The BPM is written to the '
-        'database; file tags are updated if the deezer.tags.bpm setting is enabled.\n\n'
+        'Results are reported as findings for your review. Nothing changes until you '
+        'apply a finding: then the BPM is saved in SoulSync and written into the file\'s '
+        'tags (unless BPM tags are turned off under the Deezer tag settings).\n\n'
         'Settings:\n'
         '- Use Deezer: Look up BPM via the Deezer API first\n'
         '- Use local analysis: Fall back to analyzing the audio file locally'
@@ -120,7 +122,6 @@ class BpmBackfillJob(RepairJob):
                 WHERE t.title IS NOT NULL AND t.title != ''
                   AND (t.bpm IS NULL OR t.bpm = 0){locked_filter}
                 {order_by}
-                LIMIT 500
             """)
             tracks = cursor.fetchall()
         except Exception as e:
@@ -136,6 +137,7 @@ class BpmBackfillJob(RepairJob):
             context.update_progress(0, total)
 
         logger.info("Found %d tracks missing BPM", total)
+        unreachable = 0
 
         if context.report_progress:
             context.report_progress(phase=f'Finding BPM for {total} tracks...', total=total)
@@ -174,21 +176,54 @@ class BpmBackfillJob(RepairJob):
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'deezer'
+                        else:
+                            logger.info(
+                                "Deezer has no BPM for track %s (deezer_id=%s)",
+                                track_id, deezer_id,
+                            )
+                    else:
+                        logger.warning(
+                            "Deezer returned no data for track %s (deezer_id=%s)",
+                            track_id, deezer_id,
+                        )
                 except Exception as e:
-                    logger.debug("Deezer BPM lookup failed for track %s: %s", track_id, e)
+                    logger.warning("Deezer BPM lookup failed for track %s: %s", track_id, e)
+            elif not deezer_client:
+                logger.debug("Deezer client unavailable, skipping Deezer BPM lookup for track %s", track_id)
+            elif not deezer_id:
+                logger.debug("Track %s has no deezer_id, skipping Deezer BPM lookup", track_id)
 
             # 2. Fall back to local analysis
             if bpm_value is None and local_available and file_path:
-                try:
-                    if os.path.exists(file_path):
+                # the stored path is often the media server's view (docker,
+                # nas), so a bare exists() check skipped every file (#1476)
+                local_path = self._resolve(file_path, context)
+                if not local_path:
+                    unreachable += 1
+                else:
+                    try:
                         from core.sample.analyze import analyze_track
-                        analysis = analyze_track(file_path)
+                        analysis = analyze_track(local_path)
                         bpm_val = analysis.get('bpm')
                         if bpm_val and float(bpm_val) > 0:
                             bpm_value = round(float(bpm_val), 1)
                             bpm_source = 'local'
-                except Exception as e:
-                    logger.debug("Local BPM analysis failed for track %s: %s", track_id, e)
+                        else:
+                            # Analysis ran but couldn't detect a confident BPM
+                            # (common on classical/ambient). Distinct from a
+                            # crash — the file was readable, just no beat.
+                            logger.info(
+                                "Local BPM analysis found no confident BPM for track %s",
+                                track_id,
+                            )
+                    except Exception as e:
+                        result.errors += 1
+                        logger.warning("Local BPM analysis failed for track %s: %s", track_id, e)
+                        if context.report_progress:
+                            context.report_progress(
+                                log_line=f'Could not analyze {title or "Unknown"}: {e}',
+                                log_type='error'
+                            )
 
             # Create finding for user review
             if bpm_value:
@@ -245,9 +280,34 @@ class BpmBackfillJob(RepairJob):
         if context.update_progress:
             context.update_progress(total, total)
 
+        if unreachable:
+            logger.warning("BPM backfill: %d track files couldn't be found on disk", unreachable)
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f"{unreachable} track files couldn't be found from here, so they weren't analyzed. "
+                             "Check that SoulSync can see your music folder.",
+                    log_type='error'
+                )
+
         logger.info("BPM backfill scan: %d tracks checked, %d BPM found, %d skipped",
                     result.scanned, result.findings_created, result.skipped)
         return result
+
+    @staticmethod
+    def _resolve(file_path, context: JobContext):
+        """A stored library path this process can read, or None.
+
+        passes the transfer folder and config like the corruption scan does,
+        a bare resolve has nothing to suffix-walk.
+        """
+        resolved = resolve_library_file_path(
+            file_path,
+            transfer_folder=context.transfer_folder,
+            config_manager=context.config_manager,
+        )
+        if not resolved and os.path.isfile(file_path):
+            resolved = file_path
+        return resolved
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
@@ -270,7 +330,7 @@ class BpmBackfillJob(RepairJob):
                   AND (bpm IS NULL OR bpm = 0)
             """)
             row = cursor.fetchone()
-            return min(row[0], 500) if row else 0
+            return row[0] if row else 0
         except Exception:
             return 0
         finally:

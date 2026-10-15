@@ -85,7 +85,7 @@ REQUIRED_METHODS = {
 # Coverage today (audited 2026-05):
 #   search_tracks: Plex ✓, Navidrome ✓, Jellyfin ✗, SoulSync ✗
 #   get_recently_added_albums: Jellyfin ✓, Navidrome ✓, SoulSync ✓, Plex ✗ (uses recentlyAdded() on music library)
-#   trigger_library_scan / is_library_scanning: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗ (filesystem walks in-process)
+#   trigger_library_scan / is_library_scanning: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✓ (background filesystem rescan)
 #   get_library_stats: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗
 #   create_playlist / update_playlist / get_all_playlists / etc: Plex ✓, Jellyfin ✓, Navidrome ✓, SoulSync ✗
 #   update_artist_*, update_album_poster, update_track_metadata: Plex ✓, Jellyfin partial, Navidrome stubs, SoulSync ✗

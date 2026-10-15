@@ -62,7 +62,7 @@ const SEARCHES: Record<MatchKind, string> = {
 };
 
 /** One result row, whatever catalogue it came from. */
-interface Hit {
+export interface Hit {
   key: string;
   title: string;
   meta: string;
@@ -82,7 +82,7 @@ function initials(text: string): string {
     .join('');
 }
 
-async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
+export async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
   if (!query.trim()) return [];
   if (kind === 'album') {
     const data = await searchImportAlbums(query).catch(() => null);
@@ -194,15 +194,36 @@ async function runSearch(kind: MatchKind, query: string): Promise<Hit[]> {
   }));
 }
 
+/** a chosen match, before it is sent: what the bulk list holds per download. */
+export interface PickedMatch {
+  hit: Hit;
+  kind: MatchKind;
+  season: number;
+  episode: number;
+}
+
+/** SoulSync's own best guess for a download: the type and search the release
+ * name suggests, and the top result. null pick when nothing was found. */
+export async function guessMatch(target: MatchTarget): Promise<PickedMatch | null> {
+  const guess = await fetchMatchSuggestion(target.name);
+  if (!guess.kind) return null;
+  const hits = await runSearch(guess.kind, guess.query).catch(() => []);
+  if (!hits.length) return null;
+  return { hit: hits[0], kind: guess.kind, season: guess.season ?? 1, episode: guess.episode ?? 1 };
+}
+
 export function AdlMatchModal({
   target,
   onClose,
   onMatched,
+  onPick,
 }: {
   target: MatchTarget | null;
   onClose: () => void;
   /** called after SoulSync accepted the match */
   onMatched: (message: string) => void;
+  /** pick only: hand the chosen match back instead of sending it (bulk review) */
+  onPick?: (pick: PickedMatch) => void;
 }) {
   const [kind, setKind] = useState<MatchKind | null>(null);
   const [query, setQuery] = useState('');
@@ -270,6 +291,10 @@ export function AdlMatchModal({
 
   const submit = async () => {
     if (!target || !chosen || busy) return;
+    if (onPick) {
+      if (kind) onPick({ hit: chosen, kind, season, episode });
+      return;
+    }
     setBusy(true);
     setError('');
     const outcome = await chosen.submit(target, { season, episode });
@@ -431,7 +456,13 @@ export function AdlMatchModal({
           disabled={!chosen || busy}
           onClick={() => void submit()}
         >
-          {busy ? 'Matching…' : chosen ? 'Match & import' : 'Pick a match'}
+          {busy
+            ? 'Matching…'
+            : !chosen
+              ? 'Pick a match'
+              : onPick
+                ? 'Use this match'
+                : 'Match & import'}
         </button>
       </DialogFooter>
     </DialogFrame>

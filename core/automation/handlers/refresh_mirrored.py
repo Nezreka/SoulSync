@@ -118,7 +118,15 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
             )
 
             tracks = [to_mirror_track_dict(t) for t in detail_tracks]
-            refreshed += _commit_refresh(pl, source, source_id, tracks, db, deps, auto_id)
+            # a source that reports skips (tidal) sets the key, the rest leave the stored counts alone
+            meta_extra = getattr(detail.meta, 'extra', None) or {}
+            mirror_kwargs = (
+                {'source_skipped': meta_extra['source_skipped']}
+                if 'source_skipped' in meta_extra else {}
+            )
+            refreshed += _commit_refresh(
+                pl, source, source_id, tracks, db, deps, auto_id, mirror_kwargs
+            )
         except _SkipPlaylist:
             # Source-specific soft-skip (e.g. Tidal not authenticated).
             # Logging was already emitted; do not count as error.
@@ -266,6 +274,7 @@ def _commit_refresh(
     db: Any,
     deps: AutomationDeps,
     auto_id: Optional[str],
+    mirror_kwargs: Optional[Dict[str, Any]] = None,
 ) -> int:
     """Persist the refreshed track list + emit playlist_changed when delta.
 
@@ -295,6 +304,7 @@ def _commit_refresh(
         description=pl.get('description'),
         owner=pl.get('owner'),
         image_url=pl.get('image_url'),
+        **(mirror_kwargs or {}),
     )
 
     # Membership just changed — if this playlist is organize-by-playlist, rebuild

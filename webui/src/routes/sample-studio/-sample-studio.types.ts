@@ -2,15 +2,21 @@
  * Sample Studio — shared types.
  *
  * Track rows come from GET /api/library/tracks and
- * GET /api/library/recently-added (serialize_track shape), normalized by
+ * GET /api/library/tracks/recent (serialize_track shape), normalized by
  * toStudioTrack in -sample-studio.api.ts. NOTE: `duration` is SECONDS here —
  * serialize_track ships milliseconds (the tracks.duration DB unit) and the
  * mapper converts. Analysis/peaks come from the Phase 1 api/sample.py
  * endpoints.
  */
 
+/**
+ * A library track id. Always text: plex ids are digits, jellyfin ids are
+ * guids, navidrome ids are alphanumeric.
+ */
+export type TrackId = string;
+
 export interface StudioTrack {
-  id: number;
+  id: TrackId;
   title: string;
   artist_name?: string | null;
   album_title?: string | null;
@@ -34,8 +40,22 @@ export function analysisErrorMessage(status: AnalysisStatus): string {
   return tail || 'Analysis failed';
 }
 
+/**
+ * Why the analysis request itself failed. The server's own words when it
+ * answered (readJson puts them on the error), the connection only when it
+ * didn't. This used to blame the connection for every failure, which hid a
+ * 400 on every jellyfin and navidrome track.
+ */
+export function analysisLoadError(error: unknown): string {
+  const offline =
+    'Could not reach SoulSync to load the analysis. Check your connection and try again.';
+  if (!(error instanceof Error)) return offline;
+  if (error instanceof TypeError || error.name === 'TimeoutError') return offline;
+  return error.message.trim() || offline;
+}
+
 export interface SampleAnalysis {
-  track_id: number;
+  track_id: TrackId;
   status: AnalysisStatus;
   bpm: number | null;
   onsets: number[];
@@ -133,7 +153,7 @@ export const DEFAULT_FX: RenderFx = {
 export type StemsStatus = string;
 
 export interface StemsInfo {
-  track_id: number;
+  track_id: TrackId;
   status: StemsStatus;
   stems: StemName[];
   backend?: string;
@@ -151,7 +171,7 @@ export interface StashEntry {
   id: number;
   name: string;
   tags: string[];
-  track_id: number;
+  track_id: TrackId;
   track_title: string;
   artist_name: string;
   start_s: number;

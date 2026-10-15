@@ -100,6 +100,13 @@ def _source_label(spotify_track) -> str:
 _sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVar(
     "sync_profile_id", default=None)
 
+# a sync the user clicked for, not a scheduled one. its wishlist adds are
+# user adds, so a track they once removed from the wishlist comes back
+# instead of sitting on the ignore-list (#1603). task-scoped for the same
+# reason as _sync_profile_id.
+_sync_user_initiated: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_user_initiated", default=False)
+
 
 def navidrome_client_for_profile(profile_id, client):
     """the navidrome client acting as the profile's own user, when the
@@ -524,17 +531,20 @@ class PlaylistSyncService:
             profile_id=profile_id,
         )
 
-    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace') -> SyncResult:
+    async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
+                            user_initiated: bool = False) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
         from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
+        _user_token = _sync_user_initiated.set(bool(user_initiated))
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
             reset_library_scope(_scope_token)
+            _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
@@ -830,12 +840,9 @@ class PlaylistSyncService:
                 return self._create_error_result(playlist.name, ["Sync cancelled"])
 
             wishlist_added_count = 0
-            if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
-                logger.info(
-                    "Skipping sync-time wishlist for %s unmatched tracks (wing-it or organize-by-playlist)",
-                    len(unmatched_tracks),
-                )
-                unmatched_tracks = []  # Clear so the loop below doesn't run
+            unmatched_tracks = self._drop_skipped_unmatched_wishlist(
+                playlist, unmatched_tracks,
+                total_tracks=total_tracks, matched_tracks=matched_tracks)
             if unmatched_tracks:
                 wishlist_added_count = await asyncio.to_thread(
                     self._wishlist_unmatched, playlist, unmatched_tracks)
@@ -924,11 +931,39 @@ class PlaylistSyncService:
             if not getattr(self, 'syncing_playlists', None):
                 self._cancelled = False
     
+    def _drop_skipped_unmatched_wishlist(self, playlist, unmatched_tracks,
+                                          total_tracks=0, matched_tracks=()):
+        """Clear the unmatched list when this sync skips the sync-time
+        wishlist — organize-by-playlist (whose batch failure handling
+        covers those tracks separately) or a pipeline run with wishlist
+        skipping resolved on (#1689). #1621: the drop is surfaced in the
+        automation progress output — the dashboard sync-band renders
+        current_step, and a silent skip reads as "doesn't seem to try".
+        Returns the unmatched list (cleared on skip)."""
+        if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
+            logger.info(
+                "Skipping sync-time wishlist for %s unmatched tracks (wishlist skipped for this sync)",
+                len(unmatched_tracks),
+            )
+            self._update_progress(
+                playlist.name,
+                f"Skipped wishlist for {len(unmatched_tracks)} unmatched tracks "
+                "(wishlist skipped for this sync)",
+                "", 100, 5, 5,
+                total_tracks=total_tracks,
+                matched_tracks=len(matched_tracks),
+                failed_tracks=len(unmatched_tracks),
+            )
+            return []  # Clear so the wishlist loop below doesn't run
+        return unmatched_tracks
+
     def _wishlist_unmatched(self, playlist, unmatched_tracks) -> int:
         """put the tracks the library doesn't have on the wishlist, returns
         how many went on. a db write per track, so the sync runs this off the
         shared event loop (see _find_track_in_media_server)."""
         wishlist_added_count = 0
+        wishlist_covered_count = 0  # applied or already-queued duplicates
+        drop_reasons = {}  # reason -> count, for the 0-of-N WARNING
         try:
             from core.wishlist_service import get_wishlist_service
             wishlist_service = get_wishlist_service()
@@ -949,6 +984,7 @@ class PlaylistSyncService:
                     stub_artist, spotify_track.name,
                 ):
                     logger.info(f"Skipping wishlist for wing-it track: {spotify_track.name}")
+                    drop_reasons["wing-it stub (ineligible)"] = drop_reasons.get("wing-it stub (ineligible)", 0) + 1
                     continue
 
                 # Check if we have original track data with full album objects
@@ -971,8 +1007,10 @@ class PlaylistSyncService:
                         'external_urls': getattr(spotify_track, 'external_urls', {})
                     }
 
-                # Add to wishlist with source context
-                success = wishlist_service.add_spotify_track_to_wishlist(
+                # Add to wishlist with source context. detailed=True so we can
+                # tell "already queued" (benign on re-runs) apart from real
+                # drops — the bare bool collapses both into False (#1621 R1).
+                outcome = wishlist_service.add_spotify_track_to_wishlist(
                     spotify_track_data=spotify_track_data,
                     failure_reason='Missing from media server after sync',
                     source_type='playlist',
@@ -983,17 +1021,47 @@ class PlaylistSyncService:
                         'timestamp': datetime.now().isoformat()
                     },
                     profile_id=_sync_profile_id.get() or 1,
+                    user_initiated=_sync_user_initiated.get(),
                     quality_profile_id=(
                         original_track_data.get('quality_profile_id')
                         if isinstance(original_track_data, dict)
                         else None
                     ),
+                    detailed=True,
                 )
+                if isinstance(outcome, dict):
+                    drop_reason = outcome.get("reason") or outcome.get("status") or "unknown"
+                    # "duplicate" is benign: the track is already queued and
+                    # will download — only real drops count against coverage.
+                    covered = bool(outcome.get("applied")) or drop_reason == "duplicate"
+                    created = bool(outcome.get("created"))
+                else:  # legacy bare-bool contract
+                    covered = created = bool(outcome)
+                    drop_reason = "unknown"
 
-                if success:
+                if created:
                     wishlist_added_count += 1
+                if covered:
+                    wishlist_covered_count += 1
+                else:
+                    drop_reasons[drop_reason] = drop_reasons.get(drop_reason, 0) + 1
 
             logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
+            if unmatched_tracks and wishlist_covered_count == 0:
+                # #1621: the "doesn't seem to try" silence — every miss dropped
+                # without a trace (wing-it stub gate / ignore-list swallows).
+                # Loud at WARNING so a 0-of-N wishlist add is diagnosable.
+                # Already-queued duplicates count as covered, so a re-run over
+                # previously wishlisted tracks does not trip this.
+                drops = ", ".join(f"{k} x{v}" for k, v in drop_reasons.items())
+                logger.warning(
+                    "Wishlist add: 0 of %d unmatched tracks applied for playlist '%s' "
+                    "(id=%s) — drop reasons: %s; nothing will download them",
+                    len(unmatched_tracks),
+                    getattr(playlist, 'name', '?'),
+                    getattr(playlist, 'id', '?'),
+                    drops or "unknown",
+                )
 
         except Exception as e:
             logger.warning(f"Failed to auto-add tracks to wishlist: {e}")

@@ -57,6 +57,19 @@ describe('the Recently Played card plays the song again', () => {
     expect(window.navigateToPage).not.toHaveBeenCalled();
   });
 
+  it('has play, queue and add-to-playlist on the cover, and play uses the same ladder', async () => {
+    serve([ROW]);
+    render(<ListeningHistoryBand />);
+    await waitFor(() => expect(card()).toBeTruthy());
+    expect(card().querySelector('[aria-label="Add Windowlicker to the queue"]')).not.toBeNull();
+    expect(card().querySelector('[aria-label="Add Windowlicker to a playlist"]')).not.toBeNull();
+    fireEvent.click(card().querySelector('[aria-label="Play Windowlicker"]')!);
+    // once: the button, not the button AND the card underneath it
+    expect(playTrackByMetadata).toHaveBeenCalledTimes(1);
+    const [, title, artist] = playTrackByMetadata.mock.calls[0];
+    expect([title, artist]).toEqual(['Windowlicker', 'Aphex Twin']);
+  });
+
   it('still sends the artist line to the artist, and only there', async () => {
     serve([ROW]);
     render(<ListeningHistoryBand />);

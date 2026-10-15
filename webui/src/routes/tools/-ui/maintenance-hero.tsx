@@ -130,14 +130,14 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
           {job.enabled ? (
             <span
               className="repair-flow-badge"
-              style={{ background: 'rgba(74,222,128,0.12)', color: '#4ade80' }}
+              style={{ background: 'rgba(var(--success-rgb), 0.12)', color: 'var(--success)' }}
             >
               Enabled
             </span>
           ) : (
             <span
               className="repair-flow-badge"
-              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}
+              style={{ background: 'var(--white-a06)', color: 'var(--white-a40)' }}
             >
               Disabled
             </span>
@@ -328,6 +328,14 @@ export function MaintenanceHero() {
 
   const [helpJob, setHelpJob] = useState<RepairJob | null>(null);
 
+  const [mode, setMode] = useState<'simple' | 'advanced'>(() => {
+    try {
+      const saved = localStorage.getItem('soulsync_operations_mode');
+      if (saved === 'advanced' || saved === 'simple') return saved;
+    } catch {}
+    return 'simple';
+  });
+
   /**
    * A run row's "see this job's findings" jump. The token makes a second
    * click on the same job re-fire — without it, clicking the same row twice
@@ -349,7 +357,11 @@ export function MaintenanceHero() {
         findingType: options?.findingType,
         token: (previous?.token || 0) + 1,
       }));
-      jumpToSection('repair-section-findings');
+      // the findings list lives in the advanced chassis, which simple mode
+      // hides, so review suggestions / inspect quarantine did nothing. show it
+      // for this visit (not saved as the preference) and scroll once it's up.
+      setMode('advanced');
+      setTimeout(() => jumpToSection('repair-section-findings'), 150);
     },
     [],
   );
@@ -359,16 +371,9 @@ export function MaintenanceHero() {
     const asked = takeFindingsFocus();
     if (!asked) return;
     setJobFocus((previous) => ({ ...asked, token: (previous?.token || 0) + 1 }));
+    setMode('advanced');
     setTimeout(() => jumpToSection('repair-section-findings'), 300);
   }, []);
-
-  const [mode, setMode] = useState<'simple' | 'advanced'>(() => {
-    try {
-      const saved = localStorage.getItem('soulsync_operations_mode');
-      if (saved === 'advanced' || saved === 'simple') return saved;
-    } catch {}
-    return 'simple';
-  });
 
   const handleModeChange = useCallback((next: 'simple' | 'advanced') => {
     setMode(next);

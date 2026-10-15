@@ -1504,7 +1504,7 @@
                 ghost = document.createElement('div');
                 ghost.textContent = item.getAttribute('data-label') || kind;
                 ghost.style.cssText = 'position:fixed;z-index:9500;pointer-events:none;padding:6px 12px;border-radius:8px;' +
-                    'background:rgba(var(--accent-rgb,88,101,242),.9);color:#fff;font-size:12px;font-weight:700;box-shadow:0 8px 20px rgba(0,0,0,.5);';
+                    'background:rgba(var(--accent-rgb),.9);color:#fff;font-size:12px;font-weight:700;box-shadow:0 8px 20px rgba(0,0,0,.5);';
                 document.body.appendChild(ghost);
             }
             if (!dragging) return;

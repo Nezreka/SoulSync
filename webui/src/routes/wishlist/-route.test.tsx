@@ -365,16 +365,57 @@ describe('wishlist route', () => {
     });
   });
 
-  it('keeps the audiobook tab on its original presentation', async () => {
+  it('gives the audiobook tab the same premier presentation as music', async () => {
     stubFetch();
+    // The shared stub doesn't know the audiobook wishlist endpoint; wrap it
+    // so the hero renders with real counts, not just its empty shell.
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('/api/audiobooks/wishlist'))
+          return res({
+            success: true,
+            items: [],
+            counts: {
+              total: 3,
+              wanted: 1,
+              searching: 0,
+              grabbed: 1,
+              done: 1,
+              failed: 1,
+              cancelled: 0,
+            },
+            worker: {
+              retry_after_seconds: 21600,
+              batch_size: 5,
+              action_type: 'audiobook_process_wishlist',
+              automation_name: 'Auto-Process Audiobook Wishlist',
+            },
+          });
+        return base(i, init);
+      }),
+    );
     renderRoute(['/wishlist?media=audiobooks']);
 
-    // Legacy header, not the music hero: the star title and the count meta.
+    // Same wlp hero as the music tab, not the legacy header.
+    await waitFor(() => expect(document.querySelector('.wlp-hero')).toBeInTheDocument());
+    expect(document.querySelector('.wishlist-page-title')).not.toBeInTheDocument();
+    // The hero is wired to the live counts: stats strip + automation card.
     await waitFor(() =>
-      expect(document.querySelector('.wishlist-page-title')?.textContent).toContain('Wishlist'),
+      expect(document.querySelector('.wlp-stats')?.textContent).toContain('Not Found Yet'),
     );
-    expect(document.querySelector('.wlp-hero')).not.toBeInTheDocument();
-    // Its original Clear All action is still there.
+    expect(document.querySelector('.wlp-stats')?.textContent).toContain('In Library');
+    expect(document.querySelector('.wlp-nextrun')?.textContent).toContain(
+      'Auto-Process Audiobook Wishlist',
+    );
+    // A failed title raises the triage banner, like failing tracks do on music.
+    expect(screen.getByRole('alert')).toHaveTextContent('1 title not found yet');
+    // Its Clear All action is still there.
     expect(screen.getByRole('button', { name: 'Clear All' })).toBeInTheDocument();
   });
 

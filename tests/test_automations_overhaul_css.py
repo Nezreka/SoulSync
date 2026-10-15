@@ -106,7 +106,7 @@ def test_every_automx_class_exists_in_the_markup():
 def test_token_definitions_live_on_a_rendered_selector():
     """The --automx-* custom properties must be defined on a class the page
     actually renders, or every var(--automx-*) on the page silently dies."""
-    defining = [sel for sel, body in _rules() if "--automx-accent:" in body]
+    defining = [sel for sel, body in _rules() if re.search(r"--automx-[\w-]+\s*:", body)]
     assert defining, "no rule defines the --automx-* design tokens"
     for sel in defining:
         classes = re.findall(r"\.([a-zA-Z][\w-]*)", sel)

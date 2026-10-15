@@ -64,7 +64,7 @@ def deezer_track_id(track_data: Dict[str, Any]) -> Optional[str]:
 
 
 def hint_from_track(track_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """{title, artist, deezer_id} for a download task's track. the artist is
+    """{title, artist, album, deezer_id} for a download task's track. the artist is
     the track's own first artist, not the album artist: a soundtrack's album
     artist ("Alan Menken, Aladdin - Cast, Disney") names nobody on the song"""
     if not isinstance(track_data, dict):
@@ -75,7 +75,11 @@ def hint_from_track(track_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     artists = track_data.get("artists") or []
     artist = _artist_name(artists[0]) if isinstance(artists, list) and artists else _artist_name(
         track_data.get("artist"))
-    return {"title": title, "artist": artist, "deezer_id": deezer_track_id(track_data)}
+    album = track_data.get("album") or ""
+    if isinstance(album, dict):
+        album = album.get("name") or album.get("title") or ""
+    return {"title": title, "artist": artist, "album": str(album).strip(),
+            "deezer_id": deezer_track_id(track_data)}
 
 
 __all__ = ["track_hint_context", "current_track_hint", "hint_from_track", "deezer_track_id"]

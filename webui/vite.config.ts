@@ -11,6 +11,16 @@ export default defineConfig(({ command }) => ({
     react(),
   ],
   base: command === 'serve' ? '/static/dist/' : './',
+  server: {
+    // the page is served by flask on :8008 and pulls react from here on :5173,
+    // so every module load is cross-origin. vite only allows localhost origins
+    // by default, which blanks every react page on a phone under `dev.py --lan`.
+    // allow private lan addresses too, nothing public.
+    cors: {
+      origin:
+        /^https?:\/\/(?:(?:[^:]+\.)?localhost|127\.0\.0\.1|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)(?::\d+)?$/,
+    },
+  },
   root: import.meta.dirname,
   resolve: {
     alias: [

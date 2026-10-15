@@ -34,6 +34,7 @@ def test_normalizes_lastfm_recent_track_payload():
         "duration_ms": 0,
         "server_source": "lastfm",
         "db_track_id": None,
+        "scrobble_eligible": 1,
     }
 
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   analysisErrorMessage,
+  analysisLoadError,
   DEFAULT_FILTERS,
   isAnalysisError,
   STASH_FORMAT_LABEL,
@@ -42,5 +43,23 @@ describe('type constants', () => {
       wav24: 'WAV 24-bit',
       flac: 'FLAC 24-bit',
     });
+  });
+});
+
+describe('analysisLoadError', () => {
+  it("uses the server's own words when it answered", () => {
+    expect(analysisLoadError(new Error('unknown track_id 5f1c0a3e'))).toBe(
+      'unknown track_id 5f1c0a3e',
+    );
+  });
+
+  it('blames the connection only when nothing came back', () => {
+    const offline = /Could not reach SoulSync/;
+    expect(analysisLoadError(new TypeError('Failed to fetch'))).toMatch(offline);
+    const timeout = new Error('Request timed out');
+    timeout.name = 'TimeoutError';
+    expect(analysisLoadError(timeout)).toMatch(offline);
+    expect(analysisLoadError(new Error('  '))).toMatch(offline);
+    expect(analysisLoadError('nope')).toMatch(offline);
   });
 });

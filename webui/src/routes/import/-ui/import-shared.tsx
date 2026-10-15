@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { HTTPError } from 'ky';
 import { useState } from 'react';
 
-import type { ImportQueueJob } from '../-import.types';
+import type { ImportQueueJob, ImportTrackDisposition } from '../-import.types';
 
 import {
   invalidateImportStagingQueries,
@@ -33,6 +33,27 @@ export function useInboxRefresh() {
 }
 
 /**
+ * The queue entry's finished sublabel: "3 imported · 9 already owned · 1 upgraded".
+ * Falls back to the old "N of M imported" when no dispositions were recorded
+ * (older servers, singles jobs).
+ */
+export function summarizeQueueEntry(
+  total: number,
+  dispositions: ImportTrackDisposition[],
+  processed: number,
+): string {
+  if (!dispositions.length) return `${processed} of ${total} imported`;
+  const counts: Record<string, number> = {};
+  for (const d of dispositions) counts[d.decision] = (counts[d.decision] ?? 0) + 1;
+  const parts: string[] = [];
+  if (counts.imported) parts.push(`${counts.imported} imported`);
+  if (counts.upgraded) parts.push(`${counts.upgraded} upgraded`);
+  if (counts.skipped_owned) parts.push(`${counts.skipped_owned} already owned`);
+  if (counts.error) parts.push(`${counts.error} failed`);
+  return parts.length ? parts.join(' · ') : `${processed} of ${total} imported`;
+}
+
+/**
  * Runs a matcher job: one request per track, progress into the store, and
  * the inbox re-read when it is done. A job that came from an inbox item
  * with a history row records itself against that row, so history says
@@ -45,6 +66,7 @@ export function useImportQueueActions() {
   const runQueueJob = async (entryId: number, job: ImportQueueJob) => {
     let processed = 0;
     const errors: string[] = [];
+    const dispositions: ImportTrackDisposition[] = [];
 
     for (let index = 0; index < job.items.length; index += 1) {
       const itemName =
@@ -56,6 +78,7 @@ export function useImportQueueActions() {
         sublabel: `Importing ${index + 1}/${job.items.length}: ${itemName}`,
         processed,
         errors: [...errors],
+        dispositions: [...dispositions],
       });
 
       try {
@@ -71,6 +94,9 @@ export function useImportQueueActions() {
         if (payload.errors?.length) {
           errors.push(...payload.errors);
         }
+        if (payload.dispositions?.length) {
+          dispositions.push(...payload.dispositions);
+        }
       } catch (error) {
         if (isMediaServerNotConnectedError(error)) {
           // The whole batch would fail the same gate check on every remaining item —
@@ -80,6 +106,7 @@ export function useImportQueueActions() {
             processed,
             errors: [getErrorMessage(error)],
             blockedByMediaServer: true,
+            dispositions: [...dispositions],
           });
           void invalidateImportStagingQueries(queryClient);
           return;
@@ -90,6 +117,7 @@ export function useImportQueueActions() {
       updateQueueEntry(entryId, {
         processed,
         errors: [...errors],
+        dispositions: [...dispositions],
       });
     }
 
@@ -106,9 +134,10 @@ export function useImportQueueActions() {
       sublabel:
         errors.length > 0 && processed === 0
           ? 'Nothing imported'
-          : `${processed} of ${job.items.length} imported`,
+          : summarizeQueueEntry(job.items.length, dispositions, processed),
       processed,
       errors,
+      dispositions: [...dispositions],
     });
     void invalidateImportStagingQueries(queryClient);
   };

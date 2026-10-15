@@ -521,6 +521,67 @@ def test_youtube_task_uses_get_download_status_to_resolve_path(monkeypatch):
     assert any(c[0] == 'mark_completed' for c in rec.calls)
 
 
+@pytest.mark.parametrize('source', ['torrent', 'usenet'])
+@pytest.mark.parametrize('include_original', [True, False])
+def test_release_never_imports_another_song_with_requested_title_in_qualifier(tmp_path, source, include_original):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    original = release_dir / '04._Michael_Jackson_-_Thriller.flac'
+    unrelated = release_dir / '15._Michael_Jackson_-_Billie_Jean_2008_Kanye_West_Mix_(Thriller_25th_Anniversary_Remix).flac'
+    unrelated.write_bytes(b'wrong song')
+    audio_files = [str(unrelated)]
+    if include_original:
+        original.write_bytes(b'requested song')
+        audio_files.append(str(original))
+    transfer_dir = tmp_path / 'transfer'
+    filename = 'candidate||Michael Jackson - Thriller 25'
+    download_tasks['t1'] = {
+        'status': 'post_processing',
+        'filename': filename,
+        'username': source,
+        'download_id': 'release-1',
+        'track_info': {'name': 'Thriller', 'artists': [{'name': 'Michael Jackson'}]},
+    }
+
+    class _ReleaseClient:
+        def get_download_status(self, download_id):
+            from types import SimpleNamespace
+            assert download_id == 'release-1'
+            return SimpleNamespace(file_path=str(unrelated), audio_files=audio_files)
+
+    deps, _ = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(transfer_dir)}),
+        download_orchestrator=_ReleaseClient(),
+        run_async=lambda status: status,
+    )
+    pp.run_post_processing_worker('t1', 'b1', deps)
+
+    assert not (transfer_dir / unrelated.name).exists()
+    if include_original:
+        assert (transfer_dir / original.name).read_bytes() == b'requested song'
+    else:
+        assert download_tasks['t1']['status'] == 'failed'
+        assert not list(transfer_dir.glob('*'))
+
+
+@pytest.mark.parametrize('filename,expected_title', [
+    ('Artist - Angel Eyes.flac', 'Angel'),
+    ('Artist - Thriller (Live).flac', 'Thriller'),
+    ('Artist - Thriller.flac', 'Thriller (Live)'),
+])
+def test_release_file_score_rejects_substrings_and_different_recordings(filename, expected_title):
+    assert pp._release_audio_match_score(filename, expected_title, 'Artist') < 0.80
+
+
+@pytest.mark.parametrize('filename,expected_title', [
+    ('Artist - Thriller (2008 Remastered).flac', 'Thriller'),
+    ('Artist - Thriller - Remastered 2008.flac', 'Thriller'),
+    ('Artist - Thriller.flac', 'Thriller - Remastered 2008'),
+])
+def test_release_file_score_still_accepts_remastered_original(filename, expected_title):
+    assert pp._release_audio_match_score(filename, expected_title, 'Artist') >= 0.80
+
+
 def test_torrent_release_copies_best_matching_audio_to_transfer(tmp_path):
     release_dir = tmp_path / 'release'
     release_dir.mkdir()
@@ -674,3 +735,76 @@ def test_fuzzy_context_matching_when_exact_key_missing(monkeypatch):
     # Won't find file → marks failed. But the fuzzy match log path executes.
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'failed'
+
+
+@pytest.mark.parametrize('requested_imported', [True, False])
+def test_album_tracks_follow_only_a_successful_requested_import(tmp_path, monkeypatch, requested_imported):
+    from types import SimpleNamespace
+    from core.downloads import release_import
+    release = tmp_path / 'release'
+    release.mkdir()
+    song, other = release / '01 - Song.flac', release / '02 - Other.flac'
+    song.write_bytes(b'song')
+    other.write_bytes(b'other')
+    filename = 'nzb://id||Artist - Album'
+    download_tasks['t1'] = {'status': 'post_processing', 'filename': filename, 'username': 'usenet',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    context = {'artist': {'name': 'Artist'}}
+    matched_downloads_context[f'usenet::{filename}'] = context
+    order = []
+
+    def requested_import(key, ctx, path, task_id, batch_id):
+        order.append(('requested', os.path.basename(path)))
+        if requested_imported:
+            ctx['_pipeline_import_succeeded'] = True
+
+    def album_tracks(key, ctx, files, requested, transfer, process, copy):
+        order.append(('album', sorted(os.path.basename(f.path) for f in files), os.path.basename(requested.path)))
+        assert ctx is context and process is deps.process_release_file
+        return 1
+
+    monkeypatch.setattr(release_import, 'import_album_tracks', album_tracks)
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(tmp_path / 'transfer')}),
+        download_orchestrator=SimpleNamespace(get_download_status=lambda id: SimpleNamespace(
+            file_path=str(song), audio_files=[str(song), str(other)])),
+        run_async=lambda status: status,
+        post_process_with_verification=requested_import,
+    )
+    deps.process_release_file = lambda *a: None
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    expected = [('requested', '01 - Song.flac')]
+    if requested_imported:
+        expected.append(('album', ['01 - Song.flac', '02 - Other.flac'], '01 - Song.flac'))
+    assert order == expected
+
+
+def test_failed_album_tracks_import_keeps_the_request_completed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.downloads import release_import
+    song = tmp_path / '01 - Song.flac'
+    song.write_bytes(b'song')
+    filename = 'nzb://id||Artist - Album'
+    download_tasks['t1'] = {'status': 'post_processing', 'filename': filename, 'username': 'usenet',
+                            'track_info': {'name': 'Song', 'artists': [{'name': 'Artist'}]}}
+    matched_downloads_context[f'usenet::{filename}'] = {'artist': {'name': 'Artist'}}
+
+    def requested_import(key, ctx, path, task_id, batch_id):
+        ctx['_pipeline_import_succeeded'] = True
+        download_tasks[task_id]['status'] = 'completed'
+
+    def broken(*args):
+        raise RuntimeError('catalogue exploded')
+
+    monkeypatch.setattr(release_import, 'import_album_tracks', broken)
+    deps, rec = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(tmp_path / 'transfer')}),
+        download_orchestrator=SimpleNamespace(get_download_status=lambda id: SimpleNamespace(
+            file_path=str(song), audio_files=[str(song)])),
+        run_async=lambda status: status,
+        post_process_with_verification=requested_import,
+    )
+    deps.process_release_file = lambda *a: None
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'completed'
+    assert not any(call[0] == 'on_complete' and call[1][-1] is False for call in rec.calls)

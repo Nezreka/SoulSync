@@ -366,20 +366,33 @@ class TestResumeRoute:
         resp = client.post('/api/enrichment/x/resume')
         assert resp.status_code == 500
 
-    def test_resume_without_auto_pause_token_skips_yield_override(self, client, host_state):
-        """Services without an auto_pause_token (e.g. iTunes, Deezer) should
-        NOT add to yield_override — that's a Spotify/LastFM/Genius-only
-        mechanism."""
+    def test_resume_without_a_token_still_overrides_the_yield(self, client, host_state):
+        """#1612 (cremonies): deezer had no auto_pause_token, so a ui resume
+        never reached the override set and the 2s yield loop paused it again
+        after one item. every worker that can be auto-paused has a yield name
+        now, token or not."""
         worker = _FakeWorker()
         register_services([
             EnrichmentService(
-                id='itunes', display_name='iTunes', worker_getter=lambda: worker,
-                config_paused_key='itunes_enrichment_paused',
+                id='deezer', display_name='Deezer', worker_getter=lambda: worker,
+                config_paused_key='deezer_enrichment_paused',
                 auto_pause_token=None,
             ),
+            EnrichmentService(
+                id='itunes', display_name='iTunes', worker_getter=lambda: worker,
+                config_paused_key='itunes_enrichment_paused',
+            ),
         ])
-        resp = client.post('/api/enrichment/itunes/resume')
-        assert resp.status_code == 200
+        assert client.post('/api/enrichment/deezer/resume').status_code == 200
+        assert client.post('/api/enrichment/itunes/resume').status_code == 200
+        assert host_state['yield_override'] == {'deezer', 'itunes-enrichment'}
+
+    def test_resume_of_a_service_that_never_yields_adds_nothing(self, client, host_state):
+        worker = _FakeWorker()
+        register_services([
+            EnrichmentService(id='x', display_name='X', worker_getter=lambda: worker),
+        ])
+        assert client.post('/api/enrichment/x/resume').status_code == 200
         assert host_state['yield_override'] == set()
 
 

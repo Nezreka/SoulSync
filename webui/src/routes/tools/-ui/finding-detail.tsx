@@ -663,7 +663,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
               );
             })}
           </div>
-          <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', padding: '4px 0' }}>
+          <div style={{ color: 'var(--white-a30)', fontSize: '11px', padding: '4px 0' }}>
             Play to compare, click a version to keep it, or use &quot;Keep Best&quot; for
             auto-selection. Keep Best keeps a copy that&apos;s in a playlist.
           </div>
@@ -956,7 +956,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
           {generic.length ? (
             <DetailGrid rows={generic} />
           ) : (
-            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '12px' }}>
+            <span style={{ color: 'var(--white-a30)', fontSize: '12px' }}>
               No additional details available
             </span>
           )}

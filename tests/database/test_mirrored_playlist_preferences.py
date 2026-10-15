@@ -69,6 +69,22 @@ def test_preferences_update_is_owner_scoped(db):
     assert db.get_mirrored_playlist(pk)["organize_by_playlist"] is False
 
 
+def test_sync_mode_is_set_and_cleared(db):
+    # #1704: per-mirror mode, '' goes back to the global setting
+    pk = _mirror(db)
+    assert db.get_mirrored_playlist(pk)["sync_mode"] is None
+
+    assert db.update_mirrored_playlist_preferences(pk, profile_id=1, sync_mode='append') == 'ok'
+    assert db.get_mirrored_playlist(pk)["sync_mode"] == 'append'
+
+    # an unrelated preference leaves it alone
+    assert db.update_mirrored_playlist_preferences(pk, profile_id=1, organize_by_playlist=True) == 'ok'
+    assert db.get_mirrored_playlist(pk)["sync_mode"] == 'append'
+
+    assert db.update_mirrored_playlist_preferences(pk, profile_id=1, sync_mode='') == 'ok'
+    assert db.get_mirrored_playlist(pk)["sync_mode"] is None
+
+
 def test_preferences_update_with_no_fields_is_a_noop(db):
     pk = _mirror(db)
     assert db.update_mirrored_playlist_preferences(pk, profile_id=1) == 'ok'

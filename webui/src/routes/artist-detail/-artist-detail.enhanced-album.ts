@@ -495,6 +495,16 @@ export function normTitleForMatch(value: unknown): string {
 export function getAlbumCanonicalSource(
   album: EnhancedAlbum,
 ): { source: string; id: string } | null {
+  // Prefer the explicitly pinned canonical release when available.
+  const pinnedSource = String(album.canonical_source || '')
+    .trim()
+    .toLowerCase();
+  const pinnedId = String(album.canonical_album_id || '').trim();
+
+  if (pinnedSource && pinnedId) {
+    return { source: pinnedSource, id: pinnedId };
+  }
+
   const priority: [string, string][] = [
     ['spotify', 'spotify_album_id'],
     ['deezer', 'deezer_id'],

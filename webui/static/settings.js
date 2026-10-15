@@ -91,7 +91,7 @@ const _QP_BUNDLE_CONTROL_IDS = new Set([
 const _QP_PROFILE_CONTROL_IDS = new Set([
     ..._QP_BUNDLE_CONTROL_IDS,
     'quality-fallback-enabled', 'quality-search-mode', 'quality-rank-candidates',
-    'quality-upgrade-policy', 'quality-upgrade-cutoff',
+    'quality-upgrade-policy', 'quality-upgrade-cutoff', 'quality-release-import-mode',
 ]);
 
 // Route a Quality-page change to the profile editor's lightweight autosave.
@@ -2666,7 +2666,7 @@ function buildArtSourceList() {
     if (!container) return;
     container.innerHTML = '';
     if (!_artVisualOrder.length) {
-        container.innerHTML = '<div style="padding:10px;color:var(--text-secondary,#888);font-size:13px;">No connected art sources available.</div>';
+        container.innerHTML = '<div style="padding:10px;color:#888;font-size:13px;">No connected art sources available.</div>';
         return;
     }
     const enabledOrder = getArtOrder();
@@ -3311,6 +3311,10 @@ async function loadSettingsData() {
             Math.round((ab.completeness_tolerance ?? 0.92) * 100));
         abVal(document.getElementById('audiobook-staging-days'), ab.staging_days ?? 7);
         abChecked(document.getElementById('audiobook-renumber-chapters'), ab.renumber_chapters);
+        // Opt-in, off by default: abChecked treats a missing key as on, which
+        // would switch these on for older configs.
+        const mergeM4b = document.getElementById('audiobook-merge-m4b');
+        if (mergeM4b) mergeM4b.checked = ab.merge_m4b === true;
         // Off by default, unlike the toggles above: abChecked treats a
         // missing key as on, which would switch this on for older configs.
         const removeOwned = document.getElementById('audiobook-remove-owned-from-wishlist');
@@ -4182,6 +4186,9 @@ function populateQualityProfileUI(profile) {
     const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
+    const releaseImportSelect = document.getElementById('quality-release-import-mode');
+    if (releaseImportSelect) releaseImportSelect.value = profile.release_import_mode === 'album_tracks' ? 'album_tracks' : 'requested_tracks';
+
     const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
     if (upgradePolicySelect) {
         upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
@@ -4418,6 +4425,7 @@ async function applyQualityPreset(presetName) {
                 ...preset,
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+                release_import_mode: uiState.release_import_mode,
             };
             currentQualityProfile = merged;
             window._suppressSettingsAutoSave = true;
@@ -4520,6 +4528,7 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
         upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
@@ -6528,6 +6537,7 @@ async function saveSettings(quiet = false) {
             staging_days: Math.min(90, Math.max(1,
                 _cfgInt('audiobook-staging-days', 7))),
             renumber_chapters: _cfgBool('audiobook-renumber-chapters'),
+            merge_m4b: _cfgBool('audiobook-merge-m4b'),
             remove_owned_from_wishlist: _cfgBool('audiobook-remove-owned-from-wishlist'),
             embed_metadata: _cfgBool('audiobook-embed-metadata'),
             embed_artwork: _cfgBool('audiobook-embed-artwork'),
@@ -6780,6 +6790,11 @@ async function authorizeLastfmScrobbling() {
 
 async function testConnection(service) {
     try {
+        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+            clearTimeout(settingsAutoSaveTimer);
+            settingsAutoSaveTimer = null;
+            if (typeof saveSettings === 'function') await saveSettings(true);
+        }
         showLoadingOverlay(`Testing ${service} connection...`);
 
         const response = await fetch(API.testConnection, {
@@ -6863,7 +6878,9 @@ function renderApiKeys(keys) {
     container.innerHTML = keys.map(k => `
         <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; margin-bottom: 4px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px;">
             <div style="flex: 1; min-width: 0;">
-                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}</div>
+                <div style="font-size: 13px; color: #e0e0e0; font-weight: 500;">${escapeHtml(k.label || 'Unnamed')}
+                    <span style="margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; ${k.scope === 'read' ? 'background: rgba(100,255,218,0.12); color: #64ffda;' : 'background: rgba(255,171,64,0.12); color: #ffab40;'}">${k.scope === 'read' ? 'Read-only' : 'Admin'}</span>
+                </div>
                 <div style="font-size: 11px; color: #666; margin-top: 2px;">
                     <code>${escapeHtml(k.key_prefix || 'sk_...')}...</code>
                     &middot; Created ${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'unknown'}
@@ -6894,12 +6911,14 @@ function _initApiKeyClickHandler() {
 async function generateApiKey() {
     const labelInput = document.getElementById('api-key-label');
     const label = labelInput ? labelInput.value.trim() : '';
+    const scopeInput = document.getElementById('api-key-scope');
+    const scope = scopeInput && scopeInput.value === 'admin' ? 'admin' : 'read';
 
     try {
         const response = await fetch('/api/v1/api-keys-internal/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ label: label || 'Default' })
+            body: JSON.stringify({ label: label || 'Default', scope })
         });
         const data = await response.json();
 
