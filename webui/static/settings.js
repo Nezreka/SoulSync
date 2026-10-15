@@ -734,6 +734,30 @@ const SERVICE_GLYPHS = {
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
 };
 
+// Grouped by what each service does for you, same headings as the download
+// chain. Order inside a group is the order here, not page order. A service not
+// listed lands in "Other" so a new one can never vanish from the grid.
+const SERVICE_GROUPS = {
+    music: [
+        { label: 'Metadata', hint: 'artists, albums and tracks',
+          ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
+        { label: 'Scrobbling', hint: 'listening history and recommendations',
+          ids: ['lastfm', 'listenbrainz'] },
+        { label: 'Extras', hint: 'lyrics, concerts and fingerprint checks',
+          ids: ['genius', 'concerts', 'acoustid'] },
+    ],
+    video: [
+        { label: 'Metadata', hint: 'movies, shows and episodes',
+          ids: ['tmdb', 'tvdb', 'nokey'] },
+        { label: 'Ratings & lists', hint: 'scores and list collections',
+          ids: ['omdb', 'trakt', 'mdblist'] },
+        { label: 'Subtitles', hint: 'found and downloaded for your library',
+          ids: ['opensubtitles', 'subdl', 'subsource'] },
+        { label: 'Artwork & extras', hint: 'posters, fanart and trailers',
+          ids: ['fanart', 'ytextras'] },
+    ],
+};
+
 // Follow the side you are standing on, exactly like the download chain does.
 // Defaulting to music meant a video user landed on a grid of Spotify and Tidal
 // tiles with their own TMDB key nowhere in sight.
@@ -821,7 +845,7 @@ function buildServiceTiles() {
         return;
     }
     const attr = SERVICE_KINDS[_svcKind].attr;
-    grid.innerHTML = '<div class="svc-tile-row">' + frames.map(frame => {
+    const tile = (frame) => {
         const id = frame.getAttribute(attr);
         const m = _svcMeta(frame);
         const set = _svcConfigured(frame);
@@ -850,7 +874,21 @@ function buildServiceTiles() {
              + `<span class="svc-tile-art">${art}</span>`
              + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
              + chip + '</button>';
-    }).join('') + '</div>';
+    };
+
+    const byId = new Map(frames.map(f => [f.getAttribute(attr), f]));
+    const groups = (SERVICE_GROUPS[_svcKind] || []).map(g => ({
+        ...g, frames: g.ids.map(id => byId.get(id)).filter(Boolean),
+    }));
+    const listed = new Set(groups.flatMap(g => g.ids));
+    groups.push({ label: 'Other', hint: '', frames: frames.filter(f => !listed.has(f.getAttribute(attr))) });
+
+    grid.innerHTML = groups.filter(g => g.frames.length).map(g =>
+        `<div class="src-group"><div class="src-group-head">`
+        + `<span class="src-group-label">${g.label}</span>`
+        + `<span class="src-group-count">${g.frames.length}</span>`
+        + (g.hint ? `<span class="src-group-hint">${g.hint}</span>` : '')
+        + `</div><div class="svc-tile-row">${g.frames.map(tile).join('')}</div></div>`).join('');
 }
 window.buildServiceTiles = buildServiceTiles;
 
