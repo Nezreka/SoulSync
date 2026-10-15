@@ -156,6 +156,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -14979,10 +14980,14 @@ def _apply_path_template(template: str, context: dict) -> str:
         # Only splits when we have multiple distinct artist objects (Spotify provides these)
         # Avoids string splitting which breaks names like "Tyler, the Creator" or "Simon & Garfunkel"
         artists_list = context.get('_artists_list')
-        if artists_list and len(artists_list) > 1:
-            # Multiple artist objects (Spotify) — use first
-            first = artists_list[0]
-            album_artist_value = first.get('name', first) if isinstance(first, dict) else str(first)
+        # same rule as core/imports/paths.py: a lone listed name counts when
+        # the album artist is that name plus collaborators
+        _raw_album_artist = str(context.get('albumartist') or context.get('artist') or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary and context.get('_track_artists_list'):
+            primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
