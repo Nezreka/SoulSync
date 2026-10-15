@@ -116,7 +116,8 @@ class _FakeTrack:
 def _scorer():
     stub = type("S", (), {})()
     for m in (
-        "_calculate_track_confidence", "_string_similarity",
+        "_calculate_track_confidence", "_score_title_similarity",
+        "_score_artist_similarity", "_string_similarity",
         "_normalize_for_comparison", "_clean_track_title_for_comparison",
     ):
         setattr(stub, m, types.MethodType(getattr(MusicDatabase, m), stub))
