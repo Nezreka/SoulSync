@@ -335,12 +335,17 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             if quality_profile_id is None:
                 return jsonify({"error": "Invalid quality_profile_id"}), 400
 
-        # #1704: null/'' clears back to the global mode, else a real mode
+        # #1704: null or '' clears back to the global mode, else a real mode.
+        # no fingerprint reset needed, the sync status remembers the mode
         sync_mode = None
         if 'sync_mode' in data:
             from core.sync.playlist_edit import VALID_SYNC_MODES
-            sync_mode = data.get('sync_mode') or ''
-            if sync_mode and sync_mode not in VALID_SYNC_MODES:
+            raw_mode = data.get('sync_mode')
+            if raw_mode is None or raw_mode == '':
+                sync_mode = ''
+            elif raw_mode in VALID_SYNC_MODES:
+                sync_mode = raw_mode
+            else:
                 return jsonify({"error": "Invalid sync_mode"}), 400
 
         # Both fields are validated and written in ONE transaction: a rejected
@@ -366,9 +371,6 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
         ):
             # A profile-only change must not be swallowed by the auto-sync
             # "tracks unchanged" fast path (P1-03).
-            _invalidate_mirror_sync_fingerprint(playlist_id)
-        if sync_mode is not None and (sync_mode or None) != playlist.get('sync_mode'):
-            # same for a mode change, the next sync should apply it
             _invalidate_mirror_sync_fingerprint(playlist_id)
 
         updated = _owned_mirrored_playlist(database, playlist_id) or {}

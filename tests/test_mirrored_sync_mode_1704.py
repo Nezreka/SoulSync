@@ -27,11 +27,10 @@ def _mirror(db):
     )
 
 
-def _client(db, monkeypatch, invalidated):
+def _client(db, monkeypatch):
     # monkeypatch, never configure(), same reason as the #1219 tests
     import api.mirrored_playlists as mod
     monkeypatch.setattr(mod, "get_database", lambda: db)
-    monkeypatch.setattr(mod, "_invalidate_mirror_sync_fingerprint", invalidated.append)
     app = Flask(__name__)
 
     @app.before_request
@@ -44,36 +43,26 @@ def _client(db, monkeypatch, invalidated):
 
 def test_route_sets_and_clears_the_mode(mdb, monkeypatch):
     pk = _mirror(mdb)
-    invalidated = []
-    c = _client(mdb, monkeypatch, invalidated)
+    c = _client(mdb, monkeypatch)
 
     resp = c.patch(f"/api/mirrored-playlists/{pk}/preferences", json={"sync_mode": "append"})
     assert resp.status_code == 200, resp.data
     assert resp.get_json()["playlist"]["sync_mode"] == "append"
-    # a mode change has to reach the next sync, not the unchanged-tracks skip
-    assert invalidated == [pk]
 
     resp = c.patch(f"/api/mirrored-playlists/{pk}/preferences", json={"sync_mode": None})
     assert resp.status_code == 200, resp.data
     assert mdb.get_mirrored_playlist(pk)["sync_mode"] is None
 
 
-def test_route_rejects_a_bogus_mode(mdb, monkeypatch):
-    pk = _mirror(mdb)
-    c = _client(mdb, monkeypatch, [])
-    resp = c.patch(f"/api/mirrored-playlists/{pk}/preferences", json={"sync_mode": "nuke"})
-    assert resp.status_code == 400
-    assert mdb.get_mirrored_playlist(pk)["sync_mode"] is None
-
-
-def test_same_mode_again_keeps_the_fingerprint(mdb, monkeypatch):
+@pytest.mark.parametrize("bad", ["nuke", False, 0, [], {}])
+def test_route_rejects_anything_but_a_mode_or_null(mdb, monkeypatch, bad):
     pk = _mirror(mdb)
     mdb.update_mirrored_playlist_preferences(pk, profile_id=1, sync_mode="append")
-    invalidated = []
-    c = _client(mdb, monkeypatch, invalidated)
-    resp = c.patch(f"/api/mirrored-playlists/{pk}/preferences", json={"sync_mode": "append"})
-    assert resp.status_code == 200
-    assert invalidated == []
+    c = _client(mdb, monkeypatch)
+    resp = c.patch(f"/api/mirrored-playlists/{pk}/preferences", json={"sync_mode": bad})
+    assert resp.status_code == 400
+    # a falsy junk value must not quietly clear it back to global
+    assert mdb.get_mirrored_playlist(pk)["sync_mode"] == "append"
 
 
 def _sync_kwargs(db, mirror_id, config=None):
@@ -120,8 +109,8 @@ def _run_sync_task_mode(monkeypatch, requested, configured):
 def test_run_sync_task_resolves_the_mode(monkeypatch):
     assert _run_sync_task_mode(monkeypatch, None, "append") == "append"
     assert _run_sync_task_mode(monkeypatch, "replace", "append") == "replace"
-    # a junk stored value never reaches the media server
-    assert _run_sync_task_mode(monkeypatch, "nuke", "append") == "reconcile"
+    # a junk stored value means the global mode, not a hardcoded one
+    assert _run_sync_task_mode(monkeypatch, "nuke", "append") == "append"
 
 
 def test_the_mirrored_pipeline_hands_its_mode_to_each_sync(mdb):
@@ -147,3 +136,127 @@ def test_the_mirrored_pipeline_hands_its_mode_to_each_sync(mdb):
             sync_and_wishlist_fn=sync_and_wishlist,
         )
     assert seen == ['replace', None]
+
+
+def test_resolve_sync_mode():
+    from core.sync.playlist_edit import resolve_sync_mode
+    assert resolve_sync_mode("append", "replace") == "append"
+    assert resolve_sync_mode(None, "replace") == "replace"
+    assert resolve_sync_mode("Append", "replace") == "replace"
+    assert resolve_sync_mode(None, None) == "reconcile"
+
+
+# ── the unchanged-tracks skip has to notice a mode change ────────────────────
+
+def _fast_path_run(db, pk, last_status, config=None, global_mode="reconcile"):
+    """run the real handler with a status that matches the tracks, so only
+    the mode can stop the skip. returns the result."""
+    import hashlib
+
+    from core.automation.handlers.sync_playlist import auto_sync_playlist
+
+    h = hashlib.md5("sp1".encode()).hexdigest()
+    status = {"tracks_hash": h, "mirror_tracks_hash": h, "matched_tracks": 1,
+              "quality_profile_id": db.get_mirrored_playlist(pk).get("quality_profile_id"),
+              **last_status}
+    deps = MagicMock()
+    deps.get_database.return_value = db
+    deps.load_sync_status_file.return_value = {f"auto_mirror_{pk}": status}
+    deps.config_manager.get.side_effect = (
+        lambda key, default=None: global_mode if key == "playlist_sync.mode" else default)
+    deps.config_manager.get_active_media_server.return_value = "navidrome"
+    started = threading.Event()
+    deps.run_sync_task.side_effect = lambda *a, **k: started.set()
+    import core.sync.library_presence as lp
+    orig = lp.matched_tracks_still_present
+    lp.matched_tracks_still_present = lambda *_a, **_k: True
+    try:
+        return auto_sync_playlist({"playlist_id": str(pk), **(config or {})}, deps)
+    finally:
+        lp.matched_tracks_still_present = orig
+
+
+def test_same_mode_still_skips(mdb):
+    pk = _mirror(mdb)
+    assert _fast_path_run(mdb, pk, {"sync_mode": "reconcile"})["status"] == "skipped"
+
+
+def test_a_status_from_before_the_key_still_skips(mdb):
+    # no upgrade burst: an old status ran in the global mode
+    pk = _mirror(mdb)
+    assert _fast_path_run(mdb, pk, {})["status"] == "skipped"
+
+
+def test_a_new_mirror_mode_breaks_the_skip(mdb):
+    pk = _mirror(mdb)
+    mdb.update_mirrored_playlist_preferences(pk, profile_id=1, sync_mode="append")
+    assert _fast_path_run(mdb, pk, {"sync_mode": "reconcile"})["status"] == "started"
+
+
+def test_a_new_pipeline_mode_breaks_the_skip(mdb):
+    pk = _mirror(mdb)
+    result = _fast_path_run(mdb, pk, {"sync_mode": "reconcile"}, {"sync_mode": "replace"})
+    assert result["status"] == "started"
+
+
+def test_a_new_global_mode_breaks_the_skip(mdb):
+    pk = _mirror(mdb)
+    result = _fast_path_run(mdb, pk, {"sync_mode": "reconcile"}, global_mode="append")
+    assert result["status"] == "started"
+
+
+def test_the_status_writer_keeps_the_mode():
+    """web_server._update_and_save_sync_status copies a fixed key list; a mode
+    it drops would make every run look like a mode change."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1].joinpath("web_server.py").read_text(encoding="utf-8")
+    body = src.split("def _update_and_save_sync_status", 1)[1].split("\ndef ", 1)[0]
+    keys = re.search(r"for key in \((.*?)\):", body, re.S).group(1)
+    assert "'sync_mode'" in keys
+
+
+# ── a re-sync from history keeps the mirror's own mode ───────────────────────
+
+def _start(monkeypatch, db, payload, global_mode="reconcile"):
+    import api.source_playlists as sp
+
+    submitted = []
+
+    class _Exec:
+        def submit(self, fn, *args):
+            submitted.append(args)
+            return MagicMock(done=lambda: True)
+
+    cm = MagicMock()
+    cm.get.side_effect = lambda key, default=None: global_mode if key == "playlist_sync.mode" else default
+    monkeypatch.setattr(sp, "config_manager", cm)
+    monkeypatch.setattr(sp, "sync_executor", _Exec())
+    monkeypatch.setattr(sp, "sync_lock", threading.Lock())
+    monkeypatch.setattr(sp, "sync_states", {})
+    monkeypatch.setattr(sp, "active_sync_workers", {})
+    monkeypatch.setattr(sp, "add_activity_item", lambda *a, **k: None)
+    monkeypatch.setattr(sp, "get_current_profile_id", lambda: 1)
+    import database.music_database as mdbmod
+    monkeypatch.setattr(mdbmod, "get_database", lambda: db)
+    app = Flask(__name__)
+    with app.test_request_context():
+        sp.start_playlist_sync_from_payload(payload)
+    return submitted[0][6]
+
+
+def test_history_resync_uses_the_mirrors_mode(mdb, monkeypatch):
+    pk = _mirror(mdb)
+    mdb.update_mirrored_playlist_preferences(pk, profile_id=1, sync_mode="append")
+    base = {"playlist_id": f"auto_mirror_{pk}", "playlist_name": "Mix", "tracks": [{"name": "a"}]}
+    # the dashboard sends '' (= no choice made)
+    assert _start(monkeypatch, mdb, {**base, "sync_mode": ""}) == "append"
+    assert _start(monkeypatch, mdb, base) == "append"
+    # an explicit choice still wins
+    assert _start(monkeypatch, mdb, {**base, "sync_mode": "replace"}) == "replace"
+
+
+def test_a_non_mirror_sync_uses_the_global_mode(mdb, monkeypatch):
+    payload = {"playlist_id": "spotify_xyz", "playlist_name": "Mix", "tracks": [{"name": "a"}]}
+    assert _start(monkeypatch, mdb, payload, global_mode="replace") == "replace"

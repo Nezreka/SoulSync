@@ -849,6 +849,9 @@ def run_sync_task(
             discovered_tracks=len(tracks_json),
             tracks_hash=_tracks_hash,
             quality_profile_id=_synced_quality_profile_id,
+            # the mode it ran in, so the next scheduled run sees a mode
+            # change as a change (#1704)
+            sync_mode=sync_mode,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash

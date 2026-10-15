@@ -186,6 +186,16 @@ def normalize_sync_mode(requested, configured, default: str = "reconcile") -> st
     return mode if mode in VALID_SYNC_MODES else default
 
 
+def resolve_sync_mode(own, configured, default: str = "reconcile") -> str:
+    """The mode a sync runs in, given a playlist's or pipeline's OWN mode (#1704).
+
+    Unlike a per-request value, a stored own mode that isn't a real one (a stale
+    or hand-edited row) falls back to the global setting, not the hardcoded
+    default: null or junk both mean "use global".
+    """
+    return normalize_sync_mode(own if own in VALID_SYNC_MODES else None, configured, default)
+
+
 __all__ = [
     "plan_playlist_add",
     "remove_one_occurrence",
@@ -193,6 +203,7 @@ __all__ = [
     "plan_playlist_append",
     "plan_align_rewrite",
     "normalize_sync_mode",
+    "resolve_sync_mode",
     "VALID_SYNC_MODES",
 ]
 

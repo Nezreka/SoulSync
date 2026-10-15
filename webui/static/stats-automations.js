@@ -5265,7 +5265,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
-        ${_autoSyncModeRowHtml(slotKey, config.sync_mode)}
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 4 phases: Refresh → Discover → Sync → Download Missing</div>`;
     }
     if (blockType === 'personalized_pipeline') {
@@ -5293,7 +5293,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
-        ${_autoSyncModeRowHtml(slotKey, config.sync_mode)}
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 2 phases: Snapshot → Sync → Download Missing</div>`;
     }
     // Shared variable tags builder for notification types
@@ -5470,18 +5470,18 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
     return '';
 }
 
-// #1704: a pipeline's own sync mode, '' = the global Settings mode
-function _autoSyncModeRowHtml(slotKey, value) {
-    const opts = [
-        ['', 'Use global setting'],
-        ['reconcile', 'Reconcile (match the source)'],
-        ['append', 'Append only (never remove tracks)'],
-        ['replace', 'Replace (delete and recreate)'],
-    ].map(([v, l]) => `<option value="${v}"${(value || '') === v ? ' selected' : ''}>${l}</option>`).join('');
+// #1704: a pipeline's own sync mode, '' = the global Settings mode. the
+// options come from the block's config_fields (core/automation/blocks.py)
+function _autoSyncModeRowHtml(slotKey, value, blockType) {
+    const def = _findBlockDef(blockType);
+    const field = ((def && def.config_fields) || []).find(f => f.key === 'sync_mode');
+    if (!field || !Array.isArray(field.options)) return '';
+    const opts = field.options.map(o => `<option value="${_escAttr(o.value)}"${(value || '') === o.value ? ' selected' : ''}>${_escAttr(o.label)}</option>`).join('');
     return `<div class="config-row">
             <label>Sync mode</label>
             <select id="cfg-${slotKey}-sync_mode">${opts}</select>
-        </div>`;
+        </div>${blockType === 'playlist_pipeline' ? `
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">A playlist with its own sync mode (set in its ⋯ menu) keeps it</div>` : ''}`;
 }
 
 // One generic config row from a block's config_fields definition.

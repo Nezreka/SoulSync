@@ -19510,7 +19510,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status

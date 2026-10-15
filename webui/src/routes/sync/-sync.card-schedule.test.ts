@@ -78,7 +78,13 @@ afterEach(() => {
 describe('reading schedules', () => {
   it('reads an interval off an owned automation', () => {
     expect(cardSchedulesFrom([hourly(7, 6)])).toEqual({
-      '7': { hours: 6, automationId: 107, weekly: false, nextRun: null },
+      '7': {
+        hours: 6,
+        automationId: 107,
+        weekly: false,
+        nextRun: null,
+        actionConfig: { playlist_id: 7 },
+      },
     });
   });
 
@@ -199,6 +205,47 @@ describe('the controller', () => {
     const write = calls.find((c) => c.method === 'PUT');
     expect(write).toBeDefined();
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('a reschedule keeps the config set in the builder (#1704)', async () => {
+    const tuned = {
+      ...hourly(7, 6),
+      action_config: { playlist_id: 7, sync_mode: 'append', skip_wishlist: true },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({
+          url,
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(init.body as string) : undefined,
+        });
+        if (url === '/api/automations' && (init?.method ?? 'GET') === 'GET') {
+          return new Response(JSON.stringify({ automations: [tuned] }));
+        }
+        return new Response(JSON.stringify({ success: true }));
+      }),
+    );
+    const { result } = renderHook(() => useCardSchedules());
+    await waitFor(() => expect(result.current.loaded).toBe(true));
+    await act(async () => {
+      await result.current.set({ id: 7, name: 'Mix', source: 'spotify' }, 12);
+    });
+    const put = calls.find((c) => c.method === 'PUT')!;
+    expect((put.body as { action_config: unknown }).action_config).toEqual({
+      playlist_id: '7',
+      all: false,
+      sync_mode: 'append',
+      skip_wishlist: true,
+    });
+    // hourly -> weekly is a new row, it still carries the config
+    await act(async () => {
+      await result.current.setWeekly({ id: 7, name: 'Mix', source: 'spotify' }, { days: ['mon'] });
+    });
+    const post = calls.find((c) => c.method === 'POST')!;
+    expect((post.body as { action_config: { sync_mode?: string } }).action_config.sync_mode).toBe(
+      'append',
+    );
   });
 
   it('creates one when the playlist has none', async () => {

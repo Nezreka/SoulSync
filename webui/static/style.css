@@ -19865,14 +19865,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .pl-card-health--warning { background: rgba(227, 166, 60, 0.2); color: #efc375; }
 
 /* The quality profile select, moved off the board's scheduled card. */
-.pl-menu-profile {
+.pl-menu-profile,
+.pl-menu-field {
     display: flex;
     flex-direction: column;
     gap: 4px;
     padding: 4px 4px 8px;
 }
 
-.pl-menu-profile select {
+.pl-menu-profile select,
+.pl-menu-field select {
     width: 100%;
     padding: 6px 8px;
     border-radius: 7px;

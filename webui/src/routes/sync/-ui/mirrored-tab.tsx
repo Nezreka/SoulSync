@@ -278,7 +278,7 @@ function MirroredCardMenu({
       {/* #1704: append-only for a mirror you add to on the server, while
           the global mode keeps doing the rest */}
       <div
-        className="pl-menu-profile"
+        className="pl-menu-field"
         onClick={(e) => {
           e.stopPropagation();
         }}
@@ -742,8 +742,8 @@ export function MirroredTab({
         if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
         window.showToast?.(
           mode
-            ? `"${row.name ?? 'Playlist'}" now syncs in ${mode} mode`
-            : `"${row.name ?? 'Playlist'}" follows the global sync mode`,
+            ? `"${row.display_name || row.name || 'Playlist'}" now syncs in ${mode} mode`
+            : `"${row.display_name || row.name || 'Playlist'}" follows the global sync mode`,
           'success',
         );
         await load();
