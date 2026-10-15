@@ -539,6 +539,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* what an import did with one track, in the "what happened" list */
+.outcomePill {
+  height: 18px;
+  padding: 0 7px;
+  font-size: 10.5px;
+  justify-self: end;
+}
+
 .empty {
   padding: 48px 24px;
   text-align: center;

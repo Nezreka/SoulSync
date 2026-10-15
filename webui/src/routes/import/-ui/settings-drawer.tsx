@@ -32,6 +32,7 @@ export function SettingsDrawer({
   const [interval, setInterval] = useState(60);
   const [autoProcess, setAutoProcess] = useState(true);
   const [profileId, setProfileId] = useState<number | null>(null);
+  const [clearFinished, setClearFinished] = useState(false);
 
   useEffect(() => {
     const data = settings.data;
@@ -40,6 +41,7 @@ export function SettingsDrawer({
     setInterval(data.scan_interval ?? 60);
     setAutoProcess(data.auto_process ?? true);
     setProfileId(data.quality_profile_id ?? null);
+    setClearFinished(data.clear_finished ?? false);
   }, [settings.data]);
 
   const save = useMutation({
@@ -49,6 +51,7 @@ export function SettingsDrawer({
         scanInterval: interval,
         qualityProfileId: profileId,
         autoProcess,
+        clearFinished,
       }),
     onSuccess: () => {
       window.showToast?.('Settings saved', 'success');
@@ -124,6 +127,24 @@ export function SettingsDrawer({
                 <option value="300">5 minutes</option>
                 <option value="900">15 minutes</option>
               </Select>
+            </div>
+          </div>
+
+          <div className={styles.settingRow}>
+            <div>
+              <div className={styles.settingLabel}>Clear finished folders</div>
+              <div className={styles.settingHelp}>
+                Once every track in a folder was imported or is already in your library, remove the
+                folder from the import folder. Anything that isn't music or release extras (cover,
+                cue, log) keeps it there.
+              </div>
+            </div>
+            <div className={styles.settingControl}>
+              <Switch
+                checked={clearFinished}
+                aria-label="Clear finished folders"
+                onCheckedChange={(checked) => setClearFinished(Boolean(checked))}
+              />
             </div>
           </div>
 

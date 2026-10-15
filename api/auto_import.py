@@ -79,6 +79,7 @@ def auto_import_settings():
             # _process_matches) — None/0 means "use the app-wide default profile",
             # same as every other context that doesn't specify its own.
             "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
+            "clear_finished": bool(config_manager.get('import.clear_finished_from_staging', False)),
         })
     data = request.get_json() or {}
     if 'quality_profile_id' in data:
@@ -105,6 +106,8 @@ def auto_import_settings():
     for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
+    if 'clear_finished' in data:
+        config_manager.set('import.clear_finished_from_staging', bool(data['clear_finished']))
     if 'enabled' in data and _auto_import_worker():
         # The flag alone doesn't move the worker — mirror the toggle endpoint
         # so enabling here actually starts it (and disabling stops it).
