@@ -1266,7 +1266,8 @@ export function ReviewPage() {
     (reviewCase?.album_plan?.counts.confirmed || 0) + (reviewCase?.album_plan?.counts.settled || 0);
 
   useEffect(() => {
-    if (albumView !== 'tracks' || !reviewCase || activeRowKey) return;
+    if (albumView !== 'tracks' || !reviewCase) return;
+    if (activeRowKey && assignments.some((row) => assignmentKey(row) === activeRowKey)) return;
     const first =
       assignments.find((row) => row.finding_id === activeId) ||
       assignments.find((row) => row.finding_id && row.action_state !== 'waiting') ||

@@ -934,7 +934,7 @@ export function AssignmentEvidence({ row, album }: { row: AlbumAssignment; album
     expected_duration_ms: row.slot_duration_ms,
     album_folder: row.file_path?.split('/').slice(0, -1).join('/') || album.folder,
     album_title: album.album,
-    artist_name: album.artist,
+    expected_artist: row.slot_artist,
     source: album.album_plan?.source,
     release_id: album.album_plan?.release_id,
     acoustid: row.acoustid,

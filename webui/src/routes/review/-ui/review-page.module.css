@@ -3073,7 +3073,7 @@
 }
 @container (max-width: 380px) {
   .candidateCard > button:first-child {
-    grid-template-columns: 24px 40px minmax(0, 1fr);
+    grid-template-columns: 24px 48px minmax(0, 1fr);
     gap: 7px;
   }
   .candidateCard .candidateStats {

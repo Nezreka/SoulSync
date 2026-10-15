@@ -75,6 +75,7 @@ export interface AlbumAssignment {
   audio_score?: number | null;
   duration_delta_ms?: number | null;
   file_duration_ms?: number | null;
+  slot_artist?: string;
   slot_duration_ms?: number | null;
   slot_preview_url?: string;
   playlists?: string[];
