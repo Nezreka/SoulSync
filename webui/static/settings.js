@@ -6806,8 +6806,10 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            // Use backend's message which contains dynamic source name
-            showToast(result.message || `${service} connection successful`, 'success');
+            // Use backend's message which contains dynamic source name. a pass
+            // can still carry a warning (leading \u26a0), which shouldn't read as green
+            const warned = String(result.message || '').trim().startsWith('\u26a0');
+            showToast(result.message || `${service} connection successful`, warned ? 'warning' : 'success');
 
             // Load music libraries after successful connection
             if (service === 'plex') {
@@ -6823,6 +6825,40 @@ async function testConnection(service) {
     } catch (error) {
         console.error(`Error testing ${service} connection:`, error);
         showToast(`Failed to test ${service} connection`, 'error', 'gs-connecting');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+// the deezer card holds two logins: the oauth app (favorites, playlists) and an
+// ARL (playlists + downloads). testConnection('deezer') covers the public api and
+// the oauth token; the ARL has its own check, so run both and say what each found.
+async function testDeezerConnection() {
+    let arl = document.getElementById('deezer-connection-arl')?.value || '';
+    if (!arl.trim()) return testConnection('deezer');
+    // an untouched field holds the redaction mask; empty means "test the saved one" (#870)
+    if (arl === REDACTED_SECRET_SENTINEL) arl = '';
+    try {
+        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+            clearTimeout(settingsAutoSaveTimer);
+            settingsAutoSaveTimer = null;
+            if (typeof saveSettings === 'function') await saveSettings(true);
+        }
+        showLoadingOverlay('Testing Deezer connection...');
+        const post = (url, body) => fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json()).catch(() => ({ success: false, error: 'request failed' }));
+        const [api, arlRes] = await Promise.all([
+            post(API.testConnection, { service: 'deezer' }),
+            post('/api/deezer-download/test', { arl }),
+        ]);
+        const apiMsg = api.success ? (api.message || 'Deezer reachable') : `Deezer failed: ${api.error}`;
+        const arlMsg = arlRes.success
+            ? `ARL: ${arlRes.user || 'Unknown'} (${arlRes.tier || 'Free'})`
+            : `ARL failed: ${arlRes.error || 'rejected'}`;
+        const ok = api.success && arlRes.success;
+        const warned = String(api.message || '').trim().startsWith('\u26a0');
+        showToast(`${apiMsg} · ${arlMsg}`, !ok ? 'error' : (warned ? 'warning' : 'success'), ok ? undefined : 'gs-connecting');
     } finally {
         hideLoadingOverlay();
     }

@@ -1335,17 +1335,44 @@
     // Mirrors music's testConnection(): save the key, then hit the test
     // endpoint, then toast the result. Isolated -> /api/video/enrichment/<svc>/test.
     var TEST_NAMES = { tmdb: 'TMDB', tvdb: 'TVDB', omdb: 'OMDb', fanart: 'fanart.tv',
-        opensubtitles: 'OpenSubtitles', subdl: 'SubDL', subsource: 'SubSource', trakt: 'Trakt' };
-    function testConnection(svc) {
-        var name = TEST_NAMES[svc] || svc.toUpperCase();
-        toast('Testing ' + name + ' connection…', 'info');
+        opensubtitles: 'OpenSubtitles', subdl: 'SubDL', subsource: 'SubSource', trakt: 'Trakt',
+        mdblist: 'MDBList', tvmaze: 'TVmaze', anilist: 'AniList', wikidata: 'Wikidata',
+        ryd: 'Return YouTube Dislike', sponsorblock: 'SponsorBlock', dearrow: 'DeArrow' };
+    function _testOne(svc) {
+        return fetch('/api/video/enrichment/' + svc + '/test',
+            { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .catch(function () { return { success: false, error: 'request failed' }; });
+    }
+    // the keyless cards hold several services behind one button ("tvmaze,anilist,wikidata").
+    // only the ones switched on get tested, a service you turned off isn't broken.
+    function testConnection(spec) {
+        var svcs = String(spec || '').split(',').filter(Boolean);
+        if (svcs.length > 1) {
+            svcs = svcs.filter(function (s) {
+                var box = document.getElementById('video-' + s + '-enabled');
+                return !box || box.checked;
+            });
+            if (!svcs.length) { toast('Nothing to test, all of these are switched off', 'info'); return; }
+        }
+        var names = svcs.map(function (s) { return TEST_NAMES[s] || s.toUpperCase(); });
+        toast('Testing ' + names.join(', ') + '…', 'info');
         saveKeys(true).then(function () {
-            return fetch('/api/video/enrichment/' + svc + '/test',
-                { method: 'POST', headers: { 'Accept': 'application/json' } });
-        }).then(function (r) { return r.json(); }).then(function (res) {
-            if (res && res.success) toast(res.message || (name + ' connection successful'), 'success');
-            else toast(name + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
-        }).catch(function () { toast('Failed to test ' + name + ' connection', 'error'); });
+            return Promise.all(svcs.map(_testOne));
+        }).then(function (results) {
+            if (results.length === 1) {
+                var res = results[0];
+                if (res && res.success) toast(res.message || (names[0] + ' connection successful'), 'success');
+                else toast(names[0] + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
+                return;
+            }
+            var bad = [];
+            results.forEach(function (res, i) {
+                if (!(res && res.success)) bad.push(names[i] + ': ' + ((res && res.error) || 'unknown'));
+            });
+            if (!bad.length) toast(names.join(', ') + ' all reachable', 'success');
+            else toast('Failed: ' + bad.join(' · '), 'error');
+        }).catch(function () { toast('Failed to test ' + names.join(', '), 'error'); });
     }
 
     // ── Library Organization (naming templates + post-process toggles) ───────

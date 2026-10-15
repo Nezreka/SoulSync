@@ -231,6 +231,13 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
+        if service == "mdblist":
+            # a list source, not a worker or a subtitle provider. same key the
+            # collection studio reads.
+            from core.video.collections.list_sources import check_mdblist_key
+            from . import get_video_db
+            ok, msg = check_mdblist_key(get_video_db().get_setting("mdblist_api_key") or "")
+            return jsonify({"success": ok, "message": msg, "error": None if ok else msg})
         w = engine().worker(service)
         if w:
             # matcher workers wrap a client; backfill workers (fanart,

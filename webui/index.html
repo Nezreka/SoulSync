@@ -3332,6 +3332,7 @@
                                                         id="spotify-disconnect-btn" onclick="disconnectSpotify()"
                                                         style="display: none;">🔌
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('spotify')">Test Connection</button>
                                                 </div>
                                                 <div class="form-group"
                                                     style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
@@ -3393,6 +3394,9 @@
                                                         Region-specific albums are auto-searched across other
                                                         storefronts as fallback.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('itunes')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3448,6 +3452,9 @@
                                                         <code>arl</code> value. Provides playlist access + downloads.
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testDeezerConnection()">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3472,6 +3479,9 @@
                                                     <div class="callback-help">Click "Generate new token" — no app
                                                         registration needed. Provides 60 req/min and cover art in search
                                                         results.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('discogs')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3512,6 +3522,7 @@
                                                     <button class="auth-button" onclick="disconnectTidal()"
                                                         style="margin-left: 8px;">
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('tidal')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3588,6 +3599,9 @@
                                                         → look in the request headers for <code>X-User-Auth-Token</code>
                                                         → copy that value.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('qobuz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3637,6 +3651,9 @@
                                                         setlist.fm/settings/api (non-commercial use).
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('concerts')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3684,6 +3701,9 @@
                                                         Scrobbling</button>
                                                     <span class="setting-help-text" id="lastfm-scrobble-status"></span>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('lastfm')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3706,6 +3726,9 @@
                                                             style="color: #ffff64;">Genius API Clients</a></div>
                                                     <div class="callback-help">Generate a "Client Access Token" — no
                                                         OAuth flow needed.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('genius')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3750,6 +3773,9 @@
                                                         search indexes; use its final URL.</small>
                                                 </div>
 
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('musicbrainz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3835,6 +3861,9 @@
                                                         <input type="checkbox" id="listenbrainz-scrobble-enabled">
                                                         Scrobble plays to ListenBrainz
                                                     </label>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('listenbrainz')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4117,6 +4146,8 @@
                                                         collections from MDBList lists — the real IMDb Top 250, award
                                                         lists (Oscar winners), and thousands of community lists.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="mdblist">Test MDBList</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="nokey">
@@ -4143,6 +4174,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Gap-fill extra data on your library in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="tvmaze,anilist,wikidata">Test Connections</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="ytextras">
@@ -4168,6 +4201,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Enrich cached YouTube videos in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="ryd,sponsorblock,dearrow">Test Connections</button>
                                             </div>
                                         </div>
                                     </div>
