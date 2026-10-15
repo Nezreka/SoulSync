@@ -1,0 +1,370 @@
+import { useState } from 'react';
+
+import type { ReviewFinding } from '../-review.api';
+import type { FindingTypeInfo } from '../../tools/-tools.groups';
+
+import { findingTypeLabel } from '../../tools/-tools.core';
+import { CompletenessChoice } from './completeness-choice';
+import { ReconciliationEvidence } from './reconciliation-evidence';
+import { ReviewAudio } from './review-audio';
+import styles from './review-page.module.css';
+import { formatTrackPosition } from './review-position';
+import { findingHeading, record, records, textValue, shortDuration } from './review-presentation';
+
+export function SelectedActionDetail({
+  finding,
+  itemIndex,
+  itemCount,
+  typeInfo,
+  busy,
+  onAct,
+  onSelect,
+  previousId,
+  nextId,
+  comparisonPath,
+  comparisonDurationMs,
+  compact = false,
+  numberingPreview = false,
+}: {
+  finding: ReviewFinding;
+  itemIndex: number;
+  itemCount: number;
+  typeInfo?: FindingTypeInfo;
+  busy: boolean;
+  onAct: (action: 'fix' | 'dismiss', choice?: string) => void;
+  onSelect: (findingId: number | null) => void;
+  previousId?: number;
+  nextId?: number;
+  comparisonPath?: string;
+  comparisonDurationMs?: number;
+  compact?: boolean;
+  numberingPreview?: boolean;
+}) {
+  const canApply =
+    Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag' && !numberingPreview;
+  const [assignmentSlot, setAssignmentSlot] = useState('');
+  const assignmentOptions = records(record(finding.details).assignment_options);
+  const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
+  const wrongAudio = finding.details?.audio_conflict === 'different_recording';
+  const versionConflict = finding.details?.version_conflict === true;
+  const waitingForDownload = ['wishlisted', 'downloading'].includes(
+    textValue(finding.details?.fulfillment_state),
+  );
+  const replacement = record(finding.details?.replacement_track);
+  const proposedSlot = assignmentOptions.find((slot) => {
+    const sourceTrackId = textValue(replacement.source_track_id);
+    return sourceTrackId && textValue(slot.key).startsWith(`id:${sourceTrackId}:`);
+  });
+  const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
+  const suggested = finding.review_tier === 'ready';
+  const compactReason = finding.review_reason || finding.description;
+  const details = record(finding.details);
+  const localDurationMs = Number(
+    details.file_duration_ms || record(details.current_tags).duration_ms || 0,
+  );
+  const releaseDurationMs = Number(
+    details.expected_duration_ms || record(details.replacement_track).duration_ms || 0,
+  );
+  const durationDifference =
+    localDurationMs && releaseDurationMs ? Math.abs(localDurationMs - releaseDurationMs) : 0;
+  return (
+    <section
+      className={styles.findingDetail}
+      data-compact={compact || undefined}
+      id="selected-review-action"
+      aria-label="Selected action detail"
+    >
+      {!compact && (
+        <div className={styles.decisionHeader}>
+          <span>
+            {suggested ? 'Ready change' : 'Needs review'} · {findingTypeLabel(finding.finding_type)}{' '}
+            · Item {itemIndex + 1} of {itemCount}
+          </span>
+          <span className={styles.severity}>{finding.severity}</span>
+        </div>
+      )}
+      <h3>{findingHeading(finding)}</h3>
+      <p className={styles.description}>
+        {versionConflict
+          ? 'The local audio and release track may be different versions. Listen before choosing how to keep them.'
+          : compact
+            ? compactReason || 'Review the supporting evidence.'
+            : finding.description || 'Review the evidence below.'}
+      </p>
+      {Array.isArray(details.competing_copies) && details.competing_copies.length > 0 && (
+        <p className={styles.competingFileNotice}>
+          Other local file{details.competing_copies.length === 1 ? '' : 's'} fitting this slot:{' '}
+          {details.competing_copies.map((path) => textValue(path).split('/').pop()).join(', ')}
+        </p>
+      )}
+      {wrongAudio && Boolean(details.acoustid_title) && (
+        <div className={styles.identityWarning}>
+          <strong>
+            Fingerprint identifies {textValue(details.acoustid_title)}
+            {details.acoustid_artist ? ` by ${textValue(details.acoustid_artist)}` : ''}
+            {typeof details.acoustid_score === 'number'
+              ? ` · ${Math.round(details.acoustid_score * 100)}%`
+              : ''}
+          </strong>
+          <span>
+            Expected release track:{' '}
+            {textValue(details.expected_title || replacement.name) || 'No matching slot'}. Review
+            the audio before changing this file.
+          </span>
+        </div>
+      )}
+      {durationDifference > 3000 && (
+        <div className={styles.durationWarning}>
+          <strong>Length differs by {(durationDifference / 1000).toFixed(1)} seconds</strong>
+          <span>
+            Local {shortDuration(localDurationMs)} · Release {shortDuration(releaseDurationMs)}
+          </span>
+        </div>
+      )}
+      {finding.file_path &&
+        ['reconciliation_unresolved', 'reconciliation_extra'].includes(finding.finding_type) && (
+          <ReviewAudio
+            localPath={finding.file_path}
+            localTitle={
+              textValue(details.current_title || record(details.current_tags).title) ||
+              finding.title
+            }
+            localDurationMs={localDurationMs}
+            comparisonPath={comparisonPath}
+            comparisonTitle={
+              textValue(details.expected_title || record(details.replacement_track).name) ||
+              'Release recording'
+            }
+            comparisonDurationMs={comparisonDurationMs || releaseDurationMs}
+            previewUrl={textValue(
+              details.expected_preview_url || record(details.replacement_track).preview_url,
+            )}
+            previewSource={textValue(details.source)}
+            previewTrackId={textValue(record(details.replacement_track).source_track_id)}
+          />
+        )}
+      {!compact && (
+        <section
+          className={styles.suggestion}
+          data-tone={suggested ? 'good' : 'warning'}
+          aria-label="Suggested resolution"
+        >
+          <span className={styles.suggestionIcon} aria-hidden="true">
+            {suggested ? '✓' : '!'}
+          </span>
+          <div>
+            <div className={styles.eyebrow}>Suggested resolution</div>
+            <strong>
+              {wrongAudio
+                ? canReplaceWrongAudio
+                  ? 'Replace with the expected release track'
+                  : 'Move the wrong file to quarantine'
+                : duplicateChoice
+                  ? 'Choose the copy to keep'
+                  : suggested
+                    ? typeInfo?.verb || 'Apply repair'
+                    : canApply
+                      ? 'Choose the correct action after reviewing the evidence'
+                      : 'Review manually'}
+            </strong>
+            <p>
+              {wrongAudio
+                ? canReplaceWrongAudio
+                  ? 'Requests the exact track from the selected release, then moves this file to recoverable quarantine.'
+                  : 'The audio is wrong for this release slot, but no exact replacement source is available.'
+                : duplicateChoice
+                  ? 'Both files identify as the same release track. Playlist membership is shown with each copy.'
+                  : suggested
+                    ? 'Evidence supports a direct repair.'
+                    : finding.review_reason || 'The evidence still requires a decision.'}
+            </p>
+          </div>
+        </section>
+      )}
+      <ReconciliationEvidence
+        finding={finding}
+        busy={busy}
+        prominent={
+          finding.finding_type === 'reconciliation_unresolved' || wrongAudio || versionConflict
+        }
+        onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
+      />
+      {finding.finding_type === 'reconciliation_intent' && (
+        <CompletenessChoice
+          key={finding.id}
+          finding={finding}
+          busy={busy}
+          onChoose={(choice) => onAct('fix', choice)}
+        />
+      )}
+      {finding.file_path && assignmentOptions.length > 0 && (
+        <div className={styles.assignmentCorrection}>
+          {proposedSlot && (
+            <button
+              type="button"
+              className={styles.primary}
+              disabled={busy}
+              onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
+            >
+              Confirm current assignment to {textValue(proposedSlot.title)}
+            </button>
+          )}
+          <label>
+            Assign this file to another release track
+            <select
+              value={assignmentSlot}
+              onChange={(event) => setAssignmentSlot(event.target.value)}
+            >
+              <option value="">Choose a release track…</option>
+              {assignmentOptions.map((slot, index) => (
+                <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
+                  {formatTrackPosition(
+                    textValue(slot.disc_number),
+                    textValue(slot.track_number),
+                    textValue(details.numbering_mode),
+                    textValue(slot.display_track_number),
+                  )}{' '}
+                  {textValue(slot.title)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={busy || !assignmentSlot}
+            onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
+          >
+            Save assignment
+          </button>
+          <small>The album will be rescanned before any metadata edit is offered.</small>
+        </div>
+      )}
+      {waitingForDownload && (
+        <p className={styles.waitingNotice} role="status">
+          This track is on the wishlist. The album is waiting for it to download and join the
+          library.
+        </p>
+      )}
+      {numberingPreview && (
+        <p className={styles.waitingNotice} role="status">
+          This numbering change is a preview. Choose the album numbering on Plan first.
+        </p>
+      )}
+      {!waitingForDownload && (
+        <div className={styles.actions}>
+          {finding.finding_type === 'reconciliation_intent' ? null : versionConflict && canApply ? (
+            <>
+              {replacement.source_track_id && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix', 'request_missing')}
+                  >
+                    Keep local and request release version
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
+                    Replace local with release version
+                  </button>
+                </>
+              )}
+            </>
+          ) : wrongAudio && canApply ? (
+            <>
+              {canReplaceWrongAudio && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className={styles.primary}
+                  onClick={() => onAct('fix', 'replace')}
+                >
+                  {busy ? 'Applying…' : 'Replace with correct track'}
+                </button>
+              )}
+              <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+                Quarantine wrong file
+              </button>
+            </>
+          ) : (
+            <>
+              {finding.finding_type === 'reconciliation_unresolved' &&
+                Boolean(details.replacement_available && replacement.source_track_id) && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix', 'request_missing')}
+                  >
+                    Request release version for comparison
+                  </button>
+                )}
+              {canApply &&
+                finding.finding_type !== 'reconciliation_release' &&
+                finding.finding_type !== 'reconciliation_duplicate' &&
+                finding.finding_type !== 'reconciliation_unresolved' &&
+                finding.finding_type !== 'reconciliation_extra' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={styles.primary}
+                    onClick={() => onAct('fix')}
+                  >
+                    {busy
+                      ? 'Applying…'
+                      : suggested
+                        ? typeInfo?.verb || 'Apply repair'
+                        : finding.finding_type === 'reconciliation_extra'
+                          ? 'Quarantine file'
+                          : 'Apply this change'}
+                  </button>
+                )}
+            </>
+          )}
+          <button
+            type="button"
+            disabled={busy || numberingPreview}
+            onClick={() => onAct('dismiss')}
+          >
+            {versionConflict ? 'Keep local version' : 'Accept as-is'}
+          </button>
+        </div>
+      )}
+      <nav className={styles.actions} aria-label="Decision navigation">
+        <button
+          type="button"
+          disabled={busy || previousId == null}
+          onClick={() => onSelect(previousId ?? null)}
+        >
+          ← Previous decision
+        </button>
+        <button
+          type="button"
+          disabled={busy || nextId == null}
+          onClick={() => onSelect(nextId ?? null)}
+        >
+          Next decision →
+        </button>
+      </nav>
+      {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
+        finding.file_path &&
+        Boolean(details.track_id) &&
+        details.album_id != null &&
+        !wrongAudio &&
+        !versionConflict &&
+        !duplicateChoice &&
+        !(details.competing_copies as unknown[] | undefined)?.length && (
+          <div className={styles.extraAction}>
+            <strong>Move this file out of the album</strong>
+            <span>
+              If this copy does not belong here, move it to recoverable quarantine and remove its
+              library entry.
+            </span>
+            <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+              Move this file out of the album
+            </button>
+          </div>
+        )}
+    </section>
+  );
+}

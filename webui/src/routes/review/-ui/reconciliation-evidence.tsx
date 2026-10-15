@@ -8,22 +8,17 @@ import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
 import { formatTrackPosition } from './review-position';
+import {
+  record as object,
+  records as objects,
+  textValue as label,
+  changeFieldLabel as proposedFieldLabel,
+  displayChanges,
+} from './review-presentation';
 
 type Data = Record<string, unknown>;
 type Tone = 'good' | 'warning' | 'danger' | 'info' | 'muted';
 type IconName = 'check' | 'warning' | 'x' | 'audio' | 'disc' | 'info' | 'arrow';
-
-function object(value: unknown): Data {
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Data) : {};
-}
-
-function objects(value: unknown): Data[] {
-  return Array.isArray(value) ? value.map(object).filter((item) => Object.keys(item).length) : [];
-}
-
-function label(value: unknown): string {
-  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-}
 
 function count(value: unknown): number {
   const number = Number(value);
@@ -37,22 +32,6 @@ function baseVersionTitle(value: string): string {
     .split(/\s+[-–]\s+|\s*\(/, 1)[0]
     .toLocaleLowerCase()
     .trim();
-}
-
-function proposedFieldLabel(field: string): string {
-  return (
-    {
-      artist: 'Album artist',
-      track_artist: 'Track artist',
-      library_track_artist: 'Track artist in library',
-      album: 'Album title',
-      library_album_title: 'Album title in library',
-      title: 'Track title',
-      library_title: 'Track title in library',
-      musicbrainz_recording_id: 'Recording ID',
-      library_recording_mbid: 'Recording ID in library',
-    }[field] || field.replaceAll('_', ' ')
-  );
 }
 
 function percent(value: unknown): string {
@@ -983,34 +962,7 @@ export function ReconciliationEvidence({
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
-  const shownChanges = Object.entries(changes).reduce<
-    Array<{ field: string; old: string; next: string; locations: string[] }>
-  >((rows, [field, raw]) => {
-    const value = object(raw);
-    const old = label(value.old);
-    const next = label(value.new);
-    const semantic =
-      {
-        library_album_title: 'album',
-        library_title: 'title',
-        library_track_artist: 'track_artist',
-        library_recording_mbid: 'musicbrainz_recording_id',
-        library_disc_number: 'disc_number',
-        library_track_number: 'track_number',
-      }[field] || field;
-    const existing = rows.find(
-      (row) => row.field === semantic && row.old === old && row.next === next,
-    );
-    if (existing) existing.locations.push(field.startsWith('library_') ? 'library' : 'file tag');
-    else
-      rows.push({
-        field: semantic,
-        old,
-        next,
-        locations: [field.startsWith('library_') ? 'library' : 'file tag'],
-      });
-    return rows;
-  }, []);
+  const shownChanges = displayChanges(changes);
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
   const ambiguityReasons = Array.isArray(details.ambiguity_reasons)
@@ -1079,10 +1031,7 @@ export function ReconciliationEvidence({
             {shownChanges.map((change) => {
               return (
                 <div key={`${change.field}-${change.old}-${change.next}`}>
-                  <strong>
-                    {proposedFieldLabel(change.field)}
-                    {change.locations.length > 1 ? ' · file and library' : ''}
-                  </strong>
+                  <strong>{proposedFieldLabel(change.field, change.locations)}</strong>
                   <span className={styles.oldValue}>{change.old || '—'}</span>
                   <EvidenceIcon name="arrow" />
                   <span className={styles.newValue}>{change.next || '—'}</span>

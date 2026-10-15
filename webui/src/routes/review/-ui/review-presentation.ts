@@ -1,0 +1,127 @@
+import type { AlbumAssignment, ReviewFinding } from '../-review.api';
+
+export function shortDuration(value: number | null | undefined): string {
+  if (!value || !Number.isFinite(value)) return '';
+  return `${Math.floor(value / 60000)}:${String(Math.floor((value % 60000) / 1000)).padStart(2, '0')}`;
+}
+
+export function assignmentKey(row: AlbumAssignment): string {
+  return `${row.file_path || 'missing'}:${row.slot_disc_number || 1}:${row.slot_track_number || row.current_track_number || 0}`;
+}
+
+export function findingHeading(finding: ReviewFinding): string {
+  const details = finding.details && typeof finding.details === 'object' ? finding.details : {};
+  if (details.version_conflict) {
+    return `Compare versions: ${textValue(details.current_title || finding.title.replace(/^Unassigned audio:\s*/i, ''))}`;
+  }
+  const changes =
+    details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
+      ? Object.keys(details.changes as Record<string, unknown>)
+      : [];
+  const expected = textValue(details.expected_title || finding.title.replace(/^Retag\s+/i, ''));
+  if (details.audio_conflict === 'different_recording') return finding.title;
+  if (changes.length === 1 && changes[0] === 'filename') return `Rename file: ${expected}`;
+  if (finding.finding_type === 'reconciliation_unresolved' && changes.length === 0) {
+    return `Confirm assignment: ${expected.replace(/^Confirm:\s*/i, '')}`;
+  }
+  if (/^Retag\s+/i.test(finding.title)) return `Update metadata: ${expected}`;
+  return finding.title;
+}
+
+export function statusLabel(status: string, row?: AlbumAssignment) {
+  if (row?.fulfillment_state === 'downloading') return 'Downloading';
+  if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
+  if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
+  if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
+  if (row?.relationship === 'version_conflict') return 'Compare versions';
+  return (
+    {
+      confirmed: 'Confirmed match',
+      change: 'Change',
+      uncertain: 'Review',
+      missing: 'Missing',
+      not_owned: 'Not collected',
+      extra: 'Extra',
+      duplicate: 'Duplicate',
+      settled: 'Previously reviewed',
+    }[status] || status
+  );
+}
+
+export function changeFieldLabel(field: string, locations?: string[]): string {
+  const name =
+    {
+      artist: 'Album artist · file tag',
+      album_artist: 'Album artist',
+      track_artist: 'Track artist · file tag',
+      library_track_artist: 'Track artist · library',
+      album: 'Album title · file tag',
+      library_album_title: 'Album title · library',
+      title: 'Track title',
+      library_title: 'Track title · library',
+      track_number: 'Track number',
+      disc_number: 'Disc number',
+      library_track_number: 'Track number · library',
+      library_disc_number: 'Disc number · library',
+      library_recording_disambiguation: 'Recording description · library',
+      filename: 'Filename',
+      musicbrainz_recording_id: 'Recording ID',
+      library_recording_mbid: 'Recording ID · library',
+    }[field] || field.replaceAll('_', ' ');
+  if (!locations || field === 'filename') return name;
+  const base = name.replace(/ · (file tag|library)$/, '');
+  const scope = locations.includes('library')
+    ? locations.includes('file tag')
+      ? 'file and library'
+      : 'library'
+    : 'file tag';
+  return `${base} · ${scope}`;
+}
+
+export function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export function records(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.map(record).filter((item) => Object.keys(item).length) : [];
+}
+
+export function textValue(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+export function changeValue(value: unknown): string {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map(changeValue).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+/** Merge identical file/library edits for display; preserve differing old or new values. */
+export function displayChanges(changes: unknown) {
+  const rows: Array<{ field: string; old: string; next: string; locations: string[] }> = [];
+  for (const [field, raw] of Object.entries(record(changes))) {
+    const value = record(raw);
+    const old = changeValue(value.old);
+    const next = changeValue(value.new);
+    const semantic =
+      {
+        library_album_title: 'album',
+        library_title: 'title',
+        library_track_artist: 'track_artist',
+        library_recording_mbid: 'musicbrainz_recording_id',
+        library_disc_number: 'disc_number',
+        library_track_number: 'track_number',
+      }[field] || field;
+    const location = field.startsWith('library_') ? 'library' : 'file tag';
+    const existing = rows.find(
+      (row) => row.field === semantic && row.old === old && row.next === next,
+    );
+    if (existing) {
+      if (!existing.locations.includes(location)) existing.locations.push(location);
+    } else rows.push({ field: semantic, old, next, locations: [location] });
+  }
+  return rows;
+}

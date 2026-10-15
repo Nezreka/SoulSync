@@ -487,7 +487,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
     expect(screen.getByText(/1 proposed track changes/)).toBeTruthy();
-    const selectedRow = screen.getByRole('row', { name: /Hourglass/ });
+    const selectedRow = screen.getByRole('button', { name: /Hourglass/ });
     fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');
     expect(selectedDetail.closest('[role="table"]')).toBeNull();
@@ -495,8 +495,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByText('Evidence and exact changes')).toBeNull();
     fireEvent.click(selectedRow);
     expect(screen.getByLabelText('Selected action detail')).toBeTruthy();
-    expect(selectedRow.getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('row', { name: /Hourglass/ })).toBeTruthy();
+    expect(selectedRow.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: /Hourglass/ })).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Show tracks'), { target: { value: 'numbering' } });
     expect((screen.getByLabelText('Show tracks') as HTMLSelectElement).value).toBe('numbering');
     expect(screen.queryByText(/3 settled release slots/)).toBeNull();
