@@ -1077,6 +1077,13 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+        # the worker itself was stopped (master switch off, shutdown) while the
+        # job ran. every job's check_stop() sees that flag and returns what it
+        # has, so the run reads as finished unless it is marked here, once,
+        # instead of in each job. not 'cancelled': nobody stopped this job.
+        if run_status == 'completed' and self.should_stop:
+            run_status = 'stopped'
+            run_error = 'Repair worker stopped before the job finished'
         # the job quit on its own before the end. not a crash and not done:
         # say so, with the job's reason, instead of a clean 'completed'
         if run_status == 'completed' and getattr(result, 'stopped_early', ''):
