@@ -1024,3 +1024,101 @@ def test_the_search_carries_the_song_with_its_own_artist():
     # one dict for the whole task, so a source can cache in it
     assert len({id(h) for h in sk.hint_calls}) == 1
 
+
+
+# ---------------------------------------------------------------------------
+# Quality-tier fall-through (#1304)
+# ---------------------------------------------------------------------------
+
+class _Hit:
+    def __init__(self, username, filename, fmt, bitrate=None, bit_depth=None):
+        from core.quality.model import AudioQuality
+        self.username = username
+        self.filename = filename
+        self.audio_quality = AudioQuality(format=fmt, bitrate=bitrate, bit_depth=bit_depth)
+
+
+def _ladder_judge():
+    """The real quality ranker on an MP3-320-first ladder, fallback off: only
+    the best tier present comes back, exactly as the Soulseek filter does."""
+    from core.quality.model import QualityTarget, filter_and_rank
+    targets = [QualityTarget(format='mp3', min_bitrate=320), QualityTarget(format='flac')]
+    return lambda r, t, q, p=None: filter_and_rank(list(r), targets, fallback_enabled=False)
+
+
+def _walk_marking_used(reachable, tried):
+    """Stand-in for the candidate walk: marks each row used, starts the first
+    reachable peer."""
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
+        for c in candidates:
+            key = f"{c.username}_{c.filename}"
+            if key in download_tasks[task_id]['used_sources']:
+                continue
+            download_tasks[task_id]['used_sources'].add(key)
+            tried.append(c.username)
+            if c.username in reachable:
+                download_tasks[task_id]['username'] = c.username
+                download_tasks[task_id]['filename'] = c.filename
+                return True
+        return False
+    return _attempt
+
+
+def test_dead_top_tier_peer_falls_through_to_next_tier_of_same_results():
+    # the #1304 case: one unreachable MP3 320 peer, good FLACs in the same results
+    _seed_task()
+    results = [
+        _Hit('dead', 'a.mp3', 'mp3', bitrate=320),
+        _Hit('f1', 'a.flac', 'flac', bit_depth=16),
+        _Hit('f2', 'a.flac', 'flac', bit_depth=24),
+    ]
+    tried = []
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=results),
+        matching=_FakeMatchEngine(queries=['q1']),
+        get_valid_candidates=_ladder_judge(),
+        attempt_download_with_candidates=_walk_marking_used({'f1', 'f2'}, tried),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert tried[0] == 'dead'
+    assert download_tasks['t1']['status'] != 'not_found'
+    assert download_tasks['t1']['username'] in ('f1', 'f2')
+    assert {c.username for c in download_tasks['t1']['cached_candidates']} == {'f1', 'f2'}
+
+
+def test_no_lower_tier_still_ends_not_found():
+    _seed_task()
+    results = [_Hit('dead', 'a.mp3', 'mp3', bitrate=320), _Hit('low', 'b.mp3', 'mp3', bitrate=128)]
+    tried = []
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=results),
+        matching=_FakeMatchEngine(queries=['q1']),
+        get_valid_candidates=_ladder_judge(),
+        attempt_download_with_candidates=_walk_marking_used(set(), tried),
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    # the 128 kbps file is below the ladder and fallback is off: never tried
+    assert 'low' not in tried
+    assert download_tasks['t1']['status'] == 'not_found'
+
+
+def test_skipped_rows_that_never_reach_used_sources_do_not_loop():
+    # the walk skips blacklisted rows without marking them used; the
+    # fall-through must still end
+    _seed_task()
+    results = [_Hit('bl', 'a.mp3', 'mp3', bitrate=320), _Hit('f1', 'a.flac', 'flac')]
+    calls = []
+
+    def _skip_everything(task_id, candidates, track, batch_id, **kwargs):
+        calls.append([c.username for c in candidates])
+        return False
+
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=results),
+        matching=_FakeMatchEngine(queries=['q1']),
+        get_valid_candidates=_ladder_judge(),
+        attempt_download_with_candidates=_skip_everything,
+    )
+    tw.download_track_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'not_found'
+    assert calls[:2] == [['bl'], ['f1']]

@@ -1579,6 +1579,16 @@ describe('the save payload (2069-2082, 2266-2277)', () => {
     expect(strip(weekly)).toEqual(strip(hourly));
   });
 
+  it('merges into the row\u2019s existing config, the board\u2019s target keys win (#1704)', () => {
+    const payload = autoSyncSchedulePayload(
+      playlist,
+      5,
+      { trigger_type: 'schedule', trigger_config: {} },
+      { playlist_id: '99', all: true, sync_mode: 'replace' },
+    );
+    expect(payload.action_config).toEqual({ playlist_id: '5', all: false, sync_mode: 'replace' });
+  });
+
   it('carries the action the row resolves to', () => {
     const payload = autoSyncSchedulePayload(playlist, 5, {
       trigger_type: 'schedule',

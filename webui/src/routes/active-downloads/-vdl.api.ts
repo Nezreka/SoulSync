@@ -159,6 +159,11 @@ export function cancelVideoDownload(id: number): Promise<VdlResult | null> {
   return post('video/downloads/cancel', { id });
 }
 
+/** Stop running wishlist searches (search-all, the hourly drain) so they don't keep grabbing. */
+export function stopVideoWishlistSearches(): Promise<VdlResult | null> {
+  return post('video/wishlist/search-stop', {});
+}
+
 /**
  * Retry a download. `next: true` retries with a DIFFERENT release (the
  * block-and-retry path); without it the same release is re-grabbed.

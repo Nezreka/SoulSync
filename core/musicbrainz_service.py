@@ -12,7 +12,8 @@ from core.worker_utils import (
     source_id_conflict,
 )
 from database.music_database import MusicDatabase
-from core.text.title_match import recording_version_markers
+from core.text.fold import fold_title
+from core.text.title_match import is_trailing_version_qualifier, recording_version_markers
 
 logger = get_logger("musicbrainz_service")
 
@@ -28,6 +29,181 @@ _NO_ALIASES = {'aliases': [], 'resolved': True}
 # on a numeric MB `length`; a candidate with no length is not punished for
 # missing data.
 RECORDING_DURATION_TOLERANCE_MS = 30_000
+
+# #1705 — a featuring credit in a title ("Rather Be (feat. Jess Glynne)")
+# is part of the CREDIT, not of the MusicBrainz title: MB files that
+# recording as plain "Rather Be" with Jess Glynne in the artist credit.
+# The strict phrase searches below (`recording:"<title>"`,
+# `release:"<title>"`) therefore return ZERO results for every
+# feat.-titled track (verified live for the reported case: the feat.
+# query counts 0, the stripped query finds the recording), and the raw
+# title-similarity gates bury the same candidate when a looser search
+# does surface it ("rather be (feat. jess glynne)" vs "rather be"
+# scores 0.47 against a 0.6 floor). These helpers take the featuring
+# segment back out for SEARCH AND SCORING ONLY — the stored title is
+# never rewritten. Modelled on `core/downloads/candidates.py`'s
+# `_strip_featuring`, plus `ft.`: only feat./ft./featuring segments go,
+# every other qualifier ("(Live)", "(Remix)") stays, because those name
+# a different performance and the version-marker gate must still see
+# them.
+_FEAT_BRACKET_RE = re.compile(
+    r'\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring)\b'
+    r'(?:[^\[\]\(\)]|\([^)]*\)|\[[^\]]*\])*[\)\]]',
+    re.IGNORECASE,
+)
+# Trailing credit: "Song feat. Z". The lazy tail stops at a bracket so
+# a following "(Live)" survives — with its separating space intact.
+# a name has to follow the keyword, so a title that just ends in the
+# word ("Tribute to Little Feat") is left alone.
+_FEAT_TRAILING_RE = re.compile(
+    r'\s+(?:feat|ft|featuring)\b(?=\.?\s+[^\s\(\[]).*?(?=\s*(?:[\(\[]|$))',
+    re.IGNORECASE,
+)
+_FEAT_SEGMENT_HEAD_RE = re.compile(
+    r'^[\s\(\[]*(?:featuring|feat|ft)\.?\s*', re.IGNORECASE)
+_DASH_SEPARATOR_RE = re.compile(r'\s[-–—]\s')
+
+
+def _trailing_feat_segment(title: str):
+    """The trailing featuring segment of ``title``, or None.
+
+    Returns (segment, keep): ``segment`` is the credit text to remove
+    (" feat. X"), ``keep`` is a dash tail that FOLLOWED the credit and
+    must survive it ("Song feat. X - Remix", "Song feat. X - Pt. 2").
+    The segment is ALWAYS cut at the first dash separator: what
+    follows a dash is title text (a version, a distinct-track marker,
+    a subtitle), never part of a featured artist's name — and the
+    dangerous direction is deleting title text, not keeping it. An
+    earlier version kept the tail only when it parsed as a version
+    qualifier, which swallowed distinct-track tails whole
+    ("Song feat. X - Pt. 2" stripped to "Song" and matched the plain
+    recording at 100) precisely because `is_trailing_version_qualifier`
+    vetoes distinct-track tokens by design.
+    """
+    match = _FEAT_TRAILING_RE.search(title or '')
+    if not match:
+        return None
+    segment = match.group(0)
+    dash = _DASH_SEPARATOR_RE.search(segment)
+    if dash:
+        return segment[:dash.start()], segment[dash.start():]
+    return segment, ''
+
+
+def strip_featuring_credit(title: str) -> str:
+    """``title`` without its featuring-credit segment(s).
+
+    ``"Rather Be (feat. Jess Glynne)"`` → ``"Rather Be"``;
+    ``"Song (feat. X) (Live)"`` → ``"Song (Live)"`` and
+    ``"Song feat. X - Remix"`` → ``"Song - Remix"`` (the version
+    qualifier is kept in both forms — it is not part of the credit,
+    and the stripped search's version-marker set must still see it).
+    Returns the input unchanged when there is no featuring segment,
+    and also when stripping would leave nothing (a title that is
+    somehow only a credit has nothing searchable to fall back to).
+    """
+    if not title:
+        return title
+    cleaned = _FEAT_BRACKET_RE.sub('', title)
+    trailing = _trailing_feat_segment(cleaned)
+    if trailing is not None:
+        _segment, keep = trailing
+        match = _FEAT_TRAILING_RE.search(cleaned)
+        cleaned = cleaned[:match.start()] + keep + cleaned[match.end():]
+    if cleaned == title:
+        return title
+    # Only a title a featuring segment was actually cut from gets the
+    # tidy-up below — a plain title is returned byte for byte.
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    # Leftover empty brackets from a fully-nested credit ("[[feat. X]]").
+    cleaned = re.sub(r'\(\s*\)|\[\s*\]', '', cleaned)
+    # A doubled separator where the credit hung between two dash tails
+    # ("Song - feat. X - Remix" is cut to "Song - - Remix").
+    cleaned = re.sub(r'[-–—](?:\s+[-–—])+\s', '- ', cleaned)
+    # Canonicalise an em/en-dash separator in front of a version tail
+    # to the hyphen form: `recording_version_markers`' dash-tail rule
+    # recognises only [-–], so "Song — Remix" would otherwise carry
+    # its version invisibly past the marker gate and the bare studio
+    # recording could match it. (A plain em-dash title has the same
+    # blindness without this change; the normalisation only rides
+    # along on titles a featuring cut already changed.)
+    dash = _DASH_SEPARATOR_RE.search(cleaned)
+    if (dash and dash.group(0).strip() != '-'
+            and is_trailing_version_qualifier(cleaned[dash.end():])):
+        cleaned = cleaned[:dash.start()] + ' - ' + cleaned[dash.end():]
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip().rstrip('-–—').strip()
+    return cleaned if cleaned else title
+
+
+def featured_credit_names(title: str) -> list:
+    """The artist names a title's featuring credit names, in order.
+
+    ``"Rather Be (feat. Jess Glynne)"`` → ``["Jess Glynne"]``. Used as
+    EVIDENCE, not decoration: when the featuring-stripped search is
+    scored, a candidate whose artist credit actually names the
+    featured artist is the recording the file's title describes, ahead
+    of a same-title candidate credited to the main artist alone.
+
+    The WHOLE credit text always comes first ("Earth, Wind & Fire" is
+    one artist, not three), followed — only when the credit is a
+    comma-separated list — by its individual names ("X, Y & Z" also
+    yields "X", "Y", "Z"), so multi-artist credits still match a
+    candidate that credits just one of them. A bare "and"/"&" never
+    splits on its own: too many single artists carry one in their name
+    ("Hall and Oates") and a shattered fragment both loses the true
+    comparison and can collide with an unrelated short name.
+    """
+    if not title:
+        return []
+    segments = [m.group(0) for m in _FEAT_BRACKET_RE.finditer(title)]
+    trailing = _trailing_feat_segment(title)
+    if trailing is not None:
+        segments.append(trailing[0])
+    names = []
+    for segment in segments:
+        inner = _FEAT_SEGMENT_HEAD_RE.sub('', segment).strip(')] ').strip()
+        # A bracketed fragment nested inside the credit ("(feat. X
+        # (Live))", "(feat. X (of Y))") is annotation, not name text —
+        # leaving it in pollutes the comparison below the pool's
+        # similarity threshold and the evidence is lost anyway.
+        inner = re.split(r'\s[\(\[]', inner)[0].strip(')] ').strip()
+        if not inner:
+            continue
+        if inner not in names:
+            names.append(inner)
+        if ',' in inner:
+            for part in inner.split(','):
+                for sub in re.split(r'\s*(?:&|\band\b)\s*', part):
+                    sub = sub.strip(')] ').strip()
+                    if sub and sub not in names:
+                        names.append(sub)
+    return names
+
+
+def _feat_miss_metadata(title: str) -> Optional[Dict[str, Any]]:
+    """what a negative cache row stores for ``title``.
+
+    a feat.-titled miss gets a marker saying the stripped retry already
+    ran (#1705). plain titles store nothing, same as before.
+    """
+    if strip_featuring_credit(title) != title:
+        return {'feat_retry': 1}
+    return None
+
+
+def _is_pre_feat_fix_miss(cached: Dict[str, Any], title: str) -> bool:
+    """true for a negative row on a feat. title with no #1705 marker.
+
+    those were written before the stripped retry existed, so they only
+    prove the feat. phrase search missed. without this every track hit
+    by #1705 stays unmatched until the 30 day negative ttl runs out.
+    """
+    if cached.get('musicbrainz_id'):
+        return False
+    if strip_featuring_credit(title) == title:
+        return False
+    metadata = cached.get('metadata')
+    return not (isinstance(metadata, dict) and metadata.get('feat_retry'))
 
 
 class MusicBrainzService:
@@ -385,6 +561,101 @@ class MusicBrainzService:
         qualifiers = sorted(set(q.lower() for q in self._VERSION_QUALIFIERS.findall(title)))
         return ' '.join(qualifiers)
 
+    def _score_release_candidates(self, album_name: str, artist_name: Optional[str],
+                                  results: list, *, featured_names: Optional[list] = None) -> tuple:
+        """Score one release search's candidates against ``album_name``.
+
+        Returns (best_match, best_confidence). Factored out of
+        `match_release` so the featuring-stripped retry (#1705) scores
+        its candidates with the exact same formula and gates — a second
+        scoring implementation would drift from this one.
+
+        ``featured_names`` is the recording pool's release analogue:
+        among candidates at/over the 70 bar WITH main-artist evidence
+        (the artist bonus), one whose credit also names the featured
+        artist wins — a same-title compilation appearance should not
+        beat the single's own release just on MusicBrainz score when
+        the file's title names who is actually on it.
+        """
+        # Extract version qualifier from search query for preference matching
+        query_qualifier = self._extract_version_qualifier(album_name)
+
+        best_match = None
+        best_confidence = 0
+        featured_match = None
+        featured_confidence = 0
+
+        for result in results:
+            mb_title = result.get('title', '')
+            mb_score = result.get('score', 0)
+
+            # Calculate title similarity
+            title_similarity = self._calculate_similarity(album_name, mb_title)
+
+            # Hard floor, mirroring match_recording's: without it the
+            # bonuses (artist +20, version +10, mb_score up to +30) could
+            # walk a ~0.4-title-similarity release past the 70 gate — and
+            # that MBID feeds MBID-keyed cover art with no downstream
+            # validation.
+            if title_similarity < 0.6:
+                continue
+
+            # If we have artist info, check artist match too
+            artist_bonus = 0
+            if artist_name and 'artist-credit' in result:
+                artist_credits = result['artist-credit']
+                for credit in artist_credits:
+                    if isinstance(credit, dict) and 'artist' in credit:
+                        mb_artist = credit['artist'].get('name', '')
+                        artist_similarity = self._calculate_similarity(artist_name, mb_artist)
+                        if artist_similarity > 0.7:
+                            artist_bonus = 20
+                            break
+
+            # Version qualifier matching: prefer releases with the same
+            # edition qualifier (Deluxe, Remastered, etc.) as the query.
+            # This prevents "Playing the Angel (Deluxe)" from matching the
+            # standard "Playing the Angel" release.
+            version_bonus = 0
+            if query_qualifier:
+                mb_qualifier = self._extract_version_qualifier(mb_title)
+                if query_qualifier == mb_qualifier:
+                    version_bonus = 10  # Same edition — strong preference
+                elif mb_qualifier and mb_qualifier in query_qualifier:
+                    version_bonus = 5   # Partial match (e.g. "deluxe" in "super deluxe")
+                elif not mb_qualifier:
+                    version_bonus = -5  # Query has qualifier but result doesn't — penalize
+
+            # Combine scores - cap at 100
+            confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus + version_bonus))
+
+            # Numeric difference = different release. 'Vol.4' vs 'Vol.4.5'
+            # scores 0.97 string similarity, so a near-identical wrong
+            # volume could win and its MBID then feeds CAA art with NO
+            # downstream validation (CAA is MBID-keyed — Sokhi's wrong
+            # covers). Halving lands any such candidate below the 70 gate
+            # while leaving the exact-volume result untouched.
+            from core.text.title_match import numeric_tokens_differ
+            if numeric_tokens_differ(album_name, mb_title):
+                confidence = int(confidence * 0.5)
+
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_match = result
+
+            if featured_names and confidence >= 70 and artist_bonus == 20:
+                credit_names = self._candidate_credit_names(result)
+                if any(self._calculate_similarity(featured, credited) > 0.8
+                       for featured in featured_names
+                       for credited in credit_names):
+                    if confidence > featured_confidence:
+                        featured_confidence = confidence
+                        featured_match = result
+
+        if featured_match is not None:
+            return featured_match, featured_confidence
+        return best_match, best_confidence
+
     def match_release(self, album_name: str, artist_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Match a release (album) by name to MusicBrainz
@@ -394,7 +665,7 @@ class MusicBrainzService:
         """
         # Check cache first
         cached = self._check_cache('release', album_name, artist_name)
-        if cached:
+        if cached and not _is_pre_feat_fix_miss(cached, album_name):
             logger.debug(f"Cache hit for release '{album_name}'")
             return {
                 'mbid': cached['musicbrainz_id'],
@@ -410,76 +681,39 @@ class MusicBrainzService:
             results = self.mb_client.search_release(
                 album_name, artist_name, limit=5, raise_on_error=True)
 
+            best_match, best_confidence = (None, 0)
+            if results:
+                best_match, best_confidence = self._score_release_candidates(
+                    album_name, artist_name, results)
+
+            # #1705 — featuring-credit fallback, same shape as
+            # match_recording's: a single's release title carries the
+            # feat. segment ("Rather Be (feat. Jess Glynne)") while
+            # MusicBrainz files the release under the plain title, so
+            # the strict phrase search returns nothing and raw-similarity
+            # scoring would floor the plain title anyway. Retry once
+            # with the credit stripped, scored against the stripped
+            # name, and keep whichever pass scored better. The cache
+            # stays keyed on the ORIGINAL name either way.
+            if best_confidence < 70:
+                stripped_name = strip_featuring_credit(album_name)
+                if stripped_name != album_name:
+                    alt_results = self.mb_client.search_release(
+                        stripped_name, artist_name, limit=5, raise_on_error=True)
+                    if alt_results:
+                        results = results or alt_results
+                        alt_match, alt_confidence = self._score_release_candidates(
+                            stripped_name, artist_name, alt_results,
+                            featured_names=featured_credit_names(album_name))
+                        if alt_confidence > best_confidence:
+                            best_match, best_confidence = alt_match, alt_confidence
+
             if not results:
                 logger.info(f"No MusicBrainz results for release '{album_name}'")
-                self._save_to_cache('release', album_name, artist_name, None, None, 0)
+                self._save_to_cache('release', album_name, artist_name, None,
+                                    _feat_miss_metadata(album_name), 0)
                 return None
 
-            # Extract version qualifier from search query for preference matching
-            query_qualifier = self._extract_version_qualifier(album_name)
-
-            # Find best match
-            best_match = None
-            best_confidence = 0
-
-            for result in results:
-                mb_title = result.get('title', '')
-                mb_score = result.get('score', 0)
-
-                # Calculate title similarity
-                title_similarity = self._calculate_similarity(album_name, mb_title)
-
-                # Hard floor, mirroring match_recording's: without it the
-                # bonuses (artist +20, version +10, mb_score up to +30) could
-                # walk a ~0.4-title-similarity release past the 70 gate — and
-                # that MBID feeds MBID-keyed cover art with no downstream
-                # validation.
-                if title_similarity < 0.6:
-                    continue
-
-                # If we have artist info, check artist match too
-                artist_bonus = 0
-                if artist_name and 'artist-credit' in result:
-                    artist_credits = result['artist-credit']
-                    for credit in artist_credits:
-                        if isinstance(credit, dict) and 'artist' in credit:
-                            mb_artist = credit['artist'].get('name', '')
-                            artist_similarity = self._calculate_similarity(artist_name, mb_artist)
-                            if artist_similarity > 0.7:
-                                artist_bonus = 20
-                                break
-
-                # Version qualifier matching: prefer releases with the same
-                # edition qualifier (Deluxe, Remastered, etc.) as the query.
-                # This prevents "Playing the Angel (Deluxe)" from matching the
-                # standard "Playing the Angel" release.
-                version_bonus = 0
-                if query_qualifier:
-                    mb_qualifier = self._extract_version_qualifier(mb_title)
-                    if query_qualifier == mb_qualifier:
-                        version_bonus = 10  # Same edition — strong preference
-                    elif mb_qualifier and mb_qualifier in query_qualifier:
-                        version_bonus = 5   # Partial match (e.g. "deluxe" in "super deluxe")
-                    elif not mb_qualifier:
-                        version_bonus = -5  # Query has qualifier but result doesn't — penalize
-
-                # Combine scores - cap at 100
-                confidence = min(100, int((title_similarity * 50) + (mb_score / 100 * 30) + artist_bonus + version_bonus))
-
-                # Numeric difference = different release. 'Vol.4' vs 'Vol.4.5'
-                # scores 0.97 string similarity, so a near-identical wrong
-                # volume could win and its MBID then feeds CAA art with NO
-                # downstream validation (CAA is MBID-keyed — Sokhi's wrong
-                # covers). Halving lands any such candidate below the 70 gate
-                # while leaving the exact-volume result untouched.
-                from core.text.title_match import numeric_tokens_differ
-                if numeric_tokens_differ(album_name, mb_title):
-                    confidence = int(confidence * 0.5)
-
-                if confidence > best_confidence:
-                    best_confidence = confidence
-                    best_match = result
-            
             # Only return matches with confidence >= 70%
             if best_match and best_confidence >= 70:
                 mbid = best_match.get('id')
@@ -498,7 +732,8 @@ class MusicBrainzService:
                 }
             else:
                 logger.info(f"Low confidence match for release '{album_name}' (best: {best_confidence})")
-                self._save_to_cache('release', album_name, artist_name, None, None, best_confidence)
+                self._save_to_cache('release', album_name, artist_name, None,
+                                    _feat_miss_metadata(album_name), best_confidence)
                 return None
                 
         except Exception as e:
@@ -524,16 +759,49 @@ class MusicBrainzService:
                 mbids.add(str(mbid).strip().lower())
         return mbids
 
+    @staticmethod
+    def _candidate_credit_names(result: Dict[str, Any]) -> list:
+        """Every name a recording candidate is credited under: each
+        credit's printed name plus its artist entity's name."""
+        names = []
+        for credit in result.get('artist-credit') or []:
+            if not isinstance(credit, dict):
+                continue
+            if credit.get('name'):
+                names.append(str(credit['name']))
+            artist = credit.get('artist')
+            if isinstance(artist, dict) and artist.get('name'):
+                names.append(str(artist['name']))
+        return names
+
     def _score_recording_candidates(self, track_name: str, artist_name: Optional[str],
                                     results: list, *, artist_pinned: bool,
                                     artist_mbid: Optional[str] = None,
-                                    duration_ms: Optional[int] = None) -> tuple:
+                                    duration_ms: Optional[int] = None,
+                                    featured_names: Optional[list] = None) -> tuple:
         """Shared scoring pass for both the plain and artist-pinned recording
         searches — same title-similarity gate and confidence formula either
         way. When ``artist_pinned`` is True the query already constrained the
         artist via ``arid:<mbid>``, so a candidate is treated as artist-matched
         (full artist bonus) without re-checking the printed credit text —
         that's the whole point of pinning.
+
+        ``featured_names`` (the artists the ORIGINAL title's featuring
+        credit names, #1705) marks a preferred pool: among candidates
+        that clear every gate, reach the 70-confidence bar AND carry
+        main-artist evidence (the artist bonus — a pinned query's
+        server-side constraint, or a credit name matching the query
+        artist), one whose credit also names a featured artist beats a
+        higher-scored one that doesn't — the file's own title says the
+        featured artist is on this recording, and MusicBrainz's
+        relevance order cannot tell the featured cut from a same-title
+        solo credit. The main-artist-evidence requirement matters: a
+        candidate credited ONLY to the featured artist can clear 70 on
+        title + MB score alone, and electing it would cache a different
+        artist's recording under this title. The pool never rescues a
+        candidate the gates rejected, so it can only choose among
+        matches the plain pass would already have accepted on the same
+        main-artist evidence.
 
         When the caller already knows the artist's MBID (``artist_mbid``), the
         printed credit is not trusted on its own: two different bands can
@@ -550,6 +818,8 @@ class MusicBrainzService:
         """
         best_match = None
         best_confidence = 0
+        featured_match = None
+        featured_confidence = 0
         query_markers = recording_version_markers(track_name)
         artist_mbid = (str(artist_mbid or '').strip().lower()) or None
         try:
@@ -649,6 +919,25 @@ class MusicBrainzService:
                 best_confidence = confidence
                 best_match = result
 
+            # #1705 featured-credit pool: see the docstring. Only
+            # candidates at/over the caller's acceptance bar compete,
+            # and only ones carrying MAIN-artist evidence (the artist
+            # bonus is exactly that evidence: the pin's server-side
+            # constraint, or a credit name matching the query artist) —
+            # a candidate credited ONLY to the featured artist is some
+            # other recording of that artist's, not this artist's
+            # recording featuring them, however well it scores.
+            if featured_names and confidence >= 70 and artist_bonus == 20:
+                credit_names = self._candidate_credit_names(result)
+                if any(self._calculate_similarity(featured, credited) > 0.8
+                       for featured in featured_names
+                       for credited in credit_names):
+                    if confidence > featured_confidence:
+                        featured_confidence = confidence
+                        featured_match = result
+
+        if featured_match is not None:
+            return featured_match, featured_confidence
         return best_match, best_confidence
 
     @staticmethod
@@ -726,7 +1015,8 @@ class MusicBrainzService:
 
     def _match_recording_by_artist_pin(self, track_name: str, artist_name: str, *,
                                        artist_mbid: Optional[str] = None,
-                                       duration_ms: Optional[int] = None) -> tuple:
+                                       duration_ms: Optional[int] = None,
+                                       featured_names: Optional[list] = None) -> tuple:
         """Fallback for `match_recording` when the strict name+artist search
         found nothing usable. Retries the recording search pinned to the
         artist's MBID (`arid:<mbid>`) instead of the printed credit text.
@@ -756,11 +1046,165 @@ class MusicBrainzService:
         # duration gate still applies.
         return self._score_recording_candidates(
             track_name, artist_name, results, artist_pinned=True,
-            duration_ms=duration_ms)
+            duration_ms=duration_ms, featured_names=featured_names)
+
+    def _search_recording_chain(self, track_name: str, artist_name: Optional[str], *,
+                                artist_mbid: Optional[str] = None,
+                                duration_ms: Optional[int] = None,
+                                featured_names: Optional[list] = None) -> tuple:
+        """One full name-based recording search for ``track_name``: the
+        strict search scored, then — when nothing cleared the gates —
+        the artist-pinned retry. Returns (best_match, best_confidence,
+        saw_results); ``saw_results`` is what tells "MusicBrainz returned
+        nothing at all" apart from "it returned candidates and every one
+        failed the gates" for the caller's log line. A transport failure
+        propagates (the strict search is `raise_on_error=True`) so the
+        caller never caches an outage as a miss.
+        """
+        results = self.mb_client.search_recording(
+            track_name, artist_name, limit=5, raise_on_error=True)
+
+        best_match, best_confidence = (None, 0)
+        if results:
+            best_match, best_confidence = self._score_recording_candidates(
+                track_name, artist_name, results, artist_pinned=False,
+                artist_mbid=artist_mbid, duration_ms=duration_ms,
+                featured_names=featured_names)
+
+        # The `artist:"..."` clause on a strict recording search matches
+        # the CREDIT printed on that recording, never the artist entity's
+        # aliases — there is no alias field on /recording at all. A
+        # romanised or cross-script artist name (e.g. "Tatsuro Yamashita"
+        # for a recording credited "山下達郎") therefore finds nothing no
+        # matter how exact the title is. When the plain search came back
+        # empty, or nothing on it cleared the gates, retry once pinned to
+        # the artist's MBID instead of its name — the caller's, when it
+        # already resolved one, so no extra artist search is spent.
+        if not best_match and (artist_mbid or (artist_name and str(artist_name).strip())):
+            pin_match, pin_confidence = self._match_recording_by_artist_pin(
+                track_name, artist_name or '', artist_mbid=artist_mbid,
+                duration_ms=duration_ms, featured_names=featured_names)
+            if pin_match:
+                best_match, best_confidence = pin_match, pin_confidence
+
+        return best_match, best_confidence, bool(results)
+
+    def _match_recording_by_isrc(self, track_name: str, artist_name: Optional[str],
+                                 isrc: str, *, artist_mbid: Optional[str] = None,
+                                 duration_ms: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """The exact-identifier rung of `match_recording` (#1705).
+
+        An ISRC names one recording regardless of how its title is
+        credited, so when the caller knows the file's ISRC this runs
+        BEFORE any name search — it is the only rung that can tell the
+        file's actual master apart from the ~20 same-title, same-credit
+        recordings a text search returns for a song like "Rather Be".
+
+        Exact is not the same as unambiguous in MusicBrainz's data: an
+        ISRC can sit on more than one recording row (the reported
+        ISRC, GBAHS1300498, is also carried by a garbled remix-titled
+        duplicate). Every candidate therefore still has to clear the
+        same identity discipline as a search hit, keyed to the file:
+        its featuring-stripped title must equal the file's, its version
+        markers must agree (a "(Live)"/"(Remix)" row sharing the ISRC
+        is data error, not this file), it must be credited to the known
+        artist identity / name when credits are parseable (missing
+        credit data is not a mismatch, the #1509 convention), and its
+        length must sit inside the duration tolerance when known. If
+        more than one candidate survives, the featuring credit narrows
+        once more; anything still tied is AMBIGUOUS and this rung
+        returns None rather than guessing — the name search below then
+        decides, exactly as it would have without an ISRC.
+
+        Failure discipline matches the rest of this service: the
+        lookup is asked with `raise_on_error=True`, so a TRANSPORT
+        failure raises out of this method; `match_recording` catches
+        it, runs the name rungs anyway (a name hit during an
+        /isrc/-only outage is still a real match), but suppresses the
+        negative cache write if they miss — an outage on this rung
+        must not be folded into "no such recording" and remembered
+        for 30 days. A 404 (the ISRC is genuinely unknown to
+        MusicBrainz) and a malformed code still come back as `[]`
+        from the client and simply fall through to the name rungs.
+        """
+        recordings = self.mb_client.lookup_recordings_by_isrc(
+            isrc, raise_on_error=True)
+        if not recordings:
+            return None
+
+        def _title_key(value: str) -> str:
+            # fold_title (diacritics, punctuation, case, any script)
+            # with brackets KEPT: a subtitle qualifier is title text,
+            # not noise — "Song (From 'Film')" is not "Song" — but a
+            # curly apostrophe or an accent must not reject the exact
+            # recording an ISRC identifies.
+            return fold_title(
+                strip_featuring_credit(value or ''), drop_brackets=False)
+
+        want_title = _title_key(track_name)
+        # Markers are read off the STRIPPED title, not the raw one: the
+        # strip canonicalises an em/en-dash version tail to the hyphen
+        # form the marker rule recognises, so an em-dash remix file
+        # and its "(Remix)" candidate agree here instead of the file
+        # reading as marker-less and a bare row passing.
+        want_markers = recording_version_markers(strip_featuring_credit(track_name))
+        featured = featured_credit_names(track_name)
+        survivors = []
+        for result in recordings:
+            if not isinstance(result, dict) or not result.get('id'):
+                continue
+            candidate_title = result.get('title') or ''
+            if _title_key(candidate_title) != want_title:
+                continue
+            if recording_version_markers(candidate_title) != want_markers:
+                continue
+            credit_mbids = self._recording_credit_artist_mbids(result)
+            credit_names = self._candidate_credit_names(result)
+            if artist_mbid and credit_mbids:
+                # Identity evidence exists and is decisive either way.
+                if artist_mbid not in credit_mbids:
+                    continue
+            elif artist_name and credit_names:
+                # No usable identity evidence (no caller MBID, or the
+                # credits carry names but no artist ids): the NAMES are
+                # parseable evidence then, and a contradicting credit
+                # must reject — checking them only when no MBID was
+                # supplied would let a name-only foreign credit sail
+                # through precisely when the caller knew the artist.
+                if not any(self._calculate_similarity(artist_name, credited) > 0.7
+                           for credited in credit_names):
+                    continue
+            if duration_ms:
+                try:
+                    mb_length = int(result.get('length') or 0)
+                except (TypeError, ValueError):
+                    mb_length = 0
+                if mb_length > 0 and abs(mb_length - duration_ms) > RECORDING_DURATION_TOLERANCE_MS:
+                    continue
+            survivors.append(result)
+
+        if len(survivors) > 1 and featured:
+            featured_survivors = [
+                result for result in survivors
+                if any(self._calculate_similarity(featured_name, credited) > 0.8
+                       for featured_name in featured
+                       for credited in self._candidate_credit_names(result))
+            ]
+            if len(featured_survivors) == 1:
+                survivors = featured_survivors
+
+        if len(survivors) != 1:
+            if survivors:
+                logger.debug(
+                    f"ISRC {isrc} left {len(survivors)} recordings standing "
+                    f"for '{track_name}' — ambiguous, falling back to name search")
+            return None
+        return survivors[0]
 
     def match_recording(self, track_name: str, artist_name: Optional[str] = None, *,
                         artist_mbid: Optional[str] = None,
-                        duration_ms: Optional[int] = None) -> Optional[Dict[str, Any]]:
+                        duration_ms: Optional[int] = None,
+                        isrc: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         Match a recording (track) by name to MusicBrainz
 
@@ -778,6 +1222,19 @@ class MusicBrainzService:
                 Candidates whose MusicBrainz `length` is further off than
                 RECORDING_DURATION_TOLERANCE_MS are rejected as a different
                 recording wearing the same title.
+            isrc: The file's ISRC, when the caller knows it (a library
+                track's stored ISRC, the downloaded file's embedded
+                TSRC/ISRC tag, a source's per-track ISRC) — see
+                `_match_recording_by_isrc`. A well-formed ISRC becomes
+                part of the cache key, for the same reason the artist
+                MBID is (#1509): the rung exists to tell masters apart
+                that share a (title, artist) key, so serving one
+                file's ISRC answer to a different file that merely
+                shares the key would defeat it, and a negative row
+                written by an ISRC-less lookup must not block an
+                ISRC lookup for 30 days either. A malformed value is
+                ignored entirely (the client's format check would
+                drop it anyway) rather than fragmenting the cache.
 
         Returns:
             Dict with 'mbid', 'title', 'confidence' or None if no good match
@@ -790,18 +1247,25 @@ class MusicBrainzService:
         if duration_ms is not None and duration_ms <= 0:
             duration_ms = None
 
+        isrc_code = re.sub(r'[^A-Za-z0-9]', '', str(isrc or '')).upper()
+        if not re.match(r'^[A-Z0-9]{12}$', isrc_code):
+            isrc_code = None
+
         # #1509: the known artist identity is part of the cache identity. A
         # name-only lookup can cache the wrong band's recording under
         # (track, name); an identity-pinned lookup must never read that row
         # back — or write its answer over it — so it gets its own key. The
         # MBID is lowercased so the same identity always maps to one row.
+        # #1705: a well-formed ISRC joins the key for the same reason.
         cache_artist_name = artist_name
         if artist_mbid:
             cache_artist_name = f"{artist_name or ''} [mbid:{artist_mbid}]"
+        if isrc_code:
+            cache_artist_name = f"{cache_artist_name or ''} [isrc:{isrc_code}]"
 
         # Check cache first
         cached = self._check_cache('recording', track_name, cache_artist_name)
-        if cached:
+        if cached and not _is_pre_feat_fix_miss(cached, track_name):
             logger.debug(f"Cache hit for recording '{track_name}'")
             cached_metadata = cached.get('metadata')
             return {
@@ -818,43 +1282,116 @@ class MusicBrainzService:
         # a transient failure must not be indistinguishable from "no results"
         # here, or it gets negative-cached for 30 days like a genuine miss.
         try:
-            results = self.mb_client.search_recording(
-                track_name, artist_name, limit=5, raise_on_error=True)
+            featured_names = featured_credit_names(track_name)
+            # Set when an ISRC lookup fails on transport: the rung
+            # never answered, so a name-chain miss below must not be
+            # negative-cached — the exact identifier might have
+            # resolved it, and a cached miss would hide that for the
+            # row's whole TTL (the outage-as-miss pattern this file
+            # avoids everywhere else). A name-chain HIT during the
+            # outage is still accepted and cached: it is a verified
+            # answer, just not the exact one.
+            isrc_lookup_failed = False
 
-            best_match, best_confidence = (None, 0)
-            if results:
-                best_match, best_confidence = self._score_recording_candidates(
-                    track_name, artist_name, results, artist_pinned=False,
-                    artist_mbid=artist_mbid, duration_ms=duration_ms)
+            def _isrc_rung():
+                """The exact-identifier rung, or None. See
+                `_match_recording_by_isrc` for the gates."""
+                nonlocal isrc_lookup_failed
+                if not isrc_code:
+                    return None
+                try:
+                    return self._match_recording_by_isrc(
+                        track_name, artist_name, isrc_code,
+                        artist_mbid=artist_mbid, duration_ms=duration_ms)
+                except Exception as e:  # noqa: BLE001 — the rung is one of several
+                    isrc_lookup_failed = True
+                    logger.debug(
+                        f"ISRC lookup for recording '{track_name}' failed "
+                        f"({e}) — continuing with the name search, "
+                        f"and a miss will not be cached")
+                    return None
 
-            # The `artist:"..."` clause on a strict recording search matches
-            # the CREDIT printed on that recording, never the artist entity's
-            # aliases — there is no alias field on /recording at all. A
-            # romanised or cross-script artist name (e.g. "Tatsuro Yamashita"
-            # for a recording credited "山下達郎") therefore finds nothing no
-            # matter how exact the title is. When the plain search came back
-            # empty, or nothing on it cleared the gates, retry once pinned to
-            # the artist's MBID instead of its name — the caller's, when it
-            # already resolved one, so no extra artist search is spent.
-            if not best_match and (artist_mbid or (artist_name and str(artist_name).strip())):
-                pin_match, pin_confidence = self._match_recording_by_artist_pin(
-                    track_name, artist_name or '', artist_mbid=artist_mbid,
-                    duration_ms=duration_ms)
-                if pin_match:
-                    best_match, best_confidence = pin_match, pin_confidence
+            def _accept_isrc(isrc_match):
+                mbid = isrc_match.get('id')
+                self._save_to_cache(
+                    'recording', track_name, cache_artist_name,
+                    mbid, isrc_match, 100)
+                logger.info(
+                    f"Matched recording '{track_name}' → "
+                    f"'{isrc_match.get('title')}' by ISRC (MBID: {mbid})")
+                return {
+                    'mbid': mbid,
+                    'title': track_name,
+                    'confidence': 100,
+                    'recording_disambiguation': isrc_match.get('disambiguation'),
+                    'cached': False
+                }
+
+            # #1705 — rung order is deliberate about MusicBrainz call
+            # budget (every call is rate-limited): a feat.-titled track
+            # asks the ISRC rung FIRST, because its name searches are
+            # the ones that structurally miss — that is the reported
+            # case, answered outright when the ISRC resolves. A plain
+            # title keeps today's behaviour and pays for the ISRC
+            # lookup only when the name chain could not reach the bar,
+            # where the exact identifier can still separate masters the
+            # name search scored but could not accept.
+            isrc_tried = False
+            if isrc_code and featured_names:
+                isrc_tried = True
+                isrc_match = _isrc_rung()
+                if isrc_match:
+                    return _accept_isrc(isrc_match)
+
+            best_match, best_confidence, saw_results = self._search_recording_chain(
+                track_name, artist_name, artist_mbid=artist_mbid,
+                duration_ms=duration_ms)
+
+            # #1705 — featuring-credit fallback: the strict phrase query
+            # embeds the whole title, feat. segment included, and
+            # MusicBrainz titles do not carry that segment, so the chain
+            # above structurally finds nothing for a feat.-titled track
+            # (and the artist-pinned retry repeats the same phrase).
+            # Retry the whole chain once with the credit stripped — for
+            # the search AND the scoring, whose raw title similarity
+            # would bury the stripped title's candidates — with the
+            # featured names passed as evidence so a candidate actually
+            # credited to the featured artist wins over a same-title
+            # solo credit. Runs whenever the original chain fell short
+            # of the acceptance bar (a gate-passing also-ran at 50 must
+            # not block it), and only its better score replaces the
+            # original's.
+            if best_confidence < 70:
+                stripped_title = strip_featuring_credit(track_name)
+                if stripped_title != track_name:
+                    alt_match, alt_confidence, alt_saw = self._search_recording_chain(
+                        stripped_title, artist_name, artist_mbid=artist_mbid,
+                        duration_ms=duration_ms,
+                        featured_names=featured_names)
+                    saw_results = saw_results or alt_saw
+                    if alt_match and alt_confidence > best_confidence:
+                        best_match, best_confidence = alt_match, alt_confidence
+
+            if best_confidence < 70 and isrc_code and not isrc_tried:
+                isrc_match = _isrc_rung()
+                if isrc_match:
+                    return _accept_isrc(isrc_match)
 
             if not best_match:
-                # `results` (the strict search) tells "genuinely nothing
-                # came back" apart from "something came back but every
-                # candidate — including any from the artist-pinned retry —
-                # failed the gates". Same cached values either way
-                # (mbid=None, confidence 0), only the log text tells them
-                # apart, same as before this fallback existed.
-                if results:
+                # `saw_results` (either chain's strict search) tells
+                # "genuinely nothing came back" apart from "something
+                # came back but every candidate — including any from the
+                # artist-pinned retries — failed the gates". Same cached
+                # values either way (mbid=None, confidence 0), only the
+                # log text tells them apart, same as before these
+                # fallbacks existed.
+                if saw_results:
                     logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
                 else:
                     logger.info(f"No MusicBrainz results for recording '{track_name}'")
-                self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
+                if not isrc_lookup_failed:
+                    self._save_to_cache('recording', track_name, cache_artist_name, None,
+                                        _feat_miss_metadata(track_name), best_confidence)
                 return None
 
             # Only return matches with confidence >= 70%
@@ -876,7 +1413,9 @@ class MusicBrainzService:
                 }
             else:
                 logger.info(f"Low confidence match for recording '{track_name}' (best: {best_confidence})")
-                self._save_to_cache('recording', track_name, cache_artist_name, None, None, best_confidence)
+                if not isrc_lookup_failed:
+                    self._save_to_cache('recording', track_name, cache_artist_name, None,
+                                        _feat_miss_metadata(track_name), best_confidence)
                 return None
 
         except Exception as e:

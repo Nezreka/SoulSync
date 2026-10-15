@@ -6,6 +6,7 @@ import string
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from functools import lru_cache
@@ -33,6 +34,22 @@ _NORM_INLINE_LIMIT = 5000
 _NORM_CHUNK = 20000
 # below this many rows a backfill skips the ANALYZE + wal checkpoint
 _NORM_STATS_MIN_ROWS = 1000
+# rows ANALYZE samples per index. same plans as a full ANALYZE on a 300k
+# track library (same 400 ownership decisions, same matched rows) in 78 ms
+# instead of 1.9 s, so it can run after every scan without blocking writers.
+_PLANNER_ANALYSIS_LIMIT = 1000
+_planner_stats_lock = threading.Lock()
+_planner_stats_threads = {}
+
+
+def _calling_functions(depth: int = 3) -> str:
+    """'caller <- its caller <- ...' from just above _get_connection."""
+    names = []
+    frame = sys._getframe(2)
+    while frame is not None and len(names) < depth:
+        names.append(frame.f_code.co_name)
+        frame = frame.f_back
+    return " <- ".join(names)
 
 # a per-track credit like "A feat. B" or "A; B" is one string in the tracks
 # row; track_credits holds each credited name separately, indexed, so "is B
@@ -475,6 +492,7 @@ class MusicDatabase:
                 conn.close()
         except Exception as e:
             logger.debug(f"norm readiness check at init skipped: {e}")
+        self._kick_planner_stats_thread()
     
     def _ensure_wal_mode(self):
         """put the database in wal mode, once per process. the mode lives in
@@ -532,10 +550,13 @@ class MusicDatabase:
                 # diagnostic: say so when an open is still slow.
                 _elapsed = time.perf_counter() - _t_open
                 if _elapsed > 0.2:
+                    # who was waiting. without it the log says something is
+                    # slow ~2,000 times a day and nothing about where.
                     logger.warning(
-                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s",
+                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s, from %s [%s]",
                         _elapsed * 1000, (_t_connected - _t_open) * 1000,
-                        (time.perf_counter() - _t_connected) * 1000, self.database_path)
+                        (time.perf_counter() - _t_connected) * 1000, self.database_path,
+                        _calling_functions(), threading.current_thread().name)
                 return connection
             except sqlite3.OperationalError as e:
                 last_error = e
@@ -1311,6 +1332,7 @@ class MusicDatabase:
             # Repair worker v2 tables (findings + job runs)
             self._add_repair_worker_tables(cursor)
             self._add_norm_columns(cursor)
+            self._add_lookup_indexes(cursor)
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS genre_translation_cache (
@@ -1439,8 +1461,10 @@ class MusicDatabase:
             self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
+            self._add_mirrored_playlist_track_added_at_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1904,6 +1928,7 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            self._requeue_similar_artists_rematch(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2004,6 +2029,7 @@ class MusicDatabase:
         'sample_analysis_v1':        ('table', 'sample_analysis'),
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
+        'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
     }
 
     def _record_migration(self, cursor, name):
@@ -2172,6 +2198,20 @@ class MusicDatabase:
                 if album_cols and _col not in album_cols:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
+
+            # #1701: where reorganize last placed the album. the release it used
+            # and a fingerprint of the naming settings at the time, so a later
+            # scan keeps that release and only re-flags when the user changes
+            # their naming or pins a different version. NULL = never placed.
+            _placement_cols = {
+                'reorganize_source': 'TEXT DEFAULT NULL',
+                'reorganize_album_id': 'TEXT DEFAULT NULL',
+                'reorganize_fp': 'TEXT DEFAULT NULL',
+            }
+            for _col, _typedef in _placement_cols.items():
+                if album_cols and _col not in album_cols:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
+                    logger.info("Added %s column to albums table (#1701)", _col)
 
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
@@ -2753,6 +2793,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
 
+    def _add_mirrored_playlist_sync_mode_column(self, cursor):
+        """Per-playlist sync mode (#1704). null means use the global
+        playlist_sync.mode, so existing mirrors keep doing what they did."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'sync_mode' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN sync_mode TEXT DEFAULT NULL")
+                logger.info("Added sync_mode column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding sync_mode column to mirrored_playlists: {e}")
+
     def _add_mirrored_playlist_custom_name_column(self, cursor):
         """Add custom_name (a user alias) for a mirrored playlist.
 
@@ -2817,6 +2869,22 @@ class MusicDatabase:
                 logger.info("Added cover_tiles column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding cover_tiles column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_track_added_at_column(self, cursor):
+        """when each track joined the playlist, for "sort by date added".
+
+        every edit rewrites a playlist's track rows, so mirror_playlist carries
+        this across by source_track_id the same way it carries extra_data. NULL
+        for rows from before the column; they sort by position.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlist_tracks)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'added_at' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlist_tracks ADD COLUMN added_at TEXT DEFAULT NULL")
+                logger.info("Added added_at column to mirrored_playlist_tracks table")
+        except Exception as e:
+            logger.error(f"Error adding added_at column to mirrored_playlist_tracks: {e}")
 
     def _add_mirrored_playlist_source_skipped_column(self, cursor):
         """add source_skipped: what the source never handed over (#1613).
@@ -4243,6 +4311,36 @@ class MusicDatabase:
         ('tracks', 'track_artist', 'track_artist_norm', 'norm'),
     )
 
+    # plenty of lookups still ask `LOWER(title) = LOWER(?)` (discover's
+    # playable check, curated playlists, exports, the history importers).
+    # LOWER() on the column skips idx_tracks_title, so each one read all
+    # 300k tracks: 330 ms a call, 0.1 ms with these. an index on the same
+    # expression answers exactly what the query asks, nothing changes about
+    # what matches.
+    _LOWER_TEXT_INDEXES = (
+        ('idx_tracks_title_lower', 'tracks', 'title'),
+        ('idx_albums_title_lower', 'albums', 'title'),
+        ('idx_artists_name_lower', 'artists', 'name'),
+    )
+
+    # tracks never had an index on file_path. the import pipeline, its side
+    # effects, verification, the missing-track import and the repair jobs all
+    # look tracks up or update them by exact path, often once per track, and
+    # each one read the whole table: 110-170 ms warm, seconds cold. 0.01 ms
+    # with it.
+    _PLAIN_LOOKUP_INDEXES = (
+        ('idx_tracks_file_path', 'tracks', 'file_path'),
+    )
+
+    def _add_lookup_indexes(self, cursor):
+        try:
+            for name, table, column in self._LOWER_TEXT_INDEXES:
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} (LOWER({column}))")
+            for name, table, column in self._PLAIN_LOOKUP_INDEXES:
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})")
+        except Exception as e:
+            logger.error(f"Error adding lookup indexes: {e}")
+
     @staticmethod
     def _normalizer(kind: str):
         from core.text.normalize import normalize_for_comparison, normalize_key
@@ -4428,21 +4526,143 @@ class MusicDatabase:
                 logger.debug(f"wal checkpoint after backfill skipped: {e}")
         return filled
 
-    def refresh_planner_stats(self) -> None:
+    _PLANNER_STATS_TABLES = ('tracks', 'artists', 'albums', 'track_credits')
+
+    def refresh_planner_stats(self, tables=None) -> None:
         """ANALYZE the matching tables. without statistics sqlite guesses, and
         on a real library it guessed the server_source index (one value for
         every row) over the artist and credit indexes, turning indexed lookups
-        back into full scans. cheap; run after backfills and scans."""
+        back into full scans. sampled, so cheap; run after backfills and scans."""
         try:
             conn = self._get_connection()
             try:
-                for table in ('tracks', 'artists', 'albums', 'track_credits'):
-                    conn.execute(f"ANALYZE {table}")
+                conn.execute(f"PRAGMA analysis_limit = {_PLANNER_ANALYSIS_LIMIT}")
+                for table in (tables or self._PLANNER_STATS_TABLES):
+                    conn.execute(f'ANALYZE "{table}"')
                 conn.commit()
             finally:
                 conn.close()
         except Exception as e:
             logger.debug(f"ANALYZE skipped: {e}")
+
+    @staticmethod
+    def _tables_missing_planner_stats(cursor) -> list:
+        """tables big enough to matter with an index sqlite has no statistics
+        for. an index without stats is assumed to narrow an equality to ~10
+        rows, so idx_tracks_source_owner (added after the last ANALYZE) looked
+        like the best way to find a track: every title search walked all 300k
+        rows through it, 1.4 s per missing track in a watchlist scan."""
+        has_stat1 = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'").fetchone()
+        analyzed = set()
+        if has_stat1:
+            analyzed = {(t, i) for t, i in cursor.execute(
+                "SELECT tbl, idx FROM sqlite_stat1 WHERE idx IS NOT NULL")}
+        stale = []
+        tables = [r[0] for r in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'")]
+        for table in tables:
+            # a WITHOUT ROWID table's primary key stats are filed under the
+            # table's own name, not its sqlite_autoindex name
+            indexes = [table if r[3] == 'pk' and (table, table) in analyzed else r[1]
+                       for r in cursor.execute(f'PRAGMA index_list("{table}")')]
+            if not any((table, i) not in analyzed for i in indexes):
+                continue
+            big = cursor.execute(
+                f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_NORM_STATS_MIN_ROWS - 1}').fetchone()
+            if big:
+                stale.append(table)
+        return stale
+
+    def _kick_planner_stats_thread(self):
+        """at boot, analyze whatever has an index without stats, off the boot
+        path. the check is a few pragmas; the thread only starts when there is
+        work, so a fresh or test database never starts one."""
+        try:
+            conn = self._get_connection()
+            try:
+                cursor = conn.cursor()
+                upgrades = self._match_status_indexes_to_upgrade(cursor)
+                big_upgrades = [u for u in upgrades if self._table_is_big(cursor, u[1])]
+                stale = self._tables_missing_planner_stats(cursor)
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"planner stats check skipped: {e}")
+            return
+        if upgrades and not big_upgrades:
+            # small tables: a rebuild is instant, no thread needed
+            self.upgrade_match_status_indexes(upgrades)
+        if not stale and not big_upgrades:
+            return
+        key = str(self.database_path)
+        with _planner_stats_lock:
+            t = _planner_stats_threads.get(key)
+            if t is not None and t.is_alive():
+                return
+            t = threading.Thread(target=self._boot_index_maintenance, args=(big_upgrades, stale),
+                                 name="planner-stats", daemon=True)
+            _planner_stats_threads[key] = t
+        if big_upgrades:
+            logger.info(f"enrichment queue indexes: rebuilding {len(big_upgrades)} as (status, id)")
+        if stale:
+            logger.info(f"planner stats: analyzing {len(stale)} table(s) with unanalyzed indexes: {', '.join(stale)}")
+        t.start()
+
+    def _boot_index_maintenance(self, upgrades, stale) -> None:
+        self.upgrade_match_status_indexes(upgrades)
+        tables = list(dict.fromkeys(list(stale) + [u[1] for u in upgrades]))
+        if tables:
+            self.refresh_planner_stats(tables)
+
+    @staticmethod
+    def _table_is_big(cursor, table) -> bool:
+        return cursor.execute(
+            f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_NORM_STATS_MIN_ROWS - 1}').fetchone() is not None
+
+    # every enrichment worker asks for its next item with
+    # `WHERE <svc>_match_status IS NULL ORDER BY id LIMIT 1`. on an index of
+    # the status alone sqlite has to sort every pending row to return one:
+    # 120-240 ms per item while a big library's queue is full, for each of 13
+    # workers. on (status, id) the first index entry is the answer. same rows,
+    # and the old index is a prefix of the new one, so nothing else loses it.
+    _MATCH_STATUS_TABLES = ('artists', 'albums', 'tracks')
+    _SINGLE_STATUS_INDEX = re.compile(r'CREATE INDEX "?\w+"? ON "?\w+"? ?\((\w+_match_status)\)\s*$', re.I)
+
+    @classmethod
+    def _match_status_indexes_to_upgrade(cls, cursor) -> list:
+        """(index, table, column) for every match_status index still built on
+        the status alone."""
+        out = []
+        for name, table, sql in cursor.execute(
+                "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' "
+                f"AND tbl_name IN ({','.join('?' * len(cls._MATCH_STATUS_TABLES))}) AND sql IS NOT NULL",
+                cls._MATCH_STATUS_TABLES):
+            m = cls._SINGLE_STATUS_INDEX.match(sql.strip())
+            if m:
+                out.append((name, table, m.group(1)))
+        return out
+
+    def upgrade_match_status_indexes(self, upgrades) -> None:
+        """rebuild each as (status, id), one transaction each so a reader never
+        finds the index missing. re-checked inside the transaction, so two
+        processes booting at once don't rebuild the same one twice."""
+        for name, table, column in upgrades:
+            try:
+                conn = self._get_connection()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+                                       (name,)).fetchone()
+                    if row and self._SINGLE_STATUS_INDEX.match((row[0] or '').strip()):
+                        conn.execute(f'DROP INDEX "{name}"')
+                        conn.execute(f'CREATE INDEX "{name}" ON "{table}" ({column}, id)')
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.warning(f"could not rebuild {name} as ({column}, id): {e}")
 
     def _kick_norm_backfill_thread(self):
         """one background backfill per db path per process. a big library's
@@ -4750,11 +4970,11 @@ class MusicDatabase:
             
             # Create indexes (safe even if columns were already present)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mbid ON artists (musicbrainz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_mb_status ON artists (musicbrainz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mbid ON albums (musicbrainz_release_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_mb_status ON albums (musicbrainz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mbid ON tracks (musicbrainz_recording_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_mb_status ON tracks (musicbrainz_match_status, id)")
             
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_entity ON musicbrainz_cache (entity_type, entity_name)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mb_cache_mbid ON musicbrainz_cache (musicbrainz_id)")
@@ -4824,7 +5044,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_id ON artists (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_audiodb_status ON artists (audiodb_match_status, id)")
 
             if 'style' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN style TEXT")
@@ -4847,7 +5067,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_id ON albums (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_audiodb_status ON albums (audiodb_match_status, id)")
 
             if 'style' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN style TEXT")
@@ -4866,7 +5086,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN audiodb_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_id ON tracks (audiodb_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_audiodb_status ON tracks (audiodb_match_status, id)")
 
             if 'style' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN style TEXT")
@@ -4892,7 +5112,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN discogs_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_id ON artists (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_discogs_status ON artists (discogs_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -4910,7 +5130,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN discogs_rating_count INTEGER")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_id ON albums (discogs_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_discogs_status ON albums (discogs_match_status, id)")
 
             logger.info("Discogs enrichment columns added/verified successfully")
 
@@ -4935,9 +5155,33 @@ class MusicDatabase:
             if 'similar_artists_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN similar_artists_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status, id)")
         except Exception as e:
             logger.error(f"Error adding similar-artists worker columns: {e}")
+
+    def _requeue_similar_artists_rematch(self, cursor):
+        """one-time: fetch every artist's similar artists again.
+
+        names used to resolve to the first search hit, so stored similars hold
+        namesakes (a thai pop act as Korn, Colde for Cold). the worker never
+        re-runs a matched artist and the watchlist only refetches after 30
+        days, so neither would heal them. requeue both; replace_similar_artists
+        swaps each set as it lands. occurrence_count goes back to one per row:
+        every refetch had bumped it and the reader sums it."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_similar_artists_rematch_applied'")
+            if cursor.fetchone():
+                return
+            cursor.execute("UPDATE artists SET similar_artists_match_status = NULL "
+                           "WHERE similar_artists_match_status IS NOT NULL")
+            requeued = max(cursor.rowcount, 0)
+            cursor.execute("UPDATE similar_artists SET occurrence_count = 1, "
+                           "last_updated = datetime('now', '-60 days')")
+            cursor.execute("CREATE TABLE _similar_artists_rematch_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artists_rematch')
+            logger.info("similar artists rematch: requeued %s library artists", requeued)
+        except Exception as e:
+            logger.error(f"Error requeueing similar artists rematch: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
@@ -4954,7 +5198,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_id ON artists (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_amazon_status ON artists (amazon_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -4968,7 +5212,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_id ON albums (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_amazon_status ON albums (amazon_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -4982,7 +5226,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN amazon_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_id ON tracks (amazon_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_amazon_status ON tracks (amazon_match_status, id)")
 
             logger.info("Amazon columns added/verified successfully")
         except Exception as e:
@@ -5017,7 +5261,7 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_label TEXT")
 
                 cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_id ON {table} (bandcamp_id)")
-                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status)")
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status, id)")
 
             logger.info("Bandcamp columns added/verified successfully")
         except Exception as e:
@@ -5093,7 +5337,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_id ON artists (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_deezer_status ON artists (deezer_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5107,7 +5351,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_id ON albums (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_deezer_status ON albums (deezer_match_status, id)")
 
             if 'label' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN label TEXT")
@@ -5128,7 +5372,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN deezer_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_id ON tracks (deezer_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_deezer_status ON tracks (deezer_match_status, id)")
 
             if 'bpm' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN bpm REAL")
@@ -5174,7 +5418,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_id ON artists (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status, id)")
 
             cursor.execute("PRAGMA table_info(albums)")
             albums_columns = [column[1] for column in cursor.fetchall()]
@@ -5187,7 +5431,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_id ON albums (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status, id)")
 
             cursor.execute("PRAGMA table_info(tracks)")
             tracks_columns = [column[1] for column in cursor.fetchall()]
@@ -5200,7 +5444,7 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_id ON tracks (jiosaavn_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status, id)")
 
             logger.info("JioSaavn columns added/verified successfully")
         except Exception as e:
@@ -5222,8 +5466,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_spotify_match_status ON artists (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_itunes_match_status ON artists (itunes_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5238,8 +5482,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_spotify_match_status ON albums (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_itunes_match_status ON albums (itunes_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -5254,8 +5498,8 @@ class MusicDatabase:
             if 'itunes_last_attempted' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN itunes_last_attempted TIMESTAMP")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_spotify_match_status ON tracks (spotify_match_status, id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_itunes_match_status ON tracks (itunes_match_status, id)")
 
         except Exception as e:
             logger.error(f"Error adding Spotify/iTunes enrichment columns: {e}")
@@ -5300,9 +5544,9 @@ class MusicDatabase:
             if 'genius_url' not in artists_columns:
                 cursor.execute("ALTER TABLE artists ADD COLUMN genius_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_lastfm_status ON artists (lastfm_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_id ON artists (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_genius_status ON artists (genius_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5324,7 +5568,7 @@ class MusicDatabase:
             if 'lastfm_url' not in albums_columns:
                 cursor.execute("ALTER TABLE albums ADD COLUMN lastfm_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_lastfm_status ON albums (lastfm_match_status, id)")
 
             # --- Tracks ---
             cursor.execute("PRAGMA table_info(tracks)")
@@ -5358,9 +5602,9 @@ class MusicDatabase:
             if 'genius_url' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN genius_url TEXT")
 
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_lastfm_status ON tracks (lastfm_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_id ON tracks (genius_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genius_status ON tracks (genius_match_status, id)")
 
             # One-time reset: clear all Genius matches due to blind-fallback bug in search
             # The old search_artist/search_song returned the first result with no name validation,
@@ -5410,9 +5654,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE artists ADD COLUMN qobuz_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_id ON artists (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_tidal_status ON artists (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_id ON artists (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_qobuz_status ON artists (qobuz_match_status, id)")
 
             # --- Albums ---
             cursor.execute("PRAGMA table_info(albums)")
@@ -5432,9 +5676,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE albums ADD COLUMN qobuz_last_attempted TIMESTAMP")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_id ON albums (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_tidal_status ON albums (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_id ON albums (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_qobuz_status ON albums (qobuz_match_status, id)")
 
             # --- Albums (extra metadata columns) ---
             if 'upc' not in albums_columns:
@@ -5464,9 +5708,9 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN copyright TEXT")
 
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_id ON tracks (tidal_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_tidal_status ON tracks (tidal_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_id ON tracks (qobuz_id)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_qobuz_status ON tracks (qobuz_match_status, id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc ON tracks (isrc)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_isrc_nocase ON tracks (isrc COLLATE NOCASE)")
 
@@ -7340,20 +7584,26 @@ class MusicDatabase:
         exactly what would make a "vs last month" delta lie."""
         if not where:
             return dict(self._EMPTY_OVERVIEW)
-        from core.listening_scope import play_duration_sql
+        from core.listening_scope import total_play_ms_sql
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            # the plays are read once into the cte, the time total then looks
+            # each played track up once instead of once per play
             cursor.execute(f"""
+                WITH plays AS MATERIALIZED (
+                    SELECT artist, album, title, duration_ms, db_track_id
+                    FROM listening_history
+                    {where}
+                )
                 SELECT
                     COUNT(*) as total_plays,
-                    COALESCE(SUM({play_duration_sql()}), 0) as total_time_ms,
+                    {total_play_ms_sql('plays')} as total_time_ms,
                     COUNT(DISTINCT artist) as unique_artists,
                     COUNT(DISTINCT album) as unique_albums,
                     COUNT(DISTINCT title || '|||' || COALESCE(artist, '')) as unique_tracks
-                FROM listening_history
-                {where}
+                FROM plays
             """)
             row = cursor.fetchone()
             return {
@@ -7633,19 +7883,9 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) as play_count
-                FROM listening_history lh
-                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
-                -- join scans tracks per history row (see core/stats/queries.py)
-                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                JOIN artists a ON a.id = t.artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
-                GROUP BY a.genres
-                ORDER BY play_count DESC
-                LIMIT 50
-            """)
+            # every payload, not the top 50. a genre spread over lots of small
+            # artist payloads used to fall off the cut and undercount.
+            cursor.execute(self._played_genres_sql(where))
             # Parse genre JSON and aggregate
             genre_counts = {}
             for row in cursor.fetchall():
@@ -7668,7 +7908,8 @@ class MusicDatabase:
             total = sum(genre_counts.values()) or 1
             result = sorted(
                 [{'genre': g, 'play_count': c, 'percentage': round(c / total * 100, 1)} for g, c in genre_counts.items()],
-                key=lambda x: x['play_count'], reverse=True
+                # name breaks ties, or which one makes the cut is up to sqlite
+                key=lambda x: (-x['play_count'], str(x['genre']))
             )[:15]
             return result
         except Exception as e:
@@ -7684,6 +7925,29 @@ class MusicDatabase:
     # acquisition history. We have both halves, so we can answer "you own 40%
     # metal and play 12% of it" — which is a fact about the user, not a number
     # about the software.
+
+    @staticmethod
+    def _played_genres_sql(where):
+        """plays per artist genre payload, as (genres, plays) rows. counts each
+        track's plays first, then joins each played track once. joining per
+        play hit tracks 150k times for 11k distinct tracks, 0.5 s on every
+        genre shelf."""
+        return f"""
+            WITH played AS MATERIALIZED (
+                SELECT lh.db_track_id AS tid, COUNT(*) AS n
+                FROM listening_history lh
+                {where} AND lh.db_track_id IS NOT NULL
+                GROUP BY lh.db_track_id
+            )
+            SELECT a.genres, SUM(played.n) AS plays
+            FROM played
+            -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
+            -- join scans tracks per history row (see core/stats/queries.py)
+            JOIN tracks t ON t.id = CAST(played.tid AS TEXT)
+            JOIN artists a ON a.id = t.artist_id
+            WHERE a.genres IS NOT NULL AND a.genres != ''
+            GROUP BY a.genres
+        """
 
     @staticmethod
     def _accumulate_genres(genre_counts, genres_str, weight):
@@ -7736,17 +8000,7 @@ class MusicDatabase:
 
             played = {}
             where = self._listening_time_filter(time_range, alias='lh', owner=owner)
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) AS plays
-                FROM listening_history lh
-                -- CAST: tracks.id is TEXT, db_track_id INTEGER; without it the
-                -- join scans tracks per history row (see core/stats/queries.py)
-                JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                JOIN artists a ON a.id = t.artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
-                GROUP BY a.genres
-            """)
+            cursor.execute(self._played_genres_sql(where))
             for genres_str, count in cursor.fetchall():
                 self._accumulate_genres(played, genres_str, count)
 
@@ -17888,6 +18142,67 @@ class MusicDatabase:
             logger.error(f"Error adding similar artist: {e}")
             return False
 
+    def replace_similar_artists(self, source_artist_id: str, similars: List[Dict[str, Any]],
+                                profile_id: int = 1,
+                                source_provider: Optional[str] = None) -> int:
+        """swap one artist's similar artists for a fresh fetch, in one go.
+
+        the upsert only ever added. a name a better match no longer produces
+        (Colde stored for Cold) stayed forever, and every refetch bumped
+        occurrence_count, which the reader sums. the hero's rotation history
+        (last_featured) carries over by name.
+
+        each entry takes add_or_update_similar_artist's kwargs. returns how
+        many rows went in; an empty list leaves the old set alone."""
+        from core.context_sentinels import is_context_sentinel
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return 0
+        rows = [s for s in similars or [] if s.get('similar_artist_name')]
+        if not rows:
+            return 0
+        provider = (str(source_provider).strip().lower() or None) if source_provider else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT similar_artist_name, last_featured FROM similar_artists
+                    WHERE profile_id = ? AND source_artist_id = ? AND last_featured IS NOT NULL
+                """, (profile_id, source_artist_id))
+                featured = {(r[0] or '').casefold(): r[1] for r in cursor.fetchall()}
+                cursor.execute(
+                    "DELETE FROM similar_artists WHERE profile_id = ? AND source_artist_id = ?",
+                    (profile_id, source_artist_id))
+                stored = 0
+                for row in rows:
+                    name = row['similar_artist_name']
+                    genres = row.get('genres')
+                    image_url = row.get('image_url')
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
+                         similarity_rank, occurrence_count, last_updated, profile_id,
+                         image_url, genres, popularity, metadata_updated_at, source_provider,
+                         last_featured)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?,
+                                CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP END, ?, ?)
+                        ON CONFLICT(profile_id, source_artist_id, similar_artist_name) DO NOTHING
+                    """, (source_artist_id, row.get('similar_artist_spotify_id'),
+                          row.get('similar_artist_itunes_id'), row.get('similar_artist_deezer_id'),
+                          row.get('similar_artist_musicbrainz_id'), name,
+                          row.get('similarity_rank', 1), profile_id, image_url,
+                          json.dumps(genres) if genres else None, row.get('popularity', 0) or 0,
+                          image_url, provider, featured.get(name.casefold())))
+                    stored += max(cursor.rowcount, 0)
+                conn.commit()
+                return stored
+        except Exception as e:
+            logger.error(f"Error replacing similar artists: {e}")
+            return 0
+
     def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""
         try:
@@ -23157,15 +23472,23 @@ class MusicDatabase:
                 # so the fold above can build cards whose play target no
                 # longer exists. Drop those here — never delete the history
                 # rows themselves.
-                from core.library.expired_cleanup import path_suffix_key  # matches the existing lazy import at :21740
-                cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
-                live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
-                cards = [
+                # only a card whose file is gone from disk needs the library
+                # asked, and only about that card's path. this loaded every
+                # track's path on every dashboard load (18 s cold, 1.3 s warm).
+                from core.library.expired_cleanup import path_suffix_key
+                from core.library.live_paths import live_suffix_keys
+                gone_from_disk = [
                     c for c in cards
-                    if not c.get('play_file_path')
-                    or os.path.exists(c['play_file_path'])
-                    or path_suffix_key(c['play_file_path']) in live_keys
+                    if c.get('play_file_path') and not os.path.exists(c['play_file_path'])
                 ]
+                if gone_from_disk:
+                    live_keys = live_suffix_keys(
+                        cursor, [c['play_file_path'] for c in gone_from_disk])
+                    dropped = {
+                        id(c) for c in gone_from_disk
+                        if path_suffix_key(c['play_file_path']) not in live_keys
+                    }
+                    cards = [c for c in cards if id(c) not in dropped]
 
                 # the normalized columns are indexed; the LOWER(TRIM()) form
                 # this replaced scanned every album per card (1.3 s of cpu per
@@ -23233,6 +23556,39 @@ class MusicDatabase:
                         if hit and hit[0]:
                             return hit[0]
                     return ''
+
+                # the library album behind each card, so its play / queue /
+                # add-to-playlist buttons can act on the whole album. the
+                # newest track's path is the exact answer (indexed); a path
+                # that moved roots falls back to the names. None when the
+                # library has no such album, and the card stays single-track.
+                for card in cards:
+                    card['album_id'] = None
+                    card['artist_id'] = None
+                    try:
+                        hit = None
+                        if card['play_file_path']:
+                            cursor.execute(
+                                "SELECT album_id, artist_id FROM tracks"
+                                " WHERE file_path = ? AND album_id IS NOT NULL LIMIT 1",
+                                (card['play_file_path'],))
+                            hit = cursor.fetchone()
+                        if not hit and norm_ready:
+                            cursor.execute(
+                                """
+                                SELECT al.id, al.artist_id
+                                FROM albums al JOIN artists ar ON al.artist_id = ar.id
+                                WHERE ar.name_norm = ? AND al.title_norm = ?
+                                LIMIT 1
+                                """,
+                                (self._normalize_for_comparison(card['artist_name'] or ''),
+                                 self._normalize_for_comparison(card['album_name'] or '')))
+                            hit = cursor.fetchone()
+                        if hit:
+                            card['album_id'] = hit[0]
+                            card['artist_id'] = hit[1]
+                    except Exception as e:
+                        logger.debug("recently-added album id lookup failed: %s", e)
 
                 for card in cards:
                     try:
@@ -24329,6 +24685,20 @@ class MusicDatabase:
                     old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
                 except Exception as e:
                     logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
+                # and when each track first joined, so a rewrite (an add, a
+                # remove, a reorder, a re-mirror) never resets its date added
+                old_added_map = {}
+                try:
+                    cursor.execute("""
+                        SELECT source_track_id, added_at FROM mirrored_playlist_tracks
+                        WHERE playlist_id = ? AND source_track_id IS NOT NULL AND added_at IS NOT NULL
+                        ORDER BY position
+                    """, (playlist_id,))
+                    for row in cursor.fetchall():
+                        old_added_map.setdefault(row['source_track_id'], row['added_at'])
+                except Exception as e:
+                    logger.debug("Failed to preserve mirrored playlist added_at: %s", e)
+                now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
                 # Replace all tracks
                 from core.playlists.source_refs import stable_source_track_id
@@ -24345,15 +24715,16 @@ class MusicDatabase:
                     # Restore preserved discovery data if the incoming track doesn't have its own
                     if not extra and sid and sid in old_extra_map:
                         extra = old_extra_map[sid]
+                    added_at = t.get('added_at') or (old_added_map.get(sid) if sid else None) or now_utc
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
-                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data, added_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         playlist_id, i + 1,
                         t.get('track_name', ''), t.get('artist_name', ''),
                         t.get('album_name', ''), t.get('duration_ms', 0),
-                        t.get('image_url'), sid or None, extra
+                        t.get('image_url'), sid or None, extra, added_at
                     ))
                 conn.commit()
                 logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")
@@ -24842,8 +25213,12 @@ class MusicDatabase:
         profile_id: Optional[int] = None,
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
+        sync_mode: Optional[str] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
+
+        ``sync_mode`` None leaves it alone, '' clears it back to the global
+        mode, anything else is stored as given (the route validates it).
 
         Returns ``'ok'``, ``'not_found'``, ``'unknown_quality_profile'`` or
         ``'error'``.  Both fields are validated BEFORE anything is written and
@@ -24873,6 +25248,10 @@ class MusicDatabase:
                 if organize_by_playlist is not None:
                     assignments.append("organize_by_playlist=?")
                     params.append(1 if organize_by_playlist else 0)
+
+                if sync_mode is not None:
+                    assignments.append("sync_mode=?")
+                    params.append(sync_mode or None)
 
                 if not assignments:
                     return 'ok'

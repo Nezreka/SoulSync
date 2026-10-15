@@ -68,14 +68,21 @@ class LibraryReorganizeJob(RepairJob):
         'reorganize queue: per-track sidecars are deleted at the source and album-level '
         'cover art is re-downloaded fresh at the destination via the same post-processing '
         'pipeline downloads use.\n\n'
+        'Once an album sits where the plan says, it is remembered as placed: later scans '
+        'keep the release it was placed with and skip it until you change your naming '
+        'settings or pin a different version, so new SoulSync naming rules or a source '
+        'hiccup don\'t move it again.\n\n'
         'Settings:\n'
-        '- Dry Run: When enabled, only reports what would change without moving files'
+        '- Dry Run: When enabled, only reports what would change without moving files\n'
+        '- Recheck Placed Albums: Re-plan albums already placed, e.g. to pick up '
+        'naming changes from a SoulSync update'
     )
     icon = 'repair-icon-reorganize'
     default_enabled = False
     default_interval_hours = 168  # Weekly — but disabled by default so won't auto-run
     default_settings = {
         'dry_run': True,
+        'recheck_placed_albums': False,
     }
     auto_fix = True
     writes_library_files = True
@@ -99,12 +106,18 @@ class LibraryReorganizeJob(RepairJob):
             return result
 
         dry_run = self._get_setting(context, 'dry_run', True)
+        recheck_placed = bool(self._get_setting(context, 'recheck_placed_albums', False))
 
         # Imports kept inside scan() so the module can be imported in
         # contexts that don't have web_server's Flask app booted.
         from core.imports.paths import build_final_path_for_track
         from core.library.path_resolver import resolve_library_file_path
-        from core.library_reorganize import preview_album_reorganize
+        from core.library_reorganize import (
+            album_placement_settled,
+            mark_album_placed,
+            naming_fingerprint,
+            preview_album_reorganize,
+        )
 
         transfer_dir = context.transfer_folder
         download_folder = cm.get('soulseek.download_path', '') if cm else ''
@@ -152,6 +165,8 @@ class LibraryReorganizeJob(RepairJob):
             )
 
         items_to_enqueue = []
+        fingerprint = naming_fingerprint()
+        settled = 0
 
         for i, album_row in enumerate(album_rows):
             if context.check_stop():
@@ -161,6 +176,14 @@ class LibraryReorganizeJob(RepairJob):
 
             album_id = album_row['id']
             album_title = album_row['title'] or 'Unknown Album'
+
+            # #1701: placed under today's naming settings and the same release, so
+            # there is nothing to re-plan. re-planning is what kept re-flagging
+            # albums every time a pin or a soulsync update changed the answer.
+            if not recheck_placed and album_placement_settled(album_row, fingerprint):
+                settled += 1
+                result.skipped += 1
+                continue
 
             # Default to the API planner (authoritative metadata via source IDs).
             # But media-server libraries usually have NO source IDs, so that path
@@ -204,6 +227,16 @@ class LibraryReorganizeJob(RepairJob):
             result.scanned += len(tracks)
 
             status = preview.get('status', '')
+
+            if status == 'source_unavailable':
+                # the release it was placed with didn't answer. skip rather than
+                # plan from another source and flag the whole album (#1701).
+                logger.info(
+                    "Reorganize: skipped '%s', its placed release didn't answer",
+                    album_title,
+                )
+                result.skipped += 1
+                continue
 
             if status in ('no_album', 'no_tracks'):
                 # Album was deleted between the SELECT and the preview,
@@ -251,6 +284,15 @@ class LibraryReorganizeJob(RepairJob):
             ]
 
             if not mismatched:
+                # already where the plan says: remember it as placed so the next
+                # scan keeps this release. needs a file actually seen on disk, an
+                # unreachable library has no mismatches either.
+                if (status == 'planned' and reorg_metadata_source == 'api'
+                        and any(t.get('file_exists') for t in tracks)):
+                    mark_album_placed(
+                        context.db, album_id, preview.get('source'),
+                        preview.get('source_album_id'), fingerprint,
+                    )
                 if context.report_progress and (i + 1) % 25 == 0:
                     context.report_progress(
                         scanned=i + 1, total=total,
@@ -351,7 +393,7 @@ class LibraryReorganizeJob(RepairJob):
         summary = (
             f"{mode_text} complete: {result.scanned} tracks scanned across {total} albums, "
             f"{result.auto_fixed} albums queued, {result.findings_created} findings, "
-            f"{result.skipped} skipped, {result.errors} errors"
+            f"{result.skipped} skipped ({settled} already placed), {result.errors} errors"
         )
         logger.info(summary)
         if context.report_progress:
@@ -412,7 +454,7 @@ class LibraryReorganizeJob(RepairJob):
             cursor = conn.cursor()
             if active_server:
                 cursor.execute("""
-                    SELECT al.id, al.title, al.artist_id, ar.name AS artist_name
+                    SELECT al.*, ar.name AS artist_name
                     FROM albums al
                     LEFT JOIN artists ar ON ar.id = al.artist_id
                     WHERE al.server_source = ?
@@ -420,7 +462,7 @@ class LibraryReorganizeJob(RepairJob):
                 """, (active_server,))
             else:
                 cursor.execute("""
-                    SELECT al.id, al.title, al.artist_id, ar.name AS artist_name
+                    SELECT al.*, ar.name AS artist_name
                     FROM albums al
                     LEFT JOIN artists ar ON ar.id = al.artist_id
                     ORDER BY al.id

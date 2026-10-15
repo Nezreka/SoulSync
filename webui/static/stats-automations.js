@@ -5265,6 +5265,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 4 phases: Refresh → Discover → Sync → Download Missing</div>`;
     }
     if (blockType === 'personalized_pipeline') {
@@ -5292,6 +5293,7 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         <div class="config-row">
             <label><input type="checkbox" id="cfg-${slotKey}-skip_wishlist"${skipWishlistChecked}> Skip wishlist processing</label>
         </div>
+        ${_autoSyncModeRowHtml(slotKey, config.sync_mode, blockType)}
         <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">Runs 2 phases: Snapshot → Sync → Download Missing</div>`;
     }
     // Shared variable tags builder for notification types
@@ -5466,6 +5468,20 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         }
     }
     return '';
+}
+
+// #1704: a pipeline's own sync mode, '' = the global Settings mode. the
+// options come from the block's config_fields (core/automation/blocks.py)
+function _autoSyncModeRowHtml(slotKey, value, blockType) {
+    const def = _findBlockDef(blockType);
+    const field = ((def && def.config_fields) || []).find(f => f.key === 'sync_mode');
+    if (!field || !Array.isArray(field.options)) return '';
+    const opts = field.options.map(o => `<option value="${_escAttr(o.value)}"${(value || '') === o.value ? ' selected' : ''}>${_escAttr(o.label)}</option>`).join('');
+    return `<div class="config-row">
+            <label>Sync mode</label>
+            <select id="cfg-${slotKey}-sync_mode">${opts}</select>
+        </div>${blockType === 'playlist_pipeline' ? `
+        <div class="config-row" style="color:rgba(255,255,255,0.35);font-size:11px;">A playlist with its own sync mode (set in its ⋯ menu) keeps it</div>` : ''}`;
 }
 
 // One generic config row from a block's config_fields definition.
@@ -5813,6 +5829,7 @@ function _readPlacedConfig(slotKey) {
             playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
             all: allCb ? allCb.checked : false,
             skip_wishlist: skipWl ? skipWl.checked : false,
+            sync_mode: document.getElementById('cfg-' + slotKey + '-sync_mode')?.value || '',
         };
     }
     if (type === 'personalized_pipeline') {
@@ -5833,6 +5850,7 @@ function _readPlacedConfig(slotKey) {
             kinds,
             refresh_first: refreshFirstCb ? refreshFirstCb.checked : false,
             skip_wishlist: skipWl ? skipWl.checked : false,
+            sync_mode: document.getElementById('cfg-' + slotKey + '-sync_mode')?.value || '',
         };
     }
     if (type === 'signal_received' || type === 'fire_signal') {

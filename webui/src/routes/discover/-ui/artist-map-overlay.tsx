@@ -8,6 +8,7 @@ import {
   artMapAttachCanvas,
   artMapMeasureFull,
   artMapMeasureResize,
+  artMapMeasureResizeStacked,
   artMapMeasureWithSidebar,
   artMapResetWorld,
   artMapTeardown,
@@ -69,13 +70,21 @@ function measureFor(
   const toolbar = container.querySelector<HTMLElement>('.artist-map-toolbar');
   const toolbarHeight = toolbar ? toolbar.offsetHeight : null;
   if (kind === 'genre') {
-    const row = container.querySelector<HTMLElement>('.artmap-content-row');
+    // The height is the CANVAS's own laid-out height, not the content row's.
+    // In the desktop row the two are equal, but in the stacked phone layout
+    // the row also contains the genre strip above the canvas — measuring the
+    // row sized the backing store ~300px taller than the displayed canvas,
+    // so circles drew as ellipses and hit-testing drifted (Oct 13 fold,
+    // M-11a). The sidebar width only participates in the fallback, and only
+    // in the row layout: a full-width strip costs no width.
+    const sidebarW = sidebar?.offsetWidth ?? 0;
+    const rowLayout = sidebarW > 0 && sidebarW < container.clientWidth;
     return artMapMeasureWithSidebar(
       canvas.clientWidth,
-      row?.clientHeight ?? 0,
+      canvas.clientHeight,
       container.clientWidth,
       container.clientHeight,
-      sidebar?.offsetWidth ?? 0,
+      rowLayout ? sidebarW : 0,
     );
   }
   return artMapMeasureFull(container.clientWidth, container.clientHeight, toolbarHeight);
@@ -121,7 +130,32 @@ export function ArtMapOverlay({
     artMapResetWorld();
     const dispose = attachArtMapInteraction(canvas, host);
 
+    // The interaction layer's window-resize listener misses layout changes
+    // that are not window resizes — above all the genre strip growing from
+    // empty to its capped height when the genre data lands, which shrinks
+    // the canvas AFTER the mount measurement above and left the backing
+    // store ~300px taller than the displayed canvas (circles drew as
+    // ellipses and hit-testing drifted, the M-11a complaint through a
+    // second door). Watch the canvas itself and take the host's resize
+    // path — which re-measures WITHOUT recentring — whenever the laid-out
+    // size stops matching the size the map believes it has. Comparing
+    // against the believed size is what keeps this from looping: a resize
+    // sets the canvas's inline size to its laid-out size, so the next
+    // observation agrees and stays quiet.
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver((entries) => {
+        const rect = entries[0]?.contentRect;
+        if (!rect) return;
+        if (Math.abs(rect.width - artMap.width) > 1 || Math.abs(rect.height - artMap.height) > 1) {
+          host.resized();
+        }
+      });
+      observer.observe(canvas);
+    }
+
     return () => {
+      observer?.disconnect();
       dispose();
       artMapTeardown();
     };
@@ -393,14 +427,28 @@ export function artMapHandleResize(
   sidebar: HTMLElement | null,
 ): void {
   const toolbar = container.querySelector<HTMLElement>('.artist-map-toolbar');
+  const toolbarHeight = toolbar ? toolbar.offsetHeight : null;
   const visible = sidebar && sidebar.style.display !== 'none' ? sidebar.offsetWidth || 0 : 0;
+  // Stacked phone layout (Oct 13 fold, M-11a): the genre sidebar is a
+  // full-width strip above the canvas — as wide as the container itself.
+  // The row formula would subtract that whole width from the canvas
+  // (max(120, 390 − 390) = 120px), so any window resize — a mobile URL bar
+  // collapsing on scroll is one — collapsed the canvas to a strip. A strip
+  // that spans the container costs height instead of width.
+  if (visible > 0 && visible >= container.clientWidth - 1) {
+    artMapAttachCanvas(
+      canvas,
+      artMapMeasureResizeStacked(
+        container.clientWidth,
+        container.clientHeight,
+        sidebar?.offsetHeight || 0,
+        toolbarHeight,
+      ),
+    );
+    return;
+  }
   artMapAttachCanvas(
     canvas,
-    artMapMeasureResize(
-      container.clientWidth,
-      container.clientHeight,
-      visible,
-      toolbar ? toolbar.offsetHeight : null,
-    ),
+    artMapMeasureResize(container.clientWidth, container.clientHeight, visible, toolbarHeight),
   );
 }

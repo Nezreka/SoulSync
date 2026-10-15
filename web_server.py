@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.4"
+_SOULSYNC_BASE_VERSION = "3.5.5"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -156,6 +156,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -606,6 +607,16 @@ def _require_login_enabled():
             _last_known_require_login, e
         )
         return _last_known_require_login
+
+
+# --- API key scope (before_request hook) ---
+# Registered ahead of the login / launch-PIN / profile gates on purpose: each of
+# them waves a valid key through, so a read-scope key has to be held to its
+# narrower access before any of them sees it.
+@app.before_request
+def _enforce_api_key_scope():
+    from api.auth import enforce_read_key_scope
+    return enforce_read_key_scope()
 
 
 # --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
@@ -2845,6 +2856,7 @@ _EDITION_BARE_RE = _re.compile(
 
 # Stream-prep worker logic lives in core/streaming/prepare.py.
 from core.streaming import prepare as _streaming_prepare
+from core.streaming import deezer_preview as _deezer_preview
 
 
 def _build_prepare_stream_deps(sess, sid):
@@ -3497,17 +3509,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def _m3u_entry_path(path):
-    """Final transforms for one m3u entry line: the prefix hot-swap
-    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
-    playback-machine path out) and the '#' comment-guard (#1072). Shared
-    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
-    just feeds it the configured mapping. Empty settings = '#'-guard only."""
-    from core.library.m3u_export import finalize_m3u_entry
-    return finalize_m3u_entry(
+def _m3u_entry_path(path, m3u_dir=None):
+    """One m3u entry line from a library file path: relative to ``m3u_dir``
+    when m3u_export.relative_paths is on and the file is being written there,
+    else the base path prepend + prefix hot-swap (wolf39us). the '#'
+    comment-guard (#1072) applies either way. Shared logic lives in
+    core.library.m3u_export.m3u_entry_line; this just feeds it the settings."""
+    from core.library.m3u_export import m3u_entry_line
+    relative = bool(m3u_dir) and bool(config_manager.get('m3u_export.relative_paths', False))
+    return m3u_entry_line(
         path,
+        entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
         rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
         rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+        relative_to=m3u_dir if relative else '',
     )
 
 
@@ -3527,8 +3542,8 @@ def _regenerate_batch_m3u(batch, tracks):
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
 
         # Resolve file paths from library DB
         from collections import defaultdict
@@ -3573,7 +3588,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
+                path = _m3u_entry_path(fp, m3u_folder)
                 lines.append(path)
                 found += 1
             else:
@@ -3584,8 +3599,6 @@ def _regenerate_batch_m3u(batch, tracks):
             return  # Don't overwrite with an all-missing M3U
 
         m3u_content = '\n'.join(lines)
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
         os.makedirs(m3u_folder, exist_ok=True)
         safe_fn = _sanitize_filename(playlist_name)
         m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
@@ -3680,9 +3693,6 @@ def generate_playlist_m3u():
         if save_to_disk and not force and not config_manager.get('m3u_export.enabled', False):
             return jsonify({"success": True, "skipped": True, "reason": "m3u_export disabled"})
 
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
-
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
@@ -3742,6 +3752,17 @@ def generate_playlist_m3u():
             )
             file_path_map[idx] = matched_path
 
+        # where it will be saved, worked out up front so entries can be
+        # relative to it. a content-only request has no folder: absolute.
+        will_save = save_to_disk and (force or config_manager.get('m3u_export.enabled', False))
+        m3u_folder = None
+        if will_save:
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
+
         # --- build M3U content ---
         import datetime as _dt
         found_count = 0
@@ -3763,7 +3784,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
+                entry = _m3u_entry_path(file_path, m3u_folder)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -3783,12 +3804,7 @@ def generate_playlist_m3u():
 
         # --- optionally save to disk ---
         saved_path = None
-        if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year,
-                                              sample_track_path=next(
-                                                  (p for p in file_path_map.values() if p), None))
+        if will_save:
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -4128,8 +4144,13 @@ def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
     from api import key_store
     from api.helpers import api_success
+    from api.auth import SCOPE_ADMIN, VALID_SCOPES
+    from api.helpers import api_error
     body = request.get_json(silent=True) or {}
-    raw_key, record = key_store.create_key(config_manager, body.get("label", ""))
+    scope = body.get("scope", SCOPE_ADMIN)
+    if scope not in VALID_SCOPES:
+        return api_error("BAD_REQUEST", f"scope must be one of: {', '.join(VALID_SCOPES)}.", 400)
+    raw_key, record = key_store.create_key(config_manager, body.get("label", ""), scope)
     return api_success(key_store.created_view(raw_key, record), status=201)
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
@@ -6396,6 +6417,8 @@ def stream_enhanced_search_track():
     artist_name = data.get('artist_name', '').strip()
     album_name = data.get('album_name', '').strip()
     duration_ms = data.get('duration_ms', 0)
+    # the player queue asking for a deezer clip in place of a skip (#1312)
+    preview_only = bool(data.get('preview_only'))
 
     if not track_name or not artist_name:
         return jsonify({"error": "Track name and artist name are required"}), 400
@@ -6412,8 +6435,13 @@ def stream_enhanced_search_track():
             download_orchestrator=download_orchestrator,
             matching_engine=matching_engine,
             run_async=run_async,
+            deezer_client=(_get_deezer_client()
+                           if _search_stream.is_deezer_preview_source(config_manager) else None),
+            preview_only=preview_only,
         )
         if result is None:
+            if preview_only:
+                return jsonify({"success": False, "error": "No preview available"}), 404
             return jsonify({
                 "success": False,
                 "error": "No suitable track found after trying multiple search strategies",
@@ -12517,9 +12545,25 @@ def stream_start():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                # a library track played through the media server (#809) or
+                # a deezer preview left this set, and /stream/audio serves
+                # stream_url first, so the new track would play the old one
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })
+
+        # deezer preview (#1312): nothing to download, the clip is ready now.
+        # resolved here, not in the search, because preview urls expire.
+        if _deezer_preview.is_preview_request(data):
+            track_id = _deezer_preview.preview_track_id(data)
+            client = _get_deezer_client() if track_id else None
+            preview_url = client.get_track_preview_url(track_id) if client else None
+            if not preview_url:
+                return jsonify({"success": False, "error": "Deezer preview unavailable"}), 404
+            with sess.lock:
+                sess.update(_deezer_preview.session_state_for(data, preview_url))
+            return jsonify({"success": True, "message": "Preview ready", "preview": True})
 
         # Start new background streaming task for this session.
         fut = stream_executor.submit(_prepare_stream_task, data, sess, sid)
@@ -12769,6 +12813,7 @@ def stream_stop():
                 "progress": 0,
                 "track_info": None,
                 "file_path": None,
+                "stream_url": None,
                 "error_message": None,
                 "is_library": False
             })
@@ -14939,10 +14984,14 @@ def _apply_path_template(template: str, context: dict) -> str:
         # Only splits when we have multiple distinct artist objects (Spotify provides these)
         # Avoids string splitting which breaks names like "Tyler, the Creator" or "Simon & Garfunkel"
         artists_list = context.get('_artists_list')
-        if artists_list and len(artists_list) > 1:
-            # Multiple artist objects (Spotify) — use first
-            first = artists_list[0]
-            album_artist_value = first.get('name', first) if isinstance(first, dict) else str(first)
+        # same rule as core/imports/paths.py: a lone listed name counts when
+        # the album artist is that name plus collaborators
+        _raw_album_artist = str(context.get('albumartist') or context.get('artist') or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary and context.get('_track_artists_list'):
+            primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
@@ -19470,7 +19519,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status
@@ -21951,6 +22000,9 @@ _DISCOVER_WARM_PATHS = [
 ]
 
 
+from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
+
+
 def _discover_warm_sweep(paths=None):
     """one pass over the discover shelves, as every profile.
 
@@ -21985,7 +22037,11 @@ def _discover_warm_sweep(paths=None):
                 sess['launch_pin_verified'] = True
             for p in (paths or _DISCOVER_WARM_PATHS):
                 try:
-                    status = client.get(p).status_code
+                    # recompute, don't read. a sweep inside the 30 min ttl
+                    # otherwise finds every answer still valid and refreshes
+                    # nothing, so every other sweep was a no-op
+                    with refresh_discover_caches():
+                        status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
                     status = 'error'
@@ -23431,6 +23487,13 @@ app.register_blueprint(_bp_mpl())
 from api.user_playlists import configure as _cfg_upl, create_blueprint as _bp_upl
 _cfg_upl(get_database=get_database, config_manager=config_manager)
 app.register_blueprint(_bp_upl())
+# your own playlists identify themselves in the background after every edit,
+# so they are always ready to sync (core/playlists/auto_identify)
+from core.playlists import auto_identify as _auto_identify
+_auto_identify.configure(
+    runner=lambda pls: _run_playlist_discovery_worker(pls, automation_id=None),
+    get_playlist=lambda pid: get_database().get_mirrored_playlist(pid),
+)
 
 # beatport chart discovery/sync (rides the source_playlists spine)
 from api.beatport_charts import configure as _cfg_bpc, create_blueprint as _bp_bpc

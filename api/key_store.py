@@ -9,7 +9,7 @@ can't drop each other.
 
 import threading
 
-from .auth import generate_api_key
+from .auth import SCOPE_ADMIN, VALID_SCOPES, generate_api_key, key_scope
 
 _keys_lock = threading.Lock()
 
@@ -20,6 +20,7 @@ def public_view(record):
         "id": record.get("id"),
         "label": record.get("label", ""),
         "key_prefix": record.get("key_prefix", ""),
+        "scope": key_scope(record),
         "created_at": record.get("created_at"),
         "last_used_at": record.get("last_used_at"),
     }
@@ -32,6 +33,7 @@ def created_view(raw_key, record):
         "id": record["id"],
         "label": record["label"],
         "key_prefix": record["key_prefix"],
+        "scope": key_scope(record),
         "created_at": record["created_at"],
     }
 
@@ -43,9 +45,15 @@ def list_keys(cfg):
             if isinstance(k, dict)]
 
 
-def create_key(cfg, label=""):
-    """Mint a key and store its record. Returns ``(raw_key, record)``."""
-    raw_key, record = generate_api_key(label)
+def create_key(cfg, label="", scope=SCOPE_ADMIN):
+    """Mint a key and store its record. Returns ``(raw_key, record)``.
+
+    ``scope`` is "admin" or "read"; anything else raises ValueError, so a typo
+    can't quietly mint a stronger key than the caller meant.
+    """
+    if scope not in VALID_SCOPES:
+        raise ValueError(f"scope must be one of: {', '.join(VALID_SCOPES)}")
+    raw_key, record = generate_api_key(label, scope)
     with _keys_lock:
         cfg.set("api_keys", list(cfg.get("api_keys", []) or []) + [record])
     return raw_key, record

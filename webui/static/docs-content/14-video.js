@@ -995,6 +995,7 @@ The manager shows you what's *missing* from a collection — and lets you **wish
 | **YouTube Ghost Files** | The download-ledger rows whose file is gone from disk (deleted on the server side). Without this, badges lie and retention counts overcount. Two fix modes: **prune** (stamp \`pruned_at\` — remembered, never re-downloaded) or **forget** (delete the row — becomes eligible again). Files are never touched; DB-only. Safety: unreachable YouTube root (down SMB mount) hard-errors instead of flagging everything; mass-missing (over half of 5+ checked files gone at once) asks rather than assuming. | Prune or forget the ghost row. |
 | **Watched Cleanup** | Movies watched at least once whose last watch is older than your \`watched_days\` (optionally also never-watched movies sitting \`unwatched_days\`, off by default). Watch-state changes ride the incremental scan, so candidates appear without a deep scan. Movies with no watch date are skipped, not guessed. | Moves the file to the **recycle bin** (never a hard delete) and marks the row file-less. |
 | **Naming Conformance** | Renders the **current** organization template for every owned movie/episode file and flags paths that differ — the Sonarr/Radarr "preview rename" gap, since templates only ever applied to new imports. The findings list *is* the preview (current → new); bulk select = mass rename. Safety: unlocatable files are skipped, occupied destinations are per-finding errors (never overwritten), and DB paths aren't rewritten here — the next scan reconciles them after the server notices. | Renames the file (plus same-stem sidecars and subtitles) into place. |
+| **Missing Subtitles** | Every library movie and episode, checked for your subtitle languages (per-title overrides and the forced toggle included) the same way new imports are: any sidecar next to the video counts whatever it's named, and so do embedded tracks. Weekly by default. With **Dry Run** off (the default) it queues what's missing straight away and the run's *Fixed* count is how many it queued; with Dry Run on it raises one finding per movie or show instead. Needs Download subtitles on. | Queues the still-missing subtitles (re-checked at approve time); the subtitle worker fetches them within the daily quota. |
 
 > [!TIP]
 > Run maintenance after big imports or server migrations. It's the fastest way to reconcile the database with what's actually on disk.
@@ -1082,10 +1083,33 @@ Server and library configuration lives on the admin-only Settings page — the c
             title: 'Enrichment Services & Keys',
             lede: 'API keys for TMDB, TVDB, OMDb, fanart.tv — plus indexer and download-client credentials.',
             body: `
-Enter API keys for **TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles** and the rest, set **service priority** (which source wins when several have the answer), and manage **indexer / download-client credentials** (Usenet, torrents, Soulseek).
+Enter API keys for **TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSource** and the rest, set **service priority** (which source wins when several have the answer), and manage **indexer / download-client credentials** (Usenet, torrents, Soulseek).
 
 > [!WARNING]
 > These endpoints return raw tokens, so they're **admin-gated for both reads and writes**.
+`
+        },
+        {
+            id: 'vset-subtitles',
+            title: 'Subtitles',
+            lede: 'Bazarr built in: fetch only what is missing, upgrade what is weak, and keep forced tracks alongside full ones.',
+            body: `
+Turn on **Download subtitles** (Settings → Library → Subtitles) and every import gets external \`.srt\` files for your **subtitle languages**, written next to the video as \`<video>.<lang>.srt\`. Per-movie and per-show language overrides live on the detail pages.
+
+**Providers.** OpenSubtitles, SubDL and SubSource (free API keys, each with a **Test** button), **Embedded** (extracts a text track already inside the file) and optional **Whisper** local transcription as the last resort. Drag the **provider chain** to set the order. Candidates are scored hash-first: a subtitle timed for your exact file beats one that only shares the release name, and anything under the minimum score is never downloaded.
+
+**Already have it.** Before fetching, SoulSync checks what the video already has, the same way Bazarr does:
+
+- any sidecar named after the video: \`.en.srt\`, \`.eng.srt\`, \`.English.srt\`, \`.pt-BR.srt\`, with \`.hi\` / \`.sdh\` / \`.cc\` for hearing-impaired and \`.forced\` for forced. An unlabeled \`movie.srt\` gets its language detected from the text.
+- the file's **embedded tracks**, unless you switch **Count embedded subtitles** off. You can also ignore PGS, VobSub or ASS tracks if your players can't show them.
+
+A hearing-impaired track counts for a plain request. A forced track never does, because it only has the foreign-language lines.
+
+**Forced subtitles.** Switch on **Also grab forced subtitles** to fetch a \`<video>.<lang>.forced.srt\` per language as well: just the lines for scenes in another language, for watching without full subtitles. Most titles have none, so these often stay missing. Whisper never makes forced tracks.
+
+**Retries and upgrades.** Misses retry in the background with backoff (1h, 2h, 4h … up to a week) within a per-provider **daily quota**. Downloaded subtitles are re-checked every 24h: if a clearly better one appears (it beats the current score by the upgrade delta) it replaces the old one, and if the subtitle disappeared from disk it's fetched again. Your own picks from **Search subtitles** (the **CC** button on a detail page) are never auto-replaced.
+
+**Your existing library.** New imports are covered automatically. For everything you already own (including titles added straight to Plex or Jellyfin), turn on the **Missing Subtitles** job on the **Tools** page. It checks the whole library on a schedule (weekly by default) with the rules above and queues what's missing; titles that already have subtitles are just recorded as had. Turn on its **Dry Run** setting to review first: you get one finding per movie or show, and approving one queues it.
 `
         },
         {

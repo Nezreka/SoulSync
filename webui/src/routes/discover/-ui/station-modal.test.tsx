@@ -91,19 +91,20 @@ describe('StationModal', () => {
 
   it('offers play, download and sync on the SELECTION', () => {
     const { props } = renderModal({ selected: [0] });
-    fireEvent.click(screen.getByText('▶ Play selected'));
-    fireEvent.click(screen.getByText('Download selected'));
+    fireEvent.click(screen.getByText('Play'));
+    fireEvent.click(screen.getByText('Download'));
     fireEvent.click(screen.getByText('Sync selected (1)'));
     expect(props.onPlaySelected).toHaveBeenCalled();
     expect(props.onDownloadSelected).toHaveBeenCalled();
     expect(props.onSyncSelected).toHaveBeenCalled();
   });
 
-  it('disables every action with nothing selected', () => {
-    renderModal({ selected: [] });
-    expect(screen.getByText('▶ Play selected')).toBeDisabled();
-    expect(screen.getByText('Download selected')).toBeDisabled();
-    expect(screen.getByText('Sync selected (0)')).toBeDisabled();
+  it('only floats the selection actions in once something is ticked', () => {
+    // every action there works on the selection, so with none it is not shown
+    // rather than shown greyed out
+    const { container } = renderModal({ selected: [] });
+    expect(container.querySelector('#station-modal-selbar')).toBeNull();
+    expect(container.querySelector('.mix-modal-colhead #station-select-all')).not.toBeNull();
   });
 
   it('tells the truth about an all-owned selection', () => {
@@ -136,8 +137,8 @@ describe('StationModal', () => {
       }),
     });
     expect(screen.getByText('No playable Daft Punk tracks in your library.')).toBeInTheDocument();
-    // and no selection bar over an empty list
-    expect(screen.queryByText('Select all')).toBeNull();
+    // and no select-all over an empty list
+    expect(screen.queryByLabelText('Select all')).toBeNull();
   });
 
   it('surfaces a load failure inside the dialog', () => {

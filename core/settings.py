@@ -566,7 +566,7 @@ class ConfigManager:
                 "hybrid_primary": "soulseek",  # Legacy: primary source for hybrid mode
                 "hybrid_secondary": "youtube",  # Legacy: fallback source for hybrid mode
                 "hybrid_order": [],  # Ordered list of sources for hybrid mode (overrides primary/secondary)
-                "stream_source": "youtube",  # Options: "youtube" (instant, default), "active" (use download source; falls back to youtube if soulseek)
+                "stream_source": "youtube",  # Options: "youtube" (instant, default), "active" (use download source; falls back to youtube if soulseek), "deezer_preview" (30s deezer clip, youtube when there is none)
                 # Album-bundle (torrent / usenet single-source) poll tuning.
                 # Downloader is polled every N seconds until the release
                 # lands; whole job aborts at the timeout. Defaults match
@@ -977,6 +977,7 @@ class ConfigManager:
             "m3u_export": {
                 "enabled": False,
                 "entry_base_path": "",
+                "relative_paths": False,
                 "library_enabled": False,
                 "library_path": ""
             },

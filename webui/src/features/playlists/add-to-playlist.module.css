@@ -27,76 +27,228 @@
   z-index: 100000;
   display: flex;
   flex-direction: column;
-  max-height: min(440px, calc(100vh - 16px));
-  padding: 8px;
+  max-height: min(480px, calc(100vh - 16px));
+  padding: 10px;
+  overflow: hidden;
   border: 1px solid var(--white-a10);
-  border-radius: 14px;
-  background: #18181c;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  border-radius: 20px;
+  /* solid on purpose. it was 86% see-through, and where a browser skips the
+     backdrop blur the page underneath read straight through the list */
+  background: #17151e;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(var(--accent-rgb), 0.08),
+    0 0 60px rgba(var(--accent-rgb), 0.12);
   color: #fff;
   font-size: 13px;
+  animation: picker-in 0.16s ease-out;
+}
+
+@keyframes picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .picker:focus {
   outline: none;
 }
 
-.head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 8px 10px;
+/* the song's art, blurred into a wash behind the header. the accent when the
+   page sent no art */
+.glow {
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  left: -50px;
+  height: 190px;
+  background: radial-gradient(circle at 30% 60%, rgba(var(--accent-rgb), 0.9), transparent 70%);
+  background-position: center;
+  background-size: cover;
+  filter: blur(42px) saturate(1.3);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
-.title {
+/* the scrim does the legibility, not the blur. some browsers skip the filter
+   and show the art sharp, so the text sits on a dark wash either way, fading
+   into the solid picker before the list starts */
+.glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(23, 21, 30, 0.35) 0%,
+    rgba(23, 21, 30, 0.7) 45%,
+    #17151e 78%
+  );
+}
+
+.head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 6px 14px;
+}
+
+.subjectArt {
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.subjectBlank {
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.85);
+  background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.75), rgba(var(--accent-rgb), 0.2));
+}
+
+.headText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.eyebrow {
+  font-size: 10.5px;
   font-weight: 700;
-  font-size: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--accent-light-rgb));
 }
 
 .subject {
+  margin-top: 3px;
   overflow: hidden;
-  color: var(--white-a50);
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.by {
+  overflow: hidden;
+  color: var(--white-a60);
   font-size: 12px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.search {
-  width: 100%;
-  min-width: 0;
-  height: 34px;
-  margin-bottom: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--white-a10);
-  border-radius: 9px;
-  background: var(--white-a05);
-  color: #fff;
-  font: inherit;
+.heart {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--white-a70);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    transform 0.15s ease;
 }
 
-.search:focus {
+.heart:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  transform: scale(1.06);
+}
+
+.heart:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.hearted,
+.hearted:hover:not(:disabled) {
+  color: rgb(var(--accent-light-rgb));
+}
+
+.hearted svg {
+  animation: heart-pop 0.28s ease-out;
+}
+
+@keyframes heart-pop {
+  50% {
+    transform: scale(1.25);
+  }
+}
+
+.searchWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin: 0 2px 8px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--white-a50);
+}
+
+.searchWrap:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.55);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: #fff;
+  font: inherit;
   outline: none;
-  border-color: rgba(var(--accent-rgb), 0.6);
 }
 
 .create {
   display: flex;
   gap: 6px;
+  margin: 0 2px 4px;
 }
 
-.create .search {
+.createInput {
   flex: 1;
+  min-width: 0;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.55);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #fff;
+  font: inherit;
+  outline: none;
 }
 
 .createBtn {
-  height: 34px;
-  padding: 0 14px;
+  height: 38px;
+  padding: 0 16px;
   border: none;
-  border-radius: 17px;
+  border-radius: 999px;
   background: rgb(var(--accent-rgb));
-  color: #000;
+  color: #111;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 12.5px;
   cursor: pointer;
 }
 
@@ -105,7 +257,17 @@
   cursor: default;
 }
 
+.section {
+  margin: 10px 10px 4px;
+  color: var(--white-a35);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .list {
+  position: relative;
   overflow-y: auto;
   min-height: 0;
   margin: 0 -2px;
@@ -113,13 +275,14 @@
 }
 
 .row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 7px 8px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 12px;
   background: none;
   color: inherit;
   font: inherit;
@@ -129,7 +292,7 @@
 
 .row:hover:not(:disabled),
 .row:focus-visible {
-  background: var(--white-a07);
+  background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.18), rgba(var(--accent-rgb), 0.04));
   outline: none;
 }
 
@@ -139,28 +302,51 @@
 }
 
 .newRow {
-  margin-bottom: 4px;
+  position: relative;
+}
+
+.newRow .name {
+  color: rgb(var(--accent-light-rgb));
 }
 
 .cover {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   flex-shrink: 0;
-  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border-radius: 9px;
   object-fit: cover;
-  background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.3), #24242a);
-  color: var(--white-a80);
-  font-weight: 700;
+  background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.55), rgba(var(--accent-rgb), 0.1));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-weight: 800;
+  font-size: 17px;
+}
+
+/* four covers in a 2x2, like the playlists page's collage */
+.mosaic {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.mosaic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .newCover {
-  background: var(--white-a08);
+  border: 1.5px dashed rgba(var(--accent-rgb), 0.6);
+  background: rgba(var(--accent-rgb), 0.12);
+  box-shadow: none;
+  color: rgb(var(--accent-light-rgb));
 }
 
 .rowText {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
 }
@@ -168,19 +354,62 @@
 .name {
   overflow: hidden;
   font-weight: 600;
+  font-size: 13.5px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .count {
+  margin-top: 1px;
   color: var(--white-a45);
   font-size: 11.5px;
+}
+
+/* the hover "Add", and the tick on a playlist that already has it */
+.go {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgb(var(--accent-rgb));
+  color: #111;
+  font-weight: 700;
+  font-size: 11.5px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.row:hover:not(:disabled) .go,
+.row:focus-visible .go {
+  opacity: 1;
+}
+
+.tick {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  color: #111;
+}
+
+.rowIn:hover:not(:disabled) .tick {
+  background: rgba(255, 90, 90, 0.9);
+  color: #fff;
 }
 
 .note {
   padding: 14px 8px;
   color: var(--white-a45);
   text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .picker,
+  .hearted svg {
+    animation: none;
+  }
 }
 
 /* a phone: a sheet from the bottom instead of a popover at the button */
@@ -191,8 +420,8 @@
     bottom: 0;
     left: 0 !important;
     width: auto !important;
-    max-height: 70vh;
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
-    border-radius: 16px 16px 0 0;
+    max-height: 75vh;
+    padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+    border-radius: 20px 20px 0 0;
   }
 }

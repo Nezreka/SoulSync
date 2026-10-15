@@ -61,12 +61,15 @@ describe('discover mix modal on a phone', () => {
   });
 
   it('gives the title and artist the width the number and album had', () => {
-    expect(rules(MOBILE, '.discover-playlist-track-compact.has-select')).toMatch(
+    // rows and the column head share one rule, so the labels stay over their column
+    expect(rules(MOBILE, '.mix-modal-colhead.has-select')).toMatch(
       /grid-template-columns:\s*22px 40px minmax\(0, 1fr\) auto 32px/,
     );
-    expect(rules(MOBILE, '.discover-playlist-track-compact .track-compact-album')).toMatch(
-      /display:\s*none/,
+    expect(MOBILE).toMatch(
+      /\.discover-playlist-track-compact\.has-select,\s*\.mix-modal \.discover-playlist-track-compact\.has-select,\s*\.mix-modal-colhead\.has-select\s*\{/,
     );
+    expect(rules(MOBILE, '.mix-colhead-album')).toMatch(/display:\s*none/);
+    expect(MOBILE).toMatch(/\.discover-playlist-track-compact \.track-compact-album,/);
   });
 });
 

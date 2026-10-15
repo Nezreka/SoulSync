@@ -13,6 +13,9 @@ Stream source resolution:
 - If it's "active", mirror the user's download mode (tidal / qobuz /
   hifi / deezer_dl / lidarr) — but coerce Soulseek to YouTube because
   Soulseek is too slow for streaming previews.
+- If it's "deezer_preview", answer with the song's 30s deezer clip
+  (core/streaming/deezer_preview.py). a song deezer has no clip for falls
+  back to youtube, unless the caller asked for a preview only.
 """
 
 from __future__ import annotations
@@ -41,6 +44,10 @@ def _resolve_effective_stream_mode(config_manager) -> str:
     if download_mode == 'hybrid':
         return hybrid_first
     return download_mode
+
+
+def is_deezer_preview_source(config_manager) -> bool:
+    return config_manager.get('download_source.stream_source', 'youtube') == 'deezer_preview'
 
 
 def _build_stream_queries(track_name: str, artist_name: str, effective_mode: str) -> list[str]:
@@ -99,13 +106,30 @@ def stream_search_track(
     download_orchestrator,
     matching_engine,
     run_async: Callable,
+    deezer_client=None,
+    preview_only: bool = False,
 ) -> Optional[dict]:
     """Find the best Soulseek/stream-source result for a single track.
 
     Returns the matched result dict on success, or `None` if no query
     variant produced a usable match. The route layer turns `None` into a
     404 response.
+
+    ``preview_only`` is the player queue asking "can this missing song play
+    as a deezer clip instead of being skipped". it never starts a real
+    search: no clip, or a stream source other than deezer_preview, is None.
     """
+    preview_source = is_deezer_preview_source(config_manager)
+    if preview_source:
+        from core.streaming.deezer_preview import find_preview
+        preview = find_preview(deezer_client, artist_name, track_name)
+        if preview:
+            logger.info(f"Stream source deezer_preview: clip for '{artist_name} - {track_name}'")
+            return preview
+        logger.info(f"No deezer preview for '{artist_name} - {track_name}'")
+    if preview_only:
+        return None
+
     temp_track = type('TempTrack', (), {
         'name': track_name,
         'artists': [artist_name],
@@ -113,7 +137,7 @@ def stream_search_track(
         'duration_ms': duration_ms,
     })()
 
-    effective_mode = _resolve_effective_stream_mode(config_manager)
+    effective_mode = 'youtube' if preview_source else _resolve_effective_stream_mode(config_manager)
     logger.info(f"Stream source effective mode: {effective_mode}")
 
     queries = _build_stream_queries(track_name, artist_name, effective_mode)

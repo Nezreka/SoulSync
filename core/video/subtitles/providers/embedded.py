@@ -23,7 +23,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
 
 
 def _tools_dir() -> Path:
@@ -65,22 +65,6 @@ def resolve_ffprobe(ffmpeg_bin: str | None = None) -> str | None:
     return None
 
 
-#: ffprobe reports ISO 639-2 (``eng``); SoulSync language codes are ISO 639-1
-#: (``en``). The common mappings — an unmapped code simply doesn't match (no
-#: guessing a language).
-_ISO_639_2_TO_1 = {
-    "eng": "en", "spa": "es", "fra": "fr", "fre": "fr",
-    "deu": "de", "ger": "de", "ita": "it", "por": "pt",
-    "nld": "nl", "dut": "nl", "rus": "ru", "jpn": "ja",
-    "zho": "zh", "chi": "zh", "kor": "ko", "ara": "ar",
-    "hin": "hi", "tur": "tr", "pol": "pl", "swe": "sv",
-    "nor": "no", "dan": "da", "fin": "fi", "hun": "hu",
-    "ces": "cs", "cze": "cs", "slk": "sk", "slo": "sk",
-    "ron": "ro", "rum": "ro", "bul": "bg", "ell": "el",
-    "gre": "el", "heb": "he", "tha": "th", "vie": "vi",
-    "ind": "id", "msa": "ms", "may": "ms",
-}
-
 #: Subtitle codecs ffmpeg can extract to SRT text. Bitmap-based codecs
 #: (hdmv_pgs_subtitle, dvd_subtitle, dvb_subtitle, xsub, …) need OCR — they
 #: get NO candidate rather than a half-working one. Unknown codecs fail
@@ -95,12 +79,8 @@ def _stream_language(stream: dict) -> str | None:
     tags = stream.get("tags")
     if not isinstance(tags, dict):
         return None
-    raw = str(tags.get("language") or "").strip().lower()
-    if not raw:
-        return None
-    if len(raw) == 2:
-        return raw
-    return _ISO_639_2_TO_1.get(raw)
+    from ..languages import to_code
+    return to_code(tags.get("language"))
 
 
 def _probe_subtitle_streams(ffprobe: str, file_path: str) -> list[dict]:
@@ -206,7 +186,9 @@ class EmbeddedProvider(SubtitleProvider):
                 # candidate out and the provider can never fire.
                 hash_match=True,
             ))
-        return out
+        # same flag rules as the network providers: a forced-only stream
+        # must never land as the plain sidecar.
+        return flag_filter(out, query)
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         ffmpeg, _ffprobe = self._binaries()

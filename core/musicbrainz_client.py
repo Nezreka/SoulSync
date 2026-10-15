@@ -917,7 +917,7 @@ class MusicBrainzClient:
             logger.error(f"Error fetching recording {mbid}: {e}")
             return None
 
-    def lookup_recordings_by_isrc(self, isrc: str) -> List[Dict[str, Any]]:
+    def lookup_recordings_by_isrc(self, isrc: str, raise_on_error: bool = False) -> List[Dict[str, Any]]:
         """
         Exact recording lookup by ISRC via MusicBrainz's ``/isrc/<ISRC>`` endpoint.
 
@@ -933,6 +933,13 @@ class MusicBrainzClient:
 
         Args:
             isrc: The ISRC to look up (hyphens/case are normalized).
+            raise_on_error: Re-raise a transport failure instead of folding
+                it into ``[]``. A 404 is NOT a transport failure — MusicBrainz
+                answered "no recording carries this ISRC" — and still
+                returns ``[]``. For callers that WRITE results down (the
+                enrichment match), the distinction matters the same way it
+                does for the searches: without it, an outage on this one
+                rung is indistinguishable from "no such ISRC" (#1705).
 
         Returns:
             List of recording dicts sharing that ISRC (usually 0 or 1, occasionally
@@ -954,5 +961,9 @@ class MusicBrainzClient:
             return recordings
 
         except Exception as e:
+            if http_error_status(e) == 404:
+                return []
+            if raise_on_error:
+                raise
             logger.debug(f"Error looking up ISRC {code}: {e}")
             return []

@@ -103,7 +103,7 @@ def test_iter_musicmap_similar_artist_events_uses_source_priority(monkeypatch):
         "Similar Artist": [
             pytypes.SimpleNamespace(
                 id="it-match",
-                name="iTunes Canonical",
+                name="Similar Artist",
                 image_url="https://itunes.example/it-match.jpg",
                 genres=["indie", "alt"],
                 popularity=77,
@@ -127,7 +127,7 @@ def test_iter_musicmap_similar_artist_events_uses_source_priority(monkeypatch):
     assert events[0]["source_priority"] == ["deezer", "itunes", "spotify"]
     assert events[1]["type"] == "artist"
     assert events[1]["artist"]["id"] == "it-match"
-    assert events[1]["artist"]["name"] == "iTunes Canonical"
+    assert events[1]["artist"]["name"] == "Similar Artist"
     assert events[1]["artist"]["image_url"] == "https://itunes.example/it-match.jpg"
     assert events[1]["artist"]["genres"] == ["indie", "alt"]
     assert events[1]["artist"]["popularity"] == 77
@@ -139,7 +139,7 @@ def test_iter_musicmap_similar_artist_events_uses_source_priority(monkeypatch):
 
     assert [call[0] for call in deezer.search_calls] == ["Artist One", "Similar Artist"]
     assert [call[0] for call in itunes.search_calls] == ["Artist One", "Similar Artist"]
-    assert spotify.search_calls == [("Artist One", {"limit": 1, "allow_fallback": False})]
+    assert spotify.search_calls == [("Artist One", {"limit": 10, "allow_fallback": False})]
 
 
 def test_iter_musicmap_similar_artist_events_enriches_itunes_images(monkeypatch):
@@ -157,7 +157,7 @@ def test_iter_musicmap_similar_artist_events_enriches_itunes_images(monkeypatch)
         def __init__(self):
             super().__init__({
                 "Artist One": [pytypes.SimpleNamespace(id="it-seed", name="Artist One")],
-                "Similar Artist": [pytypes.SimpleNamespace(id="it-match", name="iTunes Canonical")],
+                "Similar Artist": [pytypes.SimpleNamespace(id="it-match", name="Similar Artist")],
             })
             self.get_artist_calls = []
 
@@ -165,7 +165,7 @@ def test_iter_musicmap_similar_artist_events_enriches_itunes_images(monkeypatch)
             self.get_artist_calls.append(artist_id)
             return {
                 "id": artist_id,
-                "name": "iTunes Canonical",
+                "name": "Similar Artist",
                 "images": [{"url": "https://itunes.example/full-art.jpg"}],
                 "genres": ["indie"],
                 "popularity": 0,
@@ -200,7 +200,7 @@ def test_iter_musicmap_similar_artist_events_falls_back_to_itunes_album_art(monk
         def __init__(self):
             super().__init__({
                 "Artist One": [pytypes.SimpleNamespace(id="it-seed", name="Artist One")],
-                "Similar Artist": [pytypes.SimpleNamespace(id="it-match", name="iTunes Canonical")],
+                "Similar Artist": [pytypes.SimpleNamespace(id="it-match", name="Similar Artist")],
             })
             self.get_artist_calls = []
             self.album_art_calls = []
@@ -209,7 +209,7 @@ def test_iter_musicmap_similar_artist_events_falls_back_to_itunes_album_art(monk
             self.get_artist_calls.append(artist_id)
             return {
                 "id": artist_id,
-                "name": "iTunes Canonical",
+                "name": "Similar Artist",
                 "images": [],
                 "genres": ["indie"],
                 "popularity": 0,

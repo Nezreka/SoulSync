@@ -201,12 +201,16 @@
                 <div class="launch-pin-icon">🔐</div>
                 <h2 class="launch-pin-title">Sign in to SoulSync</h2>
                 <p class="launch-pin-subtitle">Enter your account name and password</p>
-                <input type="text" id="login-username" class="launch-pin-input" placeholder="Username"
-                    autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
-                <input type="password" id="login-password" class="launch-pin-input" placeholder="Password"
-                    autocomplete="current-password" maxlength="200" style="letter-spacing: normal;"
-                    onkeydown="if(event.key==='Enter') submitLogin()">
-                <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <!-- a real form with named fields so password managers pair the username
+                     with this password, not the hidden recovery / pin fields -->
+                <form id="login-form" action="/api/auth/login" method="post" autocomplete="on"
+                    onsubmit="event.preventDefault(); submitLogin()">
+                    <input type="text" id="login-username" name="username" class="launch-pin-input" placeholder="Username"
+                        autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="login-password" name="password" class="launch-pin-input" placeholder="Password"
+                        autocomplete="current-password" maxlength="200" style="letter-spacing: normal;">
+                    <button type="submit" id="login-submit" class="launch-pin-submit">Sign in</button>
+                </form>
                 <!-- shown when sign in with plex is on (webui/src/shell/plex-signin.ts) -->
                 <div id="login-plex" class="login-plex" hidden>
                     <span class="login-plex-or">or</span>
@@ -220,23 +224,26 @@
                 <div class="launch-pin-icon">🔑</div>
                 <h2 class="launch-pin-title">Reset your password</h2>
                 <p class="launch-pin-subtitle">Answer your recovery question</p>
-                <input type="text" id="recovery-username" class="launch-pin-input" placeholder="Username"
+                <form id="login-recovery-form" action="/api/auth/recovery-reset" method="post" autocomplete="on"
+                    onsubmit="event.preventDefault()">
+                <input type="text" id="recovery-username" name="username" class="launch-pin-input" placeholder="Username"
                     autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
-                <button id="recovery-fetch-btn" class="launch-pin-submit"
+                <button type="button" id="recovery-fetch-btn" class="launch-pin-submit"
                     onclick="fetchRecoveryQuestion()">Continue</button>
                 <div id="recovery-answer-section" style="display: none;">
                     <p id="recovery-question-text" class="launch-pin-subtitle"
                         style="margin-top: 12px; font-weight: 600;"></p>
                     <input type="text" id="recovery-answer" class="launch-pin-input" placeholder="Your answer"
                         autocomplete="off" maxlength="120" style="margin-bottom: 8px; letter-spacing: normal;">
-                    <input type="password" id="recovery-new-password" class="launch-pin-input"
+                    <input type="password" id="recovery-new-password" name="new-password" class="launch-pin-input"
                         placeholder="New password (min 6)" autocomplete="new-password" maxlength="200"
                         style="margin-bottom: 8px; letter-spacing: normal;">
                     <input type="password" id="recovery-new-password-confirm" class="launch-pin-input"
                         placeholder="Confirm new password" autocomplete="new-password" maxlength="200"
                         style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
-                    <button class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
+                    <button type="button" class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
                 </div>
+                </form>
                 <p id="recovery-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginEntry()">← Back to sign in</button>
             </div>
@@ -473,7 +480,7 @@
                         <span class="nav-text">Wishlist</span>
                         <span class="dl-nav-badge hidden" id="wishlist-nav-badge">0</span>
                     </a>
-                    <a class="nav-button" data-page="requests" href="/requests" style="display: none;">
+                    <a class="nav-button nav-idle" data-page="requests" href="/requests" style="display: none;">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.8-.9L3 20.5l1.5-4.6A8.4 8.4 0 1 1 21 11.5z" />
@@ -561,7 +568,7 @@
                             </svg></span>
                         <span class="nav-text">Settings</span>
                     </a>
-                    <a class="nav-button" data-page="issues" href="/issues">
+                    <a class="nav-button nav-idle" data-page="issues" href="/issues">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10" />
@@ -708,7 +715,7 @@
                         <span class="nav-text">Downloads</span>
                         <span class="dl-nav-badge hidden" data-video-downloads-badge>0</span>
                     </a>
-                    <a class="nav-button" data-video-page="video-requests" href="/video-requests">
+                    <a class="nav-button nav-idle" data-video-page="video-requests" href="/video-requests">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <path
@@ -767,7 +774,7 @@
                             </svg></span>
                         <span class="nav-text">Settings</span>
                     </a>
-                    <a class="nav-button" data-video-page="video-issues" href="/video-issues">
+                    <a class="nav-button nav-idle" data-video-page="video-issues" href="/video-issues">
                         <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none"
                                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                                 <circle cx="12" cy="12" r="10" />
@@ -3325,6 +3332,7 @@
                                                         id="spotify-disconnect-btn" onclick="disconnectSpotify()"
                                                         style="display: none;">🔌
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('spotify')">Test Connection</button>
                                                 </div>
                                                 <div class="form-group"
                                                     style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
@@ -3386,6 +3394,9 @@
                                                         Region-specific albums are auto-searched across other
                                                         storefronts as fallback.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('itunes')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3441,6 +3452,9 @@
                                                         <code>arl</code> value. Provides playlist access + downloads.
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testDeezerConnection()">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3465,6 +3479,9 @@
                                                     <div class="callback-help">Click "Generate new token" — no app
                                                         registration needed. Provides 60 req/min and cover art in search
                                                         results.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('discogs')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3505,6 +3522,7 @@
                                                     <button class="auth-button" onclick="disconnectTidal()"
                                                         style="margin-left: 8px;">
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('tidal')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3581,6 +3599,9 @@
                                                         → look in the request headers for <code>X-User-Auth-Token</code>
                                                         → copy that value.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('qobuz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3630,6 +3651,9 @@
                                                         setlist.fm/settings/api (non-commercial use).
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('concerts')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3677,6 +3701,9 @@
                                                         Scrobbling</button>
                                                     <span class="setting-help-text" id="lastfm-scrobble-status"></span>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('lastfm')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3699,6 +3726,9 @@
                                                             style="color: #ffff64;">Genius API Clients</a></div>
                                                     <div class="callback-help">Generate a "Client Access Token" — no
                                                         OAuth flow needed.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('genius')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3743,6 +3773,9 @@
                                                         search indexes; use its final URL.</small>
                                                 </div>
 
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('musicbrainz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3828,6 +3861,9 @@
                                                         <input type="checkbox" id="listenbrainz-scrobble-enabled">
                                                         Scrobble plays to ListenBrainz
                                                     </label>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('listenbrainz')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4013,8 +4049,8 @@
                                                             href="https://www.opensubtitles.com/en/consumers"
                                                             target="_blank" style="color: #22a079;">OpenSubtitles</a>
                                                         (register a consumer)</div>
-                                                    <div class="callback-help">Records which subtitle languages exist
-                                                        per title.</div>
+                                                    <div class="callback-help">Subtitle downloads, plus which
+                                                        subtitle languages exist per title.</div>
                                                 </div>
                                                 <button class="test-button" type="button"
                                                     data-video-test-service="opensubtitles">Test OpenSubtitles</button>
@@ -4038,6 +4074,8 @@
                                                             target="_blank" style="color: #22a079;">SubDL</a>
                                                         (account panel)</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="subdl">Test SubDL</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="subsource">
@@ -4058,6 +4096,8 @@
                                                             target="_blank" style="color: #22a079;">SubSource</a>
                                                         (profile page)</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="subsource">Test SubSource</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="trakt">
@@ -4106,6 +4146,8 @@
                                                         collections from MDBList lists — the real IMDb Top 250, award
                                                         lists (Oscar winners), and thousands of community lists.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="mdblist">Test MDBList</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="nokey">
@@ -4132,6 +4174,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Gap-fill extra data on your library in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="tvmaze,anilist,wikidata">Test Connections</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="ytextras">
@@ -4157,6 +4201,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Enrich cached YouTube videos in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="ryd,sponsorblock,dearrow">Test Connections</button>
                                             </div>
                                         </div>
                                     </div>
@@ -6590,6 +6636,7 @@
                                                         <select id="stream-source" class="form-select">
                                                             <option value="youtube">YouTube (Instant)</option>
                                                             <option value="active">Active Download Source</option>
+                                                            <option value="deezer_preview">Deezer 30s Preview (Instant)</option>
                                                         </select>
                                                         <span class="info-icon" role="button" tabindex="0"
                                                             title="What's this?" onclick="toggleSettingHelp(this)"
@@ -6600,6 +6647,11 @@
                                                             "Active Download Source" uses your configured source (Tidal,
                                                             Qobuz, etc.) — if that's Soulseek, YouTube is used
                                                             automatically.
+                                                            "Deezer 30s Preview" plays Deezer's 30 second clip of the
+                                                            song straight away, no Deezer account needed. Songs Deezer
+                                                            has no clip for use YouTube. With queue auto-download off,
+                                                            missing queue songs play their clip instead of being
+                                                            skipped.
                                                         </div>
                                                     </div>
                                                     <div class="form-group">
@@ -7006,10 +7058,28 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="m3u-relative-paths">
+                                                        Write M3U entries relative to the playlist file
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <div class="setting-help-text setting-help-body" hidden>
+                                                        Entries become <code>../Artist/Album/01 - Song.flac</code>
+                                                        instead of the full path SoulSync sees, so a saved M3U still
+                                                        works when the folder is opened from a network share, another
+                                                        machine or a sync tool. Tracks that don't share a folder with
+                                                        the playlist keep their full path, and the base path and
+                                                        prefix rewrite below still apply to those.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>M3U Entry Base Path:</label>
                                                     <div class="path-input-group">
                                                         <input type="text" id="m3u-entry-base-path"
-                                                            placeholder="e.g. /mnt/music (leave empty for relative paths)"
+                                                            placeholder="e.g. /mnt/music (leave empty to use paths as stored)"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>
@@ -8276,11 +8346,11 @@
                                                         <input type="checkbox" id="vo-subs-dl">
                                                         <span>Download subtitles</span>
                                                     </label>
-                                                    <small class="settings-hint">Fetch external .srt files from
-                                                        OpenSubtitles next to the video. On by default for new
-                                                        imports &mdash; best effort: the OpenSubtitles free tier is
-                                                        quota-limited (~20 downloads/day), so anything missed is
-                                                        retried later.</small>
+                                                    <small class="settings-hint">Fetch external .srt files next to
+                                                        the video from the provider chain below, only for what's
+                                                        missing. On by default for new imports &mdash; free tiers
+                                                        are quota-limited (~20 downloads/day each), so anything
+                                                        missed is retried later.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8297,16 +8367,57 @@
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label for="vo-sub-hi-forced">Hearing-impaired / forced
+                                                    <label for="vo-sub-hi-forced">Hearing-impaired
                                                         preference:</label>
                                                     <select id="vo-sub-hi-forced">
                                                         <option value="off">Off — best match wins</option>
                                                         <option value="prefer_hi">Prefer hearing-impaired</option>
-                                                        <option value="prefer_forced">Prefer forced</option>
                                                     </select>
                                                     <small class="settings-hint">A tiebreak only, never a filter:
-                                                        when two subtitles score the same, the preferred kind
-                                                        wins.</small>
+                                                        when two subtitles score the same, the hearing-impaired
+                                                        one (sound cues, speaker names) wins.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-forced">
+                                                        <span>Also grab forced subtitles</span>
+                                                    </label>
+                                                    <small class="settings-hint">On top of the full track, fetch a
+                                                        forced (foreign-parts-only) track per language, written as
+                                                        &lt;video&gt;.&lt;lang&gt;.forced.srt &mdash; the lines
+                                                        for scenes in another language, for when you watch
+                                                        without full subtitles. Many titles have none, so these
+                                                        often stay missing.</small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label>Already have it when&hellip;</label>
+                                                    <small class="settings-hint">Before fetching, SoulSync checks what
+                                                        the video already has: any sidecar next to it
+                                                        (<code>.en.srt</code>, <code>.eng.srt</code>,
+                                                        <code>.English.sdh.srt</code>, or an unlabeled
+                                                        <code>.srt</code> whose language it detects) and the
+                                                        file's own embedded tracks.</small>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-use-embedded">
+                                                        <span>Count embedded subtitles</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-pgs">
+                                                        <span>&hellip;except PGS (Blu-ray image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-vobsub">
+                                                        <span>&hellip;except VobSub (DVD image subs)</span>
+                                                    </label>
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="vo-sub-ignore-ass">
+                                                        <span>&hellip;except ASS/SSA (styled subs)</span>
+                                                    </label>
+                                                    <small class="settings-hint">Ignore image subs if your players
+                                                        can't show them (or have to transcode for them) and you'd
+                                                        rather have a text .srt.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -8418,17 +8529,17 @@
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label>Library backfill:</label>
+                                                    <label>Videos already in your library:</label>
                                                     <div>
-                                                        <button class="test-button" id="vo-sub-backfill"
-                                                            type="button">Scan library for missing subtitles</button>
+                                                        <button class="test-button" id="vo-sub-open-job"
+                                                            type="button">Missing Subtitles job &rarr;</button>
                                                     </div>
-                                                    <small class="settings-hint"
-                                                        id="vo-sub-backfill-status"></small>
-                                                    <small class="settings-hint">Queues wanted rows for
-                                                        library videos that have no subtitles yet, so the
-                                                        worker fetches them like new imports. Runs in the
-                                                        background; needs Download subtitles on.</small>
+                                                    <small class="settings-hint" id="vo-sub-job-status"></small>
+                                                    <small class="settings-hint">New imports are covered
+                                                        automatically. The Missing Subtitles job on the Tools
+                                                        page checks everything you already own on a schedule
+                                                        and queues what's missing; turn on its Dry Run to
+                                                        review findings first.</small>
                                                 </div>
                                             </div>
 
@@ -9875,6 +9986,18 @@
                                                     <label>New Key Label:</label>
                                                     <input type="text" id="api-key-label"
                                                         placeholder="e.g. Discord Bot, Home Assistant">
+                                                </div>
+                                                <div class="form-group" style="margin-bottom: 8px;">
+                                                    <label>Access:</label>
+                                                    <select id="api-key-scope">
+                                                        <option value="read" selected>Read-only (stats and library, for dashboards)</option>
+                                                        <option value="admin">Admin (can change settings and everything else)</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        A read-only key can fetch library and status data. It cannot
+                                                        change anything or read settings, keys or profiles.
+                                                    </div>
                                                 </div>
                                                 <div class="form-actions">
                                                     <button class="auth-button" onclick="generateApiKey()">🔑 Generate
@@ -12485,6 +12608,7 @@
             <div class="media-info">
                 <div class="track-title" id="track-title"><span class="title-text">No track</span></div>
                 <div class="artist-name" id="artist-name">Unknown Artist</div>
+                <span class="player-preview-badge" id="player-preview-badge" hidden>30s preview</span>
             </div>
             <div class="mini-player-controls">
                 <button class="mini-toggle-btn" id="mini-shuffle-btn" title="Shuffle">

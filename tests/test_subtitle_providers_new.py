@@ -239,12 +239,16 @@ def test_subsource_search_resolves_title_then_lists(monkeypatch):
             assert params["searchType"] == "imdb" and params["imdb"] == "tt0133093"
             return {"data": [{"movieId": 77, "title": "The Matrix", "imdbId": "tt0133093"}]}
         if path == "/subtitles":
-            assert params["movieId"] == 77 and params["language"] == "en"
+            # the live api wants the english name, not the code (oct 14 check:
+            # language=en returned nothing at all)
+            assert params["movieId"] == 77 and params["language"] == "english"
             return {"data": [
-                {"id": 5, "language": "en", "releaseName": "The.Matrix.1999.1080p",
-                 "hearingImpaired": False, "downloadCount": 11},
-                {"id": 6, "language": "fr", "releaseName": "x", "hearingImpaired": False},
-            ]}
+                {"subtitleId": 5, "language": "english", "releaseInfo": ["The.Matrix.1999.1080p"],
+                 "hearingImpaired": False, "foreignParts": False, "downloads": 11,
+                 "preview": "1\n00:00:01,000 --> 00:00:02,000\nhi"},
+                {"subtitleId": 6, "language": "french", "releaseInfo": ["x"],
+                 "hearingImpaired": False},
+            ], "pagination": {"page": 1, "pages": 1}}
         raise AssertionError("unexpected " + path)
     monkeypatch.setattr(p, "_api_get", fake_get)
     q = SubtitleQuery(identity={"imdb_id": "tt0133093"}, language="en")
@@ -407,3 +411,257 @@ def test_subsource_episode_season_zero():
     assert _sub_episode({"season": 0, "episode": 3}) == (0, 3)
     assert _sub_episode({"season": 0, "episodeNumber": 5}) == (0, 5)
     assert _sub_episode({"season": 2, "episode": 1}) == (2, 1)
+
+
+# ── review fixes (oct 14) ────────────────────────────────────────────────────
+def test_subdl_episode_accepts_plain_single_episode_entries(monkeypatch):
+    # the real api answers an episode query with per-episode entries (no
+    # unpack_files); dropping them meant subdl never found an episode sub.
+    p = SubDLProvider()
+    _configured(p)
+    payload = {"status": True, "subtitles": [
+        {"language": "EN", "release_name": "Show.S01E02.1080p.WEB",
+         "url": "/subtitle/1-2.zip", "hi": False, "season": 1, "episode": 2,
+         "episode_from": None, "episode_end": 0, "full_season": False},
+        {"language": "EN", "release_name": "Show.S01E03.1080p.WEB",
+         "url": "/subtitle/1-3.zip", "hi": False, "season": 1, "episode": 3,
+         "full_season": False},
+        {"language": "EN", "release_name": "Show.S01E02.AI",
+         "url": "/subtitle/1-9.zip", "season": 1, "episode": 2,
+         "ai_translated": True},
+    ]}
+    monkeypatch.setattr(p, "_search_api", lambda params: payload)
+    q = SubtitleQuery(identity={"tmdb_id": 1396, "season": 1, "episode": 2},
+                      language="en")
+    cands = p.search(q)
+    assert [c.download_ref for c in cands] == ["https://dl.subdl.com/subtitle/1-2.zip"]
+
+
+def test_subdl_episode_falls_back_to_release_tag_and_skips_full_season(monkeypatch):
+    p = SubDLProvider()
+    _configured(p)
+    payload = {"status": True, "subtitles": [
+        # season/episode sent as 0: the tag places it
+        {"language": "EN", "release_name": "Show.S01E02.720p",
+         "url": "/subtitle/a.zip", "season": 0, "episode": 0},
+        # full-season pack without unpack files: never guessed
+        {"language": "EN", "release_name": "Show.S01E02-E10",
+         "url": "/subtitle/b.zip", "season": 1, "full_season": True},
+    ]}
+    monkeypatch.setattr(p, "_search_api", lambda params: payload)
+    q = SubtitleQuery(identity={"tmdb_id": 1396, "season": 1, "episode": 2},
+                      language="en")
+    assert [c.download_ref for c in p.search(q)] == ["https://dl.subdl.com/subtitle/a.zip"]
+
+
+def test_subdl_unpack_file_with_season_zero_uses_the_pack_season(monkeypatch):
+    p = SubDLProvider()
+    _configured(p)
+    payload = {"status": True, "subtitles": [
+        {"language": "en", "release_name": "Show.S01.PACK", "season": 1,
+         "full_season": True, "url": "/subtitle/pack.zip",
+         "unpack_files": [
+             {"season": 0, "episode": 2, "name": "Show.S01E02.srt",
+              "url": "https://dl.subdl.com/subtitle/7/71"},
+         ]},
+    ]}
+    monkeypatch.setattr(p, "_search_api", lambda params: payload)
+    q = SubtitleQuery(identity={"tmdb_id": 1396, "season": 1, "episode": 2},
+                      language="en")
+    assert [c.download_ref for c in p.search(q)] == ["https://dl.subdl.com/subtitle/7/71"]
+
+
+def test_opensubtitles_hash_rides_the_id_query_and_reads_moviehash_match(monkeypatch):
+    # a moviehash query returns every sub for the feature; only rows the api
+    # flags with moviehash_match were timed for this exact file.
+    from core.video.subtitles.providers.opensubtitles import OpenSubtitlesProvider
+    p = OpenSubtitlesProvider()
+    _configured(p)
+    calls = []
+    found = {"data": [
+        {"attributes": {"language": "en", "release": "Movie.2019.WEB", "download_count": 900,
+                        "moviehash_match": False, "files": [{"file_id": 1}]}},
+        {"attributes": {"language": "en", "release": "Movie.2019.BluRay", "download_count": 5,
+                        "moviehash_match": True, "files": [{"file_id": 2}]}},
+    ]}
+    monkeypatch.setattr(p, "_search_api", lambda params: calls.append(dict(params)) or found)
+    cands = p.search(SubtitleQuery(identity={"imdb_id": "tt0137523"}, language="en",
+                                   moviehash="8e245d9679d31e12"))
+    assert len(calls) == 1
+    assert calls[0]["moviehash"] == "8e245d9679d31e12"
+    assert calls[0]["imdb_id"] == "0137523"
+    assert calls[0]["ai_translated"] == "exclude"
+    assert {c.download_ref: c.hash_match for c in cands} == {1: False, 2: True}
+
+
+def test_opensubtitles_hash_only_search_when_unidentified(monkeypatch):
+    from core.video.subtitles.providers.opensubtitles import OpenSubtitlesProvider
+    p = OpenSubtitlesProvider()
+    _configured(p)
+    calls = []
+    monkeypatch.setattr(p, "_search_api", lambda params: calls.append(dict(params)) or {"data": []})
+    p.search(SubtitleQuery(identity={}, language="en", moviehash="abc"))
+    assert calls and calls[0]["moviehash"] == "abc" and "imdb_id" not in calls[0]
+
+
+def test_opensubtitles_episode_with_only_show_imdb_uses_parent_imdb_id():
+    # episodes carry the SHOW's ids — a bare imdb_id would search the show
+    # feature itself and come back with random episodes.
+    from core.video.subtitles.providers.opensubtitles import search_params
+    params = search_params({"imdb_id": "tt0903747", "season": 1, "episode": 2}, "en")
+    assert params == {"languages": "en", "parent_imdb_id": "0903747",
+                      "season_number": 1, "episode_number": 2}
+    no_ep = search_params({"tmdb_id": 1396, "season": 1, "episode": None}, "en")
+    assert "episode_number" not in no_ep
+
+
+def test_flag_filter_never_degrades_across_the_forced_axis():
+    from core.video.subtitles.providers.base import SubtitleCandidate, flag_filter
+
+    def c(hi, forced):
+        return SubtitleCandidate("x", "en", hi, forced, "t", (hi, forced))
+
+    forced_only = [c(False, True)]
+    assert flag_filter(forced_only, SubtitleQuery(language="en")) == []
+    assert flag_filter(forced_only, SubtitleQuery(language="en",
+                                                  hi_forced_pref="prefer_forced")) == []
+    full_only = [c(False, False)]
+    assert flag_filter(full_only, SubtitleQuery(language="en", forced=True)) == []
+    # hi still degrades
+    hi_only = [c(True, False)]
+    assert flag_filter(hi_only, SubtitleQuery(language="en")) == hi_only
+
+
+# ── shapes from the live apis (oct 14, with real keys) ───────────────────────
+def test_subdl_never_sends_the_hi_param():
+    # hi=1 made subdl mark every entry hearing-impaired (live: all true with
+    # it, all false without), so the flag filter couldn't tell them apart
+    params = _search_params({"imdb_id": "tt0137523"}, "en", "k")
+    assert "hi" not in params
+
+
+def test_subdl_movie_uses_per_file_links_and_skips_commentary(monkeypatch):
+    p = SubDLProvider()
+    _configured(p)
+    payload = {"status": True, "subtitles": [
+        {"release_name": "Fight.Club.1999.10th.Anniversary.1080p.Remux", "language": "EN",
+         "hi": False, "season": 0, "episode": None, "full_season": False,
+         "url": "/subtitle/2918869-2909902.zip",
+         "unpack_files": [
+             # live data had both an SDH and a plain commentary track
+             {"name": "Fight Club (1999)_commentary1.srt", "release_name": "Fight Club (1999)_commentary1",
+              "season": 0, "episode": 0, "language": "EN", "hi": False, "format": "srt",
+              "url": "/subtitle/s26/c1"},
+             {"name": "Fight Club (1999).srt", "release_name": "Fight Club (1999)",
+              "season": 0, "episode": 0, "language": "EN", "hi": False, "format": "srt",
+              "url": "/subtitle/s26/main"},
+             {"name": "Fight Club (1999).sub", "release_name": "Fight Club (1999)",
+              "season": 0, "episode": 0, "language": "EN", "hi": False, "format": "sub",
+              "url": "/subtitle/s26/microdvd"},
+         ]},
+        # no file list and not a zip: a microdvd file that would never extract
+        {"release_name": "Fight Club", "language": "EN", "hi": False,
+         "url": "/subtitle/487037-1773.sub"},
+        # no file list, a zip: the whole entry is the candidate
+        {"release_name": "Fight.Club.1999.DVDRip", "language": "EN", "hi": False,
+         "url": "/subtitle/1-2.zip"},
+    ]}
+    monkeypatch.setattr(p, "_search_api", lambda params: payload)
+    cands = p.search(SubtitleQuery(identity={"imdb_id": "tt0137523"}, language="en"))
+    assert [c.download_ref for c in cands] == ["https://dl.subdl.com/subtitle/s26/main",
+                                               "https://dl.subdl.com/subtitle/1-2.zip"]
+
+
+def test_subdl_regional_language_codes():
+    from core.video.subtitles.providers.subdl import _norm_lang
+    assert _norm_lang("BR_PT") == "pt-br"
+    assert _norm_lang("EN") == "en"
+    assert _norm_lang("ZH_TW") == "zh-tw"
+
+
+def test_subsource_reads_release_info_foreign_parts_and_skips_non_srt(monkeypatch):
+    p = SubSourceProvider()
+    _configured(p)
+
+    def fake_get(path, params):
+        if path == "/movies/search":
+            return {"data": [{"movieId": 36835, "imdbId": "tt0137523"}]}
+        return {"data": [
+            {"subtitleId": 1, "language": "english", "releaseInfo": ["Fight.Club.1999.1080p.BluRay"],
+             "hearingImpaired": False, "foreignParts": False, "downloads": 9,
+             "preview": "1\n00:02:00,300 --> 00:02:03,200\nPeople always ask me"},
+            {"subtitleId": 2, "language": "english", "releaseInfo": ["funkar"],
+             "hearingImpaired": False, "foreignParts": False,
+             # subviewer: no '-->' timings, would fail after burning a download
+             "preview": "[INFORMATION]\n00:02:28.70,00:02:30.56\nNarrator"},
+            {"subtitleId": 3, "language": "english", "releaseInfo": ["Fight.Club.Forced"],
+             "hearingImpaired": False, "foreignParts": True,
+             "preview": "1\n00:10:00,000 --> 00:10:02,000\n(in french)"},
+        ], "pagination": {"page": 1, "pages": 1}}
+    monkeypatch.setattr(p, "_api_get", fake_get)
+    full = p.search(SubtitleQuery(identity={"imdb_id": "tt0137523"}, language="en"))
+    assert [(c.download_ref, c.title, c.download_count) for c in full] == \
+        [(1, "Fight.Club.1999.1080p.BluRay", 9)]
+    forced = p.search(SubtitleQuery(identity={"imdb_id": "tt0137523"}, language="en", forced=True))
+    assert [c.download_ref for c in forced] == [3] and forced[0].forced
+
+
+def test_subsource_language_names_and_pages(monkeypatch):
+    from core.video.subtitles.providers.subsource import _language_name
+    assert [_language_name(c) for c in ("en", "pt-br", "fa", "zh-tw", "de", "xx")] == \
+        ["english", "brazilian_portuguese", "farsi_persian", "big_5_code", "german", None]
+    p = SubSourceProvider()
+    _configured(p)
+    pages = []
+
+    def fake_get(path, params):
+        if path == "/movies/search":
+            return {"data": [{"movieId": 1, "imdbId": "tt1"}]}
+        pages.append(params["page"])
+        return {"data": [{"subtitleId": params["page"], "language": "brazilian_portuguese",
+                          "releaseInfo": ["Show.S01E02.WEB"]}],
+                "pagination": {"page": params["page"], "pages": 2}}
+    monkeypatch.setattr(p, "_api_get", fake_get)
+    cands = p.search(SubtitleQuery(identity={"imdb_id": "tt1", "season": 1, "episode": 2},
+                                   language="pt-br"))
+    assert pages == [1, 2] and [c.download_ref for c in cands] == [1, 2]
+    # a language subsource doesn't carry is never a search
+    pages.clear()
+    assert p.search(SubtitleQuery(identity={"imdb_id": "tt1"}, language="xx")) == []
+    assert pages == []
+
+
+def test_subsource_never_attributes_an_episode_range():
+    from core.video.subtitles.providers.subsource import _sub_episode
+    assert _sub_episode({"releaseInfo": ["Breaking.Bad.S01E02.480p"]}) == (1, 2)
+    assert _sub_episode({"releaseInfo": ["Show.S01E01-7.DSR-HDTV"]})[1] is None
+    assert _sub_episode({"releaseInfo": ["Show.S01E01E02.720p"]})[1] is None
+
+
+def test_archive_extracts_zip_skips_commentary_and_handles_rar(monkeypatch, tmp_path):
+    import io as _io
+    import subprocess as _sp
+    import zipfile as _zf
+    from core.video.subtitles import archive
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, "w") as zf:
+        zf.writestr("__MACOSX/._Movie.srt", "junk")
+        zf.writestr("Movie_commentary1.srt", "1\n00:00:01,000 --> 00:00:02,000\ncommentary\n")
+        zf.writestr("Movie.srt", "1\n00:00:01,000 --> 00:00:02,000\nthe film\n")
+    assert "the film" in archive.extract_srt(buf.getvalue())
+    # RAR goes through bsdtar (real subsource uploads are RAR)
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        out = cmd[cmd.index("-C") + 1]
+        with open(out + "/Fight.Club.srt", "w", encoding="utf-8") as f:
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nPeople always ask me\n")
+        return _sp.CompletedProcess(cmd, 0, b"", b"")
+    monkeypatch.setattr(archive.shutil, "which", lambda name: "/usr/bin/bsdtar" if name == "bsdtar" else None)
+    monkeypatch.setattr(archive.subprocess, "run", fake_run)
+    assert "People always ask me" in archive.extract_srt(b"Rar!\x1a\x07\x00" + b"x" * 100)
+    assert calls and calls[0][:2] == ["/usr/bin/bsdtar", "-xf"]
+    # no bsdtar: a miss, never a crash
+    monkeypatch.setattr(archive.shutil, "which", lambda name: None)
+    assert archive.extract_srt(b"Rar!\x1a\x07\x00" + b"x" * 100) is None

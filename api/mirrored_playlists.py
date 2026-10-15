@@ -314,7 +314,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -335,6 +335,19 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             if quality_profile_id is None:
                 return jsonify({"error": "Invalid quality_profile_id"}), 400
 
+        # #1704: null or '' clears back to the global mode, else a real mode.
+        # no fingerprint reset needed, the sync status remembers the mode
+        sync_mode = None
+        if 'sync_mode' in data:
+            from core.sync.playlist_edit import VALID_SYNC_MODES
+            raw_mode = data.get('sync_mode')
+            if raw_mode is None or raw_mode == '':
+                sync_mode = ''
+            elif raw_mode in VALID_SYNC_MODES:
+                sync_mode = raw_mode
+            else:
+                return jsonify({"error": "Invalid sync_mode"}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -343,6 +356,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             profile_id=profile_id,
             organize_by_playlist=organize_by_playlist,
             quality_profile_id=quality_profile_id,
+            sync_mode=sync_mode,
         )
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404

@@ -273,6 +273,48 @@ def _judge(deps, results, track, query, profile_id, pool):
     return [row for row, decision in pairs if decision.accepted]
 
 
+def _attempt_with_tier_fallthrough(deps, task_id, batch_id, track, results, candidates,
+                                   query, profile_id, pool, *, quality_first, quality_targets):
+    """Attempt *candidates*, then the lower quality tiers of the same *results*.
+
+    The quality filter only hands back the best tier present, so one dead peer
+    on that tier used to shadow every other file in the result set: a lone
+    unreachable MP3 320 hid five good FLACs and the track went not_found (#1304).
+    When nothing in the winning tier starts, re-judge the results without the
+    rows already offered, which lets the next tier win. Same filter, same
+    profile, so nothing below the user's ladder gets in that a fresh search
+    with those rows wouldn't have let in. Each pass offers at least one new
+    row, so this ends.
+    """
+    offered = set()
+    while True:
+        if deps.attempt_download_with_candidates(
+            task_id, candidates, track, batch_id,
+            quality_first=quality_first, quality_targets=quality_targets,
+        ):
+            return True
+        offered.update(_cand_user_file(c) for c in candidates)
+        with tasks_lock:
+            task = download_tasks.get(task_id)
+            if not task or task.get('status') == 'cancelled':
+                return False
+            used = set(task.get('used_sources') or ())
+        remaining = [r for r in (results or [])
+                     if _cand_user_file(r) not in offered
+                     and '{}_{}'.format(*_cand_user_file(r)) not in used]
+        if not remaining:
+            return False
+        candidates = [c for c in _judge(deps, remaining, track, query, profile_id, pool)
+                      if _cand_user_file(c) not in offered]
+        if not candidates:
+            return False
+        logger.info(f"[Modal Worker] Nothing in the top quality tier started, "
+                    f"trying {len(candidates)} candidate(s) from the next tier (task {task_id})")
+        with tasks_lock:
+            if task_id in download_tasks:
+                download_tasks[task_id]['cached_candidates'] = candidates
+
+
 def _record_decision(deps, task_id, pool, outcome, track, profile_id, merge=False,
                    provenance=None):
     if getattr(deps, 'evaluate_candidates', None) is None:
@@ -738,8 +780,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             download_tasks[task_id]['cached_candidates'] = candidates
 
                         # Try to download with these candidates
-                        success = deps.attempt_download_with_candidates(
-                            task_id, candidates, track, batch_id,
+                        success = _attempt_with_tier_fallthrough(
+                            deps, task_id, batch_id, track, tracks_result, candidates,
+                            query, _profile_id, decision_pool,
                             quality_first=_best_quality, quality_targets=_quality_targets,
                         )
                         if success:
@@ -845,8 +888,9 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                                     if task_id not in download_tasks or download_tasks[task_id]['status'] == 'cancelled':
                                         return
                                     download_tasks[task_id]['cached_candidates'] = fb_candidates
-                                success = deps.attempt_download_with_candidates(
-                                    task_id, fb_candidates, track, batch_id,
+                                success = _attempt_with_tier_fallthrough(
+                                    deps, task_id, batch_id, track, fb_results, fb_candidates,
+                                    fb_query, _profile_id, decision_pool,
                                     quality_first=_best_quality, quality_targets=_quality_targets,
                                 )
                                 if success:

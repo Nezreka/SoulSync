@@ -178,9 +178,9 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(24);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(22);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(14);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(25);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(23);
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(16);
   });
 
   it('labels known finding types', () => {

@@ -25,6 +25,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# a pipeline's own sync mode (#1704), '' = the global setting. the builder
+# reads these labels from here, the sync page's card menu matches them
+_SYNC_MODE_OPTIONS = [
+    {"value": "", "label": "Use global setting"},
+    {"value": "reconcile", "label": "Reconcile (match the source)"},
+    {"value": "append", "label": "Append only (never remove tracks)"},
+    {"value": "replace", "label": "Replace (delete and recreate)"},
+]
+
 TRIGGERS: list[dict] = [
     {"type": "schedule", "label": "Schedule", "icon": "clock", "scope": "both", "description": "Run on a timer interval", "available": True,
      "config_fields": [
@@ -316,6 +325,7 @@ ACTIONS: list[dict] = [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
          {"key": "all", "type": "checkbox", "label": "Process all mirrored playlists", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+         {"key": "sync_mode", "type": "select", "label": "Sync mode", "options": _SYNC_MODE_OPTIONS, "default": ""},
      ]},
     {"type": "personalized_pipeline", "label": "Personalized Playlist Pipeline", "icon": "sparkles",
      "description": "Sync personalized / discover-page playlists (Hidden Gems, Time Machine, Fresh Tape, etc.) to your media server + queue missing tracks for download.",
@@ -325,6 +335,7 @@ ACTIONS: list[dict] = [
           "description": "Multi-select: Hidden Gems, Discovery Shuffle, Time Machine (per decade), Genre playlists, Fresh Tape, The Archives, Seasonal Mix (per season)"},
          {"key": "refresh_first", "type": "checkbox", "label": "Refresh playlists before sync (regenerate snapshots)", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+         {"key": "sync_mode", "type": "select", "label": "Sync mode", "options": _SYNC_MODE_OPTIONS, "default": ""},
      ]},
     {"type": "import_lastfm_listening", "label": "Import Last.fm Listening", "icon": "activity",
      "description": "Pull Last.fm scrobbles into SoulSync listening history so Stats and discovery stay current.",
@@ -558,7 +569,8 @@ ACTIONS: list[dict] = [
                       {"value": "wishlist_audit", "label": "Wishlist Audit"},
                       {"value": "youtube_ghosts", "label": "YouTube Ghost Files"},
                       {"value": "watched_cleanup", "label": "Watched Cleanup"},
-                      {"value": "naming_conformance", "label": "Naming Conformance"}],
+                      {"value": "naming_conformance", "label": "Naming Conformance"},
+                      {"value": "missing_subtitles", "label": "Missing Subtitles"}],
           "default": "all"}
      ]},
 ]

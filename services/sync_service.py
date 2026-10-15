@@ -933,21 +933,22 @@ class PlaylistSyncService:
     
     def _drop_skipped_unmatched_wishlist(self, playlist, unmatched_tracks,
                                           total_tracks=0, matched_tracks=()):
-        """Clear the unmatched list when organize-by-playlist skips the
-        sync-time wishlist (batch failure handling covers those tracks
-        separately). #1621: the drop is surfaced in the automation progress
-        output — the dashboard sync-band renders current_step, and a silent
-        skip reads as "doesn't seem to try". Returns the unmatched list
-        (cleared on skip)."""
+        """Clear the unmatched list when this sync skips the sync-time
+        wishlist — organize-by-playlist (whose batch failure handling
+        covers those tracks separately) or a pipeline run with wishlist
+        skipping resolved on (#1689). #1621: the drop is surfaced in the
+        automation progress output — the dashboard sync-band renders
+        current_step, and a silent skip reads as "doesn't seem to try".
+        Returns the unmatched list (cleared on skip)."""
         if unmatched_tracks and getattr(self, '_skip_unmatched_wishlist', False):
             logger.info(
-                "Skipping sync-time wishlist for %s unmatched tracks (organize-by-playlist)",
+                "Skipping sync-time wishlist for %s unmatched tracks (wishlist skipped for this sync)",
                 len(unmatched_tracks),
             )
             self._update_progress(
                 playlist.name,
                 f"Skipped wishlist for {len(unmatched_tracks)} unmatched tracks "
-                "(organize-by-playlist: batch failure handling covers them)",
+                "(wishlist skipped for this sync)",
                 "", 100, 5, 5,
                 total_tracks=total_tracks,
                 matched_tracks=len(matched_tracks),

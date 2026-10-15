@@ -1,12 +1,17 @@
 """Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
+import hashlib
+import json
 import os
 import re
+from contextlib import nullcontext
 
 from core.metadata.art_apply import file_has_embedded_art, folder_has_cover_sidecar
 from core.library.path_resolver import resolve_library_file_path
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
+from core.lookup_failures import LookupFailures, watch_lookup_failures
+from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, hand_tagged_path_keys, is_hand_tagged_path
 from utils.logging_config import get_logger
 
@@ -54,13 +59,21 @@ class MissingCoverArtJob(RepairJob):
         'When artwork is found, a finding is created with the image URL so you can review '
         'and apply it. The job does not download or embed artwork automatically.\n\n'
         'Settings:\n'
-        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used'
+        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used\n'
+        '- Remember Empty Lookups: When on, an album no source had art for is not searched '
+        'again until it changes, your art sources change, or the recheck time passes. '
+        'Fewer repeated requests to the metadata services\n'
+        '- Recheck After Days: How long an empty answer is trusted (default 7)'
     )
     icon = 'repair-icon-coverart'
     default_enabled = True
     default_interval_hours = 48
-    default_settings = {}
+    default_settings = {
+        'remember_empty_lookups': False,
+        'recheck_after_days': 7,
+    }
     auto_fix = False
+    _lookup_failures = 0
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -159,202 +172,255 @@ class MissingCoverArtJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Searching artwork for {total} albums...', total=total)
 
-        for i, row in enumerate(albums):
-            if context.check_stop():
-                return result
-            if i % 10 == 0 and context.wait_if_paused():
-                return result
-
-            album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
-            artist_id = row[7]
-            source_album_ids = {
-                'spotify': spotify_album_id,
-                'itunes': row[column_index['itunes_album_id']] if 'itunes_album_id' in column_index else None,
-                'deezer': row[column_index['deezer_album_id']] if 'deezer_album_id' in column_index else None,
-                'discogs': row[column_index['discogs_album_id']] if 'discogs_album_id' in column_index else None,
-                'hydrabase': row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None,
-            }
-            result.scanned += 1
-
-            # same reason, for a hand-tagged file whose album isn't locked yet
-            if is_hand_tagged_path(rep_path, hand_tagged):
-                result.skipped += 1
-                continue
-
-            # Art can be missing in the DB (no thumb_url) and/or on disk (no
-            # embedded art and no cover.jpg). Skip albums that already have both.
-            db_missing = not (str(album_thumb).strip() if album_thumb else '')
-            # Resolve the representative path the SAME way the apply does
-            # (_fix_missing_cover_art) before checking disk art. Checking the raw
-            # DB path would fail on any path-mapped setup (docker mounts, a
-            # Plex/SoulSync path mismatch) — the file isn't found, album art
-            # reads as "missing", and EVERY album gets flagged while the apply
-            # (which resolves) then finds the art already present. Unresolvable →
-            # treat as no-local-file (don't claim disk-missing).
-            resolved_rep = resolve_library_file_path(
-                rep_path,
-                transfer_folder=getattr(context, 'transfer_folder', None),
-                download_folder=download_folder,
-                config_manager=context.config_manager,
-            ) if rep_path else None
-            # Match the apply (_fix_missing_cover_art line ~1376: `... or p`): if
-            # the path-mapping layer returns nothing but the raw DB path is
-            # already a real file (the common Docker case where the container
-            # path == the stored path), use it as-is. Without this the scan never
-            # sees the folder and skips the album, while the apply WOULD have
-            # written the cover.jpg — the exact gap behind Sokhi's 0-findings.
-            if not resolved_rep and rep_path and os.path.isfile(rep_path):
-                resolved_rep = rep_path
-            has_local = bool(resolved_rep)
-            # Check embedded art and the cover.jpg sidecar SEPARATELY (not the
-            # combined album_has_art_on_disk, which returns True if EITHER is
-            # present). An album can have embedded art but no cover.jpg — and if
-            # the user wants cover.jpg files, that's still a fixable "missing"
-            # (Sokhi: scans returned 0 because embedded-art albums were treated
-            # as fully arted and skipped, so their cover.jpg never got written).
-            has_embedded = file_has_embedded_art(resolved_rep) if has_local else False
-            has_sidecar = folder_has_cover_sidecar(os.path.dirname(resolved_rep)) if has_local else False
-            # cover.jpg sidecars are only a "missing" thing when the user has
-            # cover.jpg writing enabled (Boulder: "only scan for cover.jpgs when
-            # they're enabled"). Default on.
-            cover_sidecar_enabled = bool(
-                context.config_manager.get('metadata_enhancement.cover_art_download', True)
-                if context.config_manager else True)
-
-            if has_local:
-                embed_missing = not has_embedded
-                sidecar_missing = cover_sidecar_enabled and not has_sidecar
-                # has_embedded + no sidecar → the apply writes cover.jpg from the
-                # existing embedded art, so it's fixable even if the API finds no
-                # art. embed_missing still requires API art (nothing to embed).
-                sidecar_from_embedded = sidecar_missing and has_embedded
-                needs_fix = embed_missing or sidecar_missing
-            else:
-                # Media-server-only album: the DB thumb is the only art.
-                embed_missing = db_missing
-                sidecar_from_embedded = False
-                needs_fix = db_missing
-
-            # Diagnostic: dump the decision inputs for the first few albums so a
-            # confusing "0 findings" scan reveals path-resolution + on-disk state
-            # (Sokhi: scans kept returning 0 with no way to see why).
-            if _diag_logged < 5:
-                logger.info(
-                    "[cover-diag] album=%r db_path=%r resolved=%r local=%s embedded=%s "
-                    "sidecar=%s db_missing=%s cover_enabled=%s needs_fix=%s",
-                    title, rep_path, resolved_rep, has_local, has_embedded, has_sidecar,
-                    db_missing, cover_sidecar_enabled, needs_fix)
-                _diag_logged += 1
-
-            if not needs_fix:
-                if not has_local:
-                    skip_reasons['no_local_db_has_art'] += 1
-                else:
-                    skip_reasons['have_disk_art'] += 1
-                result.skipped += 1
-                continue
-
-            if context.report_progress:
-                context.report_progress(
-                    scanned=i + 1, total=total,
-                    phase=f'Searching {i + 1} / {total}',
-                    log_line=f'Searching: {title or "Unknown"} — {artist_name or "Unknown"}',
-                    log_type='info'
-                )
-
-            artwork_url = None
-
-            # Honor the user's configured cover-art sources first (the same
-            # metadata_enhancement.album_art_order the post-process embed and the
-            # Library Re-tag job use) so "cover art sources" means one thing
-            # app-wide. Non-breaking: returns None when no order is configured
-            # (the default), so we fall back to the prefer_source / metadata
-            # source-priority loop below — unchanged behavior for existing users.
+        # Opt-in: albums no source had art for are not searched again until
+        # something about the question changes or the recheck time passes.
+        memory = None
+        recheck_days = settings.get('recheck_after_days', 7)
+        if settings.get('remember_empty_lookups'):
             try:
-                from core.metadata.art_lookup import select_preferred_art_url
-                artwork_url = select_preferred_art_url(
-                    artist_name, title,
-                    {'musicbrainz_release_id': None}, art_order,
-                )
-            except Exception as e:
-                logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
+                recheck_days = max(0.0, float(recheck_days))
+            except (TypeError, ValueError):
+                recheck_days = 7.0
+            memory = EmptyLookupMemory.open(context.db, self.job_id, recheck_days)
+        self._lookup_failures = 0
+        remembered_empty = 0
+        # Which sources can actually be asked. Part of what the lookup asks, so
+        # setting one up later makes the albums it has not seen worth asking again.
+        askable_sources = ([s for s in source_priority if get_client_for_source(s)]
+                           if memory else [])
 
-            # Try source-specific IDs first, then title/artist search, in priority order.
-            if not artwork_url:
-                for source in source_priority:
-                    artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
-                    if artwork_url:
-                        break
+        # The clients mostly turn a failed request into an empty result, so the
+        # requests themselves are watched for throttles and outages as well.
+        watching = watch_lookup_failures() if memory else nullcontext(LookupFailures())
+        try:
+            with watching as health:
+                for i, row in enumerate(albums):
+                    if context.check_stop():
+                        return result
+                    if i % 10 == 0 and context.wait_if_paused():
+                        return result
 
-            # Fixable if we found API art (to embed/write), OR it's just a
-            # missing cover.jpg on an album that already has embedded art — the
-            # apply writes the sidecar from that embedded art, no API art needed.
-            if artwork_url or sidecar_from_embedded:
-                if context.report_progress:
-                    context.report_progress(
-                        log_line=(f'Found art: {title or "Unknown"}' if artwork_url
-                                  else f'Will write cover.jpg from embedded art: {title or "Unknown"}'),
-                        log_type='success'
-                    )
-                # Also search for an artist image so the finding can offer it as
-                # an independently-applyable target (Pache711). Searched even
-                # when the artist already has art, so a wrong existing image can
-                # be swapped; the UI only surfaces it when it differs from the
-                # current one.
-                found_artist_url = self._find_artist_art(artist_name, source_priority)
-                # Create finding for user to approve
-                if context.create_finding:
-                    try:
-                        _desc = (f'Album "{title}" by {artist_name or "Unknown"} has no cover art. '
-                                 + ('Found artwork from API.' if artwork_url
-                                    else 'Will write cover.jpg from the existing embedded art.'))
-                        inserted = context.create_finding(
-                            job_id=self.job_id,
-                            finding_type='missing_cover_art',
-                            severity='info',
-                            entity_type='album',
-                            entity_id=str(album_id),
-                            file_path=None,
-                            title=f'Missing artwork: {title or "Unknown"}',
-                            description=_desc,
-                            details={
-                                'album_id': album_id,
-                                'album_title': title,
-                                'artist': artist_name,
-                                'found_artwork_url': artwork_url,
-                                'spotify_album_id': spotify_album_id,
-                                'artist_thumb_url': artist_thumb or None,
-                                'artist_id': artist_id,
-                                # Found artist image (None if none matched, or it
-                                # equals the current one — nothing to offer then).
-                                'found_artist_url': (
-                                    found_artist_url
-                                    if found_artist_url and found_artist_url != artist_thumb
-                                    else None
-                                ),
-                                # Where the files live + what was missing, so the
-                                # apply can embed into the audio + write cover.jpg.
-                                'album_folder': os.path.dirname(rep_path) if rep_path else None,
-                                'db_missing': db_missing,
-                                'embed_missing': embed_missing,
-                                'sidecar_from_embedded': sidecar_from_embedded,
-                                'musicbrainz_release_id': None,
-                            }
-                        )
-                        if inserted:
-                            result.findings_created += 1
+                    album_id, title, artist_name, spotify_album_id, album_thumb, artist_thumb, rep_path = row[:7]
+                    artist_id = row[7]
+                    source_album_ids = {
+                        'spotify': spotify_album_id,
+                        'itunes': row[column_index['itunes_album_id']] if 'itunes_album_id' in column_index else None,
+                        'deezer': row[column_index['deezer_album_id']] if 'deezer_album_id' in column_index else None,
+                        'discogs': row[column_index['discogs_album_id']] if 'discogs_album_id' in column_index else None,
+                        'hydrabase': row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None,
+                    }
+                    result.scanned += 1
+
+                    # same reason, for a hand-tagged file whose album isn't locked yet
+                    if is_hand_tagged_path(rep_path, hand_tagged):
+                        result.skipped += 1
+                        continue
+
+                    # Art can be missing in the DB (no thumb_url) and/or on disk (no
+                    # embedded art and no cover.jpg). Skip albums that already have both.
+                    db_missing = not (str(album_thumb).strip() if album_thumb else '')
+                    # Resolve the representative path the SAME way the apply does
+                    # (_fix_missing_cover_art) before checking disk art. Checking the raw
+                    # DB path would fail on any path-mapped setup (docker mounts, a
+                    # Plex/SoulSync path mismatch) — the file isn't found, album art
+                    # reads as "missing", and EVERY album gets flagged while the apply
+                    # (which resolves) then finds the art already present. Unresolvable →
+                    # treat as no-local-file (don't claim disk-missing).
+                    resolved_rep = resolve_library_file_path(
+                        rep_path,
+                        transfer_folder=getattr(context, 'transfer_folder', None),
+                        download_folder=download_folder,
+                        config_manager=context.config_manager,
+                    ) if rep_path else None
+                    # Match the apply (_fix_missing_cover_art line ~1376: `... or p`): if
+                    # the path-mapping layer returns nothing but the raw DB path is
+                    # already a real file (the common Docker case where the container
+                    # path == the stored path), use it as-is. Without this the scan never
+                    # sees the folder and skips the album, while the apply WOULD have
+                    # written the cover.jpg — the exact gap behind Sokhi's 0-findings.
+                    if not resolved_rep and rep_path and os.path.isfile(rep_path):
+                        resolved_rep = rep_path
+                    has_local = bool(resolved_rep)
+                    # Check embedded art and the cover.jpg sidecar SEPARATELY (not the
+                    # combined album_has_art_on_disk, which returns True if EITHER is
+                    # present). An album can have embedded art but no cover.jpg — and if
+                    # the user wants cover.jpg files, that's still a fixable "missing"
+                    # (Sokhi: scans returned 0 because embedded-art albums were treated
+                    # as fully arted and skipped, so their cover.jpg never got written).
+                    has_embedded = file_has_embedded_art(resolved_rep) if has_local else False
+                    has_sidecar = folder_has_cover_sidecar(os.path.dirname(resolved_rep)) if has_local else False
+                    # cover.jpg sidecars are only a "missing" thing when the user has
+                    # cover.jpg writing enabled (Boulder: "only scan for cover.jpgs when
+                    # they're enabled"). Default on.
+                    cover_sidecar_enabled = bool(
+                        context.config_manager.get('metadata_enhancement.cover_art_download', True)
+                        if context.config_manager else True)
+
+                    if has_local:
+                        embed_missing = not has_embedded
+                        sidecar_missing = cover_sidecar_enabled and not has_sidecar
+                        # has_embedded + no sidecar → the apply writes cover.jpg from the
+                        # existing embedded art, so it's fixable even if the API finds no
+                        # art. embed_missing still requires API art (nothing to embed).
+                        sidecar_from_embedded = sidecar_missing and has_embedded
+                        needs_fix = embed_missing or sidecar_missing
+                    else:
+                        # Media-server-only album: the DB thumb is the only art.
+                        embed_missing = db_missing
+                        sidecar_from_embedded = False
+                        needs_fix = db_missing
+
+                    # Diagnostic: dump the decision inputs for the first few albums so a
+                    # confusing "0 findings" scan reveals path-resolution + on-disk state
+                    # (Sokhi: scans kept returning 0 with no way to see why).
+                    if _diag_logged < 5:
+                        logger.info(
+                            "[cover-diag] album=%r db_path=%r resolved=%r local=%s embedded=%s "
+                            "sidecar=%s db_missing=%s cover_enabled=%s needs_fix=%s",
+                            title, rep_path, resolved_rep, has_local, has_embedded, has_sidecar,
+                            db_missing, cover_sidecar_enabled, needs_fix)
+                        _diag_logged += 1
+
+                    if not needs_fix:
+                        if not has_local:
+                            skip_reasons['no_local_db_has_art'] += 1
                         else:
-                            result.findings_skipped_dedup += 1
-                    except Exception as e:
-                        logger.debug("Error creating cover art finding for album %s: %s", album_id, e)
-                        result.errors += 1
-            else:
-                skip_reasons['no_art_source'] += 1
-                result.skipped += 1
+                            skip_reasons['have_disk_art'] += 1
+                        result.skipped += 1
+                        continue
 
-            if context.update_progress and (i + 1) % 5 == 0:
-                context.update_progress(i + 1, total)
+                    if context.report_progress:
+                        context.report_progress(
+                            scanned=i + 1, total=total,
+                            phase=f'Searching {i + 1} / {total}',
+                            log_line=f'Searching: {title or "Unknown"} — {artist_name or "Unknown"}',
+                            log_type='info'
+                        )
 
+                    artwork_url = None
+
+                    # What was asked, so a changed title, id or source order asks again.
+                    lookup_key = str(album_id)
+                    lookup_signature = self._lookup_signature(
+                        title, artist_name, source_album_ids, askable_sources, art_order)
+                    skip_lookup = bool(memory and memory.recently_empty(lookup_key, lookup_signature))
+                    failures_before = self._lookup_failures
+                    health_before = health.count
+
+                    # Honor the user's configured cover-art sources first (the same
+                    # metadata_enhancement.album_art_order the post-process embed and the
+                    # Library Re-tag job use) so "cover art sources" means one thing
+                    # app-wide. Non-breaking: returns None when no order is configured
+                    # (the default), so we fall back to the prefer_source / metadata
+                    # source-priority loop below — unchanged behavior for existing users.
+                    if not skip_lookup:
+                        try:
+                            from core.metadata.art_lookup import select_preferred_art_url
+                            artwork_url = select_preferred_art_url(
+                                artist_name, title,
+                                {'musicbrainz_release_id': None}, art_order,
+                            )
+                        except Exception as e:
+                            self._lookup_failures += 1
+                            logger.debug("preferred cover-art lookup failed for album %s: %s", album_id, e)
+
+                        # Try source-specific IDs first, then title/artist search, in priority order.
+                        if not artwork_url:
+                            for source in source_priority:
+                                artwork_url = self._try_source(source, source_album_ids.get(source), title, artist_name)
+                                if artwork_url:
+                                    break
+                    else:
+                        remembered_empty += 1
+
+                    if memory and not skip_lookup:
+                        if artwork_url:
+                            memory.forget(lookup_key)
+                        elif (self._lookup_failures == failures_before
+                                and health.count == health_before
+                                and not self._spotify_rate_limited(context)):
+                            # Every source answered and none had art. A failed or
+                            # throttled lookup is not an answer and is asked again.
+                            memory.remember(lookup_key, lookup_signature)
+
+                    # Fixable if we found API art (to embed/write), OR it's just a
+                    # missing cover.jpg on an album that already has embedded art — the
+                    # apply writes the sidecar from that embedded art, no API art needed.
+                    if artwork_url or sidecar_from_embedded:
+                        if context.report_progress:
+                            context.report_progress(
+                                log_line=(f'Found art: {title or "Unknown"}' if artwork_url
+                                          else f'Will write cover.jpg from embedded art: {title or "Unknown"}'),
+                                log_type='success'
+                            )
+                        # Also search for an artist image so the finding can offer it as
+                        # an independently-applyable target (Pache711). Searched even
+                        # when the artist already has art, so a wrong existing image can
+                        # be swapped; the UI only surfaces it when it differs from the
+                        # current one.
+                        found_artist_url = self._find_artist_art(artist_name, source_priority)
+                        # Create finding for user to approve
+                        if context.create_finding:
+                            try:
+                                _desc = (f'Album "{title}" by {artist_name or "Unknown"} has no cover art. '
+                                         + ('Found artwork from API.' if artwork_url
+                                            else 'Will write cover.jpg from the existing embedded art.'))
+                                inserted = context.create_finding(
+                                    job_id=self.job_id,
+                                    finding_type='missing_cover_art',
+                                    severity='info',
+                                    entity_type='album',
+                                    entity_id=str(album_id),
+                                    file_path=None,
+                                    title=f'Missing artwork: {title or "Unknown"}',
+                                    description=_desc,
+                                    details={
+                                        'album_id': album_id,
+                                        'album_title': title,
+                                        'artist': artist_name,
+                                        'found_artwork_url': artwork_url,
+                                        'spotify_album_id': spotify_album_id,
+                                        'artist_thumb_url': artist_thumb or None,
+                                        'artist_id': artist_id,
+                                        # Found artist image (None if none matched, or it
+                                        # equals the current one — nothing to offer then).
+                                        'found_artist_url': (
+                                            found_artist_url
+                                            if found_artist_url and found_artist_url != artist_thumb
+                                            else None
+                                        ),
+                                        # Where the files live + what was missing, so the
+                                        # apply can embed into the audio + write cover.jpg.
+                                        'album_folder': os.path.dirname(rep_path) if rep_path else None,
+                                        'db_missing': db_missing,
+                                        'embed_missing': embed_missing,
+                                        'sidecar_from_embedded': sidecar_from_embedded,
+                                        'musicbrainz_release_id': None,
+                                    }
+                                )
+                                if inserted:
+                                    result.findings_created += 1
+                                else:
+                                    result.findings_skipped_dedup += 1
+                            except Exception as e:
+                                logger.debug("Error creating cover art finding for album %s: %s", album_id, e)
+                                result.errors += 1
+                    else:
+                        skip_reasons['no_art_source'] += 1
+                        result.skipped += 1
+
+                    if context.update_progress and (i + 1) % 5 == 0:
+                        context.update_progress(i + 1, total)
+                    if memory and (i + 1) % 25 == 0:
+                        memory.commit()
+            if memory:
+                memory.prune(str(row[0]) for row in albums)
+        finally:
+            if memory:
+                memory.close()
+        if memory and remembered_empty:
+            logger.info("Cover art scan: %d albums not searched again (empty answer "
+                        "within the last %g days)", remembered_empty, recheck_days)
         if context.update_progress:
             context.update_progress(total, total)
 
@@ -403,8 +469,27 @@ class MissingCoverArtJob(RepairJob):
                         if artwork_url:
                             return artwork_url
         except Exception as e:
+            self._lookup_failures += 1
             logger.debug("%s art lookup failed for '%s': %s", source.capitalize(), title, e)
         return None
+
+    @staticmethod
+    def _lookup_signature(title, artist_name, source_album_ids, sources, art_order) -> str:
+        """A short fingerprint of everything that decides what the lookup asks."""
+        payload = json.dumps(
+            [title, artist_name,
+             sorted((k, str(v)) for k, v in source_album_ids.items() if v),
+             list(sources), list(art_order or [])],
+            default=str)
+        return hashlib.sha1(payload.encode('utf-8')).hexdigest()[:16]
+
+    @staticmethod
+    def _spotify_rate_limited(context) -> bool:
+        check = getattr(context, 'is_spotify_rate_limited', None)
+        try:
+            return bool(check()) if callable(check) else False
+        except Exception:  # noqa: BLE001 - an unreadable flag means "do not trust this answer"
+            return True
 
     def _find_artist_art(self, artist_name, source_priority):
         """Search the configured sources for an artist image, in priority

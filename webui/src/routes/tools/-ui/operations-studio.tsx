@@ -94,6 +94,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'suspect_album_tag_detector',
       'track_number_repair',
       'mbid_mismatch_detector',
+      'untagged_downloads',
     ],
     findingTypes: [
       'album_tag_inconsistency',
@@ -102,6 +103,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'genre_cleanup',
       'suspect_album_tag',
       'track_number_mismatch',
+      'untagged_download',
     ],
   },
   {

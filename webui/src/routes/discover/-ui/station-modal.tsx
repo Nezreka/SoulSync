@@ -4,7 +4,7 @@ import { useAccessibleModal } from '@/components/dialog';
 
 import type { StationSnapshot } from '../-discover.stations';
 
-import { mixSelectionBar, mixSetAllSelected } from '../-discover.mixes';
+import { compactRows, mixCoverArt, mixSelectionBar, mixSetAllSelected } from '../-discover.mixes';
 import {
   stationAcquisitionNote,
   stationScopeCopy,
@@ -12,7 +12,7 @@ import {
   stationSyncCopy,
   stationTitle,
 } from '../-discover.stations';
-import { CompactPlaylist } from './mix-modal';
+import { CompactPlaylist, MixModalHeader, PlayIcon, TrackListHead } from './mix-modal';
 import { SyncStatus } from './sync-status';
 
 /**
@@ -84,29 +84,34 @@ export function StationModal({
   const bar = mixSelectionBar(selected.length, total);
   const chosen = stationSelectionOf(snapshot, selected);
   const unavailable = snapshot?.counts?.unavailable ?? 0;
-  const disabled = selected.length === 0;
+  const listed =
+    total > 0 && (!snapshot || snapshot.status === 'ok' || snapshot.status === 'partial');
+  const artistImage = snapshot?.station?.image_url;
 
   return (
     <div className="modal-overlay" id="station-modal-overlay" onClick={onBackdropClick}>
       <div
-        className="mix-modal station-modal"
+        className={
+          selected.length > 0 ? 'mix-modal station-modal has-selection' : 'mix-modal station-modal'
+        }
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="mix-modal-header">
-          <div>
-            <div className="mix-modal-subtitle">Station preview</div>
-            <h2 className="mix-modal-title" id={titleId}>
-              {snapshot ? stationTitle(snapshot) : `${stationName} Station`}
-            </h2>
-            <div className="mix-modal-meta">
+        <MixModalHeader
+          titleId={titleId}
+          eyebrow="Station preview"
+          title={snapshot ? stationTitle(snapshot) : `${stationName} Station`}
+          meta={
+            <>
               {snapshot ? stationScopeCopy(snapshot) : ''}
               {snapshot?.message ? ` — ${snapshot.message}` : ''}
-            </div>
-          </div>
-          <div className="mix-modal-actions">
+            </>
+          }
+          covers={artistImage ? [artistImage] : mixCoverArt(compactRows(tracks))}
+          onClose={onClose}
+          actions={
             <button
               type="button"
               className="btn btn--sm btn--secondary"
@@ -116,11 +121,8 @@ export function StationModal({
             >
               {loading ? 'Refreshing…' : 'Refresh'}
             </button>
-            <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
+          }
+        />
 
         {syncStatusBase ? (
           <SyncStatus
@@ -142,61 +144,20 @@ export function StationModal({
           </p>
         ) : null}
 
-        {total > 0 ? (
-          <div className="mix-modal-selbar" id="station-modal-selbar" style={{ display: 'flex' }}>
-            <label className="mix-selbar-all">
-              <input
-                type="checkbox"
-                id="station-select-all"
-                checked={bar.selectAllChecked}
-                onChange={(e) => onSelectAll(mixSetAllSelected(total, e.target.checked))}
-              />{' '}
-              Select all
-            </label>
-            <span className="mix-sel-count" id="station-sel-count">
-              {bar.countLabel}
-            </span>
-            <span className="mix-selbar-spacer" />
-            <button type="button" className="btn btn--sm btn--secondary" onClick={onClearSelection}>
-              Clear
-            </button>
-            <button
-              type="button"
-              className="btn btn--sm btn--secondary"
-              disabled={disabled}
-              onClick={onPlaySelected}
-            >
-              ▶ Play selected
-            </button>
-            <button
-              type="button"
-              className="btn btn--sm btn--secondary"
-              id="station-dl-selected"
-              disabled={disabled}
-              onClick={onDownloadSelected}
-            >
-              Download selected
-            </button>
-            <button
-              type="button"
-              className="btn btn--sm btn--primary"
-              id="station-sync-selected"
-              disabled={disabled || Boolean(syncing)}
-              aria-busy={syncing || undefined}
-              onClick={onSyncSelected}
-            >
-              {/* the finite scope, in the label itself */}
-              {snapshot && selected.length === total
-                ? stationSyncCopy(snapshot)
-                : `Sync selected (${selected.length})`}
-            </button>
-          </div>
-        ) : null}
-
         {chosen.length > 0 ? (
           <p className="station-modal-note" role="status">
             {stationAcquisitionNote(chosen)}
           </p>
+        ) : null}
+
+        {listed ? (
+          <TrackListHead
+            selectAll={{
+              id: 'station-select-all',
+              checked: bar.selectAllChecked,
+              onChange: (checked) => onSelectAll(mixSetAllSelected(total, checked)),
+            }}
+          />
         ) : null}
 
         <div className="mix-modal-body" id="station-modal-tracks">
@@ -219,6 +180,53 @@ export function StationModal({
             />
           )}
         </div>
+
+        {/* every action here works on the selection, so the bar only floats in
+            once there is one */}
+        {listed && selected.length > 0 ? (
+          <div
+            className="mix-modal-selbar"
+            id="station-modal-selbar"
+            role="region"
+            aria-label="Selection"
+          >
+            <span className="mix-sel-count" id="station-sel-count">
+              {bar.countLabel}
+            </span>
+            <button
+              type="button"
+              className="btn btn--sm mix-selbar-clear"
+              onClick={onClearSelection}
+            >
+              Clear
+            </button>
+            <button type="button" className="btn btn--sm btn--secondary" onClick={onPlaySelected}>
+              <PlayIcon />
+              Play
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--secondary"
+              id="station-dl-selected"
+              onClick={onDownloadSelected}
+            >
+              Download
+            </button>
+            <button
+              type="button"
+              className="btn btn--sm btn--primary"
+              id="station-sync-selected"
+              disabled={Boolean(syncing)}
+              aria-busy={syncing || undefined}
+              onClick={onSyncSelected}
+            >
+              {/* the finite scope, in the label itself */}
+              {snapshot && selected.length === total
+                ? stationSyncCopy(snapshot)
+                : `Sync selected (${selected.length})`}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

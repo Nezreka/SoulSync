@@ -11,6 +11,13 @@ import {
   setPlaylistCoverUrl,
   setPlaylistDescription,
   uploadPlaylistCover,
+  copyMirrorToUserPlaylist,
+  fetchMembership,
+  isLikedPlaylist,
+  likeSongs,
+  pinLikedFirst,
+  removeSongsFromUserPlaylist,
+  unlikeSongs,
 } from './user-playlists';
 
 afterEach(() => {
@@ -124,5 +131,61 @@ describe('playlist meta', () => {
     expect(init.method).toBe('POST');
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get('file')).toBe(file);
+  });
+});
+
+describe('round two: ticks, likes, copying a mirror', () => {
+  const SONG = [{ track_name: 'T', artist_name: 'A' }];
+
+  function capture(reply: unknown = { success: true }) {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(reply)));
+    vi.stubGlobal('fetch', fetchMock);
+    return () => {
+      const [url, init] = fetchMock.mock.calls.at(-1) as unknown as [string, RequestInit];
+      return {
+        url,
+        method: init.method,
+        body: init.body ? JSON.parse(init.body as string) : undefined,
+      };
+    };
+  }
+
+  it.each([
+    ['membership', () => fetchMembership(SONG), '/api/user-playlists/membership', { tracks: SONG }],
+    [
+      'untick',
+      () => removeSongsFromUserPlaylist(4, SONG),
+      '/api/user-playlists/4/tracks/remove',
+      { tracks: SONG },
+    ],
+    ['like', () => likeSongs(SONG), '/api/user-playlists/liked', { tracks: SONG }],
+    ['unlike', () => unlikeSongs(SONG), '/api/user-playlists/liked/remove', { tracks: SONG }],
+    ['copy a mirror', () => copyMirrorToUserPlaylist(3), '/api/user-playlists/from-mirror/3', {}],
+    [
+      'copy a mirror, renamed',
+      () => copyMirrorToUserPlaylist(3, 'Mine'),
+      '/api/user-playlists/from-mirror/3',
+      { name: 'Mine' },
+    ],
+  ])('%s posts where the server listens', async (_name, call, url, body) => {
+    const last = capture();
+    await call();
+    expect(last()).toEqual({ url, method: 'POST', body });
+  });
+
+  it('isLikedPlaylist is a user playlist with the liked id, nothing else', () => {
+    expect(isLikedPlaylist({ source: 'soulsync', source_playlist_id: 'liked' })).toBe(true);
+    expect(isLikedPlaylist({ source: 'spotify', source_playlist_id: 'liked' })).toBe(false);
+    expect(isLikedPlaylist({ source: 'soulsync', source_playlist_id: 'abc' })).toBe(false);
+    expect(isLikedPlaylist(null)).toBe(false);
+  });
+
+  it('pinLikedFirst moves Liked Songs up and keeps the rest in order', () => {
+    const rows = [
+      { id: 1, source: 'soulsync' },
+      { id: 2, source: 'soulsync', source_playlist_id: 'liked' },
+      { id: 3, source: 'spotify' },
+    ];
+    expect(pinLikedFirst(rows).map((r) => r.id)).toEqual([2, 1, 3]);
   });
 });

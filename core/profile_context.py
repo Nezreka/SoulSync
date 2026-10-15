@@ -190,16 +190,20 @@ def admin_or_api_key(view_fn):
     launch-PIN gates already let the key through. Use this on the routes a
     service holding a key must reach (profile invites); everything else stays
     on admin_only. A key is admin-minted and already acts with admin rights on
-    /api/v1, and the stamp below is the one the before_request gates use.
+    /api/v1, and the stamp below is the one the before_request gates use. A
+    read-scope key is stamped non-admin, so it falls through to admin_only and
+    is refused.
     """
     import functools
+
+    from flask import g
 
     admin_fn = admin_only(view_fn)
 
     @functools.wraps(view_fn)
     def wrapper(*args, **kwargs):
         from api.auth import apply_api_key_request_context
-        if apply_api_key_request_context():
+        if apply_api_key_request_context() and getattr(g, 'is_admin', False):
             return view_fn(*args, **kwargs)
         return admin_fn(*args, **kwargs)
     return wrapper

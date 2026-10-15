@@ -18,6 +18,10 @@ export interface UserPlaylistTrack {
   album_name?: string;
   duration_ms?: number;
   image_url?: string | null;
+  /** where the page got it (spotify, deezer, …) and that service's id for it.
+   *  identify fetches the exact track by it instead of searching. */
+  source?: string;
+  source_id?: string;
 }
 
 export interface UserPlaylistSummary {
@@ -25,6 +29,10 @@ export interface UserPlaylistSummary {
   name: string;
   track_count: number;
   image_url?: string | null;
+  /** the collage the playlists page draws when there's no cover of its own. */
+  cover_tiles?: string[];
+  /** the profile's Liked Songs, pinned first. */
+  liked?: boolean;
 }
 
 export interface AddTracksResult {
@@ -62,6 +70,22 @@ function json(method: string, body: unknown): RequestInit {
   };
 }
 
+/** the fixed source id of a profile's Liked Songs (core/playlists/user_playlists). */
+export const LIKED_SOURCE_ID = 'liked';
+
+export function isLikedPlaylist(
+  row: { source?: string | null; source_playlist_id?: string | null } | null | undefined,
+): boolean {
+  return row?.source === USER_PLAYLIST_SOURCE && row?.source_playlist_id === LIKED_SOURCE_ID;
+}
+
+/** Liked Songs first, everything else in the order it was in. */
+export function pinLikedFirst<
+  T extends { source?: string | null; source_playlist_id?: string | null },
+>(rows: readonly T[]): T[] {
+  return [...rows.filter((r) => isLikedPlaylist(r)), ...rows.filter((r) => !isLikedPlaylist(r))];
+}
+
 export function isUserPlaylist(row: { source?: string | null } | null | undefined): boolean {
   return row?.source === USER_PLAYLIST_SOURCE;
 }
@@ -89,6 +113,51 @@ export async function addToUserPlaylist(
   return send(
     `/api/user-playlists/${playlistId}/tracks`,
     json('POST', { tracks, allow_duplicates: allowDuplicates }),
+  );
+}
+
+/** the picker's untick: drop these songs wherever they sit in the playlist. */
+export async function removeSongsFromUserPlaylist(
+  playlistId: number,
+  tracks: readonly UserPlaylistTrack[],
+): Promise<{ removed: number; track_count: number }> {
+  return send(`/api/user-playlists/${playlistId}/tracks/remove`, json('POST', { tracks }));
+}
+
+/** how many of these songs each of your playlists already has. playlists with
+ *  none are left out. */
+export interface PlaylistMembership {
+  total: number;
+  playlists: Record<string, number>;
+}
+
+export async function fetchMembership(
+  tracks: readonly UserPlaylistTrack[],
+): Promise<PlaylistMembership> {
+  return send('/api/user-playlists/membership', json('POST', { tracks }));
+}
+
+/** heart songs into Liked Songs (made on first use). */
+export async function likeSongs(
+  tracks: readonly UserPlaylistTrack[],
+): Promise<{ id: number; added: number; track_count: number }> {
+  return send('/api/user-playlists/liked', json('POST', { tracks }));
+}
+
+export async function unlikeSongs(
+  tracks: readonly UserPlaylistTrack[],
+): Promise<{ id: number | null; removed: number; track_count: number }> {
+  return send('/api/user-playlists/liked/remove', json('POST', { tracks }));
+}
+
+/** an editable copy of a mirrored playlist in My Playlists; the mirror stays. */
+export async function copyMirrorToUserPlaylist(
+  mirrorId: number,
+  name?: string,
+): Promise<{ id: number; name: string }> {
+  return send(
+    `/api/user-playlists/from-mirror/${mirrorId}`,
+    json('POST', name === undefined ? {} : { name }),
   );
 }
 

@@ -60,6 +60,7 @@ def _post_sync_automation_followup(
     automation_id: str,
     playlist_id: str,
     skip_wishlist_add: bool,
+    organize_by_playlist: bool = False,
     result: Any,
 ) -> None:
     """Queue downloads after an automation sync finishes.
@@ -68,6 +69,12 @@ def _post_sync_automation_followup(
     separate scheduled "Process Wishlist" action often runs on an empty wishlist.
     Organize-by-playlist skips sync-time wishlist adds and expects a folder
     download batch instead — that only ran in Playlist Pipeline before this hook.
+
+    The organize batch is gated on ``organize_by_playlist`` itself, NOT on
+    ``skip_wishlist_add`` (#1689): pipeline runs with wishlist skipping
+    resolved on also pass skip_wishlist_add, and for them the missing
+    tracks must go nowhere — starting an organize download batch here
+    would download exactly what the user opted out of.
     """
     if not automation_id or not str(playlist_id).startswith('auto_mirror_'):
         return
@@ -79,7 +86,13 @@ def _post_sync_automation_followup(
     failed = int(getattr(result, 'failed_tracks', 0) or 0)
     wishlist_added = int(getattr(result, 'wishlist_added_count', 0) or 0)
 
-    if skip_wishlist_add:
+    if skip_wishlist_add and not organize_by_playlist:
+        # Wishlist adds were deliberately skipped for this sync (a pipeline
+        # run with the skip resolved on) — nothing to queue, and the
+        # "none added to wishlist" warning below must not fire for it.
+        return
+
+    if organize_by_playlist and skip_wishlist_add:
         org_fn = deps.run_playlist_organize_download
         if failed <= 0:
             return
@@ -335,6 +348,7 @@ def run_sync_task(
     deps: SyncDeps = None,
     sync_mode: str = 'reconcile',  # #1289: safer default (preserves server edits)
     skip_wishlist_add: bool = False,
+    organize_by_playlist: bool = False,
     user_initiated: bool = False,
 ):
     """The actual sync function that runs in the background thread."""
@@ -548,8 +562,10 @@ def run_sync_task(
         # Attach original tracks map to sync_service for wishlist with album images
         sync_service._original_tracks_map = original_tracks_map
 
-        # Organize-by-playlist still skips wishlisting entirely (batch failure
-        # handling covers it separately). Wing It mode no longer forces a
+        # skip_wishlist_add skips wishlisting entirely for this sync. Its
+        # callers: organize-by-playlist (batch failure handling covers the
+        # missing tracks separately) and pipeline runs whose resolved
+        # wishlist skip is on (#1689). Wing It mode no longer forces a
         # blanket skip — the per-track is_stub_id()/should_wishlist_stub()
         # gate in sync_service now decides per track instead.
         with sync_lock:
@@ -558,8 +574,8 @@ def run_sync_task(
         sync_service._skip_wishlist = is_wing_it
         if skip_wishlist_add:
             logger.info(
-                "[Organize by Playlist] Skipping sync-time wishlist for '%s' — "
-                "organize download + batch failure handling cover missing tracks",
+                "Skipping sync-time wishlist for '%s' — wishlist adds are "
+                "disabled for this sync",
                 playlist_name,
             )
 
@@ -786,6 +802,7 @@ def run_sync_task(
                 automation_id=automation_id,
                 playlist_id=playlist_id,
                 skip_wishlist_add=skip_wishlist_add,
+                organize_by_playlist=organize_by_playlist,
                 result=result,
             )
 
@@ -832,6 +849,9 @@ def run_sync_task(
             discovered_tracks=len(tracks_json),
             tracks_hash=_tracks_hash,
             quality_profile_id=_synced_quality_profile_id,
+            # the mode it ran in, so the next scheduled run sees a mode
+            # change as a change (#1704)
+            sync_mode=sync_mode,
         )
         if _mirror_tracks_hash is not None:
             _status_kwargs['mirror_tracks_hash'] = _mirror_tracks_hash

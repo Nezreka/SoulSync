@@ -33,9 +33,9 @@ The \`Authorization: Bearer <key>\` header is preferred — a key in the query s
 
 **Key anatomy.** A raw key is \`sk_\` followed by 43 URL-safe random characters (generated with \`secrets.token_urlsafe(32)\`). The raw key is shown **exactly once**, in the response that creates it. Only the SHA-256 hash of the key is stored — a leaked database cannot be turned back into working keys.
 
-**What a key can do.** An API key acts with **admin rights** (\`g.is_admin = True\` is stamped on every key-authenticated request). Treat keys like passwords: store them in a secrets manager, never commit them to git, and rotate immediately if one leaks. There is no read-only key tier.
+**What a key can do.** A key has a \`scope\`. An **admin** key (the default) acts with **admin rights** on every key-authenticated request. A **read** key can only \`GET\` (and \`HEAD\`/\`OPTIONS\`) under \`/api/v1\`, and not the sensitive routes: \`/api/v1/settings\`, \`/api/v1/api-keys\`, \`/api/v1/api-keys-internal\`, \`/api/v1/profiles\` and \`/api/v1/video/calendar\`. Every other request with a read key, on any path, gets \`403 INSUFFICIENT_SCOPE\`. Use a read key for dashboards and widgets, for example a Homepage stats widget on \`/api/v1/library/stats\`. Keys created before scopes existed have no \`scope\` and stay admin; a scope the server does not recognise is treated as read. A read key acts as the first profile, so it sees that profile's wishlist and watchlist. Treat keys like passwords: store them in a secrets manager, never commit them to git, and rotate immediately if one leaks. An older SoulSync build run against the same config ignores \`scope\` and treats every key as admin, so revoke read keys before going back.
 
-**Key metadata.** Each stored key records a \`label\`, a visible \`key_prefix\` (\`sk_\` plus the first 8 characters of the raw key), \`created_at\`, and \`last_used_at\`. \`last_used_at\` is refreshed on every authenticated request (persisted to disk at most once every 15 minutes per key, so heavy polling does not rewrite the config file constantly).
+**Key metadata.** Each stored key records a \`label\`, a \`scope\`, a visible \`key_prefix\` (\`sk_\` plus the first 8 characters of the raw key), \`created_at\`, and \`last_used_at\`. \`last_used_at\` is refreshed on every authenticated request (persisted to disk at most once every 15 minutes per key, so heavy polling does not rewrite the config file constantly).
 
 **Rate limiting.** The whole \`/api/v1\` blueprint is limited to 60 requests per minute per client IP (Flask-Limiter, keyed on remote address). Exceeding it returns \`429\` with code \`RATE_LIMITED\`.
 
@@ -69,6 +69,7 @@ List all API keys. Only safe metadata is returned — never the raw key, never t
         "id": "123e4567-e89b-12d3-a456-426614174000",
         "label": "Telegram bot",
         "key_prefix": "sk_aB3dE5fG",
+        "scope": "admin",
         "created_at": "2026-09-20T14:02:11.123456+00:00",
         "last_used_at": "2026-09-30T07:58:02.445100+00:00"
       }
@@ -84,6 +85,7 @@ List all API keys. Only safe metadata is returned — never the raw key, never t
 | \`id\` | string (UUID) | The key's stable identifier. Use this (not the key itself) to revoke it. |
 | \`label\` | string | Human label given at creation; empty string if none was given. |
 | \`key_prefix\` | string | \`sk_\` plus the first 8 characters of the raw key — enough to recognize which key is which. |
+| \`scope\` | string | \`admin\` or \`read\`. Keys that predate scopes show as \`admin\`. |
 | \`created_at\` | string (ISO 8601, UTC) | When the key was minted. |
 | \`last_used_at\` | string/null | Last time the key authenticated a request; \`null\` if never used. |
 
@@ -98,6 +100,7 @@ Mint a new API key. The raw key is returned **once** in this response and can ne
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | \`label\` | string | No | \`""\` | Human-readable label, e.g. \`"My Bot"\`. Shown in the key list. |
+| \`scope\` | string | No | \`"admin"\` | \`"admin"\` or \`"read"\`. Anything else is a \`400 BAD_REQUEST\`. |
 
 **Response** — \`201 Created\`:
 
@@ -109,6 +112,7 @@ Mint a new API key. The raw key is returned **once** in this response and can ne
     "id": "123e4567-e89b-12d3-a456-426614174000",
     "label": "My Bot",
     "key_prefix": "sk_aB3dE5fG",
+    "scope": "admin",
     "created_at": "2026-09-30T08:10:22.918273+00:00"
   },
   "error": null,
@@ -124,10 +128,10 @@ Note the response does **not** include \`last_used_at\` (the key has never been 
 curl -X POST http://localhost:8008/api/v1/api-keys \\
   -H "Authorization: Bearer sk_..." \\
   -H "Content-Type: application/json" \\
-  -d '{"label": "My Bot"}'
+  -d '{"label": "Homepage widget", "scope": "read"}'
 \`\`\`
 
-**Errors:** \`401 AUTH_REQUIRED\`, \`403 INVALID_KEY\`, \`429 RATE_LIMITED\`, \`500 SETTINGS_ERROR\`.
+**Errors:** \`400 BAD_REQUEST\`, \`401 AUTH_REQUIRED\`, \`403 INVALID_KEY\`, \`403 INSUFFICIENT_SCOPE\` (a read key cannot mint keys), \`429 RATE_LIMITED\`, \`500 SETTINGS_ERROR\`.
 
 **Notes:**
 - Save the returned \`key\` value immediately. If you lose it, revoke the key by its \`id\` and mint a new one.
@@ -188,6 +192,7 @@ Mint the **first** API key on a fresh install. This is the only public endpoint 
     "id": "123e4567-e89b-12d3-a456-426614174000",
     "label": "My First Key",
     "key_prefix": "sk_aB3dE5fG",
+    "scope": "admin",
     "created_at": "2026-09-30T08:10:22.918273+00:00"
   },
   "error": null,

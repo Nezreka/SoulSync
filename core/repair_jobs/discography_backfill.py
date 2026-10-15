@@ -32,6 +32,11 @@ class DiscographyBackfillJob(RepairJob):
         'wishlist for automatic download.\n\n'
         'Respects content filters: live versions, remixes, acoustic versions, '
         'instrumentals, and compilations are excluded by default.\n\n'
+        'Runs rotate through your library: each run picks up where the last '
+        'one left off, so a per-run limit spreads the whole collection over '
+        'successive runs instead of rescanning the same first artists. A run '
+        'stopped halfway resumes where it left off (rescanning at most a '
+        'few artists it had just finished).\n\n'
         'Settings:\n'
         '- Max Artists Per Run: Limit how many artists to process per scan (default: 50)\n'
         '- Min Album Tracks Owned: Only backfill artists you own at least this many tracks of '
@@ -82,22 +87,54 @@ class DiscographyBackfillJob(RepairJob):
             logger.info("No artists in library to scan")
             return result
 
-        total = min(len(artists), max_artists)
+        if self._coerce_limit(max_artists) <= 0:
+            logger.warning(
+                "Discography backfill: max_artists_per_run is %r — scanning no artists",
+                max_artists)
+            return result
+
+        # Rotate through the library across runs (#1709): the per-run limit
+        # used to slice artists[:max_artists] off the same name-ordered list
+        # every time, so artists past the limit were never scanned at all.
+        # The window starts after the last artist a previous run finished
+        # and wraps to the top, so successive runs cover the whole library
+        # and then start a fresh pass.
+        window = self._rotation_window(context, artists, max_artists)
+
+        total = len(window)
+        # say where this run starts so the user can see the rotation working
+        start_name = window[0].get('name') if window else '-'
         if context.update_progress:
             context.update_progress(0, total)
         if context.report_progress:
             context.report_progress(
-                phase=f'Scanning discography for {total} artists...',
+                phase=f'Scanning discography for {total} of {len(artists)} artists, starting at {start_name}...',
                 total=total,
             )
 
-        logger.info("Discography backfill: scanning %d artists (of %d total)", total, len(artists))
+        logger.info("Discography backfill: scanning %d artists (of %d total), starting at %s",
+                    total, len(artists), start_name)
         primary_source = get_primary_source()
 
-        for i, artist in enumerate(artists[:max_artists]):
+        last_completed = None
+        last_saved_id = None
+
+        def save_progress():
+            # Every config save rewrites the whole config, so persist in
+            # batches (like the AcoustID scanner's checkpoint) and never
+            # write the same checkpoint twice in a row.
+            nonlocal last_saved_id
+            if last_completed is None or str(last_completed.get('id')) == last_saved_id:
+                return
+            self._save_checkpoint(context, last_completed)
+            last_saved_id = str(last_completed.get('id'))
+
+        for i, artist in enumerate(window):
             if context.check_stop():
+                save_progress()
                 return result
             if i % 5 == 0 and context.wait_if_paused():
+                save_progress()
                 return result
 
             artist_id = artist['id']
@@ -114,20 +151,66 @@ class DiscographyBackfillJob(RepairJob):
             logger.info("[%d/%d] Scanning %s", i + 1, total, artist_name)
             try:
                 missing_count = self._scan_artist(context, artist, settings, primary_source, result)
-                if missing_count > 0:
-                    logger.info("[%d/%d] Found %d missing tracks for %s", i + 1, total, missing_count, artist_name)
-                else:
-                    logger.info("[%d/%d] %s — no missing tracks", i + 1, total, artist_name)
             except Exception as e:
                 logger.warning("[%d/%d] Error scanning discography for %s: %s", i + 1, total, artist_name, e)
                 result.errors += 1
+                missing_count = 0
+
+            if missing_count is None:
+                # Nothing could be scanned for this artist (no discography
+                # came back, or every release's track list failed to
+                # fetch). The fetch layer cannot tell a provider outage
+                # from an artist with genuinely nothing on file — except
+                # when the primary source is Spotify and it is under a
+                # rate-limit ban, where the empty result is the ban
+                # talking. Then stop here WITHOUT moving the checkpoint,
+                # so the ban does not burn this window of artists until
+                # the next pass. (Probed outside the artist try/except: a
+                # raising probe must never be read as an artist error.)
+                try:
+                    rate_limited = (primary_source == 'spotify'
+                                    and context.is_spotify_rate_limited())
+                except Exception:  # noqa: BLE001 — a broken probe is not a ban
+                    rate_limited = False
+                if rate_limited:
+                    result.stopped_early = (
+                        'Spotify rate limit hit; discography fetches are '
+                        'returning nothing. Stopped so the remaining '
+                        'artists are not marked scanned.')
+                    logger.warning("Discography backfill stopping early: %s",
+                                   result.stopped_early)
+                    save_progress()
+                    return result
+                logger.info("[%d/%d] %s — no discography found", i + 1, total, artist_name)
+            elif missing_count > 0:
+                logger.info("[%d/%d] Found %d missing tracks for %s", i + 1, total, missing_count, artist_name)
+            else:
+                logger.info("[%d/%d] %s — no missing tracks", i + 1, total, artist_name)
+
+            # The artist was attempted, so the rotation moves past it —
+            # including on error, or one artist that always fails would
+            # block every artist behind it forever. (A release whose track
+            # list would not fetch, when others did, is likewise an
+            # attempt: the artist is revisited on the next pass, not
+            # retried inside this one.) But a stop requested while this
+            # artist was mid-scan means it did NOT finish: leave the
+            # checkpoint behind it so the next run resumes with it.
+            if context.check_stop():
+                save_progress()
+                return result
+            last_completed = artist
+            if (i + 1) % 5 == 0:
+                save_progress()
 
             if context.update_progress and (i + 1) % 3 == 0:
                 context.update_progress(i + 1, total)
 
             # Rate limit between artists
             if context.sleep_or_stop(1.0):
+                save_progress()
                 return result
+
+        save_progress()
 
         if context.update_progress:
             context.update_progress(total, total)
@@ -138,6 +221,83 @@ class DiscographyBackfillJob(RepairJob):
         )
         return result
 
+    # -- Cross-run rotation (#1709) -------------------------------------
+    # Same persistence the AcoustID scanner uses for its checkpoint: a
+    # value on the config manager under this job's own key, saved in
+    # batches as artists finish. It is never cleared — rotation is a
+    # cycle, not a pass with an end state.
+
+    @staticmethod
+    def _coerce_limit(value) -> int:
+        """``max_artists_per_run`` as an int; the job default (50) for a
+        stored value that is not a usable number."""
+        try:
+            return int(value)
+        except (TypeError, ValueError, OverflowError):
+            return 50
+
+    def _get_checkpoint(self, context):
+        """The {'id', 'name'} of the last artist a run finished, or None."""
+        if not context.config_manager:
+            return None
+        try:
+            saved = context.config_manager.get(
+                f'repair.jobs.{self.job_id}.scan_checkpoint', None)
+        except Exception as e:  # noqa: BLE001 — a broken store means start at the top, not crash
+            logger.warning("Could not read backfill checkpoint (starting at the top): %s", e)
+            return None
+        if (isinstance(saved, dict)
+                and isinstance(saved.get('id'), (str, int))
+                and not isinstance(saved.get('id'), bool)
+                and isinstance(saved.get('name'), str) and saved['name']):
+            return {'id': str(saved['id']), 'name': saved['name']}
+        return None
+
+    def _save_checkpoint(self, context, artist) -> None:
+        if not context.config_manager or artist is None:
+            return
+        try:
+            context.config_manager.set(
+                f'repair.jobs.{self.job_id}.scan_checkpoint',
+                {'id': str(artist['id']), 'name': str(artist['name'])},
+            )
+        except Exception as e:  # noqa: BLE001 — losing the checkpoint must not fail the scan,
+            # but it must not be silent either: a store that never saves
+            # brings back the exact #1709 symptom (every run at the top).
+            logger.warning("Could not save backfill checkpoint: %s", e)
+
+    def _rotation_window(self, context, artists, max_artists):
+        """This run's slice of the library: up to ``max_artists`` artists
+        starting right after the checkpoint, wrapping to the top of the
+        list when the end is reached so the window is always full (unless
+        the whole library fits in one run)."""
+        if not artists:
+            return []
+        limit = self._coerce_limit(max_artists)
+        if limit <= 0:
+            return []
+        count = min(len(artists), limit)
+        start = 0
+        checkpoint = self._get_checkpoint(context)
+        if checkpoint is not None:
+            for idx, artist in enumerate(artists):
+                if str(artist.get('id')) == checkpoint['id']:
+                    start = idx + 1
+                    break
+            else:
+                # The checkpoint artist is gone (removed / re-identified).
+                # Resume at the first artist that sorts at-or-after where
+                # it was: '>=' so a same-named survivor (a re-identified
+                # artist keeps its name) is scanned rather than skipped —
+                # rescanning one artist is dedup-safe, skipping one is a
+                # missed discography.
+                start = next(
+                    (idx for idx, artist in enumerate(artists)
+                     if str(artist.get('name') or '') >= checkpoint['name']),
+                    len(artists),
+                )
+        return [artists[(start + k) % len(artists)] for k in range(count)]
+
     def _scan_artist(self, context, artist, settings, primary_source, result):
         """Scan one artist's discography and create findings for missing tracks.
 
@@ -145,6 +305,12 @@ class DiscographyBackfillJob(RepairJob):
         use (get_candidate_albums_for_artist + get_candidate_tracks_for_albums)
         so one artist with a big library doesn't trigger thousands of per-track
         SQL queries.
+
+        Returns the number of missing tracks found, or None when the
+        artist could not actually be scanned: no discography came back at
+        all (nothing on file, or every source failed — the fetch layer
+        cannot tell those apart), or every included release's track list
+        failed to fetch.
         """
         artist_name = artist['name']
         result.scanned += 1
@@ -174,11 +340,18 @@ class DiscographyBackfillJob(RepairJob):
 
         if not discography:
             result.skipped += 1
-            return 0
+            return None
 
         source = discography.get('source', primary_source)
         albums = discography.get('albums', [])
         singles = discography.get('singles', [])
+        if not albums and not singles:
+            # The fetch layer returns an empty (but well-formed) result
+            # both for an artist with nothing on file and when every
+            # source failed. Report that as "not scanned" (None) and let
+            # the caller decide what it means — see scan().
+            result.skipped += 1
+            return None
         missing_count = 0
         active_server = None
         if context.config_manager:
@@ -202,7 +375,12 @@ class DiscographyBackfillJob(RepairJob):
             logger.debug("Could not pre-fetch candidates for %s: %s", artist_name, exc)
             candidate_tracks = None
 
-        # Process albums and singles
+        # Process albums and singles. Track-fetch attempts are counted so
+        # an artist whose releases ALL failed to fetch (a provider outage
+        # behind a cached discography) reports "not scanned" (None)
+        # instead of a clean zero — see scan().
+        fetches_attempted = 0
+        fetches_failed = 0
         for release in albums + singles:
             if context.check_stop():
                 return missing_count
@@ -224,12 +402,15 @@ class DiscographyBackfillJob(RepairJob):
                     continue
 
             # Fetch tracks for this release
+            fetches_attempted += 1
             try:
                 tracks_data = get_album_tracks_for_source(source, str(release_id))
-            except Exception:
+            except Exception as exc:
+                logger.debug("Track fetch failed for %s / %s: %s", artist_name, release_name, exc)
                 tracks_data = None
 
             if not tracks_data:
+                fetches_failed += 1
                 continue
 
             # Extract track items
@@ -381,6 +562,10 @@ class DiscographyBackfillJob(RepairJob):
                         logger.debug("Error creating finding for %s: %s", track_name, e)
                         result.errors += 1
 
+        if fetches_attempted and fetches_failed == fetches_attempted:
+            # Every included release's track list failed to fetch: this
+            # artist was not actually scanned, whatever the count says.
+            return None
         return missing_count
 
     @staticmethod
@@ -465,7 +650,7 @@ class DiscographyBackfillJob(RepairJob):
                             WHERE t.artist_id = artists.id AND COALESCE(t.file_path, '') != '')
                     OR EXISTS (SELECT 1 FROM albums al WHERE al.artist_id = artists.id)
                   )
-                ORDER BY name
+                ORDER BY name, id
             """)
             artists = [dict(row) for row in cursor.fetchall()]
             if min_album_tracks > 0:
@@ -508,8 +693,10 @@ class DiscographyBackfillJob(RepairJob):
             """)
             row = cursor.fetchone()
             settings = self._get_settings(context)
-            max_artists = settings.get('max_artists_per_run', 50)
-            return min(row[0] if row else 0, max_artists)
+            # Same coercion the scan uses, so a stored non-numeric limit
+            # estimates the same window the scan will actually take.
+            limit = self._coerce_limit(settings.get('max_artists_per_run', 50))
+            return min(row[0] if row else 0, max(limit, 0))
         except Exception:
             return 0
         finally:

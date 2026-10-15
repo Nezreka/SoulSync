@@ -14,6 +14,7 @@ from utils.logging_config import get_logger
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.compilation import is_various_artists_credit
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
@@ -521,6 +522,12 @@ def get_album_type_display(raw_type, track_count, source: str = "", locked: bool
     return "Album"
 
 
+def _first_album_artist_id(album_ctx) -> str:
+    artists = album_ctx.get("artists") if isinstance(album_ctx, dict) else None
+    first = artists[0] if isinstance(artists, list) and artists else None
+    return str(first.get("id") or "").strip() if isinstance(first, dict) else ""
+
+
 def _replace_template_variables(template: str, context: dict) -> str:
     clean_context = sanitize_context_values(context)
     result = template
@@ -529,9 +536,17 @@ def _replace_template_variables(template: str, context: dict) -> str:
     collab_mode = _get_config_manager().get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and album_artist_value:
         artists_list = context.get("_artists_list")
-        if artists_list and len(artists_list) > 1:
-            first = artists_list[0]
-            album_artist_value = first.get("name", first) if isinstance(first, dict) else str(first)
+        # match on the raw name: the list's names aren't sanitized either
+        _raw_album_artist = str(context.get("albumartist") or context.get("artist") or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary:
+            # the album list can be the combined name itself while the track
+            # names the primary on its own
+            track_list = context.get("_track_artists_list")
+            if track_list:
+                primary = listed_primary_of(_raw_album_artist, track_list[0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             itunes_artist_id = context.get("_itunes_artist_id")
             if itunes_artist_id and ("," in album_artist_value or " & " in album_artist_value):
@@ -1243,6 +1258,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             _ext = _album_ctx.get("external_urls", {})
             if isinstance(_ext, dict) and _ext.get("itunes_artist_id"):
                 _itunes_aid = _ext["itunes_artist_id"]
+        # an itunes album names its primary's id even when the download
+        # context's artist carries none
+        if not _itunes_aid and source == "itunes" and _album_ctx:
+            _aid = _first_album_artist_id(_album_ctx)
+            if _aid.isdigit():
+                _itunes_aid = _aid
 
         _artist_name = artist_name
         if raw_album_type in ("compilation", "compile") and _artists:
@@ -1316,6 +1337,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "albumtype": album_type_display,
             "atypes": atypes_value,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
+            "_track_artists_list": _artists,
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
             "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
@@ -1494,6 +1516,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         _ext = _album_ctx.get("external_urls", {})
         if isinstance(_ext, dict) and _ext.get("itunes_artist_id"):
             _itunes_aid = _ext["itunes_artist_id"]
+    # an itunes album names its primary's id even when the download
+    # context's artist carries none
+    if not _itunes_aid and source == "itunes" and _album_ctx:
+        _aid = _first_album_artist_id(_album_ctx)
+        if _aid.isdigit():
+            _itunes_aid = _aid
 
     template_context = {
         "artist": artist_name,

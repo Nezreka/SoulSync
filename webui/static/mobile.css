@@ -1892,7 +1892,7 @@
        protrude from their track (mobile CSS batch #2, RC1). The import
        page's pills are a CSS module (hashed class), so they are hooked by
        data attribute like the other import-page exclusions. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn) {
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close) {
         min-height: 38px;
     }
 
@@ -3539,6 +3539,30 @@
     display: none !important;
 }
 
+/* Same story for the nav drawer (Oct 13 batch, M-05): the mini player is
+   z-index 99998, the drawer 10001, so with the drawer open the player
+   floated on top of it and covered its Podcasts row (measured live:
+   elementFromPoint at the player's centre returned a player button while
+   the drawer was open). init.js already stamps mobile-nav-open on <body>
+   for exactly this state; the player defers to the drawer the same way it
+   defers to the Now Playing modal. */
+body.mobile-nav-open #media-player {
+    display: none !important;
+}
+
+/* Same deferral for the Year in Listening story (Oct 13 fold, M-17): the
+   portalled overlay sits at z-9000 at body level, but #media-player is
+   z-99998 and full-width at the bottom on mobile — whenever anything was
+   playing (the normal case for a listening story) the player sat on top
+   of the story's Back / counter / Done row. The floating button stack
+   covered Done the same way. The story is a takeover; both defer to it
+   for exactly its lifetime (the overlay only exists while it is open). */
+body:has([data-year-story-overlay]) #media-player,
+body:has([data-year-story-overlay]) .activity-float-btn,
+body:has([data-year-story-overlay]) .helper-float-btn {
+    display: none !important;
+}
+
 @media (max-width: 768px) {
     /* Recommended-artist carousel cards → 2-up wrap on mobile. The base rule
        pins them with flex:0 0 160px, which overrides plain width — so override
@@ -3641,13 +3665,12 @@
 }
 
 @media (max-width: 768px) {
-    /* Sidebar visualizer is pinned at the (desktop) sidebar's right edge, so on
-       mobile it floats over the page content when the off-canvas sidebar drawer
-       is closed. Show it ONLY while the drawer is open. The .active/.viz-* rules
-       set display with 2-class specificity, so this 3-class + !important selector
-       is needed to beat them; when the drawer IS open it doesn't match, so the
-       visualizer's normal display rules take over again. */
-    .sidebar:not(.mobile-open) ~ .sidebar-visualizer {
+    /* the sidebar visualizer is a desktop thing. on phones it floated over the
+       page with the drawer closed, and with the drawer open it was just a thin
+       violet line down the drawer's edge that read as a bug. hide it in every
+       state. the .viz-* rules set display with 2-class specificity, so this
+       needs !important to win. */
+    .sidebar-visualizer {
         display: none !important;
     }
 }
@@ -4120,30 +4143,51 @@ html.download-modal-open body {
     }
 }
 
-/* discover mix modal on a phone: the header actions and the selection bar wrap
-   instead of running off the right edge, and the compact rows drop the number
-   and album columns so the title and artist get the width. */
+/* discover mix modal on a phone: the art shrinks beside the title, the header
+   actions wrap and share the width, the floating selection bar wraps instead of
+   running off the edge, and the rows drop the number and album columns so the
+   title and artist get the width. */
 @media (max-width: 768px) {
     .mix-modal {
-        position: relative;
         width: 100%;
         max-width: calc(100vw - 16px);
         max-height: 90vh;
         max-height: 90dvh;
     }
+    /* a grid with the heading's children lifted into it: art beside the
+       words, the actions on their own full-width row underneath. inside the
+       heading they only got the narrow column and Sync wrapped alone. */
     .mix-modal-header {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 12px;
-        padding: 16px 16px 14px;
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        /* row-gap 0: the desktop gap: 24px would land between every text line */
+        gap: 0 14px;
+        align-items: start;
+        padding: 18px 16px 16px;
     }
-    .mix-modal-header > div:first-child {
-        padding-right: 36px;
+    .mix-modal-heading {
+        display: contents;
+    }
+    .mix-modal-cover {
+        grid-row: 1 / span 4;
+        align-self: center;
+        width: 76px;
+        height: 76px;
+        border-radius: 10px;
+    }
+    .mix-modal-eyebrow,
+    .mix-modal-title,
+    .mix-modal-subtitle,
+    .mix-modal-meta {
+        grid-column: 2;
+        padding-right: 30px;
     }
     .mix-modal-title {
-        font-size: 20px;
+        font-size: 22px;
     }
     .mix-modal-actions {
+        grid-column: 1 / -1;
+        margin-top: 14px;
         flex-wrap: wrap;
     }
     .mix-modal-actions .btn {
@@ -4151,45 +4195,57 @@ html.download-modal-open body {
         justify-content: center;
     }
     .mix-modal-close {
-        position: absolute;
         top: 10px;
         right: 10px;
     }
 
     .mix-modal-selbar {
         flex-wrap: wrap;
+        justify-content: center;
         row-gap: 8px;
-        column-gap: 10px;
+        column-gap: 6px;
+        width: calc(100% - 24px);
+        bottom: 12px;
         padding: 10px 12px;
+        border-radius: 18px;
+        white-space: normal;
     }
-    .mix-selbar-spacer {
-        display: none;
-    }
-    /* select-all and the count share the first line, the buttons split the second */
     .mix-sel-count {
         flex: 1 1 auto;
-        text-align: right;
     }
     .mix-modal-selbar .btn {
         flex: 1 1 0;
         justify-content: center;
         white-space: nowrap;
     }
-
-    .mix-modal-body {
-        padding: 8px 8px 16px;
+    .mix-modal.has-selection .mix-modal-body {
+        padding-bottom: 120px;
     }
 
-    .discover-playlist-track-compact {
+    .mix-modal-colhead {
+        margin: 0 8px;
+        padding: 8px;
+    }
+    .mix-modal-body {
+        padding: 4px 8px 16px;
+    }
+
+    .discover-playlist-track-compact,
+    .mix-modal .discover-playlist-track-compact,
+    .mix-modal-colhead {
         grid-template-columns: 40px minmax(0, 1fr) auto 32px;
         gap: 10px;
         padding: 8px;
     }
-    .discover-playlist-track-compact.has-select {
+    .discover-playlist-track-compact.has-select,
+    .mix-modal .discover-playlist-track-compact.has-select,
+    .mix-modal-colhead.has-select {
         grid-template-columns: 22px 40px minmax(0, 1fr) auto 32px;
     }
     .discover-playlist-track-compact .track-compact-number,
-    .discover-playlist-track-compact .track-compact-album {
+    .discover-playlist-track-compact .track-compact-album,
+    .mix-colhead-num,
+    .mix-colhead-album {
         display: none;
     }
     .track-compact-name {
@@ -4297,8 +4353,27 @@ html.download-modal-open body {
      class is a hashed CSS module, unnameable here — the component stamps
      data-audiobook-overlay on it instead, and that attribute is the hook.
    Modal families NOT listed either stack above the hamburger already
-   (z-index ≥ 10000: download, mirrored, repair-help, server-search, the
-   generic .modal-overlay) or are covered by the body classes above. */
+   (z-index ≥ 10000: download, mirrored, repair-help, server-search) or
+   are covered by the body classes above.
+   Oct 13 batch: the old assumption that the generic .modal-overlay
+   "stacks above the hamburger already" is FALSE for anything mounted
+   inside #webui-react-root (position:relative; z-index:1) — at body level
+   the whole React root stacks at 1, below the hamburger's 9999, whatever
+   the overlay's own z-index says (measured live: elementFromPoint at the
+   hamburger's centre returned the hamburger over a z-10000
+   .modal-overlay). So the generic overlay is listed below, generalised
+   (fold): EVERY .modal-overlay family is trapped the same way (playlist
+   detail, mix, playlist-preview, your-artists, artist-info, blacklist,
+   station, sync discovery, sources, artist-detail modals, watchlist
+   modals, …), not just the playlist one. closed overlays don't all use
+   .hidden: some vanilla ones (automation run history, the spotify and
+   deezer arl playlist details) close with style.display='none' and stay
+   in the dom, which hid the hamburger for good after one open. so an
+   inline display:none counts as closed too. Hiding the hamburger behind
+   the account modal also keeps the nav drawer from being opened over it
+   (the drawer is z-10001, one rung above it). The Artist Map / Artist Web
+   container joins the list for the same reason — it is z-index 100, far
+   BELOW the hamburger, and only exists while a map is open. */
 html.download-modal-open .hamburger-btn,
 html.modal-open .hamburger-btn,
 body.modal-open .hamburger-btn,
@@ -4313,7 +4388,27 @@ body:has(.art-picker-overlay.visible) .hamburger-btn,
 body:has(.watchadd-modal-overlay.visible) .hamburger-btn,
 body:has(.server-disambig-overlay.visible) .hamburger-btn,
 body:has(.genre-browser-modal-overlay.active) .hamburger-btn,
-body:has([data-audiobook-overlay]) .hamburger-btn {
+body:has([data-audiobook-overlay]) .hamburger-btn,
+body:has(.modal-overlay:not(.hidden):not([style*="display: none"]):not([style*="display:none"])) .hamburger-btn,
+body:has(.artist-map-container) .hamburger-btn,
+body:has([data-year-story-overlay]) .hamburger-btn {
+    display: none !important;
+}
+
+/* The map/web container is a full-viewport takeover, but the shell's
+   floating stack renders above it (.activity-float-btn is z-index 999999)
+   and parks exactly where the stacked island nav lands (bottom-right):
+   in the visual harness the Server Activity button intercepted every
+   click on the island nav's current-genre button, and the mini player
+   (z-index 99998, a full-width bottom bar) covers the genre strip the
+   same way. Both defer for the container's lifetime — it only exists
+   while a map or web is open. Same deferral shape as the year-story
+   rule above and the watchlist overlay rules. */
+body:has(.artist-map-container) #media-player,
+body:has(.artist-map-container) .activity-float-btn,
+body:has(.artist-map-container) .helper-float-btn,
+body:has(.artist-map-container) #notif-bell-btn,
+body:has(.artist-map-container) #gsearch-bar {
     display: none !important;
 }
 
@@ -4357,5 +4452,685 @@ body:has([data-audiobook-overlay]) .hamburger-btn {
     .auto-sync-header .auto-sync-summary {
         flex: 1 1 100%;
         order: 3;
+    }
+}
+
+/* --- Auto-Sync Manager on phones: the whole modal, not just its header ---
+   The header wrap above was batch #2; the rest of the modal never got a
+   phone layout at all (Boulder's screenshot, Oct 13). Measured in Chromium
+   at 390px against the real stylesheets, replica markup:
+   - The <=1100px block in style.css tries to stack .auto-sync-body into
+     one column (280px sidebar over lanes), but the streamlined board rules
+     are scoped .auto-sync-modal .auto-sync-body (0,2,0) and beat it — so
+     the sidebar kept 280px, the lanes got the leftover 90px, filled lanes
+     (365px of content) clipped off the modal's right edge, and the grid's
+     second row stood empty: the board area rendered 150px tall in a 421px
+     slot, over half the modal dead space.
+   - The four tabs total 454px in a 370px modal with no scroll or wrap:
+     Run History clipped at the edge, mid-word.
+   - Header + idle monitor + tabs + board intro ate 403px of the 844px
+     screen before the first playlist appeared.
+   - At <=1100px the source list becomes a horizontal flex strip (groups
+     min-width 220px side by side), so the playlist list was a 69px tall
+     sideways scroller showing one group at a time.
+   The rules below are scoped to match the selectors they override
+   (.auto-sync-modal …) and this file loads after style.css, so they win
+   ties. Desktop is untouched: everything sits inside max-width: 768px. */
+@media (max-width: 768px) {
+    /* The modal takes the screen instead of floating in it. dvh so the
+       phone browser chrome doesn't crop the bottom; vh first as fallback. */
+    .auto-sync-modal {
+        width: calc(100vw - 12px);
+        height: calc(100vh - 12px);
+        height: calc(100dvh - 12px);
+        border-radius: 18px;
+    }
+
+    /* Header: one compact block. Title + actions share the first row, the
+       summary chips split the second row evenly instead of sizing to
+       their text and clipping. */
+    .auto-sync-modal .auto-sync-header {
+        padding: 14px 16px 12px;
+        gap: 8px 12px;
+        align-items: flex-start;
+    }
+    .auto-sync-modal .auto-sync-header h3 {
+        font-size: 19px;
+    }
+    /* The blurb goes on phones: style.css already hides it on short
+       screens (max-height: 760px) for the same reason — the board is the
+       content, and two lines of explanation cost two playlist rows.
+       Without it the title shrinks to its text and the actions share
+       its row again instead of wrapping onto a row of their own. */
+    .auto-sync-modal .auto-sync-header p {
+        display: none;
+    }
+    .auto-sync-modal .auto-sync-header > div:first-child {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-header-actions {
+        margin-left: auto;
+    }
+    .auto-sync-modal .auto-sync-close {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 auto;
+    }
+    .auto-sync-modal .auto-sync-refresh {
+        padding: 8px 10px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary {
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-left: 0;
+        padding: 0;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary > div {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 6px 10px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary span {
+        font-size: 15px;
+    }
+    .auto-sync-modal .auto-sync-header .auto-sync-summary small {
+        font-size: 9px;
+        letter-spacing: 0.2px;
+    }
+
+    /* Idle monitor: kicker + state on one line. The detail sentence is
+       hidden only while idle — it repeats what the board intro says, and
+       the board needs the room more. A running monitor keeps it. */
+    .auto-sync-modal .auto-sync-monitor {
+        padding: 10px 16px;
+    }
+    .auto-sync-modal .auto-sync-monitor.auto-sync-monitor--idle {
+        padding: 8px 16px;
+    }
+    .auto-sync-monitor--idle .auto-sync-monitor-head small {
+        display: none;
+    }
+    .auto-sync-monitor-list {
+        grid-template-columns: 1fr;
+    }
+
+    /* Tabs: a scroll strip, every tab reachable, nothing wraps mid-word
+       and nothing clips. */
+    .auto-sync-tabs {
+        padding: 0 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+    }
+    .auto-sync-tabs::-webkit-scrollbar {
+        display: none;
+    }
+    .auto-sync-tabs button {
+        flex: 0 0 auto;
+        height: 44px;
+        padding: 0 12px;
+        white-space: nowrap;
+    }
+
+    .auto-sync-modal .auto-sync-board-intro,
+    .auto-sync-automation-intro,
+    .auto-sync-history-intro {
+        padding: 10px 16px;
+    }
+
+    /* The board stacks: playlists on top (capped, own scroll), lanes
+       below filling what's left (own scroll). display:flex replaces the
+       grid outright, which is what finally retires the 280px column and
+       the phantom second row. */
+    .auto-sync-modal .auto-sync-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+    .auto-sync-modal .auto-sync-sidebar {
+        flex: 0 0 auto;
+        width: auto;
+        max-height: 40%;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .auto-sync-sidebar-title {
+        padding: 10px 16px 6px;
+    }
+    .auto-sync-sidebar-filter {
+        padding: 2px 12px 8px;
+    }
+    .auto-sync-sidebar-search {
+        height: 36px;
+        font-size: 13px;
+    }
+    /* Undo the <=1100px horizontal strip: back to a vertical list that
+       scrolls inside the sidebar's cap. */
+    .auto-sync-modal .auto-sync-source-list {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 0 12px 12px;
+    }
+    .auto-sync-modal .auto-sync-source-group {
+        min-width: 0;
+        margin-bottom: 12px;
+    }
+
+    /* Lanes: one column. A filled lane is a header strip (interval +
+       cadence + count) over full-width cards; an empty lane is a
+       full-width dashed row that says what it's for, not a 59px sliver
+       of a chip at the screen's edge. */
+    .auto-sync-modal .auto-sync-lanes {
+        flex: 1;
+        min-height: 0;
+        flex-direction: column;
+        flex-wrap: nowrap;
+        align-content: stretch;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: 12px;
+        gap: 8px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled {
+        flex: 0 0 auto;
+        flex-direction: column;
+        gap: 8px;
+        padding: 10px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge {
+        flex: 0 0 auto;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 8px;
+        padding: 0 2px 6px;
+        border-right: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-badge b {
+        font-size: 16px;
+    }
+    .auto-sync-modal .auto-sync-lane.filled .auto-sync-lane-track {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 0;
+    }
+    .auto-sync-modal .auto-sync-lane .auto-sync-scheduled-card {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        margin: 0;
+    }
+    .auto-sync-modal .auto-sync-lane.empty {
+        flex: 0 0 auto;
+        width: auto;
+        border-radius: 12px;
+    }
+    .auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge {
+        flex: 1;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    .auto-sync-modal .auto-sync-lane.empty .auto-sync-lane-badge span {
+        display: inline;
+    }
+
+    /* The automation intro is a bare strong + span in a flex row, so on a
+       phone the heading was crushed into a 140px column beside its own
+       explanation. Stack them. The history intro has the same shape
+       (text block + filter controls) and stacks the same way. */
+    .auto-sync-automation-intro,
+    .auto-sync-history-intro {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    /* The read-only panels ride the same panel column; give their lists
+       the leftover height and phone padding. */
+    .auto-sync-automation-list,
+    .auto-sync-history-list {
+        flex: 1;
+        min-height: 0;
+        padding: 12px;
+    }
+    .auto-sync-automation-card {
+        flex-wrap: wrap;
+    }
+
+    /* Bulk popover + weekly editor: stay on screen, real tap targets. */
+    .auto-sync-bulk-menu {
+        max-width: calc(100vw - 16px);
+    }
+    .auto-sync-bulk-menu button {
+        min-height: 40px;
+    }
+    .auto-sync-weekly-editor-backdrop {
+        padding: 12px;
+    }
+    .auto-sync-weekly-editor {
+        padding: 18px;
+    }
+}
+
+/* playlist play row + add songs on a phone: the controls stay one thumb row,
+   the add panel drops the duration so the title keeps its width */
+@media (max-width: 768px) {
+    .mm-play-row { gap: 8px; margin-top: 12px; }
+    .mm-play { width: 46px; height: 46px; }
+    .mm-round { width: 38px; height: 38px; }
+    .mm-pill { height: 38px; padding: 0 13px; }
+    .mm-play-gap { display: none; }
+    .mm-cover { width: 120px; height: 120px; }
+    .mm-sortbar { padding: 8px 12px 0; flex-wrap: wrap; }
+    .as-panel { margin: 10px 8px 4px; padding: 14px 12px 8px; max-height: 52vh; }
+    .as-row { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; }
+    .as-art { width: 40px; height: 40px; }
+    .as-dur { display: none; }
+    .as-add { min-width: 64px; padding: 0 12px; }
+}
+
+/* --- Oct 13 mobile batch (Boulder's phone screenshots + videos) ---
+   Every mechanism below was measured live in Chromium against the real
+   stylesheets (harness replicas + the real pages at 390 / 360 / 412px)
+   before fixing. M-numbers are the issue ids from that pass. */
+@media (max-width: 768px) {
+    /* M-01 — the video detail Back pill is sticky at top:14px with a 22px
+       left margin, i.e. directly under the fixed hamburger (16..60px on
+       both axes), which ate its left end. Push it clear of the button.
+       The page-class prefixes raise specificity: video-side.css loads
+       after this file. The same pill renders on the person (.vp-page)
+       and studio (.vst-page) pages with the same geometry (fold: the
+       first pass only covered .vd-page), so all three are listed. */
+    .vd-page .vd-back,
+    .vp-page .vd-back,
+    .vst-page .vd-back {
+        margin-left: 76px;
+    }
+
+    /* M-08 — Playlist Explorer empty state. .explorer-tree keeps desktop
+       canvas geometry on phones (min-width: max-content, 58px side
+       padding), so the scrollable stage measured wider than its own
+       viewport (410px in a 388px viewport at 390px wide) and the empty
+       state, sized from 100vw, centred on that wide stage instead of the
+       screen — its heading and copy clipped on both sides. On phones the
+       tree hugs the viewport and the empty state fills its container.
+       Fold: scoped to the EMPTY state only (the tree's only child is
+       .explorer-empty then). The populated tree is designed the other
+       way — centred nowrap tiers wider than the viewport inside an
+       overflow:auto stage — and clamping its min-width made wide tiers
+       overflow both sides with the left half unreachable, and changed
+       what the zoom transform scales. */
+    .explorer-tree:has(> .explorer-empty) {
+        min-width: 0;
+        padding: 24px 12px 48px;
+    }
+    .explorer-empty {
+        width: 100%;
+        min-height: 280px;
+        padding: 32px 16px;
+        box-sizing: border-box;
+    }
+
+    /* M-09 — the global loading overlay's message is a bare single-line
+       string: "Loading playlist: Hearthstone Soundtrack…" ran straight
+       off the right edge of the phone (V2 frames). Cap and centre it. */
+    .loading-message {
+        max-width: min(88vw, 480px);
+        text-align: center;
+        overflow-wrap: anywhere;
+    }
+
+    /* M-10 — "Your Artists" cards. discover-premier pins .ya-card at a
+       fixed 148px flex basis (!important) while this file wraps
+       .discover-carousel into a centred stack: at 360px only one 148px
+       card fits a row and it sits centred with dead space both sides
+       (measured: every card at x=106 in a 360px viewport). Make this one
+       carousel a fluid 2-up grid — cards share the row and shrink with
+       it. The !importants match the pinning rules they override. */
+    #your-artists-carousel {
+        flex-wrap: wrap;
+        /* discover-premier pins .discover-carousel at overflow-x:auto
+           !important + scroll-snap-type:x mandatory !important, and it
+           loads after this file — the plain declarations in the first
+           pass lost both fights and only misled. Say it with !important
+           or not at all (fold, M-10). */
+        overflow-x: visible !important;
+        scroll-snap-type: none !important;
+        justify-content: flex-start;
+    }
+    #your-artists-carousel > .ya-card {
+        flex: 1 1 calc(50% - 9px) !important;
+        width: auto !important;
+        max-width: calc(50% - 9px) !important;
+    }
+
+    /* M-11 — Artist Map never had a phone layout (this file contained
+       zero artmap rules). The desktop surface is a 200px genre sidebar
+       beside the canvas inside a fixed full-screen container; measured
+       at 390px the canvas ran 200..1702px because the sidebar would not
+       shrink and the canvas would not either. Stack them: the genre
+       list becomes a capped strip above the canvas, the canvas takes
+       what is left and may shrink to it (min-width: 0 — a canvas is a
+       replaced element, so its automatic minimum is its intrinsic
+       width). The island nav already caps at 100vw-32px; in the
+       stacked layout it anchors to the canvas's bottom-right instead of
+       floating over the genre strip.
+       Fold: the first pass capped the sidebar's BOX but the sidebar is
+       display:block in style.css, so its list's flex:1 was inert and a
+       real ~40-genre list painted straight over the canvas, unreachable
+       past the row's overflow:hidden. The sidebar must be a flex column
+       for the cap to mean anything, and the list must be the scroller.
+       The canvas sizing in JS is layout-aware too — see
+       artist-map-overlay.tsx (measureFor / artMapHandleResize). */
+    .artmap-content-row {
+        flex-direction: column;
+    }
+    .artmap-genre-sidebar {
+        display: flex;
+        flex-direction: column;
+        width: auto;
+        flex: 0 1 auto;
+        max-height: 38%;
+        min-height: 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--white-a06);
+    }
+    .artmap-genre-sidebar-list {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+    #artist-map-canvas {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        width: 100%;
+    }
+    .artmap-island-nav {
+        /* Its desktop anchor (top of the canvas, beside the sidebar)
+           lands on the genre strip once the layout stacks; park it over
+           the canvas's bottom-right instead. */
+        top: auto;
+        bottom: 12px;
+        left: auto;
+        right: 12px;
+        max-width: calc(100vw - 24px);
+    }
+    .artmap-island-menu {
+        /* The menu's desktop anchor reads --artmap-menu-top /
+           --artmap-chrome-left, both measured from the row layout — in
+           the stacked layout they put the menu right of and below the
+           viewport, so genre-jump was dead (fold, M-11c). Anchor it to
+           the nav it belongs to: above the bottom-right nav, right edge
+           aligned, opening upward. */
+        top: auto;
+        bottom: 76px;
+        left: auto;
+        right: 12px;
+        max-width: calc(100vw - 24px);
+    }
+
+    /* M-11 fold — Artist Web (shot 202453) shares .artist-map-container
+       and the toolbar, but its toolbar carries far more than the map's:
+       two lens toggles alone are wider than a 390px row, and the nav-right
+       cluster (toggles + Path/Edges/Filter + zoom + help) never wrapped,
+       so it overflowed the right edge and canvas labels clipped under it.
+       Give the right cluster its own full-width row and let it wrap; the
+       search row drops below it. The genre sidebar is the shared class
+       above, so the web's filter sidebar stacks and scrolls the same way. */
+    #artist-web-container .artist-map-toolbar {
+        flex-wrap: wrap;
+    }
+    #artist-web-container .artmap-nav-right {
+        order: 3;
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        row-gap: 6px;
+    }
+    #artist-web-container .artmap-nav-center {
+        order: 4;
+    }
+    #artist-web-container .artweb-lens-toggle {
+        max-width: 100%;
+    }
+    #artist-web-container .artweb-lens-btn {
+        padding: 5px 8px;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+    #artist-web-container .artweb-legend {
+        max-width: calc(100vw - 28px);
+    }
+
+    /* M-13 — sync tab chips and their close button. The global 38px
+       touch-target rule stretched the chips to 32x38 and the chip's
+       close button (designed 18x18) to an 18x38 dark oval overlapping
+       the Spotify chip (Boulder's circled screenshot). Both classes are
+       now excluded from that rule (see the chain above). The close
+       button also gets its designed size restated ON ITSELF (fold): the
+       first pass relied entirely on the :not chain, so a chain refactor
+       would silently re-oval it. The chips' 38x38 circle lives in the
+       ≤720px block below — that is the band where they are icon chips;
+       at 721-768px the labelled pill design wins and stays a pill. */
+    .sync-tab-close {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+    }
+
+    /* M-13 family — the mirrored tab's source filter pills are the same
+       squeeze shape (a flex row whose children could shrink): keep them
+       whole and let the row scroll instead. */
+    .library-sources {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .library-sources::-webkit-scrollbar {
+        display: none;
+    }
+    .library-source {
+        flex-shrink: 0;
+        white-space: nowrap;
+    }
+
+    /* M-14 — the mini player's transport row. Removing the player
+       buttons from the 38px touch-target chain (above) restores their
+       designed round/square shapes (measured before: play 28x38 oval,
+       stop 24x38 tall rectangle, every other control x38 tall). The row
+       still has to fit: art + info + seven controls measured the info
+       column at 84px (390px) / 54px (360px), truncating titles to a few
+       characters. The expand chevron goes — the whole bar already opens
+       Now Playing on tap — the controls tighten, and the info column
+       keeps the rest. */
+    .media-player .sidebar-album-art {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 auto;
+    }
+    .mini-player-body {
+        gap: 8px;
+        padding: 8px 10px 10px;
+    }
+    .mini-player-body .media-info {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+    .mini-player-controls {
+        gap: 4px;
+    }
+    .mini-player-controls .play-button {
+        width: 36px;
+        height: 36px;
+    }
+    .mini-player-controls .expand-hint {
+        display: none;
+    }
+}
+
+/* M-13 in the icon-chip band (fold): at ≤720px the sync tabs are icon
+   chips (mobile.css's Phase 4 block zeroes their padding there); give
+   them their round shape back at a real tap size. Above 720px the
+   labelled pills keep their designed shape. */
+@media (max-width: 720px) {
+    .sync-tab-button {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 auto;
+    }
+}
+
+/* M-10 in the tablet band (fold): the ≤768px 2-up grid yields ~357px-wide
+   cards at 721-768px — phone cards stretched across a tablet. Three up
+   keeps them card-sized there; phones keep the 2-up above. */
+@media (min-width: 561px) and (max-width: 768px) {
+    #your-artists-carousel > .ya-card {
+        flex-basis: calc(33.333% - 12px) !important;
+        max-width: calc(33.333% - 12px) !important;
+    }
+}
+
+/* M-14 at genuinely small widths only (fold): the first pass dropped the
+   shuffle/repeat toggles below 400px, which took them from standard
+   390/393px iPhones too — the staged design keeps the FULL transport at
+   390px and drops the toggles only below 340px (small Androids / SE-class
+   widths), where even tightened, art + info + seven controls leave the
+   info column ~62px. The toggles are the droppable pair — both live in
+   the Now Playing view the bar opens — so there the transport is prev /
+   play / next / stop and the title gets the freed ~48px. */
+@media (max-width: 340px) {
+    .mini-player-controls .mini-toggle-btn {
+        display: none;
+    }
+}
+
+/* --- Mirrored playlist detail modal on phones: every action reachable ---
+   Tacobell444's screenshot (#1691): on a phone the modal's action bar ran
+   off the right edge — "Sync & download", Close and Identify were past
+   the modal's clipped edge with no way to reach them, and the track rows
+   squeezed the title into a few characters ("i wan…").
+
+   What was wrong (measured in Chromium, replica markup against the real
+   stylesheets, before this section):
+   - .mm-actions-right is a no-wrap flex row holding five controls whose
+     nowrap buttons measure ~596px together. style.css's <=640px block
+     stacks .mm-actions into a column but never wraps the right group, and
+     .mirrored-modal clips with overflow:hidden — so at 390px the Sync &
+     download button's box started at x=342 on a 390px viewport and ran
+     past the panel, and Close / Identify rendered entirely off-screen.
+     Between 641-768px the bar did not even stack.
+   - The track grid kept its six desktop columns (34+40+56+28px fixed,
+     70px of gaps, 36px of row padding): the title element measured
+     36px wide at 390px, 18px at 360px, 0px at 320px.
+   After this section, same replica (and the vanilla modal's markup,
+   and the editable grid): every action button is fully inside the
+   modal at 390 / 360 / 320px with its label inside its button, and
+   the title element measures 170 / 140 / 100px (its full text fits
+   unclipped at 390px). Nothing
+   above 768px changes; the 641-768px band deliberately takes the phone
+   layout too (it is this app's mobile breakpoint) even though its
+   album column would have fit — the stacked action bar would not.
+   This file loads after style.css, so it wins ties. */
+@media (max-width: 768px) {
+    /* More of the phone for the modal: the panel measured 328px wide
+       on a 390px phone before, 355px after (replica-measured). */
+    .mirrored-modal-overlay {
+        padding: 10px;
+    }
+    .mirrored-modal {
+        max-height: calc(100vh - 20px);
+        max-height: calc(100dvh - 20px);
+    }
+    /* Track rows: the album column goes (the title needs the room more,
+       the same call the download / discover modals made), the fixed
+       columns and gaps shrink, and the title takes the remaining space.
+       The position column keeps 26px so a 3-digit track number still
+       fits on one line. The
+       head's album label is its 4th span; a hidden grid child leaves no
+       gap, so head and rows stay in step, editable grid included. */
+    .mm-list-head,
+    .mm-row {
+        grid-template-columns: 26px 36px minmax(0, 1fr) 48px 28px;
+        gap: 8px;
+        padding: 0 10px;
+    }
+    .mm-list--editable .mm-list-head,
+    .mm-list--editable .mm-row {
+        grid-template-columns: 26px 36px minmax(0, 1fr) 48px 28px 28px;
+    }
+    .mm-list-head > span:nth-child(4),
+    .mm-row-album {
+        display: none;
+    }
+    .mm-row {
+        margin: 1px 4px;
+    }
+    /* Head labels sit over the row cells: rows are inset by their 4px
+       margin, so the head's padding grows by the same 4px. */
+    .mm-list-head {
+        padding: 0 14px;
+    }
+    .mm-row-art {
+        width: 36px;
+        height: 36px;
+    }
+
+    /* Actions: stack, then wrap. The two captioned actions (Refresh,
+       Sync & download) take a full row each — their buttons are the
+       longest labels and their captions finally fit under them — and
+       the bare buttons share what rows remain, growing evenly instead
+       of sizing to their text and pushing each other off-screen.
+       flex-basis 30% (not 0) on the bare buttons: a 0-basis button
+       would share a line with a 100%-basis wrap and end up 0px wide. */
+    .mm-actions {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 14px 16px;
+    }
+    .mm-actions-right {
+        flex-wrap: wrap;
+    }
+    .mm-actions-right > .mm-btn {
+        flex: 1 1 30%;
+        min-width: 0;
+    }
+    .mm-btn-wrap {
+        flex: 1 1 100%;
+        min-width: 0;
+        align-items: stretch;
+    }
+    .mm-btn-wrap > .mm-btn {
+        width: 100%;
+    }
+    .mm-btn-caption {
+        white-space: normal;
+        text-align: center;
+    }
+    /* Button labels wrap inside their buttons instead of spilling out
+       of them: .mm-btn is nowrap, and the shrinkable boxes above go
+       narrower than "Edit Source" / "Auto-Sync" at <=390px in the
+       vanilla modal, whose four bare buttons lay out 3-across + 1. */
+    .mm-actions .mm-btn {
+        white-space: normal;
+    }
+}
+
+/* The stacked hero (style.css stacks .mm-hero-content only at <=640px):
+   the close button then floats over empty hero padding, not over the
+   info column, so the info takes its full width back. Scoped to <=640px
+   on purpose — at 641-768px the hero is still a row and the 44px
+   padding-right is the close button's clearance. */
+@media (max-width: 640px) {
+    .mm-hero-content {
+        padding-right: 0;
     }
 }

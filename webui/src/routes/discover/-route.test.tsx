@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -35,6 +35,13 @@ function bodyFor(url: string): Record<string, unknown> {
     return {
       success: true,
       artists: [{ artist_id: 'h1', artist_name: 'Hero Artist', image_url: '', source: 'spotify' }],
+    };
+  }
+  if (url.includes('/api/discover/similar-artists')) {
+    return {
+      success: true,
+      source: 'spotify',
+      artists: [{ artist_id: 's1', artist_name: 'Shelf Artist', source: 'spotify' }],
     };
   }
   if (url.includes('/api/discover/adventurousness')) return { success: true, value: 0.3 };
@@ -174,5 +181,17 @@ describe('discover route (live)', () => {
     } finally {
       delete window.openDownloadMissingModalForYouTube;
     }
+  });
+
+  it("See all picks lists the hero's own picks, not the Artists You'll Like shelf", async () => {
+    renderRoute();
+    await screen.findByText('Hero Artist');
+    screen.getByText('See all picks').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const modal = (await screen.findByText('Picked for you', { selector: 'h2' })).closest(
+      '.recommended-modal',
+    ) as HTMLElement;
+    // it opened the similar-artists list, a different set from the rotation
+    expect(within(modal).getByText('Hero Artist')).toBeTruthy();
+    expect(within(modal).queryByText('Shelf Artist')).toBeNull();
   });
 });

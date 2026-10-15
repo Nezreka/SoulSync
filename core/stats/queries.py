@@ -546,6 +546,48 @@ def get_listening_status(worker) -> dict:
 
 
 
+_STREAK_FIRST_WINDOW_DAYS = 64
+
+
+def _listening_streak(cursor, scope: str, today: date) -> int:
+    """consecutive days with a play, counting back from today. a streak stays
+    alive through today when yesterday has plays.
+
+    only reads recent days. it used to pull the date of every play ever made
+    to answer a question about the last few. the window doubles until the
+    streak ends inside it, so a years-long streak still counts in full. the
+    2 day margin covers a played_at with a utc offset, where date() lands a
+    day off the text the index range compares."""
+    window = _STREAK_FIRST_WINDOW_DAYS
+    while True:
+        since = (today - timedelta(days=window + 2)).isoformat()
+        cursor.execute(
+            f"""SELECT DISTINCT date(lh.played_at)
+                FROM listening_history lh
+                WHERE lh.played_at >= ? AND {scope}""",
+            (since,),
+        )
+        play_days = {row[0] for row in cursor.fetchall()}
+        streak = 0
+        day = today
+        if day.isoformat() not in play_days:
+            day -= timedelta(days=1)
+        while day.isoformat() in play_days:
+            streak += 1
+            day -= timedelta(days=1)
+        if day > today - timedelta(days=window):
+            return streak
+        # the streak ran to the window's edge, it may go further back
+        cursor.execute(
+            f"""SELECT 1 FROM listening_history lh
+                WHERE lh.played_at < ? AND {scope} LIMIT 1""",
+            (since,),
+        )
+        if cursor.fetchone() is None:
+            return streak
+        window *= 4
+
+
 def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     """This-week listening digest for the dashboard banner.
 
@@ -563,9 +605,14 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     chart. ``tracks_played`` is 0 when there is nothing to show — the banner
     renders nothing in that case (the calm-page rule).
     """
-    scope = owner_clause(listening_owner(database, profile_id), 'lh')
+    owner = listening_owner(database, profile_id)
+    scope = owner_clause(owner, 'lh')
     window = "lh.played_at >= datetime('now', '-7 days')"
-    artist_present = "lh.artist IS NOT NULL AND TRIM(lh.artist) <> ''"
+    # the + keeps sqlite off idx_listening_artist. "artist IS NOT NULL" reads
+    # as a range on that index, so without it sqlite walked every play ever
+    # made through the artist index just to find this week's. 23 s on 150k
+    # plays, 8 ms reading the week off the played_at index instead.
+    artist_present = "+lh.artist IS NOT NULL AND TRIM(lh.artist) <> ''"
 
     conn = database._get_connection()
     try:
@@ -581,16 +628,25 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
             f"""SELECT lh.artist, COUNT(*) AS c
                 FROM listening_history lh
                 WHERE {window} AND {scope} AND {artist_present}
-                GROUP BY lh.artist ORDER BY c DESC, lh.artist ASC LIMIT 1"""
+                GROUP BY +lh.artist ORDER BY c DESC, lh.artist ASC LIMIT 1"""
         )
         top_row = cursor.fetchone()
 
+        # a discovery is an artist played this week and never before it. take
+        # this week's artists off the played_at index, then ask the artist
+        # index once each whether an older play exists. grouping the whole
+        # history by artist to find each one's first play read every row.
         cursor.execute(
-            f"""SELECT COUNT(*) FROM (
-                    SELECT lh.artist FROM listening_history lh
-                    WHERE {scope} AND {artist_present}
-                    GROUP BY lh.artist
-                    HAVING MIN(lh.played_at) >= datetime('now', '-7 days')
+            f"""WITH week AS MATERIALIZED (
+                    SELECT lh.artist AS artist FROM listening_history lh
+                    WHERE {window} AND {scope} AND {artist_present}
+                    GROUP BY +lh.artist
+                )
+                SELECT COUNT(*) FROM week
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM listening_history o
+                    WHERE o.artist = week.artist AND {owner_clause(owner, 'o')}
+                      AND +o.played_at < datetime('now', '-7 days')
                 )"""
         )
         discoveries = cursor.fetchone()[0] or 0
@@ -603,15 +659,11 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         )
         day_ms = {row[0]: row[1] for row in cursor.fetchall()}
 
-        cursor.execute(
-            f"""SELECT DISTINCT date(lh.played_at)
-                FROM listening_history lh WHERE {scope}"""
-        )
-        play_days = {row[0] for row in cursor.fetchall()}
+        today = date.today()
+        streak = _listening_streak(cursor, scope, today)
     finally:
         conn.close()
 
-    today = date.today()
     daily = []
     for back in range(6, -1, -1):
         day = today - timedelta(days=back)
@@ -621,16 +673,6 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
             'day': 'mtwtfss'[day.weekday()],
             'hours': round((day_ms.get(key) or 0) / 3_600_000, 1),
         })
-
-    # Streak: consecutive local days with a play, counting back from today.
-    # A streak stays alive through today when yesterday has plays.
-    streak = 0
-    cursor_day = today
-    if cursor_day.isoformat() not in play_days:
-        cursor_day -= timedelta(days=1)
-    while cursor_day.isoformat() in play_days:
-        streak += 1
-        cursor_day -= timedelta(days=1)
 
     return {
         'tracks_played': total_row[0] or 0,

@@ -35,6 +35,12 @@ logger = get_logger("playlists.user_playlists")
 
 USER_PLAYLIST_SOURCE = 'soulsync'
 
+# a profile's Liked Songs is a user playlist with this fixed source id, so
+# there is one per profile and it can always be found again. it is made the
+# first time something is liked.
+LIKED_SOURCE_ID = 'liked'
+LIKED_NAME = 'Liked Songs'
+
 # sources with nothing upstream to pull from. refresh skips them; the
 # pipeline still runs identify / sync / download on them.
 NO_UPSTREAM_SOURCES = ('file', 'beatport', USER_PLAYLIST_SOURCE)
@@ -63,6 +69,10 @@ def is_user_playlist(playlist: Optional[Dict[str, Any]]) -> bool:
     return bool(playlist) and playlist.get('source') == USER_PLAYLIST_SOURCE
 
 
+def is_liked_playlist(playlist: Optional[Dict[str, Any]]) -> bool:
+    return is_user_playlist(playlist) and playlist.get('source_playlist_id') == LIKED_SOURCE_ID
+
+
 def clean_name(name: Any) -> str:
     cleaned = ' '.join(str(name or '').split())
     if not cleaned:
@@ -85,13 +95,20 @@ def clean_track(raw: Any) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         duration_ms = 0
     image = raw.get('image_url')
-    return {
+    track = {
         'track_name': title,
         'artist_name': artist,
         'album_name': album,
         'duration_ms': duration_ms,
         'image_url': image if isinstance(image, str) and image.startswith(('http://', 'https://', '/')) else None,
     }
+    # where the page got it, when it knows: identify fetches that exact track
+    # by id instead of searching for it (core/playlists/track_origin)
+    from core.playlists.track_origin import clean_origin
+    origin = clean_origin(raw.get('source'), raw.get('source_id'))
+    if origin:
+        track['extra_data'] = {'origin': origin}
+    return track
 
 
 _BRACKETED = re.compile(r'\s*[\(\[][^\)\]]*[\)\]]')
@@ -143,6 +160,9 @@ def _stored_tracks(db: Any, playlist_id: int) -> List[Dict[str, Any]]:
             'image_url': row.get('image_url'),
             'source_track_id': row.get('source_track_id'),
             'extra_data': extra or None,
+            # carried explicitly so a rewrite keeps each track's date added,
+            # even a duplicate that shares another row's source_track_id
+            'added_at': row.get('added_at'),
         })
     return out
 
@@ -191,12 +211,30 @@ def list_playlists(db: Any, profile_id: int) -> List[Dict[str, Any]]:
     from core.playlists.naming import effective_mirrored_name
     rows = [p for p in db.get_mirrored_playlists(profile_id=int(profile_id)) if is_user_playlist(p)]
     rows.sort(key=lambda p: str(p.get('updated_at') or p.get('mirrored_at') or ''), reverse=True)
+    # Liked Songs is pinned first, like every music app pins it
+    rows.sort(key=lambda p: not is_liked_playlist(p))
     return [{
         'id': p['id'],
         'name': effective_mirrored_name(p),
         'track_count': int(p.get('track_count') or 0),
         'image_url': p.get('image_url'),
+        # the collage the playlists page falls back to when there's no cover of
+        # its own. without it the picker drew a letter where the page drew art.
+        'cover_tiles': _cover_tiles(p.get('cover_tiles')),
+        'liked': is_liked_playlist(p),
     } for p in rows]
+
+
+def _cover_tiles(raw: Any) -> List[str]:
+    """the cover_tiles column (json text, or NULL until the backfill runs)."""
+    if isinstance(raw, list):
+        tiles = raw
+    else:
+        try:
+            tiles = json.loads(raw) if raw else []
+        except (TypeError, ValueError):
+            return []
+    return [t for t in tiles if isinstance(t, str) and t] if isinstance(tiles, list) else []
 
 
 def add_tracks(
@@ -205,9 +243,11 @@ def add_tracks(
     raw_tracks: Iterable[Any],
     *,
     allow_duplicates: bool = False,
+    prepend: bool = False,
 ) -> Dict[str, Any]:
     """append tracks. a song already in the playlist is skipped and reported
-    unless allow_duplicates, so the ui can ask "add anyway?"."""
+    unless allow_duplicates, so the ui can ask "add anyway?". prepend puts
+    them at the top instead (Liked Songs: newest first)."""
     incoming = [t for t in (clean_track(r) for r in raw_tracks or []) if t]
     if not incoming:
         raise UserPlaylistError('No track to add')
@@ -225,7 +265,7 @@ def add_tracks(
             have.setdefault(key, track)
             added.append(track)
         if added:
-            _write(db, playlist, current + added)
+            _write(db, playlist, added + current if prepend else current + added)
     return {
         'added': len(added),
         'duplicates': [{
@@ -262,6 +302,98 @@ def reorder_tracks(db: Any, playlist: Dict[str, Any], order: Iterable[Any]) -> N
         if sorted(positions) != list(range(1, len(current) + 1)):
             raise UserPlaylistError('The playlist changed, reload it and try again')
         _write(db, playlist, [current[p - 1] for p in positions])
+
+
+def remove_matching(db: Any, playlist: Dict[str, Any], raw_tracks: Iterable[Any]) -> Dict[str, Any]:
+    """drop every row that is LIKELY one of these songs (track_key), for the
+    picker's untick and for unliking. returns how many went."""
+    keys = {track_key(t) for t in (clean_track(r) for r in raw_tracks or []) if t}
+    if not keys:
+        raise UserPlaylistError('No track to remove')
+    with _edit_lock:
+        current = _stored_tracks(db, playlist['id'])
+        kept = [t for t in current if track_key(t) not in keys]
+        removed = len(current) - len(kept)
+        if removed:
+            _write(db, playlist, kept)
+    return {'removed': removed, 'track_count': len(kept)}
+
+
+def membership(db: Any, profile_id: int, raw_tracks: Iterable[Any]) -> Dict[str, Any]:
+    """for the picker's ticks: how many of these songs each of the profile's
+    playlists already has. only playlists that have at least one are listed."""
+    keys = {track_key(t) for t in (clean_track(r) for r in raw_tracks or []) if t}
+    counts: Dict[int, int] = {}
+    if keys:
+        for p in db.get_mirrored_playlists(profile_id=int(profile_id)):
+            if not is_user_playlist(p):
+                continue
+            have = {track_key(t) for t in _stored_tracks(db, p['id'])}
+            hit = len(keys & have)
+            if hit:
+                counts[int(p['id'])] = hit
+    return {'total': len(keys), 'playlists': counts}
+
+
+def liked_playlist(db: Any, profile_id: int, *, create: bool = False) -> Optional[Dict[str, Any]]:
+    """the profile's Liked Songs, made on first use when create is set."""
+    for p in db.get_mirrored_playlists(profile_id=int(profile_id)):
+        if is_liked_playlist(p):
+            return p
+    if not create:
+        return None
+    playlist_id = db.mirror_playlist(
+        source=USER_PLAYLIST_SOURCE,
+        source_playlist_id=LIKED_SOURCE_ID,
+        name=LIKED_NAME,
+        tracks=[],
+        profile_id=int(profile_id),
+        description='Songs you liked, newest first.',
+    )
+    if playlist_id is None:
+        raise RuntimeError('could not make Liked Songs')
+    logger.info("made Liked Songs (%s) for profile %s", playlist_id, profile_id)
+    return db.get_mirrored_playlist(playlist_id, profile_id=int(profile_id))
+
+
+def like(db: Any, profile_id: int, raw_tracks: Iterable[Any]) -> Dict[str, Any]:
+    """heart these songs. one already liked stays where it is."""
+    playlist = liked_playlist(db, profile_id, create=True)
+    result = add_tracks(db, playlist, raw_tracks, prepend=True)
+    return {'id': int(playlist['id']), 'added': result['added'], 'track_count': result['track_count']}
+
+
+def unlike(db: Any, profile_id: int, raw_tracks: Iterable[Any]) -> Dict[str, Any]:
+    playlist = liked_playlist(db, profile_id)
+    if not playlist:
+        return {'id': None, 'removed': 0, 'track_count': 0}
+    result = remove_matching(db, playlist, raw_tracks)
+    return {'id': int(playlist['id']), **result}
+
+
+def copy_mirror(db: Any, mirror: Dict[str, Any], profile_id: int, name: Any = None) -> Dict[str, Any]:
+    """make a mirrored playlist one of yours: a new user playlist with its
+    tracks (identify matches and dates added kept), cover and description.
+    the mirror stays as it is, still syncing from its source."""
+    from core.playlists.naming import effective_mirrored_name
+    new_name = clean_name(name if name is not None else effective_mirrored_name(mirror) or 'Playlist')
+    image = mirror.get('image_url')
+    # a remote poster copies over; anything else (a media-server path) would
+    # not load as a cover, and the collage covers it anyway
+    image = image if isinstance(image, str) and image.startswith(('http://', 'https://')) else None
+    with _edit_lock:
+        new_id = create_playlist(db, int(profile_id), new_name)
+        new_playlist = db.get_mirrored_playlist(new_id, profile_id=int(profile_id))
+        if not new_playlist:
+            raise RuntimeError('could not copy the playlist')
+        _write(
+            db, new_playlist, _stored_tracks(db, mirror['id']),
+            image_url=image,
+            description=mirror.get('description'),
+        )
+    logger.info("copied mirror '%s' (%s) into user playlist '%s' (%s)",
+                mirror.get('name'), mirror['id'], new_name, new_id)
+    return {'id': int(new_id), 'name': new_name}
 
 
 # ── cover, description, duplicate ─────────────────────────────────────────

@@ -1334,16 +1334,45 @@
 
     // Mirrors music's testConnection(): save the key, then hit the test
     // endpoint, then toast the result. Isolated -> /api/video/enrichment/<svc>/test.
-    function testConnection(svc) {
-        var name = svc.toUpperCase();
-        toast('Testing ' + name + ' connection…', 'info');
+    var TEST_NAMES = { tmdb: 'TMDB', tvdb: 'TVDB', omdb: 'OMDb', fanart: 'fanart.tv',
+        opensubtitles: 'OpenSubtitles', subdl: 'SubDL', subsource: 'SubSource', trakt: 'Trakt',
+        mdblist: 'MDBList', tvmaze: 'TVmaze', anilist: 'AniList', wikidata: 'Wikidata',
+        ryd: 'Return YouTube Dislike', sponsorblock: 'SponsorBlock', dearrow: 'DeArrow' };
+    function _testOne(svc) {
+        return fetch('/api/video/enrichment/' + svc + '/test',
+            { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .catch(function () { return { success: false, error: 'request failed' }; });
+    }
+    // the keyless cards hold several services behind one button ("tvmaze,anilist,wikidata").
+    // only the ones switched on get tested, a service you turned off isn't broken.
+    function testConnection(spec) {
+        var svcs = String(spec || '').split(',').filter(Boolean);
+        if (svcs.length > 1) {
+            svcs = svcs.filter(function (s) {
+                var box = document.getElementById('video-' + s + '-enabled');
+                return !box || box.checked;
+            });
+            if (!svcs.length) { toast('Nothing to test, all of these are switched off', 'info'); return; }
+        }
+        var names = svcs.map(function (s) { return TEST_NAMES[s] || s.toUpperCase(); });
+        toast('Testing ' + names.join(', ') + '…', 'info');
         saveKeys(true).then(function () {
-            return fetch('/api/video/enrichment/' + svc + '/test',
-                { method: 'POST', headers: { 'Accept': 'application/json' } });
-        }).then(function (r) { return r.json(); }).then(function (res) {
-            if (res && res.success) toast(res.message || (name + ' connection successful'), 'success');
-            else toast(name + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
-        }).catch(function () { toast('Failed to test ' + name + ' connection', 'error'); });
+            return Promise.all(svcs.map(_testOne));
+        }).then(function (results) {
+            if (results.length === 1) {
+                var res = results[0];
+                if (res && res.success) toast(res.message || (names[0] + ' connection successful'), 'success');
+                else toast(names[0] + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
+                return;
+            }
+            var bad = [];
+            results.forEach(function (res, i) {
+                if (!(res && res.success)) bad.push(names[i] + ': ' + ((res && res.error) || 'unknown'));
+            });
+            if (!bad.length) toast(names.join(', ') + ' all reachable', 'success');
+            else toast('Failed: ' + bad.join(' · '), 'error');
+        }).catch(function () { toast('Failed to test ' + names.join(', '), 'error'); });
     }
 
     // ── Library Organization (naming templates + post-process toggles) ───────
@@ -1815,59 +1844,57 @@
             if (errEl) { errEl.textContent = 'Could not start download (network error).'; errEl.hidden = false; }
         });
     }
-    // ── Library backfill ────────────────────────────────────────────────
-    var BACKFILL_URL = '/api/video/subtitles/backfill';
-    var _backfillPoll = null;
-    function _backfillStopPoll() {
-        if (_backfillPoll) { clearInterval(_backfillPoll); _backfillPoll = null; }
-    }
-    function _backfillStartPoll() {
-        if (_backfillPoll) return;
-        _backfillPoll = setInterval(function () { loadBackfillStatus(); }, 2000);
-    }
-    function renderBackfillStatus(st) {
-        var el = document.getElementById('vo-sub-backfill-status');
-        var btn = document.getElementById('vo-sub-backfill');
-        if (!el || !st) return;
-        if (st.state === 'running') {
-            if (btn) btn.disabled = true;
-            el.textContent = 'Scanning\u2026 ' + (st.videos_seen || 0) + ' videos checked, '
-                + (st.rows_created || 0) + ' queued.';
-            _backfillStartPoll();
-            return;
+    // ── Missing Subtitles job (lives on Tools; this is the signpost) ───────
+    var MISSING_SUBS_JOB = 'missing_subtitles';
+    function renderMissingSubsJob(job) {
+        var el = document.getElementById('vo-sub-job-status');
+        if (!el) return;
+        if (!job) { el.textContent = ''; return; }
+        var parts = [job.enabled ? 'On' : 'Off'];
+        if (job.enabled) {
+            var h = job.interval_hours || 168;
+            parts.push(h % 24 === 0 ? 'every ' + (h / 24) + ' day' + (h === 24 ? '' : 's')
+                : 'every ' + h + 'h');
         }
-        if (btn) btn.disabled = false;
-        _backfillStopPoll();
-        if (st.state === 'done') {
-            el.textContent = st.error ? ('Stopped early: ' + st.error)
-                : 'Done \u2014 ' + (st.videos_seen || 0) + ' videos checked, '
-                    + (st.rows_created || 0) + ' queued.';
-        } else if (st.state === 'error') {
-            el.textContent = 'Backfill failed: ' + (st.error || 'unknown error');
+        parts.push(job.settings && job.settings.dry_run ? 'dry run: findings only'
+            : 'queues what\u2019s missing');
+        var last = job.last_run;
+        if (last && last.finished_at) {
+            parts.push('last run ' + String(last.finished_at).slice(0, 10) +
+                (last.auto_fixed ? ', queued ' + last.auto_fixed : ''));
         } else {
-            el.textContent = '';
+            parts.push('never run');
         }
+        if (job.pending_findings_count) parts.push(job.pending_findings_count + ' to review');
+        el.textContent = parts.join(' \u00b7 ');
     }
-    function loadBackfillStatus() {
-        return fetch(BACKFILL_URL + '/status', { headers: { 'Accept': 'application/json' } })
+    function loadMissingSubsJob() {
+        return fetch('/api/video/repair/jobs', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d) renderBackfillStatus(d); })
+            .then(function (d) {
+                var jobs = (d && d.jobs) || [];
+                renderMissingSubsJob(jobs.filter(function (j) {
+                    return j.job_id === MISSING_SUBS_JOB; })[0] || null);
+            })
             .catch(function () { /* status is best-effort */ });
     }
-    function startBackfill() {
-        fetch(BACKFILL_URL, { method: 'POST', headers: { 'Accept': 'application/json' } })
-            .then(function (r) {
-                return r.json().then(function (d) { return { ok: r.ok, body: d }; });
-            })
-            .then(function (res) {
-                if (res.ok) { loadBackfillStatus(); return; }
-                var el = document.getElementById('vo-sub-backfill-status');
-                if (el) el.textContent = (res.body && res.body.error) || 'Could not start the scan.';
-            })
-            .catch(function () {
-                var el = document.getElementById('vo-sub-backfill-status');
-                if (el) el.textContent = 'Could not start the scan.';
-            });
+    // Jump to Tools and bring the job's card into view (cards render async).
+    function openMissingSubsJob() {
+        document.dispatchEvent(new CustomEvent('soulsync:video-navigate',
+            { detail: { page: 'video-tools' } }));
+        var tries = 0;
+        var t = setInterval(function () {
+            var card = document.querySelector('.repair-job-card[data-job-id="' + MISSING_SUBS_JOB + '"]');
+            if (card || ++tries > 40) {
+                clearInterval(t);
+                if (!card) return;
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // a brief accent ring so the eye lands on the right card
+                card.style.transition = 'box-shadow .35s ease';
+                card.style.boxShadow = '0 0 0 2px rgba(var(--accent-rgb), .85)';
+                setTimeout(function () { card.style.boxShadow = ''; }, 2200);
+            }
+        }, 100);
     }
     function fillOrg() {
         if (!_videoOrg) return;
@@ -1892,6 +1919,12 @@
         set('vo-sub-worker-interval', _videoOrg.subtitle_worker_interval_min == null ? 30 : _videoOrg.subtitle_worker_interval_min);
         set('vo-sub-worker-batch', _videoOrg.subtitle_worker_batch == null ? 10 : _videoOrg.subtitle_worker_batch);
         set('vo-sub-hi-forced', _videoOrg.subtitle_hi_forced || 'off');
+        chk('vo-sub-forced', _videoOrg.subtitle_forced);
+        chk('vo-sub-use-embedded', _videoOrg.subtitle_use_embedded !== false);
+        chk('vo-sub-ignore-pgs', _videoOrg.subtitle_ignore_pgs);
+        chk('vo-sub-ignore-vobsub', _videoOrg.subtitle_ignore_vobsub);
+        chk('vo-sub-ignore-ass', _videoOrg.subtitle_ignore_ass);
+        syncEmbeddedIgnores();
         chk('vo-sub-autosync', _videoOrg.subtitle_autosync);
         set('vo-whisper-model', _videoOrg.whisper_model || 'small');
         chk('vo-whisper-enabled', _videoOrg.whisper_enabled);
@@ -1939,6 +1972,11 @@
             subtitle_worker_interval_min: _voClampInt(val('vo-sub-worker-interval'), 5, 1440, 30),
             subtitle_worker_batch: _voClampInt(val('vo-sub-worker-batch'), 1, 200, 10),
             subtitle_hi_forced: val('vo-sub-hi-forced') || 'off',
+            subtitle_forced: on('vo-sub-forced'),
+            subtitle_use_embedded: on('vo-sub-use-embedded'),
+            subtitle_ignore_pgs: on('vo-sub-ignore-pgs'),
+            subtitle_ignore_vobsub: on('vo-sub-ignore-vobsub'),
+            subtitle_ignore_ass: on('vo-sub-ignore-ass'),
             subtitle_autosync: on('vo-sub-autosync'),
             whisper_enabled: on('vo-whisper-enabled'),
             whisper_model: val('vo-whisper-model'),
@@ -1956,6 +1994,18 @@
             youtube_sponsorblock: val('vo-sponsorblock'),
             youtube_embed_subs: on('vo-yt-subs')
         };
+    }
+    // the ignore switches only mean something while embedded subs count
+    function syncEmbeddedIgnores() {
+        var use = document.getElementById('vo-sub-use-embedded');
+        var off = !!(use && !use.checked);
+        ['vo-sub-ignore-pgs', 'vo-sub-ignore-vobsub', 'vo-sub-ignore-ass'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.disabled = off;
+            var row = el.closest('label');
+            if (row) row.style.opacity = off ? '0.45' : '';
+        });
     }
     // Clamp helpers mirroring the backend normalize() bounds, so the UI never
     // posts a value the server would silently clamp to something else.
@@ -1993,10 +2043,14 @@
             'vo-subs-dl', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
             'vo-sponsorblock', 'vo-yt-subs', 'vo-min-free', 'vo-yt-follow-count',
             'vo-sub-min-score', 'vo-sub-daily-quota', 'vo-sub-upgrade-delta',
-            'vo-sub-worker-interval', 'vo-sub-worker-batch'].forEach(function (id) {
+            'vo-sub-worker-interval', 'vo-sub-worker-batch', 'vo-sub-hi-forced',
+            'vo-sub-autosync', 'vo-sub-forced', 'vo-sub-use-embedded', 'vo-sub-ignore-pgs',
+            'vo-sub-ignore-vobsub', 'vo-sub-ignore-ass'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveOrganization(false); });
         });
+        var useEmb = document.getElementById('vo-sub-use-embedded');
+        if (useEmb) useEmb.addEventListener('change', syncEmbeddedIgnores);
         var langsEl = document.getElementById('vo-sub-langs');
         if (langsEl) langsEl.addEventListener('change', function () {
             if (validateSubLangs()) { saveOrganization(false); }
@@ -2012,8 +2066,8 @@
             // its last-resort step.
             saveOrganization(false).then(function () { loadWhisperStatus(); });
         });
-        var bfBtn = document.getElementById('vo-sub-backfill');
-        if (bfBtn) bfBtn.addEventListener('click', startBackfill);
+        var jobBtn = document.getElementById('vo-sub-open-job');
+        if (jobBtn) jobBtn.addEventListener('click', openMissingSubsJob);
         var reset = document.getElementById('vo-reset');
         if (reset) reset.addEventListener('click', function () {
             // POST blank templates + standard toggles; the backend normalises to the
@@ -2089,10 +2143,10 @@
         load();
         loadKeys();
         loadSharedLibrary();
-        // Backfill status rides the video page lifecycle, NOT the shared
+        // The job status rides the video page lifecycle, NOT the shared
         // library load: that load has an exact fetch contract (and a
         // fail/retry path) the extra status fetch would break.
-        loadBackfillStatus();
+        loadMissingSubsJob();
         loadImportLists();
         loadNotify();
         loadQuality();

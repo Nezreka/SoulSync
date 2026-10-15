@@ -20,6 +20,7 @@ import {
   fetchVideoMeta,
   fetchVideoYtMeta,
   retryVideoDownload,
+  stopVideoWishlistSearches,
 } from './-vdl.api';
 import {
   vdlIsActive,
@@ -314,8 +315,13 @@ export function useVideoDownloads(): VdlDownloadsController {
 
   const cancelAll = useCallback(async () => {
     const ids = downloadsRef.current.filter((d) => vdlIsActive(d.status)).map((d) => d.id);
+    // stop the searches first, or a running search-all re-fills the list as we cancel it
+    await stopVideoWishlistSearches();
     await Promise.all(ids.map((id) => cancelVideoDownload(id)));
-    toast(`Cancelled ${ids.length} download${ids.length === 1 ? '' : 's'}`, 'info');
+    toast(
+      `Cancelled ${ids.length} download${ids.length === 1 ? '' : 's'}, wishlist searches stopped`,
+      'info',
+    );
     await refresh();
   }, [refresh]);
 

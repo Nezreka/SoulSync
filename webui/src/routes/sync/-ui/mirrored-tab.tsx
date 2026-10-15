@@ -91,10 +91,13 @@ import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
+import { playPlaylist } from '../../../features/playlists/play-playlist';
 import {
+  copyMirrorToUserPlaylist,
   createUserPlaylist,
   duplicateUserPlaylist,
   isUserPlaylist,
+  pinLikedFirst,
   removeFromUserPlaylist,
   reorderUserPlaylist,
 } from '../../../features/playlists/user-playlists';
@@ -179,6 +182,8 @@ function MirroredCardMenu({
   onClear,
   onDelete,
   onToggleOrganize,
+  onSetSyncMode,
+  onCopyToMine,
 }: {
   row: MirroredPlaylistRow;
   top: number;
@@ -192,6 +197,10 @@ function MirroredCardMenu({
   onClear: () => void;
   onDelete: () => void;
   onToggleOrganize: (enabled: boolean) => void;
+  /** '' = back to the global mode */
+  onSetSyncMode: (mode: string) => void;
+  /** a mirror only: an editable copy in My Playlists */
+  onCopyToMine?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const pos = usePopoverPosition({ top, left }, ref);
@@ -266,8 +275,32 @@ function MirroredCardMenu({
           <span dangerouslySetInnerHTML={profileMarkup} />
         </div>
       ) : null}
+      {/* #1704: append-only for a mirror you add to on the server, while
+          the global mode keeps doing the rest */}
+      <div
+        className="pl-menu-field"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        <span className="pl-menu-heading">Sync mode</span>
+        <select
+          aria-label="Sync mode"
+          value={row.sync_mode ?? ''}
+          onChange={(e) => {
+            onSetSyncMode(e.target.value);
+            onClose();
+          }}
+        >
+          <option value="">Use global setting</option>
+          <option value="reconcile">Reconcile (match the source)</option>
+          <option value="append">Append only (never remove tracks)</option>
+          <option value="replace">Replace (delete and recreate)</option>
+        </select>
+      </div>
       <div className="pl-menu-sep" />
       {item('Rename', onRename)}
+      {!isUserPlaylist(row) && onCopyToMine && item('Copy to My Playlists', onCopyToMine)}
       {!isUserPlaylist(row) && item('Edit source link', onEditSource)}
       {item('Export', onExport)}
       {/* Only offered when there IS a discovery to clear (575-582). */}
@@ -701,6 +734,25 @@ export function MirroredTab({
     },
     [load],
   );
+  const setSyncMode = useCallback(
+    async (row: MirroredPlaylistRow, mode: string) => {
+      try {
+        const res = await patchMirroredPreferences(row.id, { sync_mode: mode || null });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          mode
+            ? `"${row.display_name || row.name || 'Playlist'}" now syncs in ${mode} mode`
+            : `"${row.display_name || row.name || 'Playlist'}" follows the global sync mode`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      }
+    },
+    [load],
+  );
   /** Same ref-not-dependency reasoning as registerReload above. */
   const registerOpenDetailRef = useRef(registerOpenDetail);
   registerOpenDetailRef.current = registerOpenDetail;
@@ -817,6 +869,22 @@ export function MirroredTab({
    * playlist behind it opened an empty discovery modal nobody could use
    * (#1405). the detail's Discover button reopens the discovery instead.
    */
+  /** make a mirror yours, from its card menu or its detail: the copy opens,
+   *  ready to edit, and the mirror keeps syncing from its source */
+  const copyToMine = useCallback(async (mirrorId: number) => {
+    try {
+      const copy = await copyMirrorToUserPlaylist(mirrorId);
+      const data = await fetchMirroredPlaylist(copy.id);
+      if (!data.error) setDetail({ playlistId: copy.id, data });
+      window.showToast?.(`“${copy.name}” is in My Playlists now`, 'success');
+    } catch (err) {
+      window.showToast?.(
+        err instanceof Error ? err.message : 'Could not copy the playlist',
+        'error',
+      );
+    }
+  }, []);
+
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
       void openDetail(row.id);
@@ -1090,7 +1158,7 @@ export function MirroredTab({
           </div>
         ) : (
           <div className="pl-grid">
-            {librarySortedRows(visibleRows, sort).map((row) => {
+            {pinLikedFirst(librarySortedRows(visibleRows, sort)).map((row) => {
               const displayName = row.display_name || row.name || '';
               // The live phase line, unchanged — its percentages and its
               // Discovered N/M are information the resting meta line cannot
@@ -1173,6 +1241,15 @@ export function MirroredTab({
                     ) : null
                   }
                   onOpen={() => onCardClick(row)}
+                  onPlay={async () => {
+                    try {
+                      const data = await fetchMirroredPlaylist(row.id);
+                      if (data.error) throw new Error(data.error);
+                      await playPlaylist(data.tracks ?? [], displayName);
+                    } catch {
+                      window.showToast?.(`Could not load ${displayName}`, 'error');
+                    }
+                  }}
                   selecting={selecting}
                   selected={selected.has(row.id)}
                   onToggleSelect={() => toggleSelected(row.id)}
@@ -1296,6 +1373,8 @@ export function MirroredTab({
           onClear={() => void onClear(menu.row)}
           onDelete={() => void onDelete(menu.row)}
           onToggleOrganize={(enabled) => void setOrganize(menu.row, enabled)}
+          onSetSyncMode={(mode) => void setSyncMode(menu.row, mode)}
+          onCopyToMine={() => void copyToMine(menu.row.id)}
         />
       )}
       {exporting && (
@@ -1373,6 +1452,7 @@ export function MirroredTab({
               : undefined
           }
           onRefresh={() => editTracks(detail.playlistId, async () => {})}
+          onMakeMine={isUserPlaylist(detail.data) ? undefined : () => copyToMine(detail.playlistId)}
           onDuplicate={
             isUserPlaylist(detail.data)
               ? async () => {

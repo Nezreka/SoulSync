@@ -1221,6 +1221,26 @@ body.max-performance .nav-button.active:hover {
     margin: 0;
 }
 
+/* a deezer 30s clip is playing, not the song (#1312) */
+.player-preview-badge {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    font-family: -apple-system, 'Segoe UI', sans-serif;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.player-preview-badge[hidden] {
+    display: none;
+}
+
 .album-name.header-album {
     font-family: -apple-system, 'Segoe UI', sans-serif;
     font-size: 10px;
@@ -6645,7 +6665,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex; align-items: center; justify-content: center;
 }
 .notif-history-modal {
-    width: 640px; max-width: 94vw; max-height: 80vh;
+    width: 640px; max-width: 94vw; max-height: 80vh; max-height: 80dvh;
     background: rgba(14, 14, 20, 0.98); border: 1px solid var(--white-a08);
     border-radius: var(--radius-xl); box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     display: flex; flex-direction: column;
@@ -6834,6 +6854,18 @@ body:has(#mix-modal-overlay) #notif-bell-btn,
 body:has(#mix-modal-overlay) #helper-float-btn,
 body:has(#mix-modal-overlay) #activity-float-btn,
 body:has(#mix-modal-overlay) .hamburger-btn {
+    display: none !important;
+}
+
+/* and the mirrored playlist modal (#1691): on a phone the hamburger sat on
+   its cover and the bell, activity and helper buttons on its bottom row of
+   actions, right where Close and Identify land once the action bar stacks */
+body:has(#mirrored-track-modal) #gsearch-bar,
+body:has(#mirrored-track-modal) #gsearch-aura,
+body:has(#mirrored-track-modal) #notif-bell-btn,
+body:has(#mirrored-track-modal) #helper-float-btn,
+body:has(#mirrored-track-modal) #activity-float-btn,
+body:has(#mirrored-track-modal) .hamburger-btn {
     display: none !important;
 }
 
@@ -7518,6 +7550,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 90vw;
     height: 500px;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
@@ -7684,6 +7717,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     left: 0;
     width: 100vw;
     height: 100vh;
+    /* dvh tracks the visible viewport under mobile browser chrome —
+       100vh alone sizes the overlay taller than the visible area and
+       the centred modal's bottom slides below the fold (Oct 13 batch,
+       M-16; same bug class PR #1661 fixed for the drawer). vh stays as
+       the fallback line above. Fold: the same vh→dvh twin treatment was
+       swept across every modal family's max-height in this file
+       (.playlist-modal, .ma-modal, .discog-modal, .ya-modal, … — 60+
+       rules), not just this overlay and the account modal. */
+    height: 100dvh;
     background: rgba(18, 18, 18, 0.85);
     backdrop-filter: blur(12px);
     z-index: 10000;
@@ -7911,6 +7953,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 460px;
     max-width: 90vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(var(--accent-rgb), 0.1);
@@ -10129,6 +10172,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 740px;
     max-width: 95vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
@@ -10945,6 +10989,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 700px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-xl);
@@ -11344,6 +11389,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 1040px;
     max-width: 96vw;
     max-height: 88vh;
+    max-height: 88dvh;
     background: linear-gradient(180deg, rgba(20, 20, 22, 0.98), rgba(12, 12, 14, 0.99));
     border: 1px solid var(--white-a08);
     border-radius: 20px;
@@ -11643,6 +11689,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         width: 100%;
         max-width: 100vw;
         max-height: 100vh;
+        max-height: 100dvh;
         border-radius: 0;
         border: none;
     }
@@ -11832,6 +11879,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 750px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     background: linear-gradient(135deg, rgba(26, 26, 26, 0.98) 0%, rgba(16, 16, 16, 0.99) 100%);
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-xl);
@@ -12742,6 +12790,30 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: rgba(var(--accent-rgb), 0.16);
     border-color: rgba(var(--accent-rgb), 0.35);
     color: rgb(var(--accent-light-rgb));
+}
+
+/* Tap-to-schedule popover (AutoSyncPickMenu): the bulk menu's chrome for
+   one playlist. The name is the menu's subject, not an eyebrow; the
+   current bucket reads as selected, not hovered. */
+.auto-sync-pick-menu-name {
+    padding: 6px 8px 0;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-sync-bulk-menu-buckets button.current {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* A sidebar card that can be tapped to schedule, not only dragged. */
+.auto-sync-playlist.pickable {
+    cursor: pointer;
 }
 
 .auto-sync-bulk-menu-custom {
@@ -16191,6 +16263,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     /* FIXED HEIGHT — prevents layout shift when results load */
     height: 600px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
@@ -16490,6 +16563,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         max-width: 100%;
         height: 100vh;
         max-height: 100vh;
+        max-height: 100dvh;
         border-radius: 0;
     }
 
@@ -16536,6 +16610,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 100%;
     max-width: 900px;
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -16636,11 +16711,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     opacity: 1;
     cursor: default;
 }
+/* rendered on body, placed by placeCoverMenu: the hero clips its overflow */
 .mm-cover-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 0;
-    z-index: 30;
+    position: fixed;
+    z-index: 10001;
     width: 248px;
     padding: 10px;
     border-radius: var(--radius-lg);
@@ -19791,14 +19865,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .pl-card-health--warning { background: rgba(227, 166, 60, 0.2); color: #efc375; }
 
 /* The quality profile select, moved off the board's scheduled card. */
-.pl-menu-profile {
+.pl-menu-profile,
+.pl-menu-field {
     display: flex;
     flex-direction: column;
     gap: 4px;
     padding: 4px 4px 8px;
 }
 
-.pl-menu-profile select {
+.pl-menu-profile select,
+.pl-menu-field select {
     width: 100%;
     padding: 6px 8px;
     border-radius: 7px;
@@ -20596,6 +20672,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 1200px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
 
@@ -21016,6 +21093,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 900px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
 
@@ -21509,6 +21587,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     position: relative;
     overflow: hidden;
     border-top: 1px solid var(--white-a15);
@@ -23606,6 +23685,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-width: 580px;
     width: 90%;
     max-height: 90vh;
+    max-height: 90dvh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -24485,6 +24565,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 900px;
     max-width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -25065,6 +25146,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .download-missing-modal-content {
         height: 95vh;
         max-height: 95vh;
+        max-height: 95dvh;
     }
 
     .download-progress-section {
@@ -25087,6 +25169,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .download-missing-modal-content {
         height: 98vh;
         max-height: 98vh;
+        max-height: 98dvh;
     }
 
     .download-missing-modal-hero {
@@ -26742,6 +26825,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 90%;
     max-width: 820px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
@@ -27773,6 +27857,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 700px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     z-index: 2;
     overflow: hidden;
     display: flex;
@@ -28151,6 +28236,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .artist-download-modal-content {
         width: 95vw;
         max-height: 90vh;
+        max-height: 90dvh;
         margin: 16px;
         border-radius: var(--radius-xl);
     }
@@ -28658,7 +28744,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ── Watch All Unwatched Modal ──────────────────────────── */
 .watch-all-modal {
-    width: 880px; max-width: 95vw; max-height: 85vh;
+    width: 880px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -30543,6 +30629,7 @@ div.artist-hero-badge {
     width: 900px;
     max-width: 90vw;
     max-height: 85vh;
+    max-height: 85dvh;
     border-radius: 18px;
     overflow: hidden;
     position: relative;
@@ -31042,6 +31129,7 @@ div.artist-hero-badge {
     .add-to-wishlist-modal {
         width: 95vw;
         max-height: 90vh;
+        max-height: 90dvh;
         border-radius: var(--radius-xl);
     }
 
@@ -34231,6 +34319,7 @@ div.artist-hero-badge {
     width: 700px;
     max-width: 90vw;
     max-height: 85vh;
+    max-height: 85dvh;
     overflow: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
         0 0 1px var(--white-a10) inset;
@@ -34891,6 +34980,7 @@ div.artist-hero-badge {
     max-width: 600px;
     width: 90%;
     max-height: 80vh;
+    max-height: 80dvh;
     overflow-y: auto;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
     animation: slideUp 0.3s ease;
@@ -35021,6 +35111,7 @@ div.artist-hero-badge {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
     display: flex;
     flex-direction: column;
     box-shadow:
@@ -35413,6 +35504,7 @@ div.artist-hero-badge {
     max-width: 650px;
     width: 90%;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow:
@@ -36156,6 +36248,7 @@ div.artist-hero-badge {
     max-width: 95vw;
     width: 95vw;
     max-height: 95vh;
+    max-height: 95dvh;
 }
 
 .recommended-modal .playlist-modal-body {
@@ -36895,29 +36988,170 @@ div.artist-hero-badge {
 }
 .mix-card-decade-icon { font-size: 34px; line-height: 1; }
 .mix-card-decade-label { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
-/* The mix modal — opened from a mix card; holds the track list + per-mix actions. */
+/* The mix modal: opened from a mix card, holds the track list + per-mix actions.
+   the station preview and the search playlist preview share this shell.
+   header = art + eyebrow + title + one filled action, then a column head that
+   owns select-all, then the rows. the selection bar floats in only once
+   something is ticked (oct 2026 redesign). */
 .mix-modal {
-    background: #14141c; border-radius: 18px;
-    width: 760px; max-width: 94vw; max-height: 86vh;
-    display: flex; flex-direction: column;
-    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    position: relative;
+    width: 860px; max-width: 94vw; max-height: 88vh;
+    max-height: 88dvh;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: #121218;
     border: 1px solid var(--white-a08);
+    border-radius: 20px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
 }
 .mix-modal-header {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    padding: 22px 24px; gap: 16px;
-    border-bottom: 1px solid var(--white-a06);
+    position: relative;
+    display: flex; align-items: flex-end; gap: 24px;
+    padding: 28px 64px 24px 28px;
+    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0));
+    flex-shrink: 0;
 }
-.mix-modal-subtitle { font-size: 12px; color: #999; }
-.mix-modal-title { font-size: 24px; font-weight: 700; color: #fff; margin: 4px 0; }
-.mix-modal-meta { font-size: 12px; color: var(--white-a50); }
-.mix-modal-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mix-modal-cover {
+    flex: 0 0 132px; width: 132px; height: 132px;
+    display: grid; overflow: hidden;
+    border-radius: 12px;
+    background: var(--white-a06);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+.mix-modal-cover.is-mosaic { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.mix-modal-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.mix-modal-cover-blank {
+    display: grid; place-items: center;
+    font-size: 44px; color: var(--white-a30);
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.35), rgba(var(--accent-rgb), 0.05));
+}
+.mix-modal-heading { flex: 1; min-width: 0; }
+.mix-modal-eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: rgba(var(--accent-rgb), 0.9);
+}
+.mix-modal-title {
+    margin: 6px 0 4px;
+    font-size: 30px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.1;
+    color: #fff;
+    overflow-wrap: anywhere;
+}
+.mix-modal-subtitle { font-size: 14px; color: var(--white-a70); }
+.mix-modal-meta {
+    margin-top: 4px;
+    font-size: 12.5px; color: var(--white-a50);
+    font-variant-numeric: tabular-nums;
+}
+.mix-modal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.mix-modal-actions .btn { padding: 8px 16px; gap: 7px; border-radius: 999px; font-size: 13px; }
+.mix-modal-actions .btn--primary { padding: 8px 20px; box-shadow: none; }
+.mix-modal-actions .btn--secondary {
+    background: var(--white-a06); border-color: transparent; color: var(--white-a85);
+}
+.mix-modal-actions .btn--secondary:hover:not(:disabled) { background: var(--white-a12); color: #fff; }
 .mix-modal-close {
-    background: none; border: none; color: var(--white-a50);
-    font-size: 16px; cursor: pointer; padding: 6px; line-height: 1;
+    position: absolute; top: 16px; right: 16px;
+    width: 32px; height: 32px; padding: 0;
+    display: grid; place-items: center;
+    border: none; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3); color: var(--white-a70);
+    cursor: pointer;
 }
-.mix-modal-close:hover { color: #fff; }
-.mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
+.mix-modal-close:hover { background: var(--white-a12); color: #fff; }
+.mix-modal-close:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+
+/* one grid for the column head and the rows, so the labels sit over their column */
+.mix-modal-colhead,
+.mix-modal .discover-playlist-track-compact {
+    grid-template-columns: 24px 40px minmax(0, 1.4fr) minmax(0, 1fr) 44px 28px;
+    gap: 14px;
+}
+.mix-modal-colhead.has-select,
+.mix-modal .discover-playlist-track-compact.has-select {
+    grid-template-columns: 20px 24px 40px minmax(0, 1.4fr) minmax(0, 1fr) 44px 28px;
+}
+.mix-modal-colhead {
+    display: grid; align-items: center; flex-shrink: 0;
+    margin: 0 20px; padding: 8px 12px;
+    border-bottom: 1px solid var(--white-a06);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--white-a40);
+}
+.mix-colhead-num { text-align: center; }
+.mix-colhead-time { text-align: right; }
+.mix-modal-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 20px; }
+/* room under the last row for the floating bar */
+.mix-modal.has-selection .mix-modal-body { padding-bottom: 84px; }
+.mix-modal .discover-playlist-tracks-compact { background: none; border-radius: 0; overflow: visible; }
+.mix-modal .discover-playlist-track-compact {
+    padding: 8px 12px;
+    border-bottom: none; border-radius: 8px;
+    transition: background-color 0.12s ease;
+}
+.mix-modal .discover-playlist-track-compact:hover { background: var(--white-a05); }
+.mix-modal .discover-playlist-track-compact.is-selected { background: rgba(var(--accent-rgb), 0.12); }
+.mix-modal .discover-playlist-track-compact:hover .track-compact-play { opacity: 1; }
+.mix-modal .track-compact-number {
+    font-size: 13px; color: var(--white-a40);
+    font-variant-numeric: tabular-nums;
+}
+.mix-modal .track-compact-image { border-radius: 6px; }
+.mix-modal .track-compact-name { margin-bottom: 3px; font-size: 14px; font-weight: 500; color: #fff; }
+.mix-modal .track-compact-artist { font-size: 13px; color: var(--white-a55); }
+.mix-modal .track-compact-album { font-size: 13px; color: var(--white-a50); }
+.mix-modal .track-compact-duration {
+    font-size: 13px; color: var(--white-a50);
+    font-variant-numeric: tabular-nums;
+}
+
+/* quiet square checkboxes in the accent, not the browser's white boxes */
+.mix-modal input[type="checkbox"] {
+    appearance: none; -webkit-appearance: none;
+    width: 16px; height: 16px; margin: 0;
+    display: grid; place-items: center;
+    border: 1.5px solid var(--white-a30); border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+.mix-modal input[type="checkbox"]:hover { border-color: var(--white-a55); }
+.mix-modal input[type="checkbox"]:checked {
+    background: rgb(var(--accent-rgb)); border-color: rgb(var(--accent-rgb));
+}
+.mix-modal input[type="checkbox"]:checked::after {
+    content: "";
+    width: 4px; height: 8px; margin-top: -2px;
+    border: solid #111; border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.mix-modal input[type="checkbox"]:focus-visible { outline: 2px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
+.mix-selbar-all { display: flex; align-items: center; cursor: pointer; }
+
+/* the selection bar: a pill floating over the list, only while something is ticked */
+.mix-modal-selbar {
+    position: absolute; left: 50%; bottom: 20px; z-index: 2;
+    transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px;
+    max-width: calc(100% - 32px);
+    padding: 8px 8px 8px 18px;
+    border: 1px solid var(--white-a10); border-radius: 999px;
+    background: rgba(32, 32, 42, 0.92);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    animation: mix-selbar-in 0.18s ease-out;
+}
+@keyframes mix-selbar-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mix-modal-selbar { animation: none; }
+}
+.mix-sel-count { margin-right: 8px; font-size: 13px; font-weight: 600; color: #fff; }
+.mix-modal-selbar .btn { padding: 7px 14px; gap: 6px; border-radius: 999px; font-size: 13px; }
+.mix-modal-selbar .btn--primary { box-shadow: none; }
+.mix-selbar-clear { background: none; border: none; color: var(--white-a65); }
+.mix-selbar-clear:hover { color: #fff; }
 
 /* ── Unified Discover card grid (#discover redesign) ─────────────────────────
    One responsive wrapping grid (fills the section width, wraps to rows — no
@@ -37118,7 +37352,7 @@ div.artist-hero-badge {
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
-    width: 480px; max-width: 95vw; max-height: 85vh;
+    width: 480px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--white-a06);
     overflow: hidden; position: relative;
@@ -38123,7 +38357,7 @@ div.artist-hero-badge {
 /* Genre picker modal */
 .artmap-genre-picker-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%);
-    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh;
+    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh; max-height: 75dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
@@ -38240,7 +38474,7 @@ div.artist-hero-badge {
 /* Your Artists Modal */
 .ya-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 800px; max-width: 95vw; max-height: 85vh;
+    width: 800px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
@@ -38365,6 +38599,7 @@ div.artist-hero-badge {
     width: 90vw;
     max-width: 800px;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -39301,41 +39536,6 @@ div.artist-hero-badge {
     opacity: 1;
 }
 
-.mix-modal-selbar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    border-bottom: 1px solid #2a2a2a;
-    background: #1a1a1a;
-}
-
-.mix-selbar-all {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-    color: #ccc;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.mix-selbar-all input {
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-    accent-color: var(--accent);
-}
-
-.mix-sel-count {
-    font-size: 12px;
-    color: #999;
-}
-
-.mix-selbar-spacer {
-    flex: 1;
-}
-
 .track-compact-block {
     display: none;
     width: 22px;
@@ -39388,6 +39588,7 @@ div.artist-hero-badge {
     width: 500px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -39538,6 +39739,7 @@ div.artist-hero-badge {
     width: 520px;
     max-width: 95vw;
     max-height: 84vh;
+    max-height: 84dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6);
@@ -47004,6 +47206,7 @@ div.artist-hero-badge {
     width: 90%;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
@@ -47143,7 +47346,7 @@ div.artist-hero-badge {
     background: linear-gradient(135deg, #1c1c1c 0%, #131313 100%);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
     border-radius: var(--radius-xl);
-    width: 90%; max-width: 560px; max-height: 86vh;
+    width: 90%; max-width: 560px; max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column;
     box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7);
     transform: scale(0.96);
@@ -49574,6 +49777,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
     max-width: 580px;
     width: 100%;
     max-height: 85vh;
+    max-height: 85dvh;
     overflow-y: auto;
     position: relative;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5),
@@ -50385,7 +50589,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
 
 .automation-history-modal {
-    max-width: 560px; width: 90%; max-height: 75vh; display: flex; flex-direction: column;
+    max-width: 560px; width: 90%; max-height: 75vh; max-height: 75dvh; display: flex; flex-direction: column;
 }
 .history-modal-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -52202,7 +52406,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .discog-modal-overlay.visible { opacity: 1; }
 
 .discog-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: rgba(14, 14, 14, 0.97);
     border: 1px solid var(--white-a08);
     border-radius: 18px;
@@ -52608,7 +52812,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Mobile */
 @media (max-width: 768px) {
-    .discog-modal { max-width: 100vw; max-height: 100vh; border-radius: 0; }
+    .discog-modal { max-width: 100vw; max-height: 100vh; max-height: 100dvh; border-radius: 0; }
     .discog-grid { grid-template-columns: 1fr; }
     .discog-filter-bar { flex-wrap: wrap; gap: 8px; }
 }
@@ -52621,6 +52825,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 560px;
     max-width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a04);
@@ -53012,6 +53217,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 90vw;
     max-width: 880px;
     max-height: 85vh;
+    max-height: 85dvh;
     background: linear-gradient(180deg, rgba(24, 24, 24, 0.97) 0%, rgba(10, 10, 10, 1) 100%);
     border: 1px solid var(--white-a06);
     border-radius: 20px;
@@ -53205,6 +53411,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     color: rgba(var(--accent-rgb), 0.9);
     background: rgba(var(--accent-rgb), 0.08);
     border-color: rgba(var(--accent-rgb), 0.15);
+}
+.np-format-badge.preview {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.3);
 }
 
 /* Progress Section */
@@ -53921,6 +54132,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-color: rgba(var(--accent-rgb),0.4) !important;
     background: rgba(var(--accent-rgb),0.12) !important;
 }
+.np-format-badge.preview {
+    color: #fbbf24 !important;
+    border-color: rgba(251, 191, 36, 0.4) !important;
+    background: rgba(251, 191, 36, 0.12) !important;
+}
 
 /* ── Progress / volume: thicker track, accent gradient fill, glow on hover ── */
 .np-progress-track, .np-volume-track { height: 6px !important; border-radius: var(--radius-pill) !important; background: var(--white-a12) !important; }
@@ -54496,6 +54712,7 @@ tr.tag-diff-same {
     width: 850px;
     max-width: 92vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     /* the list scrolls inside; header and footer stay put (#1254) */
@@ -54518,6 +54735,7 @@ tr.tag-diff-same {
 
 .tag-preview-modal {
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -54793,6 +55011,7 @@ tr.tag-diff-same {
     max-width: 1400px;
     height: 95vh;
     max-height: 95vh;
+    max-height: 95dvh;
     background: rgba(14, 14, 14, 0.98);
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-xl);
@@ -55278,6 +55497,7 @@ tr.tag-diff-same {
     width: 90vw;
     max-width: 700px;
     max-height: 85vh;
+    max-height: 85dvh;
     background: rgba(18, 18, 18, 0.99);
     border: 1px solid var(--white-a10);
     border-radius: 14px;
@@ -55531,6 +55751,7 @@ tr.tag-diff-same {
     width: 94vw;
     max-width: 1100px;
     max-height: 90vh;
+    max-height: 90dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -56232,7 +56453,7 @@ tr.tag-diff-same {
 
 /* ── Cache Health Modal ── */
 .cache-health-modal {
-    width: 680px; max-width: 95vw; max-height: 85vh;
+    width: 680px; max-width: 95vw; max-height: 85vh; max-height: 85dvh;
     background: linear-gradient(135deg, rgba(20,20,20,0.97) 0%, rgba(12,12,12,0.99) 100%);
     backdrop-filter: blur(20px) saturate(1.2);
     border-radius: 20px;
@@ -56671,7 +56892,7 @@ tr.tag-diff-same {
 /* ── Failed MB Lookups Modal ── */
 .failed-mb-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 720px; max-width: 95vw; max-height: 85vh; display: flex; flex-direction: column;
+    width: 720px; max-width: 95vw; max-height: 85vh; max-height: 85dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.5), 0 0 0 1px var(--white-a06);
 }
 .failed-mb-header {
@@ -56741,7 +56962,7 @@ tr.tag-diff-same {
 /* ── MB Search Sub-Modal ── */
 .mb-search-modal {
     background: linear-gradient(165deg, #1e1e32 0%, #181828 100%); border-radius: var(--radius-xl);
-    width: 620px; max-width: 95vw; max-height: 80vh; display: flex; flex-direction: column;
+    width: 620px; max-width: 95vw; max-height: 80vh; max-height: 80dvh; display: flex; flex-direction: column;
     box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
 }
 .mb-search-header {
@@ -58542,6 +58763,7 @@ tr.tag-diff-same {
     .repair-modal {
         width: 98vw;
         max-height: 95vh;
+        max-height: 95dvh;
         border-radius: var(--radius-lg);
     }
 
@@ -58725,6 +58947,7 @@ tr.tag-diff-same {
     width: 90vw;
     max-width: 480px;
     max-height: 80vh;
+    max-height: 80dvh;
     overflow-y: auto;
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
     animation: repair-help-slidein 0.2s ease;
@@ -64149,6 +64372,7 @@ tr.tag-diff-same {
     max-width: 1100px;
     width: 95vw;
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--white-a06) inset, 0 0 80px rgba(0,0,0,0.3) inset;
@@ -64588,6 +64812,7 @@ tr.tag-diff-same {
     max-width: 600px;
     width: 95vw;
     max-height: 80vh;
+    max-height: 80dvh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
@@ -65828,6 +66053,12 @@ body.max-performance #page-particles-canvas {
 }
 
 /* ---- Nav Badge ---- */
+
+/* requests / issues navs hide until there's something to manage.
+   the page you're on keeps its button. */
+.nav-button.nav-idle:not(.active) {
+    display: none;
+}
 
 .dl-nav-badge {
     position: absolute;
@@ -71185,6 +71416,83 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     -webkit-backdrop-filter: blur(4px);
 }
 
+/* the rail cards' hover buttons: queue, a big accent play, add to playlist.
+   on the cover above the title, shown on hover or keyboard focus, and always on
+   a touch screen, where there is no hover to find them with. */
+.dash-card-actions {
+    position: absolute;
+    top: 40%;
+    left: 0;
+    right: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    pointer-events: none;
+}
+.ya-card:hover .dash-card-actions,
+.ya-card:focus-within .dash-card-actions {
+    opacity: 1;
+    pointer-events: auto;
+}
+@media (hover: none) {
+    .dash-card-actions {
+        opacity: 1;
+        pointer-events: auto;
+    }
+}
+.dash-card-action {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--white-a12);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.dash-card-action:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.75);
+    transform: scale(1.08);
+}
+.dash-card-action--play {
+    width: 46px;
+    height: 46px;
+    border: none;
+    background: rgb(var(--accent-rgb));
+    color: #000;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.dash-card-action--play:hover:not(:disabled) {
+    background: rgb(var(--accent-light-rgb));
+}
+.dash-card-action--play svg {
+    margin-left: 2px;
+}
+.dash-card-action:disabled {
+    opacity: 0.6;
+    cursor: progress;
+}
+.dash-card-action:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .dash-card-actions,
+    .dash-card-action {
+        transition: none;
+    }
+}
+
 .dash-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -75810,6 +76118,7 @@ body.em-scroll-lock { overflow: hidden; }
     width: 860px;
     max-width: 94vw;
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background:
@@ -76079,6 +76388,7 @@ body.em-scroll-lock { overflow: hidden; }
     width: 640px;
     max-width: 94vw;
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background: linear-gradient(165deg, rgba(24,24,32,0.97) 0%, rgba(13,13,18,0.985) 60%, rgba(10,10,14,0.99) 100%);
@@ -76193,7 +76503,7 @@ body.em-scroll-lock { overflow: hidden; }
     --ss-brand: #7c5cff; /* panels override with the active service's color */
     background: linear-gradient(160deg, #181a21 0%, #121319 100%);
     border: 1px solid var(--white-a08);
-    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh;
+    border-radius: 18px; width: min(760px, 94vw); max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column; overflow: hidden;
     box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65);
 }
@@ -76433,7 +76743,7 @@ body.em-scroll-lock { overflow: hidden; }
     background: rgba(3, 4, 6, 0.62); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
 .ma-modal {
-    width: min(600px, 94vw); max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+    width: min(600px, 94vw); max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(180deg, #17191f 0%, #111318 100%);
     border: 1px solid var(--white-a08); border-radius: 24px; color: #f4f5f7;
     box-shadow: 0 40px 120px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.4);
@@ -78071,6 +78381,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     position: relative;
     width: min(760px, 94vw);
     max-height: 88vh;
+    max-height: 88dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -78335,6 +78646,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .art-picker-modal {
     width: min(920px, 94vw);
     max-height: 86vh;
+    max-height: 86dvh;
     display: flex;
     flex-direction: column;
     background: #181818;
@@ -81972,6 +82284,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     width: 860px;
     max-width: 95vw;
     max-height: 85vh;
+    max-height: 85dvh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -84936,7 +85249,7 @@ body.src-modal-open { overflow: hidden; }
 
 @media (max-width: 620px) {
     .src-tile-row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
-    .src-modal { max-height: 92vh; }
+    .src-modal { max-height: 92vh; max-height: 92dvh; }
     .src-modal-overlay { padding: 10px; }
 }
 
@@ -87294,4 +87607,439 @@ body.src-modal-open { overflow: hidden; }
     stroke-width: 1.4;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* ── playlists: play, shuffle, queue, sort, add songs, liked (oct 2026) ─────
+   the detail modal's hero gets a play row (one big accent play, quiet round
+   shuffle and queue, pills for add songs / copy to my playlists), the list
+   gets a sort bar, and your own playlists get the add-songs panel. */
+.mm-play-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+.mm-play {
+    width: 52px;
+    height: 52px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    color: #0b0b0f;
+    cursor: pointer;
+    box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.35);
+    transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.mm-play svg { margin-left: 3px; }
+.mm-play:hover:not(:disabled) {
+    transform: scale(1.06);
+    background: rgb(var(--accent-light-rgb));
+}
+.mm-round {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--white-a12);
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--white-a85);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+.mm-round:hover:not(:disabled) {
+    transform: scale(1.06);
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
+}
+.mm-pill {
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 16px;
+    border: 1px solid var(--white-a12);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.mm-pill:hover:not(:disabled) { background: rgba(0, 0, 0, 0.5); border-color: var(--white-a20); }
+.mm-pill--on,
+.mm-pill--on:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.2);
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: rgb(var(--accent-light-rgb));
+}
+.mm-play:disabled,
+.mm-round:disabled,
+.mm-pill:disabled { opacity: 0.45; cursor: default; box-shadow: none; }
+.mm-play-spin,
+.as-spin,
+.pl-card-play-spin {
+    width: 18px;
+    height: 18px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: mm-spin 0.7s linear infinite;
+}
+@keyframes mm-spin { to { transform: rotate(360deg); } }
+
+.mm-cover-liked {
+    display: grid;
+    overflow: hidden;
+}
+.playlist-liked-art {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    color: #fff;
+    background:
+        radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.25), transparent 55%),
+        linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.35) 60%, #2a1c4a);
+}
+
+/* sort: a quiet bar over the list */
+.mm-sortbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 26px 0;
+    background: #121212;
+}
+.mm-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--white-a50);
+}
+.mm-sort select {
+    height: 30px;
+    padding: 0 28px 0 12px;
+    border: 1px solid var(--white-a10);
+    border-radius: 999px;
+    background: var(--white-a05);
+    color: #fff;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.mm-sort select:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 1px; }
+.mm-sort-note { font-size: 12px; color: var(--white-a40); }
+
+/* the add-songs panel, between the hero and the list */
+.as-panel {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    /* leaves the playlist itself a few rows of room underneath */
+    max-height: min(40vh, 400px);
+    margin: 14px 16px 4px;
+    padding: 18px 18px 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 16px;
+    background:
+        radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 60%),
+        #18171f;
+    box-shadow: inset 0 1px 0 var(--white-a06);
+    animation: as-in 0.2s ease-out;
+}
+@keyframes as-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+.as-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.as-heading { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -0.2px; color: #fff; }
+.as-lede { margin: 3px 0 0; font-size: 12.5px; color: var(--white-a55); }
+.as-close {
+    width: 30px;
+    height: 30px;
+    flex-shrink: 0;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: var(--white-a06);
+    color: var(--white-a70);
+    cursor: pointer;
+}
+.as-close:hover { background: var(--white-a12); color: #fff; }
+.as-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 46px;
+    margin-top: 14px;
+    padding: 0 16px;
+    border: 1px solid var(--white-a10);
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.35);
+    color: var(--white-a50);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.as-search:focus-within {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.12);
+}
+.as-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: none;
+    color: #fff;
+    font: inherit;
+    font-size: 15px;
+    outline: none;
+}
+.as-input::-webkit-search-cancel-button { filter: invert(1) opacity(0.5); }
+.as-spin--search { width: 16px; height: 16px; color: rgb(var(--accent-light-rgb)); }
+.as-section {
+    margin: 14px 4px 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--white-a40);
+}
+.as-list { min-height: 0; overflow-y: auto; margin: 0 -6px; padding: 0 2px; }
+.as-row {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 8px;
+    border-radius: 12px;
+    transition: background-color 0.12s ease;
+}
+.as-row:hover { background: var(--white-a05); }
+.as-art {
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--white-a06);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+.as-art--blank {
+    display: grid;
+    place-items: center;
+    color: var(--white-a70);
+    background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.45), rgba(var(--accent-rgb), 0.08));
+}
+.as-text { display: flex; flex-direction: column; min-width: 0; }
+.as-title,
+.as-sub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.as-title { font-size: 13.5px; font-weight: 600; color: #fff; }
+.as-sub { margin-top: 2px; font-size: 12px; color: var(--white-a50); }
+.as-dur { font-size: 12px; color: var(--white-a40); font-variant-numeric: tabular-nums; }
+.as-add {
+    min-width: 76px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.55);
+    border-radius: 999px;
+    background: transparent;
+    color: rgb(var(--accent-light-rgb));
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.as-add--idle:hover { background: rgb(var(--accent-rgb)); color: #0b0b0f; transform: scale(1.04); }
+.as-add--adding { cursor: progress; }
+.as-add--added { border-color: transparent; background: rgb(var(--accent-rgb)); color: #0b0b0f; }
+.as-add--in { border-color: transparent; background: var(--white-a06); color: var(--white-a55); }
+.as-add:disabled { cursor: default; }
+.as-add .as-spin { width: 14px; height: 14px; }
+.as-row--done .as-title { color: var(--white-a85); }
+.as-row--skeleton:hover { background: none; }
+.as-row--skeleton .as-art { box-shadow: none; animation: as-pulse 1.2s ease-in-out infinite; }
+.as-bar {
+    display: block;
+    width: 60%;
+    height: 10px;
+    margin: 3px 0;
+    border-radius: 5px;
+    background: var(--white-a08);
+    animation: as-pulse 1.2s ease-in-out infinite;
+}
+.as-bar--short { width: 35%; }
+@keyframes as-pulse { 50% { opacity: 0.45; } }
+.as-note { padding: 18px 8px; font-size: 13px; color: var(--white-a50); text-align: center; }
+
+/* the card's play disc, over the art on hover */
+.pl-card-play {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    z-index: 2;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    color: #0b0b0f;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(4px) scale(0.9);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.pl-card-play svg { width: 16px; height: 16px; margin-left: 2px; }
+.pl-card-play .pl-card-play-spin { width: 14px; height: 14px; }
+.pl-card:hover .pl-card-play,
+.pl-card:focus-within .pl-card-play,
+.pl-card-play[aria-busy='true'] {
+    opacity: 1;
+    transform: none;
+}
+.pl-card-play:hover { background: rgb(var(--accent-light-rgb)); }
+@media (hover: none) {
+    .pl-card-play { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .as-panel,
+    .mm-play-spin,
+    .as-spin,
+    .pl-card-play-spin,
+    .as-bar,
+    .as-row--skeleton .as-art { animation: none; }
+}
+
+/* ── the playlist detail modal, made over (oct 2026) ─────────────────────────
+   one row of actions in the hero (play first, sync and identify as pills, the
+   rest behind ⋯), no footer bar, the source label up in the eyebrow, a
+   url-only description as an "Open on …" link, and rows whose number turns
+   into play-from-here on hover. */
+.mirrored-modal { border-radius: 22px; background: #121216; }
+.mm-hero { padding: 34px 34px 26px; border-bottom: none; }
+.mm-hero::after {
+    background: linear-gradient(180deg, rgba(18, 18, 22, 0.3) 0%, rgba(18, 18, 22, 0.78) 70%, #121216 100%);
+}
+.mm-hero-content { gap: 26px; }
+.mm-cover { width: 168px; height: 168px; border-radius: 14px; box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55); }
+.mm-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    margin-bottom: 10px;
+    letter-spacing: 0.12em;
+    color: var(--white-a70);
+}
+.mm-eyebrow .mm-source-pill { padding: 3px 9px; font-size: 10.5px; letter-spacing: 0.06em; }
+.mm-title { font-size: clamp(26px, 3.4vw, 40px); font-weight: 850; letter-spacing: -0.03em; line-height: 1.05; }
+.mm-meta { margin-top: 10px; font-size: 13.5px; color: var(--white-a70); }
+.mm-source-link {
+    color: rgb(var(--accent-light-rgb));
+    font-weight: 600;
+    text-decoration: none;
+}
+.mm-source-link:hover { text-decoration: underline; }
+.mm-play-row { margin-top: 20px; }
+.mm-play { width: 56px; height: 56px; }
+.mm-play-gap { flex: 1; }
+.mm-pill { height: 42px; padding: 0 18px; background: rgba(255, 255, 255, 0.1); border-color: var(--white-a14); font-size: 13.5px; }
+.mm-pill:hover:not(:disabled) { background: rgba(255, 255, 255, 0.16); }
+.mm-pill--quiet { background: rgba(0, 0, 0, 0.28); }
+.mm-round { width: 42px; height: 42px; }
+.mm-round--on { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+.mm-more-menu {
+    position: fixed;
+    z-index: 100001;
+    width: 280px;
+    padding: 6px;
+    border: 1px solid var(--white-a10);
+    border-radius: 14px;
+    background: #1d1b25;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+    animation: as-in 0.14s ease-out;
+}
+.mm-more-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    padding: 9px 12px;
+    border: none;
+    border-radius: 9px;
+    background: none;
+    color: #fff;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.mm-more-item:hover:not(:disabled),
+.mm-more-item:focus-visible { background: rgba(var(--accent-rgb), 0.14); outline: none; }
+.mm-more-item:disabled { opacity: 0.55; cursor: default; }
+.mm-more-label { font-size: 13.5px; font-weight: 600; }
+.mm-more-hint { margin-top: 2px; font-size: 11.5px; color: var(--white-a50); }
+.mm-more-item--danger .mm-more-label { color: #ff7a7a; }
+.mm-more-item--danger:hover:not(:disabled) { background: rgba(255, 90, 90, 0.12); }
+.mm-more-sep { height: 1px; margin: 5px 8px; background: var(--white-a08); }
+
+/* the sort is a quiet pill on the right, above the column head */
+.mm-sortbar { justify-content: flex-end; padding: 4px 22px 4px; background: #121216; }
+.mm-sort-note { margin-right: auto; }
+.mm-sort select {
+    height: 30px;
+    padding: 0 28px 0 12px;
+    border-color: transparent;
+    background-color: var(--white-a05);
+    color: var(--white-a70);
+    font-weight: 600;
+}
+.mm-sort select:hover { color: #fff; background-color: var(--white-a08); }
+.mm-list { background: #121216; padding: 0 0 12px; }
+.mm-list-head { background: #121216; margin: 0 12px; padding: 0 22px; }
+.mm-row { height: 56px; margin: 0 12px; padding: 0 22px; border-radius: 10px; }
+.mm-row:hover { background: var(--white-a06); }
+
+/* the number becomes play-from-here on hover */
+.mm-row-pos { position: relative; display: grid; place-items: center; }
+.mm-row-play {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transform: translate(-50%, -50%);
+}
+.mm-row:hover .mm-row-play,
+.mm-row-play:focus-visible { opacity: 1; }
+.mm-row:hover .mm-row-num,
+.mm-row:focus-within .mm-row-num { visibility: hidden; }
+.mm-row-play:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.8); }
+@media (hover: none) {
+    .mm-row-play { display: none; }
 }

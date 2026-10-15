@@ -37,9 +37,12 @@ export interface PopoverDismissOptions {
 export function usePopoverDismiss({ ref, anchor, onClose }: PopoverDismissOptions): void {
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (ref.current?.contains(target)) return;
-      if (anchor?.contains(target)) return;
+      // the path is fixed when the click is dispatched. contains() asks the
+      // tree as it is now, and a button that swapped itself out on click
+      // (New playlist -> name form) is already detached, so it read as outside.
+      const path = e.composedPath();
+      if (ref.current && path.includes(ref.current)) return;
+      if (anchor && path.includes(anchor)) return;
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
