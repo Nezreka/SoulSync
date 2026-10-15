@@ -72,6 +72,9 @@ class LibraryReorganizeJob(RepairJob):
         'keep the release it was placed with and skip it until you change your naming '
         'settings or pin a different version, so new SoulSync naming rules or a source '
         'hiccup don\'t move it again.\n\n'
+        'A scan that gets stopped (or a restart) picks up at the album it stopped on '
+        'next time, then goes back to the top once it reaches the end. Changing dry run, '
+        'your naming settings or the active server starts it over.\n\n'
         'Settings:\n'
         '- Dry Run: When enabled, only reports what would change without moving files\n'
         '- Recheck Placed Albums: Re-plan albums already placed, e.g. to pick up '
@@ -155,23 +158,51 @@ class LibraryReorganizeJob(RepairJob):
                 )
             return result
 
+        fingerprint = naming_fingerprint()
+
+        # #1716: a stopped scan used to start over at the first album. resume
+        # right after the last album a run finished, as long as it ran under
+        # the same mode, naming and server (anything else is a different scan).
+        scan_key = self._scan_key(dry_run, recheck_placed, fingerprint, active_server)
+        start = self._resume_index(context, album_rows, scan_key)
+        if start:
+            logger.info(
+                "Reorganize: resuming at album %d of %d ('%s')",
+                start + 1, total, album_rows[start]['title'] or 'Unknown Album',
+            )
+
         if context.report_progress:
             mode_label = 'DRY RUN' if dry_run else 'LIVE'
+            resume_note = f', resuming at album {start + 1}' if start else ''
             context.report_progress(
                 phase=f'Scanning {total} albums ({mode_label})...',
-                log_line=f'Mode: {mode_label} — Iterating {total} albums',
+                log_line=f'Mode: {mode_label} — Iterating {total} albums{resume_note}',
                 log_type='info',
-                scanned=0, total=total,
+                scanned=start, total=total,
             )
 
         items_to_enqueue = []
-        fingerprint = naming_fingerprint()
         settled = 0
+        last_done = None
 
-        for i, album_row in enumerate(album_rows):
+        def save_progress():
+            # live mode queues before the checkpoint moves, so a restart never
+            # skips an album whose move was only held in memory.
+            self._flush_enqueue(items_to_enqueue, result)
+            if last_done is not None:
+                self._save_checkpoint(context, {'album_id': last_done, 'scan': scan_key})
+
+        for i in range(start, total):
+            album_row = album_rows[i]
+            if i > start:
+                last_done = str(album_rows[i - 1]['id'])
+                if (i - start) % 25 == 0:
+                    save_progress()
             if context.check_stop():
+                save_progress()
                 return result
             if i % 20 == 0 and context.wait_if_paused():
+                save_progress()
                 return result
 
             album_id = album_row['id']
@@ -366,25 +397,9 @@ class LibraryReorganizeJob(RepairJob):
                     phase=f'{"Dry run" if dry_run else "Queueing"} ({i+1}/{total})...',
                 )
 
-        # Bulk enqueue collected items in one batch (apply mode only).
-        # Queue's tally shape: {'enqueued': N, 'already_queued': M, 'total': K}.
-        if items_to_enqueue:
-            try:
-                from core.reorganize_queue import get_queue
-                queue_summary = get_queue().enqueue_many(items_to_enqueue)
-                enqueued_count = queue_summary.get('enqueued', 0)
-                already_queued = queue_summary.get('already_queued', 0)
-                result.auto_fixed += enqueued_count
-                # Dedupe-skipped albums are tracked separately so the
-                # repair-job summary doesn't double-count.
-                result.skipped += already_queued
-                logger.info(
-                    "Reorganize: enqueued %d albums (%d already in queue)",
-                    enqueued_count, already_queued,
-                )
-            except Exception as exc:
-                logger.error("Failed to enqueue reorganize items: %s", exc)
-                result.errors += 1
+        self._flush_enqueue(items_to_enqueue, result)
+        # the pass reached the end, so the next run starts at the top
+        self._save_checkpoint(context, None)
 
         if context.update_progress:
             context.update_progress(total, total)
@@ -405,6 +420,72 @@ class LibraryReorganizeJob(RepairJob):
             )
 
         return result
+
+    @staticmethod
+    def _flush_enqueue(items: list, result: JobResult) -> None:
+        """Hand the collected albums to the reorganize queue (live mode only)
+        and empty the list. Queue's tally shape: {'enqueued', 'already_queued',
+        'total'}."""
+        if not items:
+            return
+        batch = list(items)
+        items.clear()
+        try:
+            from core.reorganize_queue import get_queue
+            queue_summary = get_queue().enqueue_many(batch)
+            enqueued_count = queue_summary.get('enqueued', 0)
+            already_queued = queue_summary.get('already_queued', 0)
+            result.auto_fixed += enqueued_count
+            # Dedupe-skipped albums are tracked separately so the
+            # repair-job summary doesn't double-count.
+            result.skipped += already_queued
+            logger.info(
+                "Reorganize: enqueued %d albums (%d already in queue)",
+                enqueued_count, already_queued,
+            )
+        except Exception as exc:
+            logger.error("Failed to enqueue reorganize items: %s", exc)
+            result.errors += 1
+
+    # -- resume after a stop (#1716) ------------------------------------
+    # same store the acoustid scanner and discography backfill use: a value
+    # under this job's own config key. cleared when a pass reaches the end.
+
+    @staticmethod
+    def _scan_key(dry_run, recheck_placed, fingerprint, active_server) -> str:
+        return f"{'dry' if dry_run else 'live'}|{int(bool(recheck_placed))}|{fingerprint}|{active_server or ''}"
+
+    def _resume_index(self, context: JobContext, album_rows: list, scan_key: str) -> int:
+        """Index of the first album this run should plan: right after the
+        checkpoint album, or 0 when there's no usable checkpoint."""
+        if not context.config_manager:
+            return 0
+        try:
+            saved = context.config_manager.get(
+                f'repair.jobs.{self.job_id}.scan_checkpoint', None)
+        except Exception as e:  # noqa: BLE001 (a broken store means start at the top, not crash)
+            logger.warning("Could not read reorganize checkpoint (starting at the top): %s", e)
+            return 0
+        if not isinstance(saved, dict) or saved.get('scan') != scan_key:
+            return 0
+        album_id = saved.get('album_id')
+        if album_id is None:
+            return 0
+        for idx, row in enumerate(album_rows):
+            if str(row['id']) == str(album_id):
+                return idx + 1 if idx + 1 < len(album_rows) else 0
+        # the album is gone (deleted or rescanned under a new id). starting
+        # over re-plans albums, skipping ahead could miss some.
+        logger.info("Reorganize checkpoint album %s is gone, starting at the top", album_id)
+        return 0
+
+    def _save_checkpoint(self, context: JobContext, value) -> None:
+        if not context.config_manager or not hasattr(context.config_manager, 'set'):
+            return
+        try:
+            context.config_manager.set(f'repair.jobs.{self.job_id}.scan_checkpoint', value)
+        except Exception as e:  # noqa: BLE001 (losing the checkpoint must not fail the scan)
+            logger.warning("Could not save reorganize checkpoint: %s", e)
 
     def estimate_scope(self, context: JobContext) -> int:
         """Estimate is the active-server album count — matches what

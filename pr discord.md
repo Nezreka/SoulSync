@@ -1,17 +1,15 @@
-**SoulSync 3.5.5 is out** :musical_note:
+**SoulSync 3.5.6 is out** :musical_note:
 
-Your own playlists grow up: play, shuffle and queue on every playlist, a Liked Songs heart in the add-to-playlist picker, ticks for playlists that already have the song, add songs and sort from inside a playlist, and a made-over detail view. Mirrors can append or reconcile per playlist or per pipeline instead of one global mode (thanks @Tacobell444).
+A quick follow-up to 3.5.5.
 
-Songs that aren't in your library can play their Deezer 30s preview instead (thanks @cremonies). Dashboard rail cards get play, queue and add-to-playlist buttons, and the mix modal is redesigned.
+Playlist sync stops grabbing the wrong song. The album fallback now needs the artist to match, so a same-titled song on a same-named album can't stand in for the real one. One song your server no longer has also stops blocking the whole playlist: it's skipped and everything else gets written (thanks @kevin2xk).
 
-A big speed pass: stale SQLite planner stats made a watchlist scan pay 1.4 s per missing track (now 32 ms), plus missing indexes on file paths and lowercase titles, faster enrichment workers and stats.
+Library reorganize resumes where it stopped instead of starting from the first album every run, and a stopped run keeps the moves it already planned (thanks @QT3496).
 
-Read-only API keys (thanks @splitsec2). Subtitles reach Bazarr parity with a missing subtitles job on the tools page.
+Auto-import runs the same library check as the import page, so staging drops skip what you already own. Each import in history says what it did, and a new opt-in Clear finished folders switch tidies staging once everything is in.
 
-Downloads can't land untagged anymore, and a repair job flags the ones that did. The next quality tier gets a shot when the top one won't start (thanks @javiavid). Standalone full refresh stops dropping tracks to id collisions (thanks @rijndael86).
+The album modal shows found and missing tracks as soon as it opens.
 
-Matching: featuring-credit titles match on MusicBrainz (thanks @pm-melo), AcoustID accepts a recording under another release's title (thanks @zikasak), reorganize settles where it placed an album (thanks @rhyst), and discography backfill rotates through the whole library (thanks @QT3496).
-
-Also: pipeline syncs respect wishlist skip (thanks @Tacobell444), every connection gets a test button, similar artists stop storing namesakes, and another phone layout batch.
+Run Now on the Update Discovery automation always refreshes instead of waiting out the 6 hour cooldown (thanks @mikedaf). YouTube imports onto NFS shares stop failing on file metadata the share refuses (thanks @hilburn).
 
 Full notes on GitHub.

@@ -1986,6 +1986,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
+    // owned/missing per track straight away, not after Begin Analysis
+    if (typeof previewModalOwnership === 'function') void previewModalOwnership(virtualPlaylistId);
 
     console.log(`✅ Successfully opened download missing tracks modal for: ${playlistName}`);
 }

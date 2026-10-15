@@ -3460,6 +3460,16 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.6': [
+        { date: 'October 2026 · 3.5.6' },
+        { title: 'Playlist sync lands the right songs', desc: 'The album fallback needs the artist to match, so a same-titled song on a same-named album stops standing in for the real one. One song your server no longer has stops blocking the whole playlist: it is skipped and the rest are written (thanks @kevin2xk) (#1715).', page: 'sync' },
+        { title: 'Reorganize resumes where it stopped', desc: 'Library reorganize saves the last album it finished and picks up right after it, queues moves as it goes so a stopped run keeps what it planned, and goes back to the top after a full pass (thanks @QT3496) (#1716).', page: 'tools' },
+        { title: 'Auto-import skips what you own', desc: 'Staging drops run the same library check as the import page. Each import in history says what it did with a per-track list, and an opt-in Clear finished folders switch removes a folder once every track is in.', page: 'import' },
+        { title: 'Album modal knows what you own', desc: 'A release opened from a discography shows found and missing per track as soon as it opens, instead of waiting for Begin Analysis.' },
+        { title: 'Run Now refreshes discovery', desc: 'Run Now on the Update Discovery automation always refreshes, so changed settings apply right away. Scheduled runs keep the 6 hour cooldown (thanks @mikedaf) (#1719).', page: 'automations' },
+        { title: 'YouTube imports on NFS', desc: 'A share that refuses file metadata (errno 524) no longer fails a YouTube import after the file landed (thanks @hilburn) (#1713).' },
+        { title: 'Earlier versions', desc: '3.5.5 brought playable and likeable playlists, per-playlist sync mode, Deezer previews and a big speed pass.' },
+    ],
     '3.5.5': [
         { date: 'October 2026 · 3.5.5' },
         { title: 'Play, like and sort your playlists', desc: 'Play, shuffle and queue on every playlist. A heart in the add-to-playlist picker toggles Liked Songs, the picker ticks playlists that already have the song, and you can add songs, sort, and make a mirror your own.', page: 'sync' },
@@ -3478,30 +3488,6 @@ const WHATS_NEW = {
         { title: 'Connections', desc: 'Every service gets a test button, and services are grouped by what they do.', page: 'settings' },
         { title: 'More fixes', desc: 'Pipeline syncs respect wishlist skip (thanks @Tacobell444) (#1689), m3u entries can be relative, requests and issues hide until needed, password managers fill sign-in properly, and another phone batch fixes the hamburger, drawer, mini player and mirrored playlist modal (thanks @Tacobell444) (#1691, #1699).' },
         { title: 'Earlier versions', desc: '3.5.4 brought subtitles without Bazarr, audiobook series follows and m4b merge, and one downloads page.' },
-    ],
-    '3.5.4': [
-        { date: 'October 2026 · 3.5.4' },
-        { title: 'Subtitles replace Bazarr', desc: 'Providers are pluggable, a wanted loop retries misses with hash-first scoring, per-title language overrides, proper hi/forced naming, an upgrade loop and manual search. Optional local Whisper transcription as the last resort, and fetching is on by default for new imports (#1635, #1638, #1643, #1644).', page: 'settings' },
-        { title: 'Subtitle chain widget and backfill', desc: 'The provider chain is a settings widget you can drag into order, and a backfill runs subtitles across the existing library, admins only (#1668).', page: 'settings' },
-        { title: 'Follow an audiobook series', desc: 'A series joins author and narrator follows: backfill every missing volume or new books only, and new volumes land on the wishlist on the daily scan (#1599).' },
-        { title: 'Optional m4b merge', desc: 'A book that arrives as many files folds into one .m4b with a chapter marker per file, off by default. Originals are only deleted after the merged file verifies (thanks SeadogsBooty on discord) (#1648).', page: 'settings' },
-        { title: 'Plex-safe audiobook imports', desc: 'The book is built in a hidden staging folder and revealed with one atomic rename, so Plex only ever sees the finished book. A scan nudge goes out after the import lands (thanks SeadogsBooty on discord) (#1664).' },
-        { title: 'Narration-aware completeness', desc: 'Complete books stop being held for being a different narration than the wishlisted edition, and holds say which narration and which check applied (thanks SeadogsBooty on discord) (#1647, #1655).' },
-        { title: 'Audiobook wishlist, music design', desc: 'The audiobooks wishlist tab wears the same design as music: hero, stat strip, a triage banner for failed titles and one sticky command bar (#1675).' },
-        { title: 'One downloads page', desc: 'Music and video share one downloads page with a music | video switcher, deep-linkable, and the old video page redirects. Video wishlist drains are capped per run (thanks @c5pie) (#1650, #1651).', page: 'active-downloads' },
-        { title: 'Playlist covers, descriptions, duplicate', desc: 'Your own playlists get a cover (upload, pick from a track\'s art, or paste a URL), a description, and a duplicate button. A user playlist\'s cover pushes to your server on every sync (#1666).', page: 'sync' },
-        { title: 'Usenet finds the album for the song', desc: 'A single-song request can use an album release: the track is picked out by title, artist, version and duration. An option keeps the album\'s other tracks too (#1604).' },
-        { title: 'Scrobbling leaves the stats toggle alone', desc: 'The scrobble flush runs on its own cadence, and the web player scrobbles by Last.fm\'s rule: half the track or 4 minutes, 30s minimum (thanks @cin) (#1654).', page: 'settings' },
-        { title: 'Mirror playlists stay safe', desc: 'A failed Spotify fetch no longer refreshes a mirror to empty, and an empty track payload no longer wipes a mirror\'s tracks (thanks @splitsec2) (#1657, #1659).' },
-        { title: 'Library sees every provider', desc: 'The in-library count sees Deezer, Tidal and Qobuz tracks, profile 1\'s downloads stop reading as missing, and playlist sync matches again when the candidate pool is empty (thanks @zikasak) (#1624, #1660).' },
-        { title: 'Poisoned batches stop misfiling', desc: 'Wishlist batches with no real album id stop stamping every track with the first row\'s album, and a repair signal flags albums shaped like the bad one (thanks @kevin2xk) (#1620).' },
-        { title: 'Matching and verification fixes', desc: 'The Soulseek scorer vetoes a wrong song that only shares a version qualifier, AcoustID handles dash-wrapped subtitles, and cross-script same-title recordings skip instead of failing (thanks @zikasak) (#1630).', page: 'tools' },
-        { title: 'Watchlist credits the artist', desc: 'The scanner only wishlists tracks credited to the watched artist, with an opt-in other-artists toggle. The scan deck stops disappearing a second after it appears (thanks SeadogsBooty on discord) (#1636, #1645).', page: 'watchlist' },
-        { title: 'Quarantine says what arrived', desc: 'Muted icons when the song is already in your library or was an extra album track. Slowed and sped-up versions are their own versions, approving counts as replace intent, and Discogs dates keep their precision (thanks @nick2000713) (#1653).' },
-        { title: 'Phone layout fixes', desc: 'Buttons stop stretching into ovals, the watchlist rail scrolls, settings and modals clear the menu button, the player\'s play button is round with the EQ reachable, and the dashboard listen cards stack instead of clipping (thanks @Thibs, @c5pie and gzetk) (#1683).' },
-        { title: 'Accent colours and dead CSS', desc: 'The UI follows your accent instead of hardcoded Spotify greens, palettes collapse onto design tokens, and a hardened checker deletes dead CSS by the thousand lines (thanks @Thundernerd) (#1617, #1625, #1631, #1649, #1669).' },
-        { title: 'More fixes', desc: 'BPM backfill reopens dismissed findings in bulk and always writes locally analyzed BPM (thanks Specialmed on discord) (#1646). The nav drawer scrolls in landscape on phones, Spotify\'s HTTPS redirect requirement is documented for NAS and Docker (thanks @Thibs) (#1661, #1663), and tribute albums stop winning the album picker (thanks @TheJimmerJammer123) (#1641). Imports skip tracks already in your library (thanks SeadogsBooty on discord) (#1667) and the inbox stays honest mid-scan (#1679). Deezer sessions re-login when the token dies (#1681), standalone library scans work (thanks Spectro on discord) (#1682), AcoustID keys apply without a restart and a bad key stops the scan early (thanks @splitsec2) (#1672), pinned canonical albums are respected (thanks @kiwijar) (#1670), scrollbars fade while you scroll (thanks @Thibs) (#1673), and automations gain ntfy and Gotify notifications (thanks @SimpleSimonLA) (#1674).' },
-        { title: 'Earlier versions', desc: '3.5.3 brought My Playlists, match & import from download clients, and audiobook format choices.' },
     ],
 };
 
@@ -3531,6 +3517,22 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.6: playlist sync fixes, reorganize resume and smarter auto-import',
+        description: 'A follow-up to 3.5.5. Playlist sync stops matching the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, auto-import skips what you already own, and Run Now on Update Discovery actually runs.',
+        features: [
+            'Playlist sync: the album fallback needs the artist to match, and one song your server no longer has is skipped instead of blocking the playlist (thanks @kevin2xk) (#1715).',
+            'Library reorganize resumes after the last album it finished and keeps the moves a stopped run planned (thanks @QT3496) (#1716).',
+            'Auto-import runs the library check, says what each import did, and can clear finished staging folders.',
+            'The album modal shows found and missing tracks as soon as it opens.',
+            'Run Now on Update Discovery skips the 6 hour cooldown (thanks @mikedaf) (#1719), and YouTube imports survive NFS shares that refuse file metadata (thanks @hilburn) (#1713).',
+        ],
+    },
+    {
+        title: 'Earlier in 3.5.5',
+        description: 'Playable and likeable playlists, per-playlist sync mode, Deezer previews, a database speed pass, read-only API keys and Bazarr-level subtitles.',
+        features: [],
+    },
+    {
         title: '3.5.5: playlists you can play and like, per-playlist sync mode, deezer previews and a speed pass',
         description: 'Your own playlists get play buttons, Liked Songs and a made-over detail view, mirrors pick their own sync mode, songs outside your library play Deezer previews, the database gets a big speed pass, read-only API keys, subtitles reach Bazarr parity, and downloads can no longer land untagged.',
         features: [
@@ -3546,36 +3548,11 @@ const VERSION_MODAL_SECTIONS = [
             'Pipeline syncs respect wishlist skip (thanks @Tacobell444) (#1689); connection test buttons; similar artists stop storing namesakes; another phone batch (#1691, #1699).',
         ],
     },
-    {
-        title: 'Earlier in 3.5.4',
-        description: 'Subtitles without Bazarr, audiobook series follows and m4b merge, one downloads page, playlist covers and a full phone pass.',
-        features: [],
-    },
-    {
-        title: '3.5.4: subtitles replace bazarr, audiobook series and m4b, one downloads page, playlist covers and a phone pass',
-        description: 'Subtitles grow up to replace Bazarr, audiobooks get series follows and an m4b merge with Plex-safe imports, one downloads page for music and video, Usenet pulls a track out of an album release, scrobbling leaves the stats toggle alone, and mirror playlists stay safe. Your playlists get covers and descriptions, and the phone layout gets a full pass.',
-        features: [
-            'Subtitles: pluggable providers, a wanted loop with hash-first scoring, per-title overrides, hi/forced naming, upgrades and manual search, plus optional local Whisper as the last resort. The provider chain is a settings widget now, with a backfill for the existing library (#1635, #1638, #1643, #1644, #1668).',
-            'Audiobooks: follow a whole series, optional m4b merge on import, Plex-safe staged imports, and narration-aware completeness (thanks SeadogsBooty on discord) (#1599, #1647, #1648, #1655, #1664). The audiobook wishlist wears the music design (#1675).',
-            'One downloads page for music and video, with video wishlist drains capped per run (thanks @c5pie) (#1650, #1651).',
-            'Your playlists get a cover (upload, track art or a URL), a description and a duplicate button (#1666).',
-            'Usenet and torrents can satisfy a single-song request from an album release, with an option to keep the album\'s other tracks (#1604).',
-            'Scrobbling runs on its own cadence and the web player follows Last.fm\'s rule (thanks @cin) (#1654).',
-            'Mirror safety: failed Spotify fetches and empty payloads can\'t wipe a mirror (thanks @splitsec2) (#1657, #1659).',
-            'Library and matching: in-library counts for every provider, profile 1 downloads visible, playlist sync matches again, Soulseek and AcoustID verification fixes, pinned canonical albums respected (thanks @zikasak, @kevin2xk, @Logan-Selley, @kiwijar) (#1620, #1624, #1630, #1634, #1660, #1670).',
-            'Phones: a full layout pass from 22 screenshots. Round player controls and a reachable EQ, a scrolling watchlist rail, settings and modals clear of the menu button, dashboard cards stack (thanks @Thibs, @c5pie and gzetk) (#1683).',
-            'Imports skip tracks already in your library (thanks SeadogsBooty on discord) (#1667); Deezer sessions re-login on a dead token (#1681); standalone library scans work (thanks Spectro on discord) (#1682); AcoustID keys apply live and a bad key stops the scan (thanks @splitsec2) (#1672); scrollbars fade while scrolling (thanks @Thibs) (#1673); ntfy and Gotify notifications in automations (thanks @SimpleSimonLA) (#1674).',
-            'Watchlist only wishlists tracks credited to the watched artist; the scan deck stops disappearing (thanks SeadogsBooty on discord) (#1636, #1645).',
-            'Quarantine says when a song already arrived, slowed/sped-up are their own versions, Discogs dates keep precision (thanks @nick2000713) (#1653).',
-            'The UI follows your accent; dead CSS deleted by the thousand lines (thanks @Thundernerd) (#1617, #1625, #1631, #1649, #1669).',
-            'BPM backfill reopens findings in bulk (thanks Specialmed on discord) (#1646); phone landscape nav drawer; Spotify HTTPS docs for NAS/Docker (thanks @Thibs) (#1661, #1663).',
-        ],
-    },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.5.5';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.6';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

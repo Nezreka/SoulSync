@@ -128,26 +128,37 @@ def test_a_match_with_nothing_to_check_is_dead():
 
 # ── the analysis branch that consumed it ─────────────────────────────────────
 
-def test_the_download_analysis_drops_a_stale_match_before_trusting_it():
-    """Pins the guard's SHAPE at the call site: the analysis must consult
-    match_is_live between fetching the match and acting on it. A rewrite that
-    reorders those two lines re-opens #1138 exactly."""
-    import re
+def _saved_match(monkeypatch, match):
+    monkeypatch.setattr(mlm, "get_match_for_track",
+                        lambda db, profile_id, track_data, default_source=None: match)
+
+
+def test_live_manual_match_drops_a_match_whose_file_is_gone(monkeypatch):
+    from core.downloads.master import live_manual_match
+
+    _saved_match(monkeypatch, {"library_track_id": 7})
+    assert live_manual_match(_DB(ids=()), 1, {"id": "sp1", "name": "B"}, "spotify") is None
+
+
+def test_live_manual_match_keeps_a_match_whose_file_is_there(monkeypatch):
+    from core.downloads.master import live_manual_match
+
+    match = {"library_track_id": 7}
+    _saved_match(monkeypatch, match)
+    assert live_manual_match(_DB(ids=(7,)), 1, {"id": "sp1", "name": "B"}, "spotify") is match
+
+
+def test_the_download_analysis_asks_for_the_live_match_only():
+    """the analysis must go through live_manual_match. reading the match table
+    directly skips the staleness guard and re-opens #1138 exactly."""
     from pathlib import Path
 
     source = (Path(__file__).resolve().parents[1]
               / "core" / "downloads" / "master.py").read_text(encoding="utf-8")
-    fetch = source.index("_mlm.get_match_for_track(")
-    guard = source.index("_mlm.match_is_live(")
     act = source.index("'manual_library_match'")
-    assert fetch < guard < act, (
-        "the staleness guard must sit between fetching the manual match and "
-        "acting on it — #1138 is exactly what happens when it does not"
-    )
-    # And the guard must clear the match rather than merely log about it.
-    between = source[guard:act]
-    assert re.search(r"_manual_match\s*=\s*None", between), (
-        "a warning alone still skips the download — the match must be dropped"
+    assert "live_manual_match(" in source[:act]
+    assert source.count("_mlm.get_match_for_track(") == 1, (
+        "only live_manual_match may read the saved match"
     )
 
 
