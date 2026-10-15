@@ -70,14 +70,15 @@ def process_artist(
     source_artist_id: str,
     artist_name: str,
     fetch_similars: Callable[[str, int], Dict[str, Any]],
-    store_similar: Callable[..., bool],
+    replace_similars: Callable[..., int],
     limit: int = 25,
     profile_id: int = 1,
 ) -> tuple:
     """Fetch + store similar artists for one library artist.
 
     ``fetch_similars(name, limit)`` returns the ``get_musicmap_similar_artists``
-    payload; ``store_similar(**kwargs)`` is ``add_or_update_similar_artist``.
+    payload; ``replace_similars(source_artist_id, rows, profile_id=)`` is
+    ``replace_similar_artists``: the fresh set replaces the old one whole.
     Returns ``(status, stored_count, detail)`` where status is one of:
       - ``'matched'``   — stored ≥1 similar artist
       - ``'not_found'`` — MusicMap had no entry / nothing matched a source
@@ -102,7 +103,7 @@ def process_artist(
     if not sims:
         return ('not_found', 0, 'no matches')
 
-    stored = 0
+    rows = []
     for rank, s in enumerate(sims, 1):
         name = s.get('name')
         if not name:
@@ -115,21 +116,21 @@ def process_artist(
             # similar carries a metadata source id, or we skip it.
             logger.debug("Skipping similar '%s' (matched %s — no storable source id)", name, s.get('source'))
             continue
+        rows.append(dict(
+            similar_artist_name=name,
+            similarity_rank=rank,
+            image_url=s.get('image_url'),
+            genres=s.get('genres'),
+            popularity=s.get('popularity', 0) or 0,
+            **kwargs,
+        ))
+
+    stored = 0
+    if rows:
         try:
-            ok = store_similar(
-                source_artist_id=source_artist_id,
-                similar_artist_name=name,
-                similarity_rank=rank,
-                profile_id=profile_id,
-                image_url=s.get('image_url'),
-                genres=s.get('genres'),
-                popularity=s.get('popularity', 0) or 0,
-                **kwargs,
-            )
-            if ok:
-                stored += 1
+            stored = replace_similars(source_artist_id, rows, profile_id=profile_id) or 0
         except Exception as exc:
-            logger.debug("store similar failed for %s: %s", name, exc)
+            return ('error', 0, f'store failed: {exc}')
 
     return ('matched' if stored else 'not_found', stored, '')
 
@@ -235,7 +236,7 @@ class SimilarArtistsWorker:
                 status, count, detail = process_artist(
                     sid, artist['name'],
                     get_musicmap_similar_artists,
-                    self.db.add_or_update_similar_artist,
+                    self.db.replace_similar_artists,
                     limit=self.limit, profile_id=self.profile_id,
                 )
                 self._mark(artist['id'], status)

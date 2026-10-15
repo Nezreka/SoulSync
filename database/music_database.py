@@ -1928,6 +1928,7 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            self._requeue_similar_artists_rematch(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2028,6 +2029,7 @@ class MusicDatabase:
         'sample_analysis_v1':        ('table', 'sample_analysis'),
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
+        'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
     }
 
     def _record_migration(self, cursor, name):
@@ -5156,6 +5158,30 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status, id)")
         except Exception as e:
             logger.error(f"Error adding similar-artists worker columns: {e}")
+
+    def _requeue_similar_artists_rematch(self, cursor):
+        """one-time: fetch every artist's similar artists again.
+
+        names used to resolve to the first search hit, so stored similars hold
+        namesakes (a thai pop act as Korn, Colde for Cold). the worker never
+        re-runs a matched artist and the watchlist only refetches after 30
+        days, so neither would heal them. requeue both; replace_similar_artists
+        swaps each set as it lands. occurrence_count goes back to one per row:
+        every refetch had bumped it and the reader sums it."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_similar_artists_rematch_applied'")
+            if cursor.fetchone():
+                return
+            cursor.execute("UPDATE artists SET similar_artists_match_status = NULL "
+                           "WHERE similar_artists_match_status IS NOT NULL")
+            requeued = max(cursor.rowcount, 0)
+            cursor.execute("UPDATE similar_artists SET occurrence_count = 1, "
+                           "last_updated = datetime('now', '-60 days')")
+            cursor.execute("CREATE TABLE _similar_artists_rematch_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artists_rematch')
+            logger.info("similar artists rematch: requeued %s library artists", requeued)
+        except Exception as e:
+            logger.error(f"Error requeueing similar artists rematch: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
@@ -18115,6 +18141,67 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding similar artist: {e}")
             return False
+
+    def replace_similar_artists(self, source_artist_id: str, similars: List[Dict[str, Any]],
+                                profile_id: int = 1,
+                                source_provider: Optional[str] = None) -> int:
+        """swap one artist's similar artists for a fresh fetch, in one go.
+
+        the upsert only ever added. a name a better match no longer produces
+        (Colde stored for Cold) stayed forever, and every refetch bumped
+        occurrence_count, which the reader sums. the hero's rotation history
+        (last_featured) carries over by name.
+
+        each entry takes add_or_update_similar_artist's kwargs. returns how
+        many rows went in; an empty list leaves the old set alone."""
+        from core.context_sentinels import is_context_sentinel
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return 0
+        rows = [s for s in similars or [] if s.get('similar_artist_name')]
+        if not rows:
+            return 0
+        provider = (str(source_provider).strip().lower() or None) if source_provider else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT similar_artist_name, last_featured FROM similar_artists
+                    WHERE profile_id = ? AND source_artist_id = ? AND last_featured IS NOT NULL
+                """, (profile_id, source_artist_id))
+                featured = {(r[0] or '').casefold(): r[1] for r in cursor.fetchall()}
+                cursor.execute(
+                    "DELETE FROM similar_artists WHERE profile_id = ? AND source_artist_id = ?",
+                    (profile_id, source_artist_id))
+                stored = 0
+                for row in rows:
+                    name = row['similar_artist_name']
+                    genres = row.get('genres')
+                    image_url = row.get('image_url')
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
+                         similarity_rank, occurrence_count, last_updated, profile_id,
+                         image_url, genres, popularity, metadata_updated_at, source_provider,
+                         last_featured)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?,
+                                CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP END, ?, ?)
+                        ON CONFLICT(profile_id, source_artist_id, similar_artist_name) DO NOTHING
+                    """, (source_artist_id, row.get('similar_artist_spotify_id'),
+                          row.get('similar_artist_itunes_id'), row.get('similar_artist_deezer_id'),
+                          row.get('similar_artist_musicbrainz_id'), name,
+                          row.get('similarity_rank', 1), profile_id, image_url,
+                          json.dumps(genres) if genres else None, row.get('popularity', 0) or 0,
+                          image_url, provider, featured.get(name.casefold())))
+                    stored += max(cursor.rowcount, 0)
+                conn.commit()
+                return stored
+        except Exception as e:
+            logger.error(f"Error replacing similar artists: {e}")
+            return 0
 
     def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""

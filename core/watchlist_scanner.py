@@ -3442,38 +3442,25 @@ class WatchlistScanner:
                 source_artist_id, derived_provider = watchlist_source_identity(watchlist_artist)
                 source_provider = source_provider or derived_provider
 
-            # Store each similar artist in database
-            stored_count = 0
-            for rank, similar_artist in enumerate(similar_artists, 1):
-                try:
-                    # similar_artist has 'name', provider IDs, 'image_url', 'genres', 'popularity'
-                    success = self.database.add_or_update_similar_artist(
-                        source_artist_id=source_artist_id,
-                        similar_artist_name=similar_artist['name'],
-                        similar_artist_spotify_id=similar_artist.get('spotify_id'),
-                        similar_artist_itunes_id=similar_artist.get('itunes_id'),
-                        similarity_rank=rank,
-                        profile_id=profile_id,
-                        image_url=similar_artist.get('image_url'),
-                        genres=similar_artist.get('genres'),
-                        popularity=similar_artist.get('popularity', 0),
-                        similar_artist_deezer_id=similar_artist.get('deezer_id'),
-                        similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
-                        source_provider=source_provider,
-                    )
-
-                    if success:
-                        stored_count += 1
-                        ids = ', '.join(
-                            f"{k}: {similar_artist.get(v)}"
-                            for k, v in [('Spotify', 'spotify_id'), ('iTunes', 'itunes_id'), ('Deezer', 'deezer_id'), ('MB', 'musicbrainz_id')]
-                            if similar_artist.get(v)
-                        )
-                        logger.debug(f"  #{rank}: {similar_artist['name']} ({ids})")
-
-                except Exception as e:
-                    logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
-                    continue
+            # the fresh set replaces the old one whole: an upsert kept every
+            # wrong match an older fetch ever made
+            rows = [
+                dict(
+                    similar_artist_name=similar_artist['name'],
+                    similar_artist_spotify_id=similar_artist.get('spotify_id'),
+                    similar_artist_itunes_id=similar_artist.get('itunes_id'),
+                    similar_artist_deezer_id=similar_artist.get('deezer_id'),
+                    similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
+                    similarity_rank=rank,
+                    image_url=similar_artist.get('image_url'),
+                    genres=similar_artist.get('genres'),
+                    popularity=similar_artist.get('popularity', 0),
+                )
+                for rank, similar_artist in enumerate(similar_artists, 1)
+                if similar_artist.get('name')
+            ]
+            stored_count = self.database.replace_similar_artists(
+                source_artist_id, rows, profile_id=profile_id, source_provider=source_provider)
 
             logger.info(f"Stored {stored_count}/{len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
             return True
