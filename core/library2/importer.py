@@ -22,6 +22,7 @@ populates the v2 schema. It is:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import uuid
@@ -976,8 +977,56 @@ def _map_server_item(cursor, entity_type: str, entity_id: int, row: Any,
                    "" if owner is None else f"own:{owner}", compat=owner is None)
 
 
+def _playlist_origins(cursor) -> Dict[str, Dict[str, Any]]:
+    """Provenance is optional: an older playlist schema must never fail the import."""
+    try:
+        return _playlist_origins_unchecked(cursor)
+    except sqlite3.Error as error:
+        logger.warning("playlist origins skipped: %s", error)
+        return {}
+
+
+def _playlist_origins_unchecked(cursor) -> Dict[str, Dict[str, Any]]:
+    """Legacy track key -> the mirrored playlist its file was saved for.
+
+    Explicit evidence only: the file sits in a folder named like a playlist
+    that lists that very track (by a source track id). A folder that merely
+    looks like a playlist proves nothing and is not an origin."""
+    tables = {r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if not {"mirrored_playlists", "mirrored_playlist_tracks", "tracks"} <= tables:
+        return {}
+    id_cols = [c for c in ("spotify_track_id", "deezer_id", "itunes_track_id", "tidal_id",
+                           "qobuz_id", "youtube_id") if c in _existing_columns(cursor, "tracks")]
+    if not id_cols:
+        return {}
+    from core.playlists.materialize import playlist_dir_for
+
+    by_track: Dict[str, List[Dict[str, Any]]] = {}
+    for r in cursor.execute(
+            "SELECT p.source, p.source_playlist_id, p.name, t.source_track_id "
+            "FROM mirrored_playlists p JOIN mirrored_playlist_tracks t ON t.playlist_id = p.id "
+            "WHERE t.source_track_id IS NOT NULL AND TRIM(t.source_track_id) <> ''"):
+        by_track.setdefault(str(r["source_track_id"]), []).append(
+            {"source": r["source"], "source_playlist_id": r["source_playlist_id"], "name": r["name"],
+             "folder": os.path.basename(playlist_dir_for("/", r["name"])).casefold()})
+    if not by_track:
+        return {}
+    origins: Dict[str, Dict[str, Any]] = {}
+    for r in cursor.execute(f"SELECT id, file_path, {', '.join(id_cols)} FROM tracks "
+                            "WHERE file_path IS NOT NULL AND TRIM(file_path) <> ''"):
+        folder = os.path.basename(os.path.dirname(str(r["file_path"]))).casefold()
+        for column in id_cols:
+            hit = next((p for p in by_track.get(str(r[column]), ()) if p["folder"] == folder), None) \
+                if r[column] else None
+            if hit:
+                origins[_legacy_key(r["id"])] = hit
+                break
+    return origins
+
+
 def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
-                         live: Set[int]) -> Tuple[Dict[str, str], Set[Tuple[str, str]]]:
+                         live: Set[int], origins: Optional[Dict[str, Dict[str, Any]]] = None
+                         ) -> Tuple[Dict[str, str], Set[Tuple[str, str]]]:
     """Legacy albums that are another library's copy of an earlier row (#1199).
 
     Upstream gave every own library its own artist/album/track rows; Library v2
@@ -992,7 +1041,9 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
     the ``(legacy album key, title key)`` pairs a legacy album holds more than
     once -- a deluxe copy's live cut beside its studio one.
     """
-    if not live or not _legacy_owners_exist(cursor, "albums"):
+    origins = origins or {}
+    has_owners = bool(live) and _legacy_owners_exist(cursor, "albums")
+    if not has_owners and not origins:
         return {}, set()
     cols = _existing_columns(cursor, "albums")
     id_cols = {"spotify": ("spotify_album_id",), "musicbrainz": ("musicbrainz_release_id",),
@@ -1000,9 +1051,25 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
     optional = [c for c in ("track_count", "year", "album_type", "record_type", "release_type",
                             "type", *(c for group in id_cols.values() for c in group), )
                 if c in cols]
+    artist_ids = {
+        _legacy_key(row["id"]): {
+            **_extra_provider_ids(row, "artist", exclude=set()),
+            **({"spotify": _legacy_spotify_id(row, "spotify_artist_id")}
+               if _legacy_spotify_id(row, "spotify_artist_id") else {}),
+            **({"musicbrainz": _pick(row, "musicbrainz_artist_id", "musicbrainz_id")}
+               if _pick(row, "musicbrainz_artist_id", "musicbrainz_id") else {}),
+        }
+        for row in cursor.execute("SELECT * FROM artists").fetchall()
+    }
+    album_playlists: Dict[str, Set[str]] = {}
+    for track_id, album_id in (cursor.execute("SELECT id, album_id FROM tracks") if origins else ()):
+        origin = origins.get(_legacy_key(track_id))
+        if origin:
+            album_playlists.setdefault(_legacy_key(album_id), set()).add(origin["name"])
     groups: Dict[tuple, List[Dict[str, Any]]] = {}
     for row in cursor.execute(
-            "SELECT al.id, al.title, al.owner_profile_id, ar.name AS artist_name"
+            "SELECT al.id, al.title, " + ("al.owner_profile_id" if has_owners else "NULL AS owner_profile_id")
+            + ", ar.id AS legacy_artist, ar.name AS artist_name"
             + "".join(f", al.{c}" for c in optional)
             + " FROM albums al JOIN artists ar ON ar.id = al.artist_id ORDER BY al.rowid"):
         key = _legacy_key(row["id"])
@@ -1012,11 +1079,17 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
         identity = (normalize_name(row["artist_name"] or ""), release_title_key(row["title"]),
                     album_type == "single")
         if identity[0] and identity[1]:
+            names = album_playlists.get(key, ())
+            owner = _live_owner(row, live)
             groups.setdefault(identity, []).append({
-                "key": key, "owner": _live_owner(row, live), "year": _pick(row, "year"),
+                "key": key, "owner": owner, "year": _pick(row, "year"),
+                # Two playlist saves in one library are two physical versions,
+                # exactly as two libraries' copies are.
+                "slot": (owner, next(iter(names)) if len(names) == 1 else None),
+                "artist_ids": artist_ids.get(_legacy_key(row["legacy_artist"]), {}),
                 "ids": {source: str(_pick(row, *columns)) for source, columns in id_cols.items()
                         if _pick(row, *columns) is not None}})
-    groups = {k: g for k, g in groups.items() if len({e["owner"] for e in g}) > 1}
+    groups = {k: g for k, g in groups.items() if len({e["slot"] for e in g}) > 1}
     if not groups:
         return {}, set()
     wanted = {e["key"] for group in groups.values() for e in group}
@@ -1032,6 +1105,8 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
 
     def contradicts(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
         return (any(a["ids"].get(source, value) != value for source, value in b["ids"].items())
+                or any(str(a["artist_ids"].get(source, value)) != str(value)
+                       for source, value in b["artist_ids"].items())
                 or None not in (a["year"], b["year"]) and str(a["year"]) != str(b["year"]))
 
     copies: Dict[str, str] = {}
@@ -1041,21 +1116,55 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
             mine = titles.get(entry["key"], set())
             best, overlap = None, 0
             for first in firsts:
-                if entry["owner"] in first["owners"] or contradicts(first, entry):
+                if entry["slot"] in first["slots"] or contradicts(first, entry):
                     continue
                 shared = len(mine & titles.get(first["key"], set()))
                 if shared > overlap:
                     best, overlap = first, shared
             if best is None:
-                firsts.append({**entry, "owners": {entry["owner"]}})
+                firsts.append({**entry, "slots": {entry["slot"]}})
             else:
                 copies[entry["key"]] = best["key"]
-                best["owners"].add(entry["owner"])
+                best["slots"].add(entry["slot"])
+                # Later copies must agree with every adopted identity, even
+                # when the first library's sparse row had no provider anchor.
+                best["ids"] = {**best["ids"], **entry["ids"]}
+                best["artist_ids"] = {**best["artist_ids"], **entry["artist_ids"]}
+                if best["year"] is None:
+                    best["year"] = entry["year"]
     return copies, repeated
 
 
+def _recording_identity(row: Any, *, legacy: bool = False) -> Dict[str, Any]:
+    from core.library2.provider_ids import parse_external_ids
+
+    ids = (_extra_provider_ids(row, "track", exclude=set()) if legacy
+           else parse_external_ids(_pick(row, "external_ids")))
+    for source, columns in {
+        "spotify": ("spotify_track_id",) if legacy else ("spotify_id",),
+        "musicbrainz": ("musicbrainz_recording_id",) if legacy else ("musicbrainz_id",),
+        "isrc": ("isrc",),
+    }.items():
+        value = _pick(row, *columns)
+        if value:
+            ids[source] = str(value).strip().casefold()
+    return {"ids": {str(k): str(v).strip().casefold() for k, v in ids.items()},
+            "duration": _pick(row, "duration")}
+
+
+def _recordings_conflict(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    if any(source in a["ids"] and a["ids"][source] != value
+           for source, value in b["ids"].items()):
+        return True
+    try:
+        first, second = float(a["duration"] or 0), float(b["duration"] or 0)
+        return min(first, second) > 0 and abs(first - second) > max(5000, max(first, second) * .1)
+    except (TypeError, ValueError):
+        return False
+
+
 def _track_of_copy(cursor, index: Dict[int, List[Dict[str, Any]]], album_id: int,
-                   row: Any, owner: Any, repeated: Set[Tuple[str, str]]) -> Optional[int]:
+                   row: Any, slot: Any, repeated: Set[Tuple[str, str]]) -> Optional[int]:
     """The catalogue track a copied album's legacy track is another file of:
     same title key, and not yet a track of this library. The position picks
     between several; it does not veto a sole one (upstream's disc number
@@ -1066,19 +1175,24 @@ def _track_of_copy(cursor, index: Dict[int, List[Dict[str, Any]]], album_id: int
     if tracks is None:
         tracks = index[album_id] = [
             {"id": int(t["id"]), "title": release_title_key(t["title"]),
+             "identity": _recording_identity(t),
              "position": (t["disc_number"] or 1, t["track_number"]),
-             "owners": {f[0] for f in cursor.execute(
-                 "SELECT DISTINCT owner_profile_id FROM lib2_track_files WHERE track_id=?",
+             "owners": {(f[0], f[1]) for f in cursor.execute(
+                 "SELECT DISTINCT f.owner_profile_id, o.playlist_name FROM lib2_track_files f "
+                 "LEFT JOIN lib2_file_origins o ON o.file_id = f.id WHERE f.track_id=?",
                  (t["id"],)).fetchall()}}
             for t in cursor.execute(
-                "SELECT id, title, disc_number, track_number FROM lib2_tracks WHERE album_id=?",
+                "SELECT id, title, disc_number, track_number, duration, isrc, spotify_id, "
+                "musicbrainz_id, external_ids FROM lib2_tracks WHERE album_id=?",
                 (album_id,)).fetchall()]
     title = release_title_key(row["title"])
     position = (_pick(row, "disc_number") or 1, _pick(row, "track_number"))
-    candidates = [t for t in tracks if t["title"] == title and owner not in t["owners"]]
+    identity = _recording_identity(row, legacy=True)
+    candidates = [t for t in tracks if t["title"] == title and slot not in t["owners"]
+                  and not _recordings_conflict(t["identity"], identity)]
     placed = [t for t in candidates if t["position"] == position]
     sole = len(candidates) == 1 and (_legacy_key(row["album_id"]), title) not in repeated
-    match = placed[0] if placed else (candidates[0] if sole else None)
+    match = placed[0] if len(placed) == 1 else (candidates[0] if not placed and sole else None)
     return None if match is None else match["id"]
 
 
@@ -1661,8 +1775,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 + "GROUP BY album_id"
             ).fetchall()
         }
+        playlist_origins = _playlist_origins(cursor)
         album_copies, repeated_titles = _legacy_album_copies(
-            cursor, actual_track_counts, live_owners)
+            cursor, actual_track_counts, live_owners, playlist_origins)
         own_album_keys = set(album_map)
         made_by_a_copy: Set[int] = set()  # albums an own library's row created this run
         for copy_key, first_key in album_copies.items():
@@ -1889,6 +2004,13 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "WHERE track_id IS NOT NULL AND path IS NOT NULL"
             ).fetchall()
         }
+        imported_files = {
+            (int(row["track_id"]), _legacy_key(row["legacy_track_id"])): dict(row)
+            for row in cursor.execute(
+                "SELECT id, track_id, path, legacy_track_id, legacy_source_path FROM lib2_track_files "
+                "WHERE track_id IS NOT NULL AND legacy_track_id IS NOT NULL"
+            ).fetchall()
+        }
         # A file is concrete track-level coverage.  The release flag is derived
         # later, after Wishlist rows have also been seeded; it must not suppress
         # an individually-owned track on a partial album.
@@ -2007,9 +2129,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             existing = track_map.get(_legacy_key(row["id"]))
             owner = _live_owner(row, live_owners)
             joined = None
+            origin = playlist_origins.get(_legacy_key(row["id"]))
+            slot = (owner, origin["name"] if origin else None)
             if existing is None and album_id in copied_albums:
                 joined = joined_track_map.get(_legacy_key(row["id"])) or _track_of_copy(
-                    cursor, copied_tracks, album_id, row, owner, repeated_titles)
+                    cursor, copied_tracks, album_id, row, slot, repeated_titles)
             adopted = joined is not None and owner is not None
             if adopted:
                 # another library's file of a track already imported; the
@@ -2186,6 +2310,14 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # Track file from legacy file_path.
             file_path = _pick(row, "file_path")
             if file_path:
+                source_path = file_path
+                # A native rename keeps the file identity/back-reference. A
+                # frozen legacy path is not permission to resurrect its old
+                # location and prune the real, now-organized version.
+                imported_file = imported_files.get((int(track_id), _legacy_key(row["id"])))
+                if (imported_file and imported_file["path"]
+                        and imported_file["path"] != imported_file["legacy_source_path"]):
+                    file_path = imported_file["path"]
                 fmt = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else None
                 file_key = (int(track_id), str(file_path))
                 file_id = existing_files.get(file_key)
@@ -2198,12 +2330,12 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     cursor.execute(
                         "INSERT INTO lib2_track_files(track_id, path, size, bitrate, sample_rate, "
                         "bit_depth, format, verification_status, import_status, owner_profile_id, "
-                        "legacy_track_id, legacy_import_run_id, acquired_quality_json, retention_json) "
-                        "VALUES(?,?,?,?,?,?,?,?, 'imported',?,?,?,?,?)",
+                        "legacy_track_id, legacy_import_run_id, acquired_quality_json, retention_json, legacy_source_path) "
+                        "VALUES(?,?,?,?,?,?,?,?, 'imported',?,?,?,?,?,?)",
                         (track_id, file_path, _pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status"), owner, row["id"], run_id,
-                         _pick(row, "acquired_quality_json"), _pick(row, "retention_json")),
+                         _pick(row, "acquired_quality_json"), _pick(row, "retention_json"), source_path),
                     )
                     existing_files[file_key] = int(cursor.lastrowid)
                     stats["files"] += 1
@@ -2216,20 +2348,31 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                                   verification_status=?,
                                   acquired_quality_json=COALESCE(acquired_quality_json, ?),
                                   retention_json=COALESCE(retention_json, ?),
-                                  owner_profile_id=COALESCE(?, owner_profile_id),
-                                  legacy_track_id=?,
-                                  legacy_import_run_id=?, updated_at=CURRENT_TIMESTAMP
+                                  owner_profile_id=CASE WHEN legacy_track_id IS NULL OR legacy_track_id=?
+                                      THEN COALESCE(?, owner_profile_id) ELSE owner_profile_id END,
+                                  legacy_track_id=CASE WHEN legacy_track_id IS NULL OR legacy_track_id=?
+                                      THEN ? ELSE legacy_track_id END,
+                                  legacy_import_run_id=?, legacy_source_path=?, updated_at=CURRENT_TIMESTAMP
                             WHERE id=?""",
                         (_pick(row, "file_size"), _pick(row, "bitrate"),
                          _pick(row, "sample_rate"), _pick(row, "bit_depth"), fmt,
                          _pick(row, "verification_status"),
                          _pick(row, "acquired_quality_json"), _pick(row, "retention_json"),
-                         owner, row["id"], run_id, file_id),
+                         row["id"], owner, row["id"], row["id"], run_id, source_path, file_id),
                     )
+                # A file a second legacy row also points at keeps its first
+                # owner/back-reference; this row's observation is provenance only.
+                cursor.execute(
+                    "INSERT OR REPLACE INTO lib2_file_origins(file_id, legacy_track_id, owner_profile_id, "
+                    "playlist_name, source, source_playlist_id) VALUES(?,?,?,?,?,?)",
+                    (existing_files[file_key], row["id"], owner,
+                     origin["name"] if origin else None, origin["source"] if origin else None,
+                     origin["source_playlist_id"] if origin else None))
             if copied_tracks.get(album_id) is not None:
                 entry = next((t for t in copied_tracks[album_id] if t["id"] == track_id), None)
                 if entry is None:
                     entry = {"id": int(track_id), "title": release_title_key(title),
+                             "identity": _recording_identity(row, legacy=True),
                              "position": (_pick(row, "disc_number") or 1,
                                           _pick(row, "track_number")),
                              "owners": set()}
@@ -2237,7 +2380,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 elif owner is None and track_id in tracks_by_a_copy:
                     entry["title"] = release_title_key(title)
                     entry["position"] = (_pick(row, "disc_number") or 1, _pick(row, "track_number"))
-                entry["owners"].add(owner)
+                entry["owners"].add(slot)
             if legacy_owners:
                 _map_server_item(cursor, "track", track_id, row, owner)
             if (i + 1) % IMPORT_BATCH_SIZE == 0:

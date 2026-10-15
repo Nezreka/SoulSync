@@ -1,10 +1,35 @@
 """An upgrade must preserve references across overlapping catalogue IDs."""
 
 from contextlib import closing
+import sqlite3
 
 from core.library2.bootstrap import run_bootstrap_if_needed
 from core.library2.importer import import_legacy_library
 from database.music_database import MusicDatabase
+
+
+def test_completed_native_stash_keeps_valid_native_id_before_discriminator():
+    from core.library2.user_references import ensure_reference_id_kinds, migrate_legacy_track_references
+
+    with closing(sqlite3.connect(':memory:')) as conn:
+        conn.row_factory = sqlite3.Row
+        conn.executescript('''
+            CREATE TABLE lib2_bootstrap_state(id INTEGER PRIMARY KEY,status TEXT);
+            INSERT INTO lib2_bootstrap_state VALUES(1,'done');
+            CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY,legacy_track_id INTEGER,title TEXT);
+            INSERT INTO lib2_tracks VALUES(7,700,'Saved native song');
+            INSERT INTO lib2_tracks VALUES(8,7,'Different legacy song');
+            CREATE TABLE lib2_track_files(track_id INTEGER,legacy_track_id INTEGER,path TEXT);
+            CREATE TABLE sample_stash(id INTEGER PRIMARY KEY,name TEXT,track_id INTEGER,file_path TEXT);
+            INSERT INTO sample_stash VALUES(1,'My Chop',7,'/chops/my.wav');
+            INSERT INTO sample_stash VALUES(2,'Unavailable source',999,'/chops/missing.wav');
+        ''')
+        ensure_reference_id_kinds(conn)
+        migrate_legacy_track_references(conn)
+        migrate_legacy_track_references(conn)
+        rows = conn.execute('SELECT track_id,track_id_kind,file_path FROM sample_stash ORDER BY id').fetchall()
+        assert tuple(rows[0]) == (7, 'lib2', '/chops/my.wav')
+        assert tuple(rows[1]) == (999, 'untyped', '/chops/missing.wav')
 
 
 def _overlapping_tracks(database):

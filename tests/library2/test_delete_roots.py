@@ -147,3 +147,61 @@ def test_a_resolver_guess_in_the_transfer_folder_is_still_refused(tmp_path):
     assert fuzzy_resolved_path_is_deletable(
         recorded, str(guessed), _Config(transfer=str(transfer)),
     ) is False
+
+
+def test_missing_declared_root_does_not_authorize_deleting_another_copy(
+        imported_conn, legacy_db, tmp_path):
+    from core.library2.file_delete import delete_entity_files
+
+    original_root = tmp_path / "original"
+    original_root.mkdir()
+    (original_root / ".mounted").write_bytes(b"mounted")
+    missing = original_root / "Artist/Album/song.flac"
+    other_root = tmp_path / "independent"
+    other = other_root / "Artist/Album/song.flac"
+    other.parent.mkdir(parents=True)
+    other.write_bytes(b"independent copy")
+    album_id = _album_file(imported_conn, missing)
+    config = _Config(music_paths=[str(original_root), str(other_root)])
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id, config_manager=config,
+    )
+    # Confirm the real user action, then assert on its physical side effect.
+    delete_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        preview_token=preview["preview_token"], config_manager=config,
+    )
+
+    assert other.exists(), "delete must not unlink a different declared root's copy"
+    assert other.read_bytes() == b"independent copy"
+    assert preview["deletable_count"] == 0
+
+
+def test_destructive_guard_refuses_cross_declared_root_guesses(tmp_path):
+    original = tmp_path / "unmounted"
+    independent = tmp_path / "independent"
+    target = independent / "Artist/Album/song.flac"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"independent")
+
+    assert fuzzy_resolved_path_is_deletable(
+        str(original / "Artist/Album/song.flac"), str(target),
+        _Config(music_paths=[str(original), str(independent)]),
+    ) is False
+
+
+def test_destructive_guard_retains_a_missing_windows_roots_identity(tmp_path, monkeypatch):
+    import os
+
+    real_exists = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda path: False if path == "/.dockerenv" else real_exists(path))
+    root = tmp_path / "local"
+    target = root / "Artist/Album/song.flac"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"independent")
+
+    assert fuzzy_resolved_path_is_deletable(
+        r"H:\Music\Artist\Album\song.flac", str(target),
+        _Config(music_paths=[r"H:\Music", str(root)]),
+    ) is False

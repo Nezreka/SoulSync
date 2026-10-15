@@ -420,7 +420,7 @@ class _KeepOpen(sqlite3.Connection):
 
 @pytest.fixture()
 def repoint(monkeypatch, tmp_path):
-    """Returns (update_track_path_fn, conn) — the REAL production closure."""
+    """The real updater with explicit evidence for the single seeded file."""
     conn = sqlite3.connect(":memory:", factory=_KeepOpen)
     conn.row_factory = sqlite3.Row
     from core.library2.schema import ensure_library_v2_schema
@@ -445,7 +445,13 @@ def repoint(monkeypatch, tmp_path):
         get_database=lambda: _RepointDb(conn),
     )
     runner(_make_item())
-    return captured['update_track_path_fn'], conn
+    def update_planned_file(track_id, new_path):
+        return captured['update_track_path_fn'](
+            track_id, new_path, file_id=1, source_db_path=OLD, current_path_abs=OLD,
+            moved_paths={OLD: new_path},
+        )
+
+    return update_planned_file, conn
 
 
 OLD = '/music/Old Artist/Album/01.flac'

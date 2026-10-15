@@ -1016,6 +1016,20 @@ def _bitrate_kbps(value: Any) -> Any:
 _NOT_LOADED = object()
 
 
+def _file_playlists_many(conn, file_ids) -> Dict[int, List[str]]:
+    """Playlists each file was saved for (legacy playlist copies), one read."""
+    ids = sorted({int(i) for i in file_ids if i is not None})
+    found: Dict[int, List[str]] = {}
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        for row in conn.execute(
+                "SELECT DISTINCT file_id, playlist_name FROM lib2_file_origins "
+                f"WHERE playlist_name IS NOT NULL AND file_id IN ({','.join('?' for _ in chunk)}) "
+                "ORDER BY playlist_name", chunk):
+            found.setdefault(int(row[0]), []).append(row[1])
+    return found
+
+
 def _serialize_track(
     conn,
     t,
@@ -1028,6 +1042,7 @@ def _serialize_track(
     media_server_sources: Optional[List[str]] = None,
     linked_from: Any = _NOT_LOADED,
     findings: Any = None,
+    playlists: Optional[Dict[int, List[str]]] = None,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
     if file_row is _NOT_LOADED:
@@ -1126,6 +1141,9 @@ def _serialize_track(
             # ('./Transfer', 'Transfer', '/app/Transfer'), so the noise was not
             # even consistent between rows of one album.
             "display_path": library_relative_path(file_row["path"]),
+            # Playlists this very file was saved for (legacy playlist copies); passive provenance.
+            "playlists": (playlists if playlists is not None
+                          else _file_playlists_many(conn, [file_row["id"]])).get(int(file_row["id"]), []),
             "format": file_row["format"],
             "bitrate": bitrate,
             "sample_rate": sample_rate,
@@ -1245,6 +1263,8 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
     media_sources = _media_server_sources_many(conn, "track", track_ids)
     from core.library2.validation import linked_findings_many
     findings_by_file = linked_findings_many(conn, [*files.values(), *borrowed_files.values()])
+    playlists_by_file = _file_playlists_many(
+        conn, [f["id"] for f in [*files.values(), *borrowed_files.values()]])
     serialized = [
         _serialize_track(
             conn,
@@ -1259,6 +1279,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             provenance=provenance.get(int(track["id"]), {}),
             media_server_sources=media_sources.get(int(track["id"]), []),
             findings=findings_by_file.get((files.get(int(track['id'])) or _borrowed_row(links, borrowed_files, int(track['id'])) or {}).get('id'), []),
+            playlists=playlists_by_file,
         )
         for track in tracks
     ]
@@ -1583,7 +1604,9 @@ def track_versions(conn, track_id: int) -> Optional[List[Dict[str, Any]]]:
         f"ORDER BY {primary_order()}",
         (int(track_id),),
     ).fetchall()
-    versions = [_serialize_track(conn, t, album, file_row=dict(row), linked_from=None)
+    playlists_by_file = _file_playlists_many(conn, [row["id"] for row in rows])
+    versions = [_serialize_track(conn, t, album, file_row=dict(row), linked_from=None,
+                                 playlists=playlists_by_file)
                 for row in rows]
     _apply_quality_verdicts(conn, versions)
     return versions

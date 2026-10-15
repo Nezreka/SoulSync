@@ -117,88 +117,73 @@ def build_runner(
         except Exception as e:    # noqa: BLE001 — never break a reorganize
             logger.debug("[Reorganize] Could not re-point findings: %s", e)
 
-    def _update_track_path(track_id, new_path):
+    def _update_track_path(track_id, new_path, *, file_id=None, source_db_path=None,
+                           current_path_abs=None, sibling_files=(), moved_paths=None):
         """Repoint the native catalogue at ``new_path``.
 
-        iss29-E01: this MUST raise when the catalogue was not updated.
-        ``_finalize_track`` detects a failed path update solely by catching an
-        exception out of this callback, and on success it goes on to
-        ``os.remove`` the original. Swallowing the error here therefore deleted
-        the user's only copy while both catalogues still pointed at the old
-        path — reported as "moved". The realistic trigger is the SQLite write
-        lock being held elsewhere (import commit, ``recompute_wanted``): the
-        connection raises ``database is locked``, the whole transaction rolls
-        back, and the file is destroyed anyway. Downstream that reads as a lib2
-        miss, a ``dead_file_cleaner`` finding and a re-download of a track the
-        user already owned.
+        The audio has already moved. A catalogue write failure must propagate
+        so the executor restores it; otherwise the old path becomes a false
+        missing-file finding and the new location is lost to the catalogue.
 
-        The callback raises unless exactly one native file row is resolved, so
-        the caller never deletes the source after an ambiguous/stale update.
+        The planner supplies file identity and the mover supplies successful
+        paths. A stale file row fails the whole transaction so the caller can
+        undo exactly those filesystem moves.
         """
         lib2_links = {"track_ids": [], "file_ids": []}
         config_manager = get_config_manager() if get_config_manager is not None else None
         db = get_database()
         with db._get_connection() as conn:
-            previous_path = None
             has_v2_files = bool(conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
                 "AND name='lib2_track_files'"
             ).fetchone())
-            if has_v2_files:
-                # the library being reorganized (#1199): the file the move was
-                # planned for is the first of THIS library's rows, in the same
-                # order load_album_and_tracks chose it -- the global primary
-                # may be another library's copy
-                from core.library2.sql_util import owner_clause
-                owner = owner_clause(column="f.owner_profile_id")
-                rows = conn.execute(
-                    f"""SELECT f.id AS file_id, f.track_id, f.path, f.is_primary
-                         FROM lib2_track_files f
-                        WHERE f.track_id=?
-                          AND COALESCE(f.file_state,'active')<>'deleted'{owner}
-                        ORDER BY f.is_primary DESC, f.id""",
-                    (int(track_id),),
-                ).fetchall()
-                primary_rows = [row for row in rows if bool(row["is_primary"])] if rows else []
-                if rows and not primary_rows and owner:
-                    primary_rows = [rows[0]]
-                if primary_rows:
-                    previous_path = primary_rows[0]["path"]
-                lib2_links = {
-                    "track_ids": sorted({int(row["track_id"]) for row in rows}),
-                    "file_ids": sorted({int(row["file_id"]) for row in primary_rows}),
-                }
-            if len(lib2_links["file_ids"]) != 1:
+            if (not has_v2_files or file_id is None or not source_db_path
+                    or not current_path_abs or not moved_paths
+                    or moved_paths.get(current_path_abs) != new_path):
                 raise RuntimeError(f"track {track_id} has no unambiguous file row")
-            old_stem = os.path.splitext(os.path.basename(previous_path or ""))[0]
-            new_stem = os.path.splitext(os.path.basename(new_path))[0]
-            new_dir = os.path.dirname(new_path)
+
+            from core.library2.sql_util import owner_clause
+            owner = owner_clause(column="owner_profile_id")
+            planned_files = [{
+                'file_id': file_id, 'source_db_path': source_db_path,
+                'current_path_abs': current_path_abs,
+            }, *sibling_files]
+            planned_paths = {f['current_path_abs'] for f in planned_files}
+            if set(moved_paths) - planned_paths:
+                raise RuntimeError(f"track {track_id} contains an unplanned file move")
             repointed_ids = []
-            for row in rows:
-                old_row_path = str(row["path"] or "")
-                row_stem, row_ext = os.path.splitext(os.path.basename(old_row_path))
-                # The filesystem mover carries same-stem audio versions (for
-                # example FLAC + OPUS) alongside the primary. Repoint exactly
-                # those rows in the same transaction; unrelated historical
-                # versions with another stem were not moved and stay put.
-                if int(row["file_id"]) == lib2_links["file_ids"][0]:
-                    row_new_path = new_path
-                elif row_stem == old_stem and row_ext:
-                    row_new_path = os.path.join(new_dir, new_stem + row_ext)
-                else:
+            for planned_file in planned_files:
+                row_new_path = moved_paths.get(planned_file['current_path_abs'])
+                if row_new_path is None:
                     continue
-                conn.execute(
-                    """UPDATE lib2_track_files
-                          SET path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                    (row_new_path, int(row["file_id"])),
+                old_row_path = planned_file['source_db_path']
+                changed = conn.execute(
+                    f"""UPDATE lib2_track_files
+                           SET path=?, updated_at=CURRENT_TIMESTAMP
+                         WHERE id=? AND track_id=? AND path=?
+                           AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')
+                           {owner}""",
+                    (row_new_path, int(planned_file['file_id']), int(track_id), old_row_path),
                 )
+                if changed.rowcount != 1:
+                    raise RuntimeError(f"track {track_id} file {planned_file['file_id']} changed since planning")
                 _repoint_findings(conn, old_row_path, row_new_path)
-                repointed_ids.append(int(row["file_id"]))
-            lib2_links["file_ids"] = sorted(repointed_ids)
+                repointed_ids.append(int(planned_file['file_id']))
+            lib2_links = {"track_ids": [int(track_id)], "file_ids": sorted(repointed_ids)}
             # Findings carry their own path snapshot. Move those snapshots in
             # the same transaction as the native file row so future fixes do
             # not keep retrying a path that the reorganize just removed.
             conn.commit()
+
+        # Repair bounded, known dependants only after the audio paths and DB
+        # agree. Legacy M3Us beside a moved original and manifest-owned
+        # materialized links are the sources of reference evidence.
+        try:
+            from core.playlists.path_repair import repair_playlist_references
+
+            repair_playlist_references(moved_paths, config_manager=config_manager)
+        except Exception as reference_err:
+            logger.warning("[Reorganize] Playlist path repair failed: %s", reference_err)
 
         # A lib2-imported track keeps a legacy_track_id back-reference. Route
         # the update through the common boundary so path, file snapshot,

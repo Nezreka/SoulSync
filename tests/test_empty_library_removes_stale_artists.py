@@ -87,6 +87,7 @@ def _worker(client, database=None):
     worker.should_stop = False
     worker.post_scan_hook = None
     worker._new_track_ids = set()
+    worker._seen_credit_artist_ids = set()
     worker.processed_artists = 0
     worker.processed_albums = 0
     worker.processed_tracks = 0

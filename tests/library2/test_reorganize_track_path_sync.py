@@ -82,22 +82,30 @@ def test_native_path_update_repoints_same_stem_file_versions(
 ):
     with closing(imported_legacy_db._get_connection()) as conn:
         primary = conn.execute(
-            "SELECT track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
+            "SELECT id, track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
         ).fetchone()
         track_id = primary["track_id"]
         secondary_path = primary["path"].rsplit(".", 1)[0] + ".opus"
-        conn.execute(
+        secondary_id = conn.execute(
             """INSERT INTO lib2_track_files(track_id, path, legacy_track_id)
                VALUES (?, ?, NULL)""",
             (track_id, secondary_path),
-        )
+        ).lastrowid
         conn.commit()
 
     captured = {}
 
     def fake_reorganize_album(*, update_track_path_fn, **kwargs):
         captured['update_track_path_fn'] = update_track_path_fn
-        update_track_path_fn(track_id, '/library/Drake/Views/01 One Dance.flac')
+        destination = '/library/Drake/Views/01 One Dance.flac'
+        update_track_path_fn(
+            track_id, destination, file_id=primary['id'],
+            source_db_path=primary['path'], current_path_abs=primary['path'],
+            sibling_files=[{'file_id': secondary_id, 'source_db_path': secondary_path,
+                            'current_path_abs': secondary_path}],
+            moved_paths={primary['path']: destination,
+                         secondary_path: '/library/Drake/Views/01 One Dance.opus'},
+        )
         return {'status': 'completed', 'source': None, 'total': 1, 'moved': 1,
                 'skipped': 0, 'failed': 0, 'errors': []}
 

@@ -82,7 +82,10 @@ def ensure_file_delete_schema(cursor) -> None:
     )
 
 
-def _library_roots(config_manager: Any = None, *, include_import_root: bool = True) -> List[str]:
+def _library_roots(
+    config_manager: Any = None, *, include_import_root: bool = True,
+    include_missing: bool = False,
+) -> List[str]:
     """The folders a library file may legitimately live in.
 
     ``library.music_paths`` is what the user declared — and it is optional,
@@ -131,16 +134,18 @@ def _library_roots(config_manager: Any = None, *, include_import_root: bool = Tr
         if not isinstance(raw, str) or not raw.strip():
             continue
         resolved = os.path.realpath(
-            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip())))
+            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip()).replace("\\", "/")))
         )
-        if os.path.isdir(resolved) and resolved not in roots:
+        if (include_missing or os.path.isdir(resolved)) and resolved not in roots:
             roots.append(resolved)
     return roots
 
 
 def _containing_root(path: str, roots: List[str]) -> Optional[str]:
     """Return the deepest configured root containing ``path``; fail closed."""
-    real_path = os.path.realpath(path)
+    from core.imports.paths import docker_resolve_path
+
+    real_path = os.path.realpath(docker_resolve_path(path).replace("\\", "/"))
     matches = []
     for root in roots:
         try:
@@ -171,6 +176,10 @@ def fuzzy_resolved_path_is_deletable(
     configured library root — the same containment ADR-05 already enforces for
     the Library V2 delete pipeline (:func:`_containing_root`).
 
+    When the stored path already names a declared root, a guess must retain
+    that root even when it is unavailable. Equal suffixes in independent roots
+    do not establish that the files are the same.
+
     Fails closed: with no usable roots configured there is nothing to validate a
     guess against, so the guess is not acted on.
     """
@@ -186,7 +195,19 @@ def fuzzy_resolved_path_is_deletable(
     roots = _library_roots(config_manager, include_import_root=False)
     if not roots:
         return False
-    return _containing_root(resolved, roots) is not None
+    resolved_root = _containing_root(resolved, roots)
+    if resolved_root is None:
+        return False
+    # The original's identity survives an unmounted root. Being somewhere in
+    # the configured library is insufficient: another root can hold an
+    # independent copy with exactly the same suffix.
+    known_roots = _library_roots(config_manager, include_missing=True)
+    original_root = _containing_root(original, known_roots)
+    if original_root is not None:
+        return original_root == _containing_root(resolved, known_roots)
+    # A server-only mount alias may still resolve into a single known music
+    # root; shared resolution already rejects independent ambiguous matches.
+    return True
 
 
 ALREADY_GONE = "already_gone"

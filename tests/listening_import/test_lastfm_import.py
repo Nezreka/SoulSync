@@ -4,6 +4,27 @@ from database.music_database import MusicDatabase
 from core.listening_import.lastfm import LastFMListeningImportWorker, normalize_lastfm_scrobble
 
 
+def test_lastfm_native_history_id_wins_over_different_legacy_numeric_collision():
+    import sqlite3
+    from contextlib import closing
+
+    with closing(sqlite3.connect(':memory:')) as conn:
+        conn.executescript('''
+            CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY,legacy_track_id TEXT,title TEXT);
+            INSERT INTO lib2_tracks VALUES(1,100,'Chosen');
+            INSERT INTO lib2_tracks VALUES(2,1,'Wrong song');
+        ''')
+        db = MusicDatabase.__new__(MusicDatabase)
+        db._add_listening_history_table(conn.cursor())
+        conn.execute("INSERT INTO listening_history(track_id,title,played_at,server_source,db_track_id) VALUES('fm1','Chosen','2026-01-01 01:00:00','lastfm',1)")
+        conn.execute("INSERT INTO listening_history(track_id,title,played_at,server_source,db_track_id) VALUES('plex1','Wrong song','2026-01-01 02:00:00','plex',1)")
+        # A prior startup may already have made the generic legacy backfill.
+        conn.execute("INSERT INTO listening_history(track_id,title,played_at,server_source,db_track_id,lib2_track_id) VALUES('fm2','Chosen','2026-01-01 03:00:00','lastfm',1,2)")
+        db._add_listening_history_table(conn.cursor())
+        db._add_listening_history_table(conn.cursor())
+        assert conn.execute('SELECT db_track_id,lib2_track_id FROM listening_history ORDER BY id').fetchall() == [(None, 1), (1, 2), (None, 1)]
+
+
 class _Config:
     def get(self, key, default=None):
         values = {

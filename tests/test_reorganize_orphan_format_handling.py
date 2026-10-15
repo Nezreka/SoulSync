@@ -252,7 +252,7 @@ class TestRenameInPlaceOrdersTheSiblingCarry:
         monkeypatch.setattr(library_reorganize.os, "rename", _boom)
 
         ok, err = library_reorganize._rename_track_in_place(
-            str(canonical), str(dst_dir / "05 - Song.flac")
+            str(canonical), str(dst_dir / "05 - Song.flac"), sibling_paths=[str(sibling)]
         )
 
         assert ok is False

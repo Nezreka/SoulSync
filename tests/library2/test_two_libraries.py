@@ -273,6 +273,12 @@ class TestRemovalDetection:
         from core.library2.media_server_sync import upsert_artist
         self._mapped(lib, "Both Band", "Both", "b", lib.shared)
         with lib.db._get_connection() as conn:
+            # A scan only stamps an artist its own library holds a file of
+            # (it never creates one): Kim has her copy of the track too.
+            conn.execute(
+                "INSERT INTO lib2_track_files(track_id, path, is_primary, file_state, owner_profile_id)"
+                " SELECT track_id, ?, 0, 'active', ? FROM lib2_track_files LIMIT 1",
+                (os.path.join(lib.kim_root, "Both Band", "Both", "01.flac"), lib.kim))
             with library_scope.library_scope(lib.kim):
                 upsert_artist(conn.cursor(), server_source="plex", server_id="ar-kims-copy",
                               name="Both Band")

@@ -318,6 +318,7 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 
 _MIGRATION_BLOCKED_ENDPOINTS = frozenset({
     'start_download', 'start_matched_download', 'process_wishlist_api',
+    'enriched_start', 'manual_start',
     'start_wishlist_missing_downloads', 'start_playlist_missing_downloads',
     'start_missing_downloads', 'start_database_update', 'start_watchlist_scan',
     'update_similar_artists_endpoint', 'start_metadata_update', 'repair_job_run',

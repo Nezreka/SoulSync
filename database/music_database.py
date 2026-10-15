@@ -685,7 +685,6 @@ class MusicDatabase:
             # the pragma takes a lock, and on an install with enrichment workers
             # writing constantly each fresh connection sat ~250 ms in the busy
             # backoff before it could run a single query.
-            self._ensure_wal_mode()
             self._initialize_database()
             _database_initialized_paths.add(db_key)
     
@@ -773,8 +772,17 @@ class MusicDatabase:
     
     def _initialize_database(self):
         """Create database tables if they don't exist"""
+        from core.library2.upgrade_backup import prepare_startup_upgrade, record_startup_upgrade
+        # A harness with no file behind it has nothing to snapshot.
+        upgrade = prepare_startup_upgrade(self.database_path) if getattr(self, 'database_path', None) else None
+        if getattr(self, 'database_path', None):
+            self._ensure_wal_mode()
+        conn = None
         try:
             conn = self._get_connection()
+            # sqlite3 does not implicitly begin for DDL. Start explicitly so
+            # required schema failure also rolls back early CREATE/ALTER steps.
+            conn.execute('BEGIN')
             cursor = conn.cursor()
             
             # The legacy `artists`/`albums`/`tracks` catalogue is no longer
@@ -1963,6 +1971,7 @@ class MusicDatabase:
                 self._record_migration(cursor, 'library_v2_schema')
             except Exception as lib2_err:
                 logger.error(f"Library v2 schema init failed: {lib2_err}")
+                raise
 
             # Durable acquisition root + persistent external-client correlation
             # (audit Phase 4 / ADR-07).
@@ -1985,6 +1994,7 @@ class MusicDatabase:
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
+            record_startup_upgrade(conn, upgrade)
 
             conn.commit()
 
@@ -2011,8 +2021,13 @@ class MusicDatabase:
             logger.info("Database initialized successfully")
 
         except Exception as e:
+            if conn is not None:
+                conn.rollback()
             logger.error(f"Error initializing database: {e}")
             raise
+        finally:
+            if conn is not None:
+                conn.close()
 
         self._init_manual_library_match_table()
         self._backfill_mirrored_track_source_ids()
@@ -5775,6 +5790,31 @@ class MusicDatabase:
             cursor.execute("PRAGMA table_info(listening_history)")
             if 'lib2_track_id' not in {r[1] for r in cursor.fetchall()}:
                 cursor.execute("ALTER TABLE listening_history ADD COLUMN lib2_track_id INTEGER")
+            # INT-01 repair: the Last.fm importer resolved against `lib2_tracks`
+            # but stored the result in `db_track_id`, the media server's own id
+            # namespace. Those rows lost their cover/artist/genre links, and the
+            # backfill above would read the same value as a LEGACY track id — a
+            # numeric collision then links the play to a different track. Move
+            # them source-specifically: only `lastfm` rows, only where the value
+            # really names a catalogue row, and only while `lib2_track_id` is
+            # empty or the legacy-id guess the generic backfill made from the same
+            # number (a startup of an older build already ran it), so it is
+            # idempotent and touches nothing else. It runs FIRST: the backfill
+            # below must never read this namespace as a legacy id.
+            try:
+                cursor.execute("""
+                    UPDATE listening_history
+                       SET lib2_track_id = db_track_id, db_track_id = NULL
+                     WHERE server_source = 'lastfm'
+                       AND db_track_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM lib2_tracks t
+                                    WHERE t.id = listening_history.db_track_id)
+                       AND (lib2_track_id IS NULL
+                            OR lib2_track_id = (SELECT t.id FROM lib2_tracks t
+                                                 WHERE t.legacy_track_id = listening_history.db_track_id))
+                """)
+            except Exception as e:
+                logger.debug("last.fm listening id repair skipped: %s", e)
             try:
                 cursor.execute("""
                     UPDATE listening_history
@@ -5788,26 +5828,6 @@ class MusicDatabase:
                 """)
             except Exception as e:
                 logger.debug("listening_history catalogue backfill skipped: %s", e)
-            # INT-01 repair: the Last.fm importer resolved against `lib2_tracks`
-            # but stored the result in `db_track_id`, the media server's own id
-            # namespace. Those rows lost their cover/artist/genre links, and the
-            # backfill above would read the same value as a LEGACY track id — a
-            # numeric collision then links the play to a different track. Move
-            # them source-specifically: only `lastfm` rows, only where the value
-            # really names a catalogue row, and only while `lib2_track_id` is
-            # still empty, so it is idempotent and touches nothing else.
-            try:
-                cursor.execute("""
-                    UPDATE listening_history
-                       SET lib2_track_id = db_track_id, db_track_id = NULL
-                     WHERE server_source = 'lastfm'
-                       AND lib2_track_id IS NULL
-                       AND db_track_id IS NOT NULL
-                       AND EXISTS (SELECT 1 FROM lib2_tracks t
-                                    WHERE t.id = listening_history.db_track_id)
-                """)
-            except Exception as e:
-                logger.debug("last.fm listening id repair skipped: %s", e)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_lib2_track ON listening_history (lib2_track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_played_at ON listening_history (played_at)")
             cursor.execute("""

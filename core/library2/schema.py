@@ -247,10 +247,28 @@ CREATE TABLE IF NOT EXISTS lib2_track_files (
     legacy_track_id INTEGER,                          -- non-NULL only for legacy-import-owned files
     legacy_import_run_id TEXT,                        -- last complete legacy snapshot that saw it
     owner_profile_id INTEGER,                         -- whose library this file belongs to; NULL = the shared library (every row today)
+    legacy_source_path TEXT,                          -- last source observation; native renames keep path independent
     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (track_id) REFERENCES lib2_tracks(id) ON DELETE SET NULL,
     FOREIGN KEY (derived_from_file_id) REFERENCES lib2_track_files(id) ON DELETE SET NULL
+)
+"""
+
+# Passive provenance of a physical file: which legacy library row observed it and,
+# when the legacy playlist data proves it, which playlist it was saved for. Never
+# an ownership claim; the file's root decides the library.
+LIB2_FILE_ORIGINS_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_file_origins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_id INTEGER NOT NULL,
+    legacy_track_id INTEGER NOT NULL,
+    owner_profile_id INTEGER,
+    playlist_name TEXT,
+    source TEXT,
+    source_playlist_id TEXT,
+    UNIQUE (file_id, legacy_track_id),
+    FOREIGN KEY (file_id) REFERENCES lib2_track_files(id) ON DELETE CASCADE
 )
 """
 
@@ -358,6 +376,7 @@ _ALL_DDL = (
     LIB2_TRACKS_DDL,
     LIB2_TRACK_ARTISTS_DDL,
     LIB2_TRACK_FILES_DDL,
+    LIB2_FILE_ORIGINS_DDL,
     LIB2_MANUAL_SKIPS_DDL,
     LIB2_MIRROR_OUTBOX_DDL,
 )
@@ -466,6 +485,8 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_track_files ADD COLUMN legacy_track_id INTEGER"),
     ("lib2_track_files", "legacy_import_run_id",
      "ALTER TABLE lib2_track_files ADD COLUMN legacy_import_run_id TEXT"),
+    ("lib2_track_files", "legacy_source_path",
+     "ALTER TABLE lib2_track_files ADD COLUMN legacy_source_path TEXT"),
     # Missing lifecycle (audit P2-02): consecutive misses only count while
     # the relevant library root is known healthy.
     ("lib2_track_files", "missing_since",
@@ -1505,4 +1526,5 @@ __all__ = [
     "LIB2_TRACKS_DDL",
     "LIB2_TRACK_ARTISTS_DDL",
     "LIB2_TRACK_FILES_DDL",
+    "LIB2_FILE_ORIGINS_DDL",
 ]

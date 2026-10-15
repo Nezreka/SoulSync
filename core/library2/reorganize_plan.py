@@ -119,8 +119,8 @@ def _album_row(conn, album_id: int):
 def _track_rows(conn, album_id: int) -> List[Any]:
     """The album's tracks with their primary file, catalogue order.
 
-    A track with no usable file is not part of a reorganize — there is nothing
-    to move — so the join is inner on purpose.
+    Retain positions without usable files for release/disc counts; the planner
+    filters them out before creating move entries.
     """
     from core.library2.sql_util import owner_clause
     from core.library2.track_files import primary_order
@@ -129,13 +129,15 @@ def _track_rows(conn, album_id: int) -> List[Any]:
     # library's copy into this library's folder (#1199)
     return conn.execute(
         f"""SELECT t.id, t.title, t.track_number, t.disc_number,
-                   (SELECT tf.path FROM lib2_track_files tf
+                   selected.id AS file_id, selected.path AS file_path
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_files selected ON selected.id =
+                   (SELECT tf.id FROM lib2_track_files tf
                      WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> ''
                        AND COALESCE(tf.file_state,'active')
                            NOT IN ('missing_confirmed','deleted')
                        {owner_clause(column="tf.owner_profile_id")}
-                     ORDER BY {primary_order('tf')} LIMIT 1) AS file_path
-              FROM lib2_tracks t
+                     ORDER BY {primary_order('tf')} LIMIT 1)
              WHERE t.album_id = ?
              ORDER BY COALESCE(t.disc_number,1), t.track_number, t.id""",
         (int(album_id),),
@@ -251,7 +253,8 @@ def plan_album_reorganize(
     all_rows = _track_rows(conn, album_id)
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
-    all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path']} for r in all_rows]
+    all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
+                   'file_id': r['file_id']} for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -287,6 +290,9 @@ def plan_album_reorganize(
         title = track.get("title") or ""
         item = {
             "track_id": track["id"],
+            "file_id": track["file_id"],
+            "source_db_path": db_path,
+            "sibling_files": [],
             "title": title,
             "track_number": track.get("track_number") or 0,
             "disc_number": int(track.get("disc_number") or 1),
@@ -315,6 +321,31 @@ def plan_album_reorganize(
             item.update(matched=False, reason='Unknown release position; select the release edition in Re-identify')
             planned.append(item)
             continue
+
+        # A matching basename is not evidence that neighbouring audio belongs
+        # to this recording. Carry only catalogue versions of this track in
+        # the selected source directory, and retain their IDs for the updater.
+        from core.library2.sql_util import owner_clause
+        from core.library_reorganize import _AUDIO_EXTS
+        source_dir = _canonical_file_path(os.path.dirname(resolved))
+        source_stem = os.path.splitext(os.path.basename(resolved))[0]
+        for sibling in conn.execute(
+            f"""SELECT f.id, f.path FROM lib2_track_files f
+                 WHERE f.track_id=? AND f.id<>?
+                   AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted')
+                   {owner_clause(column='f.owner_profile_id')}""",
+            (track['id'], track['file_id']),
+        ):
+            sibling_abs = resolve_file_path_fn(sibling['path']) if sibling['path'] else None
+            if not sibling_abs or _same_physical_file(sibling_abs, resolved):
+                continue
+            stem, ext = os.path.splitext(os.path.basename(sibling_abs))
+            if (stem == source_stem and ext.lower() in _AUDIO_EXTS
+                    and _canonical_file_path(os.path.dirname(sibling_abs)) == source_dir):
+                item['sibling_files'].append({
+                    'file_id': sibling['id'], 'source_db_path': sibling['path'],
+                    'current_path_abs': sibling_abs,
+                })
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(

@@ -76,6 +76,12 @@ class _NonClosingConn:
     def commit(self):
         return self._real.commit()
 
+    def execute(self, *args):
+        return self._real.execute(*args)
+
+    def rollback(self):
+        return self._real.rollback()
+
     def close(self):
         pass
 

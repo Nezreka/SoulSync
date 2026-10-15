@@ -12,7 +12,8 @@ The resolver tries the raw path first (cheap happy-path), then walks
 progressively shorter suffixes against every configured base directory:
 the transfer folder, the slskd download folder, every configured Plex
 library location, and every entry in the user's `library.music_paths`
-config. The first existing match wins.
+config. The longest matching suffix wins only when it identifies one physical
+file; a stored path under a known root keeps that root's identity.
 
 This module replaces four duplicated copies of the same function (each
 with the same incomplete logic) that lived in
@@ -95,6 +96,8 @@ def _collect_base_dirs(
     download_folder: Optional[str],
     config_manager: Any,
     plex_client: Any,
+    *,
+    include_missing: bool = False,
 ) -> list[str]:
     """Build the ordered list of base directories to probe."""
     candidates: list[Optional[str]] = []
@@ -132,6 +135,8 @@ def _collect_base_dirs(
     if config_manager is not None:
         try:
             music_paths = config_manager.get("library.music_paths", []) or []
+            if isinstance(music_paths, str):
+                music_paths = [music_paths]
             if isinstance(music_paths, Iterable):
                 for p in music_paths:
                     if isinstance(p, str) and p.strip():
@@ -161,7 +166,7 @@ def _collect_base_dirs(
         if not c or c in seen:
             continue
         seen.add(c)
-        if os.path.isdir(c):
+        if include_missing or os.path.isdir(c):
             out.append(c)
     return out
 
@@ -192,6 +197,7 @@ def resolve_library_file_path(
     config_manager: Any = None,
     plex_client: Any = None,
     library_root: Optional[str] = None,
+    allow_fuzzy: bool = True,
 ) -> Optional[str]:
     """Resolve a stored DB path to an actual file on disk.
 
@@ -209,9 +215,11 @@ def resolve_library_file_path(
             ``library.music_paths`` from config to expand the search.
         plex_client: When provided, every Plex-reported music-library
             location is added to the search.
+        allow_fuzzy: When False, skip sibling-album and synthesized-filename
+            directory scans; exact suffix probes still run across all roots.
 
     Returns:
-        The first existing path on disk, or None when no match is found.
+        The unambiguous most-specific path on disk, or None when no match is found.
         Never raises — failure is the None return.
     """
     resolved, _ = resolve_library_file_path_with_diagnostic(
@@ -221,6 +229,7 @@ def resolve_library_file_path(
         config_manager=config_manager,
         plex_client=plex_client,
         library_root=library_root,
+        allow_fuzzy=allow_fuzzy,
     )
     return resolved
 
@@ -233,6 +242,7 @@ def resolve_library_file_path_with_diagnostic(
     config_manager: Any = None,
     plex_client: Any = None,
     library_root: Optional[str] = None,
+    allow_fuzzy: bool = True,
 ) -> Tuple[Optional[str], ResolveAttempt]:
     """Same as ``resolve_library_file_path`` but also returns a
     ``ResolveAttempt`` describing what the resolver tried.
@@ -253,55 +263,90 @@ def resolve_library_file_path_with_diagnostic(
     if not isinstance(file_path, str) or not file_path:
         return None, attempt
 
-    if os.path.exists(file_path) and (not library_root or _inside_library_root(file_path, library_root)):
+    if os.path.exists(file_path):
+        if library_root and not _inside_library_root(file_path, library_root):
+            return None, attempt
         attempt.raw_path_existed = True
         return file_path, attempt
 
-    path_parts = file_path.replace("\\", "/").split("/")
-    base_dirs = (_collect_base_dirs(library_root, None, None, None) if library_root else
+    path_parts = [part for part in file_path.replace("\\", "/").split("/") if part]
+    if not path_parts or ".." in path_parts:
+        return None, attempt
+    # A missing mount is still a declared root. Dropping it here would let an
+    # absent file become an independent copy in a different mounted library.
+    known_roots = _collect_base_dirs(
+        transfer_folder, download_folder, config_manager, plex_client,
+        include_missing=True,
+    )
+    if library_root:
+        known_roots.append(library_root)
+    stored_root = _matching_root(_docker_resolve_path(file_path), known_roots)
+    if stored_root and library_root and not _inside_library_root(stored_root, library_root):
+        return None, attempt
+    selected_root = stored_root or library_root
+    base_dirs = (_collect_base_dirs(selected_root, None, None, None) if selected_root else
                  _collect_base_dirs(transfer_folder, download_folder, config_manager, plex_client))
     attempt.base_dirs_tried = list(base_dirs)
     if not base_dirs:
         return None, attempt
 
-    # Try progressively shorter path suffixes against each base dir.
-    #
-    # Start at index 0 so a clean RELATIVE library path is tried in FULL first.
-    # SoulSync's own library scanner stores paths like
-    # "Asketa/Another Side/01 - Track.flac" (no leading slash) — index 0 is the
-    # artist folder and dropping it (the old range(1, ...)) meant the artist
-    # segment was never joined, so nothing under transfer/ ever resolved and
-    # every track looked unreadable to the quality scanner.
-    #
-    # For ABSOLUTE media-server paths ("/music/Artist/Album/track.flac") index 0
-    # is the empty leading segment and i=0 yields os.path.join(base, "", ...) ==
-    # base/Artist/... which simply won't exist and harmlessly falls through to
-    # i=1 ("music/...") etc. A Windows drive part ("E:") at i=0 likewise just
-    # fails on POSIX and falls through. So starting at 0 is safe for every form
-    # and only ADDS the relative-full-path match that was missing.
-    for base in base_dirs:
-        for i in range(0, len(path_parts)):
+    def allowed(candidate):
+        return (
+            (not library_root or _inside_library_root(candidate, library_root))
+            and (not stored_root or _matching_root(candidate, known_roots) == stored_root)
+        )
+
+    # Compare the same suffix across ALL roots before dropping a segment. A
+    # transfer-folder basename must not beat another root's artist/album/file.
+    for i in range(len(path_parts)):
+        matches = []
+        for base in base_dirs:
             candidate = os.path.join(base, *path_parts[i:])
-            if os.path.exists(candidate) and (not library_root or _inside_library_root(candidate, library_root)):
-                return candidate, attempt
+            if os.path.exists(candidate) and allowed(candidate):
+                matches.append(candidate)
+        if matches:
+            return _single_physical_match(matches), attempt
+
+    if not allow_fuzzy:
+        return None, attempt
 
     sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
-    if sibling and (not library_root or _inside_library_root(sibling, library_root)):
+    if sibling and allowed(sibling):
         return sibling, attempt
     # Filename wrong as well as the album folder — Navidrome synthesizes the
     # whole path from tags, so no exact segment is left to match on (#1127).
     resolved = _resolve_via_synthesized_filename(path_parts, base_dirs)
-    if library_root and resolved and not _inside_library_root(resolved, library_root):
+    if resolved and not allowed(resolved):
         resolved = None
     return resolved, attempt
 
 
 def _inside_library_root(path, root):
     try:
-        base = os.path.normcase(os.path.realpath(root))
-        return os.path.commonpath([base, os.path.normcase(os.path.realpath(path))]) == base
+        base = os.path.normcase(os.path.realpath(root.replace("\\", "/")))
+        candidate = os.path.normcase(os.path.realpath(path.replace("\\", "/")))
+        return os.path.commonpath([base, candidate]) == base
     except (ValueError, OSError):
         return False
+
+
+def _matching_root(path, roots):
+    """The deepest declared physical root, including unavailable roots."""
+    matches = [os.path.normcase(os.path.realpath(root.replace("\\", "/"))) for root in roots
+               if _inside_library_root(path, root)]
+    return max(matches, key=len) if matches else None
+
+
+def _single_physical_match(matches):
+    """Aliases need filesystem identity; equal names or bytes do not prove it."""
+    first = matches[0]
+    for candidate in matches[1:]:
+        try:
+            if not os.path.samefile(first, candidate):
+                return None
+        except OSError:
+            return None
+    return first
 
 
 def _resolve_via_sibling_album_folder(
@@ -359,21 +404,10 @@ def _resolve_via_sibling_album_folder(
     if not matches:
         return None
 
-    # Ambiguity is about hitting two different ALBUMS, not two paths. The same
-    # library is often reachable through several configured base dirs (a
-    # transfer path plus a music path, duplicate mounts, a symlink), and every
-    # one of those yields the same album folder NAME — that is one album seen
-    # repeatedly, not a genuine conflict. Comparing full paths there refused
-    # perfectly resolvable files.
-    album_names = {os.path.basename(os.path.dirname(m)) for m in matches}
-    if len(album_names) == 1:
-        logger.debug("resolved %r via sibling album folder: %s", basename, matches[0])
-        return matches[0]
-    logger.debug(
-        "sibling-album fallback found %d different album folders for %r under %r "
-        "(%s) — ambiguous, refusing to guess",
-        len(album_names), basename, artist_segment, sorted(album_names))
-    return None
+    resolved = _single_physical_match(matches)
+    if resolved:
+        logger.debug("resolved %r via sibling album folder: %s", basename, resolved)
+    return resolved
 
 
 # A leading track / disc-track number on a filename: "01 - ", "01-01 - ",
@@ -529,22 +563,11 @@ def _resolve_via_synthesized_filename(
         matches = prefixed
     if not matches:
         return None
-    # Same reasoning as the sibling-album step: one library reachable through
-    # several base dirs yields the same file repeatedly, which is not a
-    # conflict. Compare (album folder, filename) so a genuine second copy under
-    # a different album still refuses.
-    identities = {
-        (os.path.basename(os.path.dirname(m)), os.path.basename(m)) for m in matches
-    }
-    if len(identities) == 1:
+    resolved = _single_physical_match(matches)
+    if resolved:
         logger.debug(
-            "resolved %r via synthesized-filename fallback: %s", basename, matches[0])
-        return matches[0]
-    logger.debug(
-        "synthesized-filename fallback found %d distinct files for %r under %r "
-        "(%s) — ambiguous, refusing to guess",
-        len(identities), basename, artist_segment, sorted(identities))
-    return None
+            "resolved %r via synthesized-filename fallback: %s", basename, resolved)
+    return resolved
 
 
 __all__ = [

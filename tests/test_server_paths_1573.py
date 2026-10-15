@@ -85,32 +85,71 @@ def test_learned_mount_skips_the_walk(library, monkeypatch):
     assert server_paths.local_path_for('/music/The Killers/The Killers - Hot Fuss/01 - Jenny.flac') == str(other)
 
 
-def test_unreachable_gives_none_and_stops_walking(tmp_path, monkeypatch):
-    calls = []
-    import core.library.path_resolver as resolver
-    monkeypatch.setattr(resolver, 'resolve_library_file_path', lambda *a, **k: calls.append(1))
+def test_unreachable_namespace_stops_expensive_album_scans(tmp_path, monkeypatch):
+    root = tmp_path / 'music'
+    album = root / 'A' / 'Physical Album'
+    album.mkdir(parents=True)
+    (album / 'keep.flac').write_bytes(b'audio')
+    config = _Config([str(root)])
+    scans = []
+    import os
+    real_scandir = os.scandir
+
+    def count_scans(path):
+        scans.append(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', count_scans)
     for i in range(server_paths._GIVE_UP_AFTER + 50):
-        assert server_paths.local_path_for(f'/music/A/B/{i}.flac') is None
-    assert len(calls) == server_paths._GIVE_UP_AFTER
+        assert server_paths.local_path_for(f'/music/A/B/{i}.flac', config) is None
+    # Each allowed miss scans the artist once per fuzzy strategy, and its
+    # album once for synthesized filenames. Exact suffix probes remain cheap.
+    assert len(scans) == server_paths._GIVE_UP_AFTER * 3
 
 
 
 def test_a_hit_resets_the_miss_count(library, monkeypatch):
-    """a partly mounted library keeps walking as long as hits interleave"""
-    import core.library.path_resolver as resolver
-    real = resolver.resolve_library_file_path
-    calls = []
-
-    def counting(*a, **k):
-        calls.append(1)
-        return real(*a, **k)
-    monkeypatch.setattr(resolver, 'resolve_library_file_path', counting)
+    """A reachable flat hit re-enables fuzzy scans for its own namespace."""
     for i in range(server_paths._GIVE_UP_AFTER - 1):
-        server_paths.local_path_for(f'/elsewhere/A/B/{i}.flac', settings_module.config_manager)
-    server_paths.local_path_for('/music/' + _REL, settings_module.config_manager)
+        server_paths.local_path_for(f'/music/A/B/{i}.flac', settings_module.config_manager)
+    flat = library / 'playlist/song.flac'
+    flat.parent.mkdir()
+    flat.write_bytes(b'flat hit')
+    assert server_paths.local_path_for('/music/playlist/song.flac', settings_module.config_manager) == str(flat)
+    # No mount is learned from the two-segment tail, so this requires a real
+    # fuzzy directory scan after further misses in that same namespace.
     for i in range(10):
-        server_paths.local_path_for(f'/elsewhere/A/C/{i}.flac', settings_module.config_manager)
-    assert len(calls) == server_paths._GIVE_UP_AFTER + 10
+        server_paths.local_path_for(f'/music/A/C/{i}.flac', settings_module.config_manager)
+    assert server_paths.local_path_for(
+        '/music/The Killers/Wrong Album/11 - Everything Will Be Alright.flac',
+        settings_module.config_manager,
+    ) == str(library / _REL)
+
+
+@pytest.mark.parametrize('reported', ['/flat/playlist/song.flac', '/music/playlist/song.flac'])
+def test_unreachable_files_do_not_hide_a_later_reachable_flat_path(tmp_path, reported):
+    root = tmp_path / 'flat-mounted'
+    target = root / 'playlist/song.flac'
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'local flat song')
+    config = _Config([str(root)])
+
+    for i in range(server_paths._GIVE_UP_AFTER):
+        assert server_paths.local_path_for(f'/music/Artist/Album/{i}.flac', config) is None
+
+    assert server_paths.local_path_for(reported, config) == str(target)
+
+
+def test_miss_budget_does_not_disable_another_namespaces_fuzzy_lookup(library):
+    for i in range(server_paths._GIVE_UP_AFTER):
+        assert server_paths.local_path_for(
+            f'/unmounted/A/B/{i}.flac', settings_module.config_manager,
+        ) is None
+
+    assert server_paths.local_path_for(
+        '/other-mount/The Killers/Wrong Album/11 - Everything Will Be Alright.flac',
+        settings_module.config_manager,
+    ) == str(library / _REL)
 
 
 # -- the scan save ----------------------------------------------------------

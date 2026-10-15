@@ -20,6 +20,14 @@ def ensure_reference_id_kinds(conn: Any) -> None:
         columns = _columns(conn, table)
         if columns and column not in columns:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT '{kind}'")
+    # Before the discriminator existed, completed native installations wrote
+    # native stash IDs. A saved chop's file_path points at its rendered audio,
+    # not at the source track, so validate the ID directly in that namespace.
+    # Keep unresolved rows untyped and preserve the saved audio reference.
+    if done and 'track_id_kind' in _columns(conn, 'sample_stash') and _columns(conn, 'lib2_tracks'):
+        conn.execute("""UPDATE sample_stash SET track_id_kind='lib2'
+            WHERE track_id_kind='untyped' AND EXISTS (
+                SELECT 1 FROM lib2_tracks WHERE id=sample_stash.track_id)""")
 
 
 def _native_id(conn: Any, legacy_id: Any, path: str | None = None) -> int | None:

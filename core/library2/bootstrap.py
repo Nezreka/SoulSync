@@ -208,26 +208,10 @@ def ensure_bootstrap_schema(cursor) -> None:
 
 
 def source_watermark(database: Any) -> str:
-    """Return a stable snapshot of the legacy source population.
-
-    Counts plus max ids are intentionally cheap and sufficient to detect a
-    changed upgrade source while the compatibility tables still exist.
-    """
+    """Return a persisted, mutation-sensitive identity of the upgrade source."""
+    from core.library2.source_snapshot import snapshot
     with closing(database._get_connection()) as conn:
-        snapshot = {}
-        for table in ("artists", "albums", "tracks"):
-            exists = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (table,),
-            ).fetchone()
-            if not exists:
-                snapshot[table] = [0, ""]
-                continue
-            row = conn.execute(
-                f"SELECT COUNT(*) AS n, MAX(id) AS max_id FROM {table}"
-            ).fetchone()
-            snapshot[table] = [int(row["n"] or 0), str(row["max_id"] or "")]
-        return json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+        return snapshot(conn)
 
 
 def source_row_count(watermark: str) -> int:

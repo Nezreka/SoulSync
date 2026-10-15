@@ -275,6 +275,8 @@ export interface LibraryV2TrackFile {
    *  `path` stays the value that is copied, opened and deleted. Absent on a
    *  payload from an older backend, so read it with a fallback. */
   display_path?: string | null;
+  /** Playlists this file was saved for — one version per playlist copy. */
+  playlists?: string[];
   format: string | null;
   bitrate: number | null;
   sample_rate: number | null;

@@ -70,10 +70,25 @@ def test_rename_carries_sibling_format_file(tmp_path):
     sib.write_bytes(b"opus")
     dst = tmp_path / "new" / "Song.flac"
 
-    ok, _ = _rename_track_in_place(str(src), str(dst))
+    ok, _ = _rename_track_in_place(str(src), str(dst), sibling_paths=[str(sib)])
     assert ok
     assert dst.exists()
     assert (tmp_path / "new" / "Song.opus").exists()    # sibling came along, renamed stem
+
+
+def test_rename_does_not_infer_audio_identity_from_a_matching_stem(tmp_path):
+    src = tmp_path / 'old' / 'Song.flac'
+    src.parent.mkdir()
+    src.write_bytes(b'flac')
+    unrelated = src.with_suffix('.mp3')
+    unrelated.write_bytes(b'ANOTHER RECORDING')
+    dst = tmp_path / 'new' / 'Renamed.flac'
+
+    ok, _ = _rename_track_in_place(str(src), str(dst))
+
+    assert ok and dst.read_bytes() == b'flac'
+    assert unrelated.read_bytes() == b'ANOTHER RECORDING'
+    assert not dst.with_suffix('.mp3').exists()
 
 
 def test_rename_carries_the_track_s_lyrics_sidecar(tmp_path):

@@ -20,6 +20,8 @@ through unchanged.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, List, Optional
 
 from core.imports.paths import (
@@ -33,6 +35,81 @@ from core.playlists.materialize import (
 from utils.logging_config import get_logger
 
 logger = get_logger("playlists.materialize")
+
+
+def _profile(context, fallback=1):
+    return int(context.get("profile_id") or fallback or 1)
+
+
+def _source(context):
+    # playlist_source is an explicit request field; older batch_source values
+    # were guessed from ID prefixes, which misclassifies bare numeric IDs.
+    return str(context.get("playlist_source") or context.get("source")
+               or context.get("batch_source") or "spotify").strip().lower()
+
+
+def _batch_ref(batch):
+    return (batch.get("source_playlist_ref") or batch.get("source_playlist_id")
+            or batch.get("playlist_id"))
+
+
+def _resolve_batch_playlist(db, batch, profile_id):
+    source = _source(batch)
+    if batch.get("mirrored_playlist_id") is not None:
+        return db.get_mirrored_playlist(int(batch["mirrored_playlist_id"]), profile_id=profile_id)
+    ref = _batch_ref(batch)
+    if ref:
+        return db.resolve_mirrored_playlist(ref, profile_id, default_source=source)
+    # Older batches have only the playlist label. A unique owner/source match
+    # recovers the canonical identity; ambiguous labels grant no prune authority.
+    candidates = [pl for pl in (db.get_mirrored_playlists(profile_id) or [])
+                  if _profile(pl, profile_id) == profile_id and _source(pl) == source
+                  and pl.get("name") == batch.get("playlist_name")]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def playlist_output_identity(playlist: dict, *, profile_id: int = 1, batch: bool = False):
+    """Return a stable folder key and readable manifest provenance.
+
+    Source IDs, rather than display names or transient download batch IDs, join
+    completion and mirror rebuilds. Name-only historical payloads are explicitly
+    weak identities and must never authorize pruning.
+    """
+    owner = _profile(playlist, profile_id)
+    source = _source(playlist)
+    source_id = playlist.get("source_playlist_id") or (playlist.get("source_playlist_ref") if batch else None)
+    if source_id:
+        source_id = str(source_id).strip()
+        if source_id.startswith(("http://", "https://", "spotify:")):
+            from core.playlists.source_refs import normalize_mirrored_source_ref
+            source_id = normalize_mirrored_source_ref(source, source_id).source_playlist_id
+        kind, ref = "source", source_id
+    elif not batch and playlist.get("id") is not None:
+        kind, ref = "mirror", str(playlist["id"])
+    elif batch and playlist.get("mirrored_playlist_id") is not None:
+        kind, ref = "mirror", str(playlist["mirrored_playlist_id"])
+    elif batch and playlist.get("playlist_id"):
+        from core.playlists.source_refs import extract_mirrored_pk
+        raw_ref = str(playlist["playlist_id"])
+        mirror_id = extract_mirrored_pk(raw_ref)
+        if mirror_id is not None and not raw_ref.isdigit():
+            kind, ref = "mirror", str(mirror_id)
+        else:
+            kind, ref = "source", raw_ref
+            source_id = raw_ref
+    else:
+        kind, ref = "name", str(playlist.get("playlist_name") or playlist.get("name") or "Unnamed Playlist")
+    identity = [owner, source, kind, ref]
+    digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
+    # Keep the path independent of a renamed display label, including labels
+    # which sanitize to the same filename. Readable labels live in the manifest.
+    from core.imports.paths import sanitize_filename
+    folder = f"profile-{owner}-{sanitize_filename(source)[:24]}-{digest}"
+    metadata = {"profile_id": owner, "source": source, "source_playlist_id": source_id,
+                "mirrored_playlist_id": playlist.get("mirrored_playlist_id") if batch else playlist.get("id"),
+                "playlist_name": playlist.get("playlist_name") or playlist.get("name") or "Unnamed Playlist",
+                "identity_kind": kind, "identity_ref": ref}
+    return folder, metadata
 
 
 def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manager) -> List[str]:
@@ -65,7 +142,7 @@ def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manage
     return out
 
 
-def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_manager) -> Optional[RebuildSummary]:
+def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_manager, *, db=None) -> Optional[RebuildSummary]:
     """(Re)build the playlist folder for a finished organize-by-playlist batch.
 
     Returns the :class:`RebuildSummary`, or ``None`` when the batch isn't an
@@ -73,12 +150,17 @@ def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_ma
     ``playlists.materialize_mode`` from config."""
     if not batch or not batch.get("playlist_folder_mode"):
         return None
-    name = batch.get("playlist_name") or "Unknown Playlist"
+    if db is not None:
+        playlist = _resolve_batch_playlist(db, batch, _profile(batch))
+        if playlist:
+            return _rebuild_one_from_db(db, config_manager, playlist, profile_id=_profile(batch))[1]
+    name, identity = playlist_output_identity(batch, batch=True)
     real_paths = collect_batch_real_paths(batch, download_tasks, config_manager=config_manager)
     root = config_root_path(config_manager.get("playlists.materialize_path", "./Playlists"),
                             "./Playlists")
     mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
-    return rebuild_playlist_folder(root, name, real_paths, mode)
+    return rebuild_playlist_folder(root, name, real_paths, mode, playlist_identity=identity,
+                                   prune_stale=identity["identity_kind"] != "name")
 
 
 def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_manager, *, profile_id: int = 1):
@@ -112,9 +194,17 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
             seen_ref.add(key)
             wanted.append((ref, source or "spotify", force))
 
+    profile_id = _profile(batch, profile_id)
+    own_playlist = None
+    results, seen_id = [], set()
     if batch.get("playlist_folder_mode"):
-        _want(batch.get("source_playlist_ref") or batch.get("playlist_id"),
-              batch.get("batch_source") or "spotify", True)
+        own_playlist = _resolve_batch_playlist(db, batch, profile_id)
+        if own_playlist:
+            results.append(_rebuild_one_from_db(db, config_manager, own_playlist, profile_id=profile_id))
+            seen_id.add(own_playlist.get("id"))
+        else:
+            summary = materialize_playlist_from_batch(batch, download_tasks, config_manager)
+            results.append((batch.get("playlist_name") or "Unknown Playlist", summary))
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
@@ -129,7 +219,6 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
         if isinstance(si, dict) and si.get("playlist_id"):
             _want(si["playlist_id"], si.get("source") or "spotify", False)
 
-    results, seen_id = [], set()
     for ref, source, force in wanted:
         try:
             pl = db.resolve_mirrored_playlist(ref, profile_id, default_source=source)
@@ -146,14 +235,14 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
             continue
         seen_id.add(pl.get("id"))
         try:
-            results.append(_rebuild_one_from_db(db, config_manager, pl))
+            results.append(_rebuild_one_from_db(db, config_manager, pl, profile_id=profile_id))
         except Exception as e:
             logger.error("[Playlist Folder] rebuild failed for '%s': %s", pl.get("name"), e)
             continue
     return results
 
 
-def _rebuild_one_from_db(db, config_manager, playlist: dict):
+def _rebuild_one_from_db(db, config_manager, playlist: dict, *, profile_id: int = 1):
     """Rebuild ONE playlist's folder from its CURRENT membership × ownership —
     re-matching each member via the app's own ``check_track_exists`` (by name, not
     source IDs), resolving to disk, and rebuilding WITH prune. Because it's driven
@@ -180,7 +269,7 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
     library_root = library_root_for_profile(import_owner_id(playlist))
     resolved: List[dict] = []
     seen = set()
-    _scope_token = set_library_scope(library_scope_for_profile(playlist.get("profile_id")))
+    _scope_token = set_library_scope(library_scope_for_profile(_profile(playlist, profile_id)))
     try:
         for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
             title = (t.get("track_name") or "").strip()
@@ -225,7 +314,9 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
         ]
 
     name = playlist.get("name") or "Unnamed Playlist"
-    return name, rebuild_playlist_folder(root, name, real_paths, mode, dest_names=dest_names)   # prune_stale=True
+    folder, identity = playlist_output_identity(playlist, profile_id=profile_id)
+    return name, rebuild_playlist_folder(root, folder, real_paths, mode, dest_names=dest_names,
+                                         playlist_identity=identity)
 
 
 def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
@@ -233,7 +324,7 @@ def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int =
     for the manual "Rebuild" button. Self-heals after a library reorganize moves
     files or membership changes. Returns a list of ``(playlist_name, summary)``."""
     return [
-        _rebuild_one_from_db(db, config_manager, pl)
+        _rebuild_one_from_db(db, config_manager, pl, profile_id=profile_id)
         for pl in (db.get_mirrored_playlists(profile_id) or [])
         if pl.get("organize_by_playlist")
     ]
@@ -250,12 +341,13 @@ def rebuild_mirrored_playlist_if_organized(db, config_manager, playlist_id, *, p
     pl = db.get_mirrored_playlist(playlist_id)
     if not pl or not pl.get("organize_by_playlist"):
         return None
-    _name, summary = _rebuild_one_from_db(db, config_manager, pl)
+    _name, summary = _rebuild_one_from_db(db, config_manager, pl, profile_id=profile_id)
     return summary
 
 
 __all__ = [
     "collect_batch_real_paths",
+    "playlist_output_identity",
     "materialize_playlist_from_batch",
     "reconcile_batch_playlists",
     "rebuild_organized_playlists_from_db",

@@ -10275,6 +10275,15 @@ function TrackRow(props: TrackRowProps) {
             style={widthStyle('file_path')}
             title={track.file?.path ?? undefined}
           >
+            {track.file?.playlists?.length ? (
+              <div className={styles.fileVersionBadges}>
+                {track.file.playlists.map((name) => (
+                  <span key={name} className={styles.fileRoleBadge} title="Saved for this playlist">
+                    Playlist: {name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <FilePathCellBody path={track.file?.path} display={track.file?.display_path} />
           </td>
         );

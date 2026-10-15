@@ -2523,14 +2523,20 @@ def reorganize_album(
     return summary
 
 
-def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Optional[str]]:
+def _rename_track_in_place(
+    current_abs: str, new_abs: str, *, sibling_paths=(), moved_paths=None,
+) -> Tuple[bool, Optional[str]]:
     """Move ONE file from ``current_abs`` to ``new_abs`` in place — no copy, no re-tag,
-    no post-processing. Creates the destination folder, carries sibling-format files
-    (e.g. a lossy ``.opus`` alongside the ``.flac``) along with the renamed stem, and
+    no post-processing. Creates the destination folder, carries explicitly supplied
+    sibling-format files along with the renamed stem, and
     falls back to a cross-device move when the rename crosses a filesystem boundary.
 
     Refuses to overwrite a DIFFERENT existing file at the destination (returns an error
     instead) — never silent data loss. Returns ``(ok, error_message)``.
+
+    Native plans supply proven ``sibling_paths``; the default authorizes only
+    the selected audio file. ``moved_paths`` records only moves
+    that actually succeeded, for exact catalogue updates and rollback.
     """
     try:
         if current_abs and not os.path.exists(current_abs):
@@ -2538,14 +2544,14 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
         same = _same_physical_file(current_abs, new_abs)
         if same:
             return True, None
-        if os.path.exists(new_abs) and not same:
+        if os.path.lexists(new_abs) and not same:
             return False, 'destination already exists'
         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
         # Siblings are collected BEFORE the rename (the source stem is gone
         # afterwards) but carried AFTER it succeeds (iss29-E02): moving them
         # first meant a failed canonical rename left the album split across two
         # directories, with no error path that could put it back.
-        siblings = _find_sibling_audio_files(current_abs)
+        siblings = list(sibling_paths)
         try:
             os.rename(current_abs, new_abs)
         except OSError as e:
@@ -2553,10 +2559,14 @@ def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Option
                 shutil.move(current_abs, new_abs)  # crosses a filesystem boundary
             else:
                 raise
+        if moved_paths is not None:
+            moved_paths[current_abs] = new_abs
         # Carry sibling-format audio to the same destination with the renamed stem —
         # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
         for sibling_src in siblings:
-            _move_sibling_to_destination(sibling_src, new_abs)
+            sibling_dst = _move_sibling_to_destination(sibling_src, new_abs)
+            if sibling_dst and moved_paths is not None:
+                moved_paths[sibling_src] = sibling_dst
         # And the track's own sidecars. A .lrc is part of the track — SoulSync
         # writes it itself — and the import path has carried it since
         # lilbob5769's report. Reorganize looked for sibling AUDIO only and
@@ -2677,7 +2687,11 @@ def reorganize_album_rename_only(
                 continue
         except Exception as guard_err:
             logger.warning("[Reorganize/rename] move-guard check failed: %s", guard_err)
-        ok, err = _rename_track_in_place(current_abs, new_abs)
+        moved_paths = {}
+        sibling_paths = [f['current_path_abs'] for f in t.get('sibling_files', [])]
+        ok, err = _rename_track_in_place(
+            current_abs, new_abs, sibling_paths=sibling_paths, moved_paths=moved_paths,
+        )
         if not ok:
             summary['failed'] += 1
             summary['errors'].append({
@@ -2698,9 +2712,27 @@ def reorganize_album_rename_only(
         # Put the file back and fail the track loudly instead.
         if update_track_path_fn:
             try:
-                update_track_path_fn(t.get('track_id'), new_abs)
+                if t.get('file_id') is not None:
+                    update_track_path_fn(
+                        t.get('track_id'), new_abs, file_id=t['file_id'],
+                        source_db_path=t['source_db_path'], current_path_abs=current_abs,
+                        sibling_files=t.get('sibling_files', []), moved_paths=moved_paths,
+                    )
+                else:
+                    update_track_path_fn(t.get('track_id'), new_abs)
             except Exception as db_err:
-                undone, undo_err = _rename_track_in_place(new_abs, current_abs)
+                rollback_errors = []
+                # Never rediscover siblings in the destination: a refused
+                # sibling destination may hold another recording. Undo only
+                # files this attempt demonstrably moved.
+                for old_path, moved_path in reversed(list(moved_paths.items())):
+                    restored, restore_err = _rename_track_in_place(
+                        moved_path, old_path, sibling_paths=[],
+                    )
+                    if not restored:
+                        rollback_errors.append(f'{moved_path}: {restore_err}')
+                undone = not rollback_errors
+                undo_err = '; '.join(rollback_errors)
                 if undone:
                     detail = f'{db_err} (move undone)'
                     logger.warning(
@@ -2944,7 +2976,7 @@ def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Option
     sibling_dst = os.path.join(dst_dir, canonical_stem + sibling_ext)
     if _same_physical_file(sibling_src, sibling_dst):
         return sibling_dst  # already at the right place
-    if os.path.exists(sibling_dst):
+    if os.path.lexists(sibling_dst):
         logger.warning(
             "[Reorganize] Not moving sibling-format file %s → %s: destination "
             "already exists; leaving the source in place",
