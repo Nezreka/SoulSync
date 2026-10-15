@@ -25,16 +25,29 @@ def prepare_completion_tracks(album, missing_tracks, source, artist, *, expected
     return context, tracks
 
 
-def queue_album_completion(*, canonical_source, canonical_album_id, album_id, album_title, artist, missing_tracks, deps, canonical_album=None):
+def queue_album_completion(*, canonical_source, canonical_album_id, album_id, album_title, artist, missing_tracks, deps, canonical_album=None, related_album_ids=None):
     """Create a missing-track-only batch, scoped to one profile."""
     if not missing_tracks or not canonical_source or not canonical_album_id:
         return {"status": "skipped", "reason": "Missing release or tracks"}
     profile_id = deps.profile_id
+    verify_scope = getattr(deps, "verify_album_scope", None)
+    if not callable(verify_scope):
+        return {"status": "skipped", "reason": "Album ownership verification unavailable"}
+    try:
+        if verify_scope(album_id, profile_id) is not True:
+            return {"status": "skipped", "reason": "Album is not in the requesting shared library"}
+    except Exception:
+        return {"status": "skipped", "reason": "Album ownership verification failed"}
+
     verify = getattr(deps, "verify_missing_tracks", None)
     if not callable(verify):
         return {"status": "skipped", "reason": "Library verification unavailable"}
     try:
-        missing_tracks = verify(album_id, missing_tracks, profile_id)
+        if related_album_ids is None:
+            related_album_ids = [album_id]
+        missing_tracks = verify(
+            album_id, missing_tracks, profile_id, related_album_ids
+        )
         if not missing_tracks:
             return {"status": "skipped", "reason": "Album already complete"}
         album_ctx, prepared_tracks = prepare_completion_tracks(
@@ -54,6 +67,19 @@ def queue_album_completion(*, canonical_source, canonical_album_id, album_id, al
                 return {"status": "skipped", "reason": "Release already queued"}
         if sum(1 for batch in batches.values() if batch.get("phase") == "analysis") >= 3:
             return {"status": "skipped", "reason": "Too many active analysis batches"}
+        claim = getattr(deps, "claim_completion_attempt", None)
+        release = getattr(deps, "release_completion_attempt", None)
+        if not callable(claim) or not callable(release):
+            return {"status": "skipped", "reason": "Persistent cooldown unavailable"}
+        try:
+            cooldown_token = claim(
+                profile_id, canonical_source, canonical_album_id
+            )
+        except Exception:
+            return {"status": "skipped", "reason": "Persistent cooldown failed"}
+        if not cooldown_token:
+            return {"status": "skipped", "reason": "Release is cooling down"}
+
         batch_id = str(uuid.uuid4())
         batches[batch_id] = {
             "phase": "analysis",
@@ -96,5 +122,18 @@ def queue_album_completion(*, canonical_source, canonical_album_id, album_id, al
     except Exception:
         with deps.tasks_lock:
             batches.pop(batch_id, None)
+        release = getattr(deps, "release_completion_attempt", None)
+        try:
+            if not callable(release):
+                raise RuntimeError("Cooldown rollback unavailable")
+            release(
+                profile_id, canonical_source,
+                canonical_album_id, cooldown_token
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "reason": "Submission failed; cooldown rollback failed",
+            }
         return {"status": "failed", "reason": "Download submission failed"}
     return {"status": "queued", "batch_id": batch_id}

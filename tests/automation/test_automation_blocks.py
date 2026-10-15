@@ -180,6 +180,6 @@ def test_complete_incomplete_albums_action():
         field['key']: field
         for field in action['config_fields']
     }
-    assert set(fields) == {'max_albums'}
+    assert set(fields) == {'max_albums', 'target_album_id'}
     assert fields['max_albums']['type'] == 'number'
     assert fields['max_albums']['default'] == 3

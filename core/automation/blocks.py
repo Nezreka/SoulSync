@@ -403,7 +403,9 @@ ACTIONS: list[dict] = [
      "description": "Queue missing tracks for incomplete albums using their pinned canonical releases. Requires an Album Completeness scan; never replaces existing tracks.",
      "available": True, "scope": "music",
      "config_fields": [
-         {"key": "max_albums", "type": "number", "label": "Maximum albums per run", "default": 3}
+         {"key": "max_albums", "type": "number", "label": "Maximum albums per run", "default": 3},
+         {"key": "target_album_id", "type": "text", "label": "Target Album ID (optional)",
+          "placeholder": "Leave blank to complete any eligible album"}
      ]},
     {"type": "search_and_download", "label": "Search & Download", "icon": "download",
      "description": "Search for a track and download the best match", "available": True,

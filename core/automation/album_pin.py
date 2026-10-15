@@ -14,7 +14,7 @@ def get_current_album_pin(db, album_id):
         cursor.execute("PRAGMA table_info(albums)")
         columns = {row[1] for row in cursor.fetchall()}
 
-        required = {'canonical_source', 'canonical_album_id'}
+        required = {'canonical_source', 'canonical_album_id', 'owner_profile_id'}
         if not required.issubset(columns):
             return None
 
@@ -25,7 +25,7 @@ def get_current_album_pin(db, album_id):
 
         cursor.execute(
             f"""SELECT canonical_source, canonical_album_id,
-                       {locked} AS locked
+                       {locked} AS locked, owner_profile_id
                 FROM albums WHERE id = ?""",
             (album_id,),
         )
@@ -43,6 +43,7 @@ def get_current_album_pin(db, album_id):
         return {
             'canonical_source': source,
             'canonical_album_id': release_id,
+            'owner_profile_id': row[3],
         }
     except Exception:
         return None

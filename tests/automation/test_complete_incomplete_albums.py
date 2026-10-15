@@ -106,6 +106,121 @@ def _pinned_finding(finding_id, album_id, release_id):
     }
 
 
+
+
+def test_target_album_id_rejects_unrelated_album():
+    """A targeted run must never queue a different album."""
+    finding = _pinned_finding(1, 42, 'release-123')
+    pages = []
+
+    def get_findings(**kwargs):
+        pages.append(kwargs['page'])
+        return {'items': [finding], 'total': 1}
+
+    def forbidden(**kwargs):
+        pytest.fail("Unrelated album reached a protected operation")
+
+    deps = SimpleNamespace(
+        get_repair_findings=get_findings,
+        get_current_album_pin=forbidden,
+        fetch_canonical_release=forbidden,
+        queue_album_completion=forbidden,
+    )
+
+    result = auto_complete_incomplete_albums(
+        {
+            '_event_data': {
+                'job_id': 'album_completeness',
+                'run_status': 'completed',
+                'errors': 0,
+            },
+            'max_albums': 1,
+            'target_album_id': 'DIFFERENT_ALBUM',
+        },
+        deps,
+    )
+
+    assert result['queued_albums'] == 0
+    assert result['eligible_albums'] == 0
+    assert pages == [0]
+
+
+
+
+def test_target_album_id_finds_second_page_without_queuing_others():
+    """Targeted completion searches later pages and queues only its album."""
+    target_id = 42
+    pages = []
+    queued = []
+
+    unrelated = [
+        _pinned_finding(i, i + 100, f'release-{i}')
+        for i in range(50)
+    ]
+    target = _pinned_finding(51, target_id, 'release-target')
+
+    def get_findings(**kwargs):
+        pages.append(kwargs['page'])
+        return {
+            'items': unrelated if kwargs['page'] == 0 else [target],
+            'total': 51,
+        }
+
+    def get_pin(album_id):
+        assert album_id == target_id
+        return {
+            'owner_profile_id': None,
+            'canonical_source': 'spotify',
+            'canonical_album_id': 'release-target',
+        }
+
+    def fetch_release(**kwargs):
+        assert kwargs['canonical_album_id'] == 'release-target'
+        return {
+            'album': {
+                'id': 'release-target',
+                'source': 'spotify',
+            },
+            'tracks': [{
+                'id': 'track-release-target',
+                'name': 'Missing Song',
+                'track_number': 8,
+                'disc_number': 1,
+            }],
+        }
+
+    def queue(**kwargs):
+        queued.append(kwargs)
+        return {'status': 'queued'}
+
+    deps = SimpleNamespace(
+        get_repair_findings=get_findings,
+        get_current_album_pin=get_pin,
+        fetch_canonical_release=fetch_release,
+        queue_album_completion=queue,
+    )
+
+    result = auto_complete_incomplete_albums(
+        {
+            '_event_data': {
+                'job_id': 'album_completeness',
+                'run_status': 'completed',
+                'errors': 0,
+            },
+            'max_albums': 1,
+            'target_album_id': str(target_id),
+        },
+        deps,
+    )
+
+    assert pages == [0, 1]
+    assert result['eligible_albums'] == 1
+    assert result['queued_albums'] == 1
+    assert len(queued) == 1
+    assert queued[0]['album_id'] == target_id
+    assert queued[0]['canonical_album_id'] == 'release-target'
+
+
 def test_queues_missing_tracks_from_pinned_release():
     queued = []
     finding = _pinned_finding(1, 42, 'release-123')
@@ -115,7 +230,7 @@ def test_queues_missing_tracks_from_pinned_release():
             'items': [finding],
             'total': 1,
         },
-        get_current_album_pin=lambda album_id: {"canonical_source": "spotify", "canonical_album_id": "release-123" if album_id == 42 else "release-a" if album_id in (41, 42) else "release-b"},
+        get_current_album_pin=lambda album_id: {"owner_profile_id": None, "canonical_source": "spotify", "canonical_album_id": "release-123" if album_id == 42 else "release-a" if album_id in (41, 42) else "release-b"},
         fetch_canonical_release=lambda **kw: {
             'album': {'id': kw['canonical_album_id'],
                       'source': kw['canonical_source']},
@@ -163,7 +278,7 @@ def test_limits_albums_and_deduplicates_canonical_releases():
             'items': findings,
             'total': len(findings),
         },
-        get_current_album_pin=lambda album_id: {"canonical_source": "spotify", "canonical_album_id": "release-a" if album_id in (41, 42) else "release-b"},
+        get_current_album_pin=lambda album_id: {"owner_profile_id": None, "canonical_source": "spotify", "canonical_album_id": "release-a" if album_id in (41, 42) else "release-b"},
         fetch_canonical_release=lambda **kw: {
             'album': {'id': kw['canonical_album_id'],
                       'source': kw['canonical_source']},
@@ -209,7 +324,7 @@ def test_rejects_missing_track_from_wrong_canonical_release():
     }]
 
     deps = SimpleNamespace(
-        get_current_album_pin=lambda album_id: {"canonical_source": "spotify", "canonical_album_id": "release-123"},
+        get_current_album_pin=lambda album_id: {"owner_profile_id": None, "canonical_source": "spotify", "canonical_album_id": "release-123"},
         get_repair_findings=lambda **kwargs: {
             'items': [finding],
             'total': 1,
@@ -252,9 +367,9 @@ def test_rejects_album_repinned_after_scan():
     queued = []
     deps = SimpleNamespace(
         get_repair_findings=lambda **kw: {
-            "items": [_pinned_finding(1, 42, "release-123")]
+            "items": [_pinned_finding(1, 42, "release-123")], "total": 1
         },
-        get_current_album_pin=lambda album_id: {
+        get_current_album_pin=lambda album_id: {"owner_profile_id": None,
             "canonical_source": "spotify",
             "canonical_album_id": "release-NEW",
         },
@@ -272,4 +387,164 @@ def test_rejects_album_repinned_after_scan():
         deps,
     )
     assert result["queued_albums"] == 0
+    assert queued == []
+
+
+@pytest.mark.parametrize(
+    "pin",
+    [
+        {
+            "canonical_source": "spotify",
+            "canonical_album_id": "release-123",
+            "owner_profile_id": 2,
+        },
+        {
+            "canonical_source": "spotify",
+            "canonical_album_id": "release-123",
+            "owner_profile_id": 0,
+        },
+        {
+            "canonical_source": "spotify",
+            "canonical_album_id": "release-123",
+        },
+    ],
+    ids=["personal-library", "unexpected-owner", "missing-owner"],
+)
+def test_album_ownership_guard(pin):
+    """Unsafe ownership must block release fetching and download queuing."""
+    finding = _pinned_finding(1, 42, "release-123")
+
+    def forbidden(**kwargs):
+        pytest.fail("Unsafe album reached release fetching or download queue")
+
+    deps = SimpleNamespace(
+        get_repair_findings=lambda **kwargs: {
+            "items": [finding],
+            "total": 1,
+        },
+        get_current_album_pin=lambda album_id: pin,
+        fetch_canonical_release=forbidden,
+        queue_album_completion=forbidden,
+    )
+
+    result = auto_complete_incomplete_albums(
+        {
+            "_event_data": {
+                "job_id": "album_completeness",
+                "run_status": "completed",
+                "errors": 0,
+            },
+            "max_albums": 1,
+        },
+        deps,
+    )
+
+    assert result["queued_albums"] == 0
+
+
+def test_untargeted_run_reads_beyond_first_fifty():
+    """Untargeted completion must retrieve findings beyond page one."""
+    pages_requested = []
+
+    def get_findings(**kw):
+        pages_requested.append(kw["page"])
+        if kw["page"] == 0:
+            return {
+                "items": [
+                    {
+                        "finding_type": "other",
+                        "status": "pending",
+                        "details": {},
+                    }
+                    for _ in range(50)
+                ],
+                "total": 51,
+            }
+        if kw["page"] == 1:
+            return {
+                "items": [_pinned_finding(51, 42, "release-123")],
+                "total": 51,
+            }
+        pytest.fail("Unexpected findings page")
+
+    def verify_pin(album_id):
+        assert str(album_id) == "42"
+        return {
+            "owner_profile_id": None,
+            "canonical_source": "spotify",
+            "canonical_album_id": "release-123",
+        }
+
+    deps = SimpleNamespace(
+        get_repair_findings=get_findings,
+        get_current_album_pin=verify_pin,
+        fetch_canonical_release=lambda **kw: {
+            "album": {
+                "id": "different-release",
+                "source": "spotify",
+            },
+            "tracks": [],
+        },
+        queue_album_completion=lambda **kw: pytest.fail(
+            "Test must not queue a download"
+        ),
+    )
+
+    auto_complete_incomplete_albums(
+        {
+            "max_albums": 1,
+            "_event_data": {
+                "job_id": "album_completeness",
+                "run_status": "completed",
+                "errors": 0,
+            },
+        },
+        deps,
+    )
+
+    assert pages_requested == [0, 1]
+
+
+def test_failed_pagination_never_queues_downloads():
+    """A failed second page must prevent processing the first page."""
+    pages_requested = []
+    queued = []
+
+    def get_findings(**kw):
+        pages_requested.append(kw["page"])
+        if kw["page"] == 0:
+            return {
+                "items": [
+                    _pinned_finding(i, 42, "release-123")
+                    for i in range(50)
+                ],
+                "total": 51,
+            }
+        return None
+
+    deps = SimpleNamespace(
+        get_repair_findings=get_findings,
+        get_current_album_pin=lambda album_id: pytest.fail(
+            "Must not verify pins from partial findings"
+        ),
+        fetch_canonical_release=lambda **kw: pytest.fail(
+            "Must not fetch releases from partial findings"
+        ),
+        queue_album_completion=lambda **kw: queued.append(kw),
+    )
+
+    result = auto_complete_incomplete_albums(
+        {
+            "max_albums": 1,
+            "_event_data": {
+                "job_id": "album_completeness",
+                "run_status": "completed",
+                "errors": 0,
+            },
+        },
+        deps,
+    )
+
+    assert pages_requested == [0, 1]
+    assert result["status"] == "skipped"
     assert queued == []

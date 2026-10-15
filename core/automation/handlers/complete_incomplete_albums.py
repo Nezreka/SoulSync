@@ -43,6 +43,8 @@ def auto_complete_incomplete_albums(config, deps):
     except (TypeError, ValueError):
         max_albums = 3
 
+    target_album_id = str(config.get('target_album_id') or '').strip()
+
     result = deps.get_repair_findings(
         job_id='album_completeness',
         finding_type='incomplete_album',
@@ -54,10 +56,39 @@ def auto_complete_incomplete_albums(config, deps):
     if not isinstance(result, dict):
         return {'status': 'skipped', 'reason': 'Invalid repair findings'}
 
+    # Read all pages before selecting albums, including untargeted runs.
+    # Never process a partial result if pagination fails.
+    if not isinstance(result.get('items'), list):
+        return {'status': 'skipped', 'reason': 'Invalid findings page'}
+
+    findings = list(result['items'])
+    try:
+        total = int(result.get('total'))
+        if total < 0 or len(findings) > total:
+            raise ValueError('Invalid findings count')
+    except (TypeError, ValueError):
+        return {'status': 'skipped', 'reason': 'Invalid findings count'}
+
+    page = 1
+    while len(findings) < total:
+        next_page = deps.get_repair_findings(
+            job_id='album_completeness',
+            finding_type='incomplete_album',
+            status='pending',
+            page=page,
+            limit=50,
+        )
+        if not isinstance(next_page, dict) or not isinstance(next_page.get('items'), list):
+            return {'status': 'skipped', 'reason': 'Could not read all findings'}
+        if not next_page['items'] or len(findings) + len(next_page['items']) > total:
+            return {'status': 'skipped', 'reason': 'Findings pagination ended unexpectedly'}
+        findings.extend(next_page['items'])
+        page += 1
+
     eligible = []
     seen_releases = set()
 
-    for finding in result.get('items') or []:
+    for finding in findings:
         if not isinstance(finding, dict):
             continue
 
@@ -69,6 +100,9 @@ def auto_complete_incomplete_albums(config, deps):
 
         details = finding.get('details')
         if not isinstance(details, dict):
+            continue
+
+        if target_album_id and str(details.get('album_id') or '').strip() != target_album_id:
             continue
 
         source = str(details.get('canonical_source') or '').strip()
@@ -97,7 +131,13 @@ def auto_complete_incomplete_albums(config, deps):
 
         try:
             pin = deps.get_current_album_pin(details.get("album_id"))
-            if not pin or str(pin.get("canonical_source", "")).casefold() != str(details["canonical_source"]).casefold() or str(pin.get("canonical_album_id", "")) != str(details["canonical_album_id"]):
+            # Only shared-library albums are supported. Missing ownership
+            # information must fail closed, never default to shared.
+            if not isinstance(pin, dict) or "owner_profile_id" not in pin:
+                continue
+            if pin["owner_profile_id"] is not None:
+                continue
+            if str(pin.get("canonical_source", "")).casefold() != str(details["canonical_source"]).casefold() or str(pin.get("canonical_album_id", "")) != str(details["canonical_album_id"]):
                 continue
             source = str(details['canonical_source']).strip()
             release_id = str(details['canonical_album_id']).strip()
@@ -153,6 +193,7 @@ def auto_complete_incomplete_albums(config, deps):
                 album_title=details.get('album_title') or '',
                 artist=details.get('artist') or '',
                 missing_tracks=verified,
+                related_album_ids=details.get('related_album_ids'),
                 canonical_album=album,
             )
         except Exception:
