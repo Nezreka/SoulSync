@@ -85,8 +85,11 @@ def test_owned_counts_stay_bounded_after_analyze(tmp_path, monkeypatch, batched)
             "VALUES (10, ?, ?, 'Missing artist', ?)",
             ((i + 3, f"Missing track {i}", f"missing-{i}") for i in range(100)),
         )
+        # Reproduce persisted full-ANALYZE stats from an upgraded installation.
+        # The production helper may sample, which hides the old query's bad plan.
+        conn.execute("PRAGMA analysis_limit=0")
+        conn.execute("ANALYZE")
         conn.commit()
-    db.refresh_planner_stats()
 
     connect = db._get_connection
     steps = 0
