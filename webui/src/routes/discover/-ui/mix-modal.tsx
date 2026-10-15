@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { useId } from 'react';
 
 import { useAccessibleModal } from '@/components/dialog';
@@ -8,7 +10,10 @@ import type { CompactRow, DiscoverMix, MixAction } from '../-discover.mixes';
 
 import {
   compactRows,
+  MIX_COVER_PLACEHOLDER,
   mixActions,
+  mixCoverArt,
+  mixMetaLine,
   mixSelectionBar,
   mixSetAllSelected,
   mixStatusBase,
@@ -29,6 +34,12 @@ import { SyncStatus } from './sync-status';
  * Sync one carrying `${base}-sync-btn` so the live poller can find it), a
  * selection bar with ids `#mix-select-all` / `#mix-sel-count` /
  * `#mix-dl-selected`, and the track list in `#mix-modal-tracks`.
+ *
+ * oct 2026 redesign: the ids and the poller hooks all stayed, the look did
+ * not. the header is cover art + eyebrow + title + one filled Play, select-all
+ * sits in the column head over the boxes, and the bar with the selection
+ * actions only floats in once something is ticked. the station preview and the
+ * search playlist preview share MixModalHeader and TrackListHead.
  *
  * `selectable` is opt-in per call and it is not cosmetic: it adds the checkbox
  * and the `has-select` class the grid reflows on. A supplied onPlay handler
@@ -86,11 +97,13 @@ function CompactTrackRow({
 }) {
   return (
     <div
-      className={
-        row.selectable
-          ? 'discover-playlist-track-compact has-select'
-          : 'discover-playlist-track-compact'
-      }
+      className={[
+        'discover-playlist-track-compact',
+        row.selectable && 'has-select',
+        checked && 'is-selected',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       data-track-index={row.index}
     >
       {row.selectable && (
@@ -139,7 +152,12 @@ function CompactTrackRow({
       {/* EMPTY for an unknown length — "0:00" claims a fact we do not have. */}
       <div className="track-compact-duration">{row.duration}</div>
       <AddToPlaylistButton
-        track={{ track_name: row.name, artist_name: row.artist, album_name: row.album }}
+        track={{
+          track_name: row.name,
+          artist_name: row.artist,
+          album_name: row.album,
+          image_url: row.cover === MIX_COVER_PLACEHOLDER ? null : row.cover,
+        }}
         className={`track-compact-add ${addStyles.button}`}
         size={15}
       />
@@ -147,12 +165,145 @@ function CompactTrackRow({
   );
 }
 
+// ── The shared shell pieces ──────────────────────────────────────────────────
+
+const ICON = { width: 15, height: 15, viewBox: '0 0 24 24', 'aria-hidden': true } as const;
+
+export function PlayIcon() {
+  return (
+    <svg {...ICON} width={13} height={13} fill="currentColor">
+      <path d="M7 4.5v15l13-7.5z" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg {...ICON} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" />
+    </svg>
+  );
+}
+
+function SyncIcon() {
+  return (
+    <svg {...ICON} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M20 11a8 8 0 0 0-14.5-4.5L4 8m0-4v4h4M4 13a8 8 0 0 0 14.5 4.5L20 16m0 4v-4h-4" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      {...ICON}
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+    >
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+/** an action's icon from what it does, so the labels can stay plain words. */
+function actionIcon(onclick: string): ReactNode {
+  if (onclick.startsWith('play')) return <PlayIcon />;
+  if (onclick.startsWith('download')) return <DownloadIcon />;
+  if (onclick.startsWith('sync')) return <SyncIcon />;
+  return null;
+}
+
+export interface MixModalHeaderProps {
+  titleId: string;
+  /** the small label over the title: Mix, Station, Playlist · Deezer. */
+  eyebrow: string;
+  title: ReactNode;
+  /** the one-line why under the title. */
+  description?: ReactNode;
+  meta?: ReactNode;
+  /** one cover, or four for a mosaic. none shows a plain tile. */
+  covers: string[];
+  actions?: ReactNode;
+  onClose: () => void;
+}
+
+/** the header all three track modals share: art, eyebrow, title, actions. */
+export function MixModalHeader({
+  titleId,
+  eyebrow,
+  title,
+  description,
+  meta,
+  covers,
+  actions,
+  onClose,
+}: MixModalHeaderProps) {
+  return (
+    <div className="mix-modal-header">
+      <div
+        className={covers.length === 4 ? 'mix-modal-cover is-mosaic' : 'mix-modal-cover'}
+        aria-hidden="true"
+      >
+        {covers.length > 0 ? (
+          covers.map((src) => <img key={src} src={src} alt="" loading="lazy" />)
+        ) : (
+          <span className="mix-modal-cover-blank">♪</span>
+        )}
+      </div>
+      <div className="mix-modal-heading">
+        <div className="mix-modal-eyebrow">{eyebrow}</div>
+        <h2 className="mix-modal-title" id={titleId}>
+          {title}
+        </h2>
+        {description ? <div className="mix-modal-subtitle">{description}</div> : null}
+        <div className="mix-modal-meta">{meta}</div>
+        {actions ? <div className="mix-modal-actions">{actions}</div> : null}
+      </div>
+      <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
+        <CloseIcon />
+      </button>
+    </div>
+  );
+}
+
+export interface TrackListHeadProps {
+  /** the select-all box. left out, the list has no checkbox column. */
+  selectAll?: { id: string; checked: boolean; onChange: (checked: boolean) => void };
+}
+
+/** the column labels over the rows. select-all lives here, over the boxes it ticks. */
+export function TrackListHead({ selectAll }: TrackListHeadProps) {
+  return (
+    <div className={selectAll ? 'mix-modal-colhead has-select' : 'mix-modal-colhead'}>
+      {selectAll ? (
+        <label className="mix-selbar-all">
+          <input
+            type="checkbox"
+            id={selectAll.id}
+            aria-label="Select all"
+            checked={selectAll.checked}
+            onChange={(e) => selectAll.onChange(e.target.checked)}
+          />
+        </label>
+      ) : null}
+      <span className="mix-colhead-num">#</span>
+      <span />
+      <span>Title</span>
+      <span className="mix-colhead-album">Album</span>
+      <span className="mix-colhead-time">Time</span>
+      <span />
+    </div>
+  );
+}
+
 // ── The selection bar ────────────────────────────────────────────────────────
 
 export interface MixSelectionBarProps {
-  total: number;
   selected: number[];
-  onSelectAll: (indices: number[]) => void;
   onClearSelection: () => void;
   onDownloadSelected: () => void;
   /** the ticked rows onto a playlist; anchor is the button */
@@ -160,47 +311,31 @@ export interface MixSelectionBarProps {
 }
 
 /**
- * The selection bar (4998-5004, behaviour 4792-4805).
+ * the floating bar that shows up once something is ticked (behaviour 4792-4805).
  *
- * The ids are load-bearing: `_updateMixSelBar` writes count and label into them
- * by id, and the vanilla's own handlers will keep doing so until PR 2 deletes
- * them. Clear unticks every row AND the select-all box — it is not the same as
- * select-all(false), which only exists once something is ticked.
+ * the count and download ids are the vanilla's, kept so nothing that reads
+ * them by id goes blind. Clear unticks every row AND the select-all box, it is
+ * not the same as select-all(false), which only exists once all are ticked.
  */
 export function MixSelectionBarView({
-  total,
   selected,
-  onSelectAll,
   onClearSelection,
   onDownloadSelected,
   onAddSelectedToPlaylist,
 }: MixSelectionBarProps) {
-  const bar = mixSelectionBar(selected.length, total);
+  const bar = mixSelectionBar(selected.length, 0);
   return (
-    <div className="mix-modal-selbar" id="mix-modal-selbar" style={{ display: 'flex' }}>
-      <label className="mix-selbar-all">
-        <input
-          type="checkbox"
-          id="mix-select-all"
-          // total > 0 as well as count === total: without it an empty list
-          // shows select-all ticked, because 0 === 0.
-          checked={bar.selectAllChecked}
-          onChange={(e) => onSelectAll(mixSetAllSelected(total, e.target.checked))}
-        />{' '}
-        Select all
-      </label>
+    <div className="mix-modal-selbar" id="mix-modal-selbar" role="region" aria-label="Selection">
       <span className="mix-sel-count" id="mix-sel-count">
         {bar.countLabel}
       </span>
-      <span className="mix-selbar-spacer" />
-      <button type="button" className="btn btn--sm btn--secondary" onClick={onClearSelection}>
+      <button type="button" className="btn btn--sm mix-selbar-clear" onClick={onClearSelection}>
         Clear
       </button>
       {onAddSelectedToPlaylist ? (
         <button
           type="button"
           className="btn btn--sm btn--secondary"
-          disabled={selected.length === 0}
           onClick={(e) => onAddSelectedToPlaylist(e.currentTarget)}
         >
           Add to playlist
@@ -270,7 +405,8 @@ export function MixModal({
 }: MixModalProps) {
   const actions = mixActions(mix);
   const base = mixStatusBase(mix);
-  const hasTracks = Boolean(tracks && tracks.length > 0);
+  const rows = tracks ? compactRows(tracks) : [];
+  const hasTracks = rows.length > 0;
   const titleId = useId();
   // escape, focus trap, initial focus, focus restore, scroll lock. none of it
   // was here: escape did nothing and the thing was a plain div.
@@ -279,78 +415,65 @@ export function MixModal({
   return (
     <div className="modal-overlay" id="mix-modal-overlay" onClick={onBackdropClick}>
       <div
-        className="mix-modal"
+        className={selected.length > 0 ? 'mix-modal has-selection' : 'mix-modal'}
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="mix-modal-header">
-          <div>
-            {/* The EYEBROW sits above the title, falling back to 'Mix' (4979). */}
-            <div className="mix-modal-subtitle">{mix.subtitle || 'Mix'}</div>
-            <h2 className="mix-modal-title" id={titleId}>
-              {mix.title}
-            </h2>
-            {/* Empty, not '0 tracks', until a lazy mix has fetched (4981). */}
-            <div className="mix-modal-meta">{tracks ? `${tracks.length} tracks` : ''}</div>
-          </div>
-          <div className="mix-modal-actions">
-            {actions.map((action) => {
-              // Resolving a 50-track mix against the library takes a couple of
-              // seconds and this button used to say nothing for all of it.
-              const busy = playing && action.onclick.startsWith('play');
-              return (
-                <button
-                  type="button"
-                  key={action.label}
-                  className={
-                    action.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary'
-                  }
-                  // The live sync poller re-enables the button BY THIS ID (5035).
-                  id={action.isSync && base ? `${base}-sync-btn` : undefined}
-                  disabled={busy}
-                  aria-busy={busy || undefined}
-                  onClick={() => onAction(action)}
-                >
-                  {busy ? 'Starting…' : action.label}
-                </button>
-              );
-            })}
-            <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
+        <MixModalHeader
+          titleId={titleId}
+          eyebrow="Mix"
+          title={mix.title}
+          description={mix.subtitle}
+          // empty, not '0 tracks', until a lazy mix has fetched (4981)
+          meta={tracks ? mixMetaLine(rows) : ''}
+          covers={mixCoverArt(rows)}
+          onClose={onClose}
+          actions={actions.map((action) => {
+            // Resolving a 50-track mix against the library takes a couple of
+            // seconds and this button used to say nothing for all of it.
+            const busy = playing && action.onclick.startsWith('play');
+            return (
+              <button
+                type="button"
+                key={action.label}
+                // play leads and is the one filled button. the rest stay quiet
+                // so the header has a single obvious thing to press.
+                className={
+                  action.onclick.startsWith('play')
+                    ? 'btn btn--sm btn--primary'
+                    : 'btn btn--sm btn--secondary'
+                }
+                // The live sync poller re-enables the button BY THIS ID (5035).
+                id={action.isSync && base ? `${base}-sync-btn` : undefined}
+                disabled={busy}
+                aria-busy={busy || undefined}
+                onClick={() => onAction(action)}
+              >
+                {actionIcon(action.onclick)}
+                {busy ? 'Starting…' : action.label.replace(/^▶\s*/, '')}
+              </button>
+            );
+          })}
+        />
 
         {syncStatusOverride ??
           (base ? (
             <SyncStatus statusBase={base} progress={syncProgress} visible={Boolean(syncing)} />
           ) : null)}
 
-        {/* Hidden until there are tracks to select (5011-5014). */}
-        {hasTracks && (
-          <MixSelectionBarView
-            total={(tracks as unknown[]).length}
-            selected={selected}
-            onSelectAll={onSelectAll}
-            onClearSelection={onClearSelection}
-            onDownloadSelected={onDownloadSelected}
-            onAddSelectedToPlaylist={(anchor) => {
-              const picked = new Set(selected);
-              openAddToPlaylist(
-                compactRows(tracks as unknown[])
-                  .filter((row) => picked.has(row.index))
-                  .map((row) => ({
-                    track_name: row.name,
-                    artist_name: row.artist,
-                    album_name: row.album,
-                  })),
-                anchor,
-              );
+        {hasTracks && !loading && !error ? (
+          <TrackListHead
+            selectAll={{
+              id: 'mix-select-all',
+              // total > 0 as well as count === total: without it an empty list
+              // shows select-all ticked, because 0 === 0.
+              checked: mixSelectionBar(selected.length, rows.length).selectAllChecked,
+              onChange: (checked) => onSelectAll(mixSetAllSelected(rows.length, checked)),
             }}
           />
-        )}
+        ) : null}
 
         <div className="mix-modal-body" id="mix-modal-tracks">
           {loading ? (
@@ -374,6 +497,27 @@ export function MixModal({
             )
           )}
         </div>
+
+        {hasTracks && selected.length > 0 ? (
+          <MixSelectionBarView
+            selected={selected}
+            onClearSelection={onClearSelection}
+            onDownloadSelected={onDownloadSelected}
+            onAddSelectedToPlaylist={(anchor) => {
+              const picked = new Set(selected);
+              openAddToPlaylist(
+                rows
+                  .filter((row) => picked.has(row.index))
+                  .map((row) => ({
+                    track_name: row.name,
+                    artist_name: row.artist,
+                    album_name: row.album,
+                  })),
+                anchor,
+              );
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -30,6 +30,8 @@ export function isLive(cls: string, refs: Refs): boolean;
 export function selectorClasses(selector: string): string[];
 export function analyseRules(cssText: string, refs: Refs): RuleVerdict[];
 export function legacyStylesheets(): string[];
+export function atRuleKey(name: string, params: string): string;
+export function selectorKey(selector: string): string;
 export function removedSelectors(
   beforeSheets: Sheet[],
   afterSheets: Sheet[],

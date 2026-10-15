@@ -17,6 +17,8 @@
  * modal when not (openFreshRelease). One fetch per feed, on mount.
  */
 
+import type { ReactNode } from 'react';
+
 import { useCallback, useState } from 'react';
 
 import { thumb } from '@/platform/artwork-thumb';
@@ -24,6 +26,7 @@ import { getShellBridge } from '@/platform/shell/bridge';
 
 import type { FreshRelease, RecentlyAddedAlbum } from '../-dash.content';
 
+import { addRecentAlbumToPlaylist, playRecentAlbum, queueRecentAlbum } from '../-dash.card-actions';
 import {
   fetchFreshReleases,
   fetchRecentlyAdded,
@@ -33,6 +36,7 @@ import {
   relativeAge,
 } from '../-dash.content';
 import { useLiveRefresh } from '../-dash.live-refresh';
+import { RailCardActions } from './rail-card-actions';
 
 interface RailCardProps {
   /** Small corner check — the library already has this (discover's badge). */
@@ -50,6 +54,8 @@ interface RailCardProps {
   /** Makes the sub (artist) line its own hit-target — straight to the artist page. */
   onArtistClick?: () => void;
   onOpen: () => void;
+  /** the hover buttons over the cover (RailCardActions). */
+  actions?: ReactNode;
 }
 
 function RailCard({
@@ -63,6 +69,7 @@ function RailCard({
   titleAttr,
   onOpen,
   onArtistClick,
+  actions,
 }: RailCardProps) {
   // Fallback ladder, one rung per failure: cover -> the artist's art -> ♫.
   // History thumb URLs can be stale or media-server-authed and die in the
@@ -101,6 +108,7 @@ function RailCard({
         </div>
       )}
       {caption && <div className="dash-rail-caption">{caption}</div>}
+      {actions}
       <div className="ya-card-info">
         <div className="ya-card-name">{name}</div>
         {onArtistClick ? (
@@ -224,6 +232,14 @@ export function ContentBand() {
               badge={fileBadge(album.quality, album.source)}
               titleAttr={`Play ${album.albumName} — ${album.artistName}`}
               onArtistClick={() => void openArtistFromRail({ name: album.artistName })}
+              actions={
+                <RailCardActions
+                  label={album.albumName}
+                  onPlay={() => playRecentAlbum(album)}
+                  onQueue={() => queueRecentAlbum(album)}
+                  onAddToPlaylist={(anchor) => addRecentAlbumToPlaylist(album, anchor)}
+                />
+              }
               onOpen={() => {
                 if (!album.playFilePath) return;
                 // id -1 is truthy, so playLibraryTrack canonicalises against

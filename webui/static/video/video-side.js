@@ -309,22 +309,30 @@
         return !ap || ap.indexOf(pageId) > -1;
     }
     // Hand off to the unified React downloads page with its video view
-    // preselected. Flips to the music shell (where the React page lives) and
-    // routes in-app — no full reload. mode 'replace' (boot / deep link) must
-    // not leave /video-downloads in history, or Back would bounce straight
-    // back into this redirect.
+    // preselected. Downloads is a shared page: the shell stays on the
+    // video side and only the page's media tab is set — no side flip.
+    // Routes in-app, no full reload. mode 'replace' (boot / deep link)
+    // must not leave /video-downloads in history, or Back would bounce
+    // straight back into this redirect.
     function gotoUnifiedDownloads(mode) {
         _backStack = [];
         setActiveNav('video-downloads');
+        // Reveal wiring, same mechanism showPage() drives for the legacy
+        // shared pages: the attribute keys the video-side.css rules that
+        // show #webui-react-root and hide the video host. Without it the
+        // blanket video-side rule keeps the React root display:none and
+        // the routed page renders invisibly under the stale video page.
+        document.body.setAttribute('data-video-page', 'video-downloads');
         var replace = mode === 'replace' || mode === 'restore';
         try {
             var wsr = window.SoulSyncWebRouter;
             if (wsr && typeof wsr.navigateToPage === 'function') {
                 wsr.navigateToPage('active-downloads', { query: { media: 'video' }, replace: replace });
-                // Flip the side AFTER routing: the path is already a non-video
-                // one, so switchSide('music') skips its history.replaceState('/')
-                // and Browser Back lands on the previous video page.
-                if (typeof window._switchAppSide === 'function') window._switchAppSide('music');
+                // No side flip here (there was one, in #1651): flipping is
+                // what stranded the side toggle — the toggle resumes the
+                // active-marked page, which is this hand-off, so every
+                // Video click re-ran it and bounced straight back to music
+                // with no way out.
                 return;
             }
         } catch (e) { /* fall through to a real redirect */ }

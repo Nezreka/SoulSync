@@ -58,6 +58,8 @@ export interface CardSchedule {
   weeklyConfig?: { days: string[]; time: string; tz: string };
   /** When it next runs, as the automation reports it. */
   nextRun?: string | null;
+  /** The row's own action config, carried through a reschedule (#1704). */
+  actionConfig?: Record<string, unknown>;
 }
 
 export type CardScheduleMap = Readonly<Record<string, CardSchedule>>;
@@ -114,6 +116,7 @@ export function cardSchedulesFrom(automations: unknown[]): CardScheduleMap {
       automationId: entry.automation_id,
       weekly: false,
       nextRun: entry.next_run ?? null,
+      actionConfig: entry.action_config,
     };
   }
   for (const [playlistId, entry] of Object.entries(state.weeklySchedules)) {
@@ -125,6 +128,7 @@ export function cardSchedulesFrom(automations: unknown[]): CardScheduleMap {
       automationId: entry.automation_id,
       weekly: true,
       nextRun: entry.next_run ?? null,
+      actionConfig: entry.action_config,
       weeklyConfig: {
         days: Array.isArray(entry.days) ? [...entry.days] : [],
         // autoSyncWeeklyTrigger's own fallback, kept in step with it.
@@ -257,10 +261,15 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
           if (!res.ok) throw new Error('Failed to unschedule');
           toast(`${row.name || 'Playlist'} is no longer scheduled`, 'success');
         } else {
-          const payload = autoSyncSchedulePayload(row, row.id, {
-            trigger_type: 'schedule',
-            trigger_config: autoSyncTriggerForHours(hours),
-          });
+          const payload = autoSyncSchedulePayload(
+            row,
+            row.id,
+            {
+              trigger_type: 'schedule',
+              trigger_config: autoSyncTriggerForHours(hours),
+            },
+            existing?.actionConfig,
+          );
           // A weekly schedule is REPLACED rather than updated in place: the two
           // are different trigger shapes, and updating one into the other is
           // how you end up with a row that claims both.
@@ -308,10 +317,15 @@ export function useCardSchedules(options: UseCardSchedulesOptions = {}): CardSch
       setBusy((prev) => new Set(prev).add(playlistId));
       try {
         const existing = schedules[playlistId];
-        const payload = autoSyncSchedulePayload(row, row.id, {
-          trigger_type: 'weekly_time',
-          trigger_config: config,
-        });
+        const payload = autoSyncSchedulePayload(
+          row,
+          row.id,
+          {
+            trigger_type: 'weekly_time',
+            trigger_config: config,
+          },
+          existing?.actionConfig,
+        );
         // An HOURLY row is a different trigger shape, so it is replaced rather
         // than updated into a weekly one — updating across shapes is how you
         // end up with a row that claims both.

@@ -33,6 +33,17 @@ DOWNLOAD_COUNT_WEIGHT = 10.0
 # second line of defense, not the first.
 DEFAULT_MIN_SCORE = 24.0
 
+#: Allowed ``subtitle_hi_forced`` setting values (validated in
+#: ``core.video.organization.normalize``; anything else reads as "off").
+#: forced isn't a preference any more: forced tracks are their own wanted
+#: rows (the ``subtitle_forced`` setting), never a stand-in for a full one.
+HI_FORCED_PREFS = ("off", "prefer_hi")
+
+#: Tiebreak epsilon for the HI/forced preference — far below any real score
+#: delta (the gate is 24.0), so it only ever breaks exact ties: it can never
+#: flip a genuine ranking or lift a below-gate candidate over the gate.
+_HI_FORCED_PREF_TIEBREAK = 1e-9
+
 
 def opensubtitles_hash(path: str) -> str | None:
     """The OpenSubtitles file hash: size + uint64 sums of the first and last 64KB.
@@ -145,6 +156,16 @@ def score_candidate(candidate, query) -> float:
             score += filename_similarity(str(title), str(filename)) * FILENAME_WEIGHT
         score += download_count_bonus(getattr(candidate, "download_count", 0))
     except Exception:  # noqa: BLE001 - scoring is best-effort, never fatal
+        pass
+    # HI/forced preference (``subtitle_hi_forced`` setting, threaded through
+    # ``SubtitleQuery.hi_forced_pref``): a pure tiebreak — a preferred
+    # candidate ranks above an equal-scoring unpreferred one. Never excludes:
+    # a preference, not a filter.
+    try:
+        _pref = str(getattr(query, "hi_forced_pref", "off") or "off").strip().lower()
+        if _pref == "prefer_hi" and bool(getattr(candidate, "hi", False)):
+            score += _HI_FORCED_PREF_TIEBREAK
+    except Exception:  # noqa: BLE001 - the preference is best-effort
         pass
     return score
 

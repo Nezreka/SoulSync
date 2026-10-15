@@ -1,17 +1,17 @@
-"""The video settings' Subtitles section (Phase 1 of the subtitle overhaul).
+"""The video settings' Subtitles section (subtitle-finish redesign).
 
-Covers the three Phase 1 controls plus the link to the existing
-OpenSubtitles API key:
+Covers the redesigned section: master toggle, languages input, the EDITABLE
+provider chain (mirroring the download-chain widget: pool tiles + ordered
+steps, drag + arrow buttons, Whisper pinned last), the HI/forced preference
+and auto-sync controls, the advanced tuning knobs, and the API key fields
+for the keyed providers.
 
-  * ``vo-subs-dl``      master toggle      -> ``download_subtitles``
-  * ``vo-sub-langs``    languages input    -> ``subtitle_langs``
-  * ``vo-provider-order`` read-only chain  -> ``subtitle_provider_order``
-
-The toggle and langs input used to live loose inside the video
-organization card; the section groups them with the provider chain.
-The provider chain is deliberately read-only in Phase 1 (reordering
-is a later phase), rendering the backend order with an
-OpenSubtitles-only fallback.
+  * ``vo-subs-dl``        master toggle      -> ``download_subtitles``
+  * ``vo-sub-langs``      languages input    -> ``subtitle_langs``
+  * ``subchain-widget``   editable chain     -> ``subtitle_provider_order``
+  * ``vo-sub-hi-forced``  HI/forced pref     -> ``subtitle_hi_forced``
+  * ``vo-sub-autosync``   auto-sync toggle   -> ``subtitle_autosync``
+  * ``vo-sub-min-score`` etc. advanced knobs -> ``subtitle_*`` settings
 """
 
 from pathlib import Path
@@ -48,13 +48,20 @@ def panel(index):
 
 def test_section_lives_in_the_video_panel(panel):
     assert "Subtitles" in panel
-    for element_id in ("vo-subs-dl", "vo-sub-langs", "vo-provider-order"):
+    for element_id in ("vo-subs-dl", "vo-sub-langs", "subchain-widget",
+                       "subchain-pool", "subchain-list",
+                       "vo-sub-hi-forced", "vo-sub-autosync",
+                       "vo-sub-open-job", "vo-sub-job-status"):
         assert f'id="{element_id}"' in panel, element_id
 
 
 def test_ids_are_unique(index):
-    for element_id in ("vo-subs-dl", "vo-sub-langs", "vo-provider-order",
-                       "vo-sub-langs-error"):
+    for element_id in ("vo-subs-dl", "vo-sub-langs", "vo-sub-langs-error",
+                       "subchain-widget", "subchain-pool", "subchain-list",
+                       "vo-sub-hi-forced", "vo-sub-autosync",
+                       "vo-sub-min-score", "vo-sub-daily-quota",
+                       "vo-sub-upgrade-delta", "vo-sub-worker-interval",
+                       "vo-sub-worker-batch"):
         assert index.count(f'id="{element_id}"') == 1, element_id
 
 
@@ -63,7 +70,7 @@ def test_master_toggle_wired_to_download_subtitles(video_js):
     assert "download_subtitles: on('vo-subs-dl')" in video_js
 
 
-def test_toggle_help_text_describes_phase1_semantics(panel):
+def test_toggle_help_text_describes_semantics(panel):
     """On by default for new imports; best-effort; ~20/day quota; misses retried."""
     assert "On by default for new" in panel
     assert "~20" in panel
@@ -85,26 +92,109 @@ def test_langs_input_validates_lightly(index, video_js, panel):
     assert "_voLangsLastGood" in video_js
 
 
-def test_provider_chain_is_read_only_ordered_list(index, video_js, panel):
-    assert '<ol class="vo-provider-order" id="vo-provider-order">' in panel
-    # rendered from the backend order, OpenSubtitles-only fallback
-    assert "_videoOrg.subtitle_provider_order" in video_js
-    assert "DEFAULT_SUBTITLE_PROVIDER_ORDER = ['opensubtitles']" in video_js
-    # posted back to the backend (GET serves it, POST persists it — the backend
-    # normalizes it into the organization blob)
-    assert "subtitle_provider_order: subtitleProviderOrder()" in video_js
-    # no drag-reorder affordance in Phase 1
-    assert "draggable" not in video_js.split("renderProviderOrder")[1].split(
-        "function fillOrg")[0]
-    assert "More providers are" in panel
+def test_provider_chain_is_editable(panel, video_js):
+    # the download-chain widget structure, not a read-only list
+    assert 'id="subchain-widget"' in panel
+    assert 'id="subchain-pool"' in panel
+    assert 'id="subchain-list"' in panel
+    # drag AND arrow buttons (drag is impossible on phones)
+    assert "draggable" in video_js
+    assert "dlchain-move" in video_js
+    # rendered from the backend order and posted back; the backend
+    # normalizes via parse_provider_order
+    assert "_subchainOrder" in video_js
+    assert "subtitle_provider_order: _subchainOrder.slice()" in video_js
 
 
-def test_section_links_to_existing_opensubtitles_key(index, panel):
-    # the API key field stays where it is; the section points at it
-    assert 'id="opensubtitles-api-key"' in index
-    assert 'href="#opensubtitles-api-key"' in panel
+def test_chain_knows_all_providers(video_js):
+    for pid in ("opensubtitles", "subdl", "subsource", "embedded", "whisper"):
+        assert pid in video_js
+    # Whisper is pinned last as the last resort, never reorderable
+    assert "SUBCHAIN_BACKGROUND_IDS = ['whisper']" in video_js
+
+
+def test_hi_forced_preference_wired(panel, video_js):
+    assert 'id="vo-sub-hi-forced"' in panel
+    assert "set('vo-sub-hi-forced', _videoOrg.subtitle_hi_forced || 'off')" in video_js
+    assert "subtitle_hi_forced: val('vo-sub-hi-forced') || 'off'" in video_js
+    for value in ("off", "prefer_hi"):
+        assert f'value="{value}"' in panel
+    # forced is its own toggle now, never a preference
+    assert 'value="prefer_forced"' not in panel
+
+
+def test_forced_and_have_it_toggles_wired(panel, video_js):
+    for element_id, key in (("vo-sub-forced", "subtitle_forced"),
+                            ("vo-sub-use-embedded", "subtitle_use_embedded"),
+                            ("vo-sub-ignore-pgs", "subtitle_ignore_pgs"),
+                            ("vo-sub-ignore-vobsub", "subtitle_ignore_vobsub"),
+                            ("vo-sub-ignore-ass", "subtitle_ignore_ass")):
+        assert f'id="{element_id}"' in panel, element_id
+        assert f"{key}: on('{element_id}')" in video_js, key
+
+
+def test_every_subtitle_control_autosaves(video_js):
+    # the hi preference and auto-sync used to have no change listener, so
+    # flipping them never saved on its own
+    block = video_js[video_js.index("'vo-sub-worker-interval', 'vo-sub-worker-batch'"):]
+    block = block[:block.index("forEach")]
+    for element_id in ("vo-sub-hi-forced", "vo-sub-autosync", "vo-sub-forced",
+                       "vo-sub-use-embedded", "vo-sub-ignore-pgs",
+                       "vo-sub-ignore-vobsub", "vo-sub-ignore-ass"):
+        assert f"'{element_id}'" in block, element_id
+
+
+def test_subdl_and_subsource_have_test_buttons(index):
+    for svc in ("subdl", "subsource", "opensubtitles", "fanart"):
+        assert f'data-video-test-service="{svc}"' in index, svc
+
+
+def test_autosync_toggle_wired(panel, video_js):
+    assert 'id="vo-sub-autosync"' in panel
+    assert "chk('vo-sub-autosync', _videoOrg.subtitle_autosync)" in video_js
+    assert "subtitle_autosync: on('vo-sub-autosync')" in video_js
+
+
+def test_library_sweep_points_at_the_tools_job(panel, video_js):
+    # the one-off backfill button became the Missing Subtitles maintenance job
+    assert 'id="vo-sub-backfill"' not in panel
+    assert "/api/video/subtitles/backfill" not in video_js
+    assert 'id="vo-sub-open-job"' in panel
+    assert "MISSING_SUBS_JOB = 'missing_subtitles'" in video_js
+    assert "page: 'video-tools'" in video_js
+    assert ".repair-job-card[data-job-id=" in video_js
+
+
+def test_tools_page_knows_the_job():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "webui/static/video/video-repair.js").read_text(
+        encoding="utf-8")
+    assert "missing_subtitles: 'Missing Subtitles'" in js
+    assert "missing_subtitles: 'Queue Subtitles'" in js
+    assert "if (f.finding_type === 'missing_subtitles') return subtitlesDetailHTML(d);" in js
+
+
+def test_advanced_knobs_wired(panel, video_js):
+    for element_id, setting in (
+            ("vo-sub-min-score", "subtitle_min_score"),
+            ("vo-sub-daily-quota", "subtitle_daily_quota"),
+            ("vo-sub-upgrade-delta", "subtitle_upgrade_min_delta"),
+            ("vo-sub-worker-interval", "subtitle_worker_interval_min"),
+            ("vo-sub-worker-batch", "subtitle_worker_batch")):
+        assert f'id="{element_id}"' in panel, element_id
+        assert f"{setting}:" in video_js, setting
+
+
+def test_provider_api_keys_have_fields_and_endpoints(index, video_js):
+    for element_id in ("opensubtitles-api-key", "subdl-api-key", "subsource-api-key"):
+        assert f'id="{element_id}"' in index, element_id
+    # keys save through the enrichment config endpoint
+    assert "subdl_api_key:" in video_js
+    assert "subsource_api_key:" in video_js
+    # the section points at the Services keys
+    assert "Services" in index
 
 
 def test_sane_defaults(video_js):
     assert "'vo-sub-langs', _videoOrg.subtitle_langs || 'en'" in video_js
-    assert "subtitleProviderOrder()" in video_js
+    assert "_subchainOrder" in video_js

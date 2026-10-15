@@ -146,7 +146,7 @@ def test_v1_routes_create_list_revoke(v1_app):
     resp = client.post("/api/v1/api-keys", json={"label": "bot"}, headers=auth)
     assert resp.status_code == 201
     made = resp.get_json()["data"]
-    assert set(made) == {"key", "id", "label", "key_prefix", "created_at"}
+    assert set(made) == {"key", "id", "label", "key_prefix", "scope", "created_at"}
 
     listed = client.get("/api/v1/api-keys", headers=auth).get_json()["data"]["keys"]
     assert made["id"] in {k["id"] for k in listed}

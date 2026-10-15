@@ -2,8 +2,8 @@
 
 Pin the OBSERVABLE BEHAVIOR the engine will dispatch through.
 SoulSync standalone is the structurally-different one — no auth /
-no API / no library scan. is_connected just checks `transfer_path`
-is a directory. Filesystem walk happens via _get_cached_scan().
+no API. is_connected just checks `transfer_path` is a directory.
+Filesystem walk happens via _get_cached_scan().
 """
 
 from __future__ import annotations

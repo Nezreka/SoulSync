@@ -293,6 +293,17 @@ body[data-side="video"][data-video-page="video-chat"] #chat-page {
 body[data-side="video"][data-video-page="video-chat"] #video-page-host {
     display: none !important;
 }
+/* Downloads is a shared page too, but it is a React route, not a legacy
+   page: its host is #webui-react-root (a plain .page, so the blanket rule
+   above hides it). Reveal it the same way and hide the video host.
+   data-video-page is set by gotoUnifiedDownloads() in video-side.js —
+   navigate() hands off before showPage() can set it. */
+body[data-side="video"][data-video-page="video-downloads"] #webui-react-root {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-downloads"] #video-page-host {
+    display: none !important;
+}
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
    library mapping) — hidden on the music side. */
 body[data-side="music"] [data-video-only] {
@@ -6378,6 +6389,13 @@ body[data-side="video"] #gsearch-aura {
 /* ── Issues page + report/detail modals (the music Issues standard) ────────── */
 .vi-toolbar { display: flex; gap: 10px; margin-bottom: 16px; }
 .vi-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px; }
+/* Phones: five stat columns never fit — the row ran off the right edge
+   with the fourth card cut (mobile CSS batch #2, RC3). Two columns, the
+   fifth card wraps full-row. */
+@media (max-width: 640px) {
+    .vi-stats { grid-template-columns: repeat(2, 1fr); }
+    .vi-toolbar { flex-wrap: wrap; }
+}
 .vi-stat {
     padding: 14px; border-radius: var(--radius-lg); background: rgba(255,255,255,0.035);
     border: 1px solid var(--white-a07); text-align: center;

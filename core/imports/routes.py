@@ -288,7 +288,11 @@ def _records_or_scanning_payload(runtime: ImportRouteRuntime, staging_path: str)
     if state == "error":
         raise RuntimeError(val.get("error") or "staging scan failed")
     if state == "scanning":
+        # #1671: the stub must still say WHICH folder is being read. Without
+        # staging_path the page rendered "Import folder not configured" for a
+        # folder that is configured — it was only mid-scan.
         return None, {"success": True, "scanning": True,
+                      "staging_path": staging_path,
                       "progress": {"scanned": val.get("scanned", 0),
                                    "total": val.get("total", 0)}}
     return val, None
@@ -399,6 +403,10 @@ def invalidate_staging_scan_cache() -> None:
     _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
     _staging_scan_problems.clear()
+    # the scanning payload's history cache is an invalidation target too:
+    # an action that moves files must not leave stale history rows behind
+    # for the rest of its TTL.
+    _scanning_history_cache.update({"path": None, "ts": 0.0, "rows": None, "problems": None})
 
 
 def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
@@ -434,6 +442,159 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
         return {"success": False, "error": str(exc)}, 500
 
 
+def _inbox_worker_payload(worker: Any, status: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(status, dict):
+        status = {}
+    return {
+        "available": worker is not None,
+        "running": bool(status.get("running")),
+        "paused": bool(status.get("paused")),
+        "current_status": status.get("current_status", "idle"),
+        "last_scan_time": status.get("last_scan_time"),
+        "stats": status.get("stats") or {},
+    }
+
+
+# While a scan runs the page polls every ~1.5s; re-reading 200 history rows
+# and re-parsing their match JSON on every poll is waste on exactly the slow
+# installs #1671 is about. The history view may lag a few seconds during a
+# scan — the scan's own completion brings the exact rows.
+_SCANNING_HISTORY_TTL = 5.0
+_scanning_history_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "rows": None, "problems": None}
+
+
+def _scanning_history_rows(worker: Any, staging_path: str,
+                           status: Dict[str, Any]) -> tuple[list, list]:
+    """(rows, problems) the inbox can show while the staging scan runs.
+
+    Terminal history (imported / dismissed) stands as-is. Everything the
+    worker has not finished with — needs review, needs identifying, queued,
+    importing, failed, partial — still has its files in the folder as far as
+    anyone knows mid-scan, so those rows are built through pseudo-candidates
+    (in_staging, carrying the history row's status) instead of being dropped
+    the way ``build_inbox`` drops file-less unfinished rows. A failed row
+    built this way keeps its Retry action during the scan. Briefly cached:
+    the page polls faster than history changes during a scan."""
+    now = time.time()
+    cache = _scanning_history_cache
+    if (cache["rows"] is not None and cache["path"] == staging_path
+            and (now - cache["ts"]) < _SCANNING_HISTORY_TTL):
+        return cache["rows"], cache["problems"]
+
+    from core.imports.inbox import build_inbox
+
+    history = worker.get_results(limit=200)
+    # History is INSERT-per-attempt, so one folder can carry several rows —
+    # and its hash is content-derived, so fixing a file in the folder gives
+    # the next attempt a NEW hash for the same path. Identity here is hash
+    # OR path (the same rule build_inbox claims by); keep only the newest
+    # row per folder, or a folder renders twice during scans — once per
+    # attempt — and a superseded row can swallow the live one.
+    seen_identities = set()
+    deduped = []
+    for hist in history:
+        # normpath only a real path: normpath("") is ".", which would give
+        # every pathless row the same identity and drop all but the newest.
+        keys = {k for k in (hist.get("folder_hash"),
+                            os.path.normpath(hist["folder_path"])
+                            if hist.get("folder_path") else None) if k}
+        if keys & seen_identities:
+            continue
+        seen_identities |= keys
+        deduped.append(hist)
+    history = deduped
+    rows = build_inbox([], [], history, [], staging_root=staging_path)
+
+    staged_statuses = {"pending_review", "needs_identification", "approved",
+                       "processing", "failed", "partial"}
+    by_id = {h.get("id"): h for h in history}
+    kept: list = []
+    staged_rows: list = []
+    for row in rows:
+        hist = by_id.get(row.get("history_id"))
+        if (hist is not None and hist.get("status") in staged_statuses
+                and hist.get("folder_path")):
+            staged_rows.append(hist)
+        else:
+            kept.append(row)
+    seen_ids = {r.get("history_id") for r in rows}
+    staged_rows.extend(
+        h for h in history
+        if h.get("id") not in seen_ids and h.get("status") in staged_statuses
+        and h.get("folder_path"))
+
+    if staged_rows:
+        from types import SimpleNamespace
+
+        candidates = []
+        seen_keys = set()
+        for hist in staged_rows:
+            path = hist.get("folder_path") or ""
+            key = hist.get("folder_hash") or path
+            if not path or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            candidates.append(SimpleNamespace(
+                path=path,
+                name=hist.get("folder_name") or hist.get("album_name") or "",
+                audio_files=[],
+                # legacy rows can carry an empty hash; a synthetic key keeps
+                # two such rows from sharing one identity in the page's list
+                # (the history claim itself falls back to the folder path).
+                folder_hash=hist.get("folder_hash") or f"scan-{hist.get('id')}",
+                is_single=(hist.get("total_files") or 0) <= 1,
+            ))
+        kept.extend(
+            r for r in build_inbox(candidates, [], staged_rows,
+                                   status.get("active_imports") or [],
+                                   staging_root=staging_path)
+            if r["in_staging"])
+
+    problems = list(_staging_scan_problems)
+    seen_problems = {(p["path"], p["error"]) for p in problems}
+    for problem in status.get("scan_problems") or []:
+        entry = {"path": problem.get("path", ""), "error": problem.get("error", "")}
+        if entry["path"] and (entry["path"], entry["error"]) not in seen_problems:
+            problems.append(entry)
+
+    _scanning_history_cache.update(
+        {"path": staging_path, "ts": time.time(), "rows": kept, "problems": problems})
+    return kept, problems
+
+
+def _scanning_inbox_payload(scanning: Dict[str, Any], staging_path: str,
+                            worker: Any) -> Dict[str, Any]:
+    """What the inbox can honestly say while the staging scan is still running (#1671).
+
+    The scan only gates the *staging* rows: history lives in the database and
+    the worker's state is in memory, so both can be served immediately. The
+    page keeps showing them (plus the folder path and the auto-import switch)
+    under a scan-progress banner instead of blanking to zeroes and claiming
+    the folder is not configured. No ``summary``: the staged counts are
+    exactly what is not known yet, and a fabricated "0 items" is the bug
+    being fixed. Enrichment must never break the poll — any failure falls
+    back to the bare scanning payload."""
+    payload = dict(scanning)
+    status: Dict[str, Any] = {}
+    rows: list = []
+    problems: list = []
+    if worker is not None:
+        try:
+            status = worker.get_status() or {}
+        except Exception:  # noqa: BLE001 — worker state is a nicety during a scan
+            status = {}
+        if not isinstance(status, dict):
+            status = {}
+        try:
+            rows, problems = _scanning_history_rows(worker, staging_path, status)
+        except Exception:  # noqa: BLE001 — history is a nicety during a scan
+            rows, problems = [], []
+    payload["items"] = rows
+    payload["problems"] = problems
+    payload["worker"] = _inbox_worker_payload(worker, status)
+    return payload
+
+
 def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int]:
     """Every staging item with its state: the page's one list.
 
@@ -444,7 +605,7 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
         staging_path = runtime.get_staging_path()
         records, scanning = _records_or_scanning_payload(runtime, staging_path)
         if scanning is not None:
-            return scanning, 200
+            return _scanning_inbox_payload(scanning, staging_path, worker), 200
 
         from core.imports.inbox import build_inbox, summarize
 
@@ -478,14 +639,7 @@ def inbox(runtime: ImportRouteRuntime, worker: Any) -> tuple[Dict[str, Any], int
             "items": rows,
             "summary": summarize(rows),
             "problems": problems,
-            "worker": {
-                "available": worker is not None,
-                "running": bool(status.get("running")),
-                "paused": bool(status.get("paused")),
-                "current_status": status.get("current_status", "idle"),
-                "last_scan_time": status.get("last_scan_time"),
-                "stats": status.get("stats") or {},
-            },
+            "worker": _inbox_worker_payload(worker, status),
         }, 200
     except Exception as exc:
         runtime.logger.error("Error building import inbox: %s", exc)
@@ -637,6 +791,80 @@ def search_sources() -> tuple[Dict[str, Any], int]:
         return {"success": False, "error": str(exc), "sources": []}, 500
 
 
+def _get_import_db(runtime) -> Any:
+    """The music database for library lookups, or None when unavailable.
+
+    Every library pre-check fails open without it (proceed, never skip).
+    """
+    try:
+        from database.music_database import get_database
+        return get_database()
+    except Exception as exc:                                # noqa: BLE001
+        runtime.logger.debug("[Library Check] database unavailable: %s", exc)
+        return None
+
+
+def _annotate_library_status(runtime: ImportRouteRuntime,
+                             payload: Dict[str, Any], source: str,
+                             album_name: str = "") -> Dict[str, Any]:
+    """Attach per-track existing-library decisions to an album-match payload.
+
+    Runs at the matching stage, so the review UI can show what's already
+    owned BEFORE the user imports. The process endpoint re-checks (never
+    trusts the client's copy) — this is presentation, not enforcement.
+    """
+    from core.imports.library_check import check_track_library_status
+
+    matches = payload.get("matches") or []
+    if not payload.get("success") or not matches:
+        return payload
+    db = _get_import_db(runtime)
+    # album_name is optional on the way in (callers may pass only album_id);
+    # fall back to the metadata source's album title so release scoping
+    # still works and the review UI shows skip badges.
+    resolved_album_name = (
+        album_name
+        or str((payload.get("album") or {}).get("name") or "")
+        or str((payload.get("album") or {}).get("title") or "")
+    )
+    quality_profile = _resolve_gate_profile(runtime)
+    for match in matches:
+        staging_file = match.get("staging_file") or {}
+        track = match.get("track") or {}
+        if not staging_file or not track:
+            match["library_status"] = None
+            continue
+        match["library_status"] = check_track_library_status(
+            db,
+            track=track,
+            staging_file_path=staging_file.get("full_path", ""),
+            match_type=match.get("match_type"),
+            confidence=match.get("confidence", 0) or 0,
+            source_hint=source,
+            album_name=resolved_album_name,
+            quality_profile=quality_profile,
+            quiet=True,  # presentation only; enforcement re-checks and logs
+        )
+    return payload
+
+
+def _resolve_gate_profile(runtime: ImportRouteRuntime) -> dict:
+    """Best-effort quality profile for the library-check gate.
+
+    Mirrors what the pipeline will resolve for the replacement arbiter
+    (``load_profile_by_id(runtime.profile_id)``); {} on any failure, in
+    which case the gate falls back to the global ``import.replace_lower_quality``
+    setting — exactly like the pipeline does.
+    """
+    try:
+        from core.quality.selection import load_profile_by_id
+        profile_id = getattr(runtime, "profile_id", None)
+        profile = load_profile_by_id(profile_id)
+        return profile if isinstance(profile, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:
     """Match staging files to an album's tracklist."""
     try:
@@ -665,6 +893,9 @@ def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict
             file_paths=filter_file_paths,
             source=source or None,
         )
+        # Existing-library pre-check: annotate each pairing so the review UI
+        # shows what's already owned before anything is imported.
+        payload = _annotate_library_status(runtime, payload, source, album_name)
         return payload, 200
     except Exception as exc:
         runtime.logger.error("Error matching album for import: %s", exc)
@@ -1008,10 +1239,20 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
 
         processed = 0
         errors = []
+        dispositions = []
+        summary = {"imported": 0, "skipped_owned": 0, "upgraded": 0}
         album_name = album.get("name", album.get("album_name", "Unknown Album"))
         artist_name = album.get("artist", album.get("artist_name", "Unknown Artist"))
         album_id = album.get("id", album.get("album_id", ""))
         source = str(album.get("source") or data.get("source") or "").strip().lower()
+
+        from core.imports.library_check import (
+            DECISION_SKIP_OWNED,
+            DECISION_UPGRADE,
+            check_track_library_status,
+        )
+        db = _get_import_db(runtime)
+        gate_profile = _resolve_gate_profile(runtime)
 
         total_discs = max(
             (
@@ -1023,6 +1264,16 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         )
         artist_context = runtime.resolve_album_artist_context(album, source=source)
 
+        def _record_disposition(track_name, file_name, decision, reason):
+            dispositions.append({
+                "track_name": track_name,
+                "file_name": file_name,
+                "decision": decision,
+                "reason": reason,
+            })
+            if decision in summary:
+                summary[decision] += 1
+
         for match in matches:
             staging_file = match.get("staging_file")
             track = match.get("track") or {}
@@ -1032,12 +1283,50 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             file_path, path_error = _validate_import_file(
                 runtime, staging_file.get("full_path", ""),
             )
+            _err_track = (track or {}).get("name", "Unknown Track")
+            _err_file = staging_file.get("filename") or "?"
             if path_error:
-                errors.append(f"{path_error}: {staging_file.get('filename', '?')}")
+                errors.append(f"{path_error}: {_err_file}")
+                _record_disposition(
+                    _err_track, _err_file, "error", f"{path_error}: {_err_file}",
+                )
                 continue
 
             track_name = track.get("name", "Unknown Track")
             track_number = track.get("track_number", 1)
+            file_name = staging_file.get("filename") or os.path.basename(file_path)
+
+            # Existing-library pre-check (enforcement): re-checked here, never
+            # trusting the client's annotated copy. Confident "already owned"
+            # pairings skip the pipeline entirely — no transcoding, tagging or
+            # file moves for tracks the library already has.
+            status = check_track_library_status(
+                db,
+                track=track,
+                staging_file_path=file_path,
+                match_type=match.get("match_type"),
+                confidence=match.get("confidence", 0) or 0,
+                source_hint=source,
+                album_name=album_name,
+                quality_profile=gate_profile,
+            )
+            decision = status["decision"]
+            if decision == DECISION_SKIP_OWNED:
+                runtime.logger.info(
+                    "[Library Check] Skipping %s — %s",
+                    track_name, status["reason"],
+                )
+                _record_disposition(track_name, file_name, "skipped_owned", status["reason"])
+                # Deliberately NOT unlinking the staging file: on the manual
+                # import page these are the user's own files — the pre-check
+                # never deletes user data. Skipped files stay in staging
+                # until the user removes them. (Automated client copies are
+                # working copies and ARE discarded — see client_match.)
+                continue
+            # "upgrade" and everything else proceed; the pipeline's existing
+            # upgrade/replacement logic decides what the better file replaces.
+            gate_decision = decision
+
             context_key = f"import_album_{album_id}_{track_number}_{uuid.uuid4().hex[:8]}"
             context = runtime.build_album_import_context(
                 album,
@@ -1065,16 +1354,23 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                 if reject_reason:
                     errors.append(f"{track_name}: {reject_reason}")
                     runtime.logger.warning("Import rejected: %s — %s", track_name, reject_reason)
+                    _record_disposition(track_name, file_name, "error", reject_reason)
                 else:
                     processed += 1
+                    # The gate's decision stands: an "upgrade" routing that
+                    # processed cleanly counts as upgraded, the rest imported.
+                    final_decision = "upgraded" if gate_decision == DECISION_UPGRADE else "imported"
+                    _record_disposition(track_name, file_name, final_decision, status["reason"])
                     runtime.logger.info("Import processed: %s. %s from %s", track_number, track_name, album_name)
             except Exception as proc_err:
                 err_msg = f"{track_name}: {str(proc_err)}"
                 errors.append(err_msg)
                 runtime.logger.error("Import processing error: %s", err_msg)
+                _record_disposition(track_name, file_name, "error", str(proc_err))
 
         if runtime.add_activity_item:
-            runtime.add_activity_item("", "Album Imported", f"{album_name} by {artist_name} ({processed}/{len(matches)} tracks)", "Now")
+            runtime.add_activity_item("", "Album Imported", _import_summary_text(
+                album_name, artist_name, summary, len(matches)), "Now")
 
         if processed > 0:
             _emit_import_completed(
@@ -1094,10 +1390,26 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         if processed > 0:
             invalidate_staging_scan_cache()
 
-        return {"success": True, "processed": processed, "total": len(matches), "errors": errors}, 200
+        return {"success": True, "processed": processed, "total": len(matches),
+                "errors": errors, "dispositions": dispositions,
+                "summary": summary}, 200
     except Exception as exc:
         runtime.logger.error("Error processing album import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
+
+
+def _import_summary_text(album_name: str, artist_name: str,
+                         summary: Dict[str, int], total: int) -> str:
+    """One-line import result, e.g. "3 imported · 9 already owned · 1 upgraded"."""
+    parts = []
+    if summary.get("imported"):
+        parts.append(f"{summary['imported']} imported")
+    if summary.get("upgraded"):
+        parts.append(f"{summary['upgraded']} upgraded")
+    if summary.get("skipped_owned"):
+        parts.append(f"{summary['skipped_owned']} already owned")
+    detail = " · ".join(parts) if parts else "nothing imported"
+    return f"{album_name} by {artist_name} ({detail})"
 
 
 def search_tracks(runtime: ImportRouteRuntime, query: str, limit: int = 10) -> tuple[Dict[str, Any], int]:

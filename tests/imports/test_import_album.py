@@ -178,6 +178,9 @@ def test_build_album_import_match_payload_uses_generic_track_keys(monkeypatch, t
                 "disc_number": 1,
             },
             "confidence": 1.0,
+            # match_type is always present (None when not an exact-ID pairing)
+            # so the library pre-check gate can trust the field.
+            "match_type": None,
         }
     ]
 

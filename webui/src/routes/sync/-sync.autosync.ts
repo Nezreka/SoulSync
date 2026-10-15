@@ -535,6 +535,12 @@ export interface AutoSyncScheduleEntry {
   owned: true;
   next_run?: string | null;
   trigger_config: unknown;
+  /**
+   * the row's own config, so a reschedule from the board keeps what was set
+   * in the builder (a pipeline's sync_mode, skip_wishlist) instead of
+   * replacing it with the board's bare payload (#1704)
+   */
+  action_config?: Record<string, unknown>;
 }
 
 export interface AutoSyncHourlyEntry extends AutoSyncScheduleEntry {
@@ -621,6 +627,7 @@ export function buildAutoSyncScheduleState(
           owned: true,
           next_run: auto.next_run,
           trigger_config: auto.trigger_config || {},
+          action_config: auto.action_config || {},
         };
         return;
       }
@@ -639,6 +646,7 @@ export function buildAutoSyncScheduleState(
           owned: true,
           next_run: auto.next_run,
           trigger_config: auto.trigger_config || {},
+          action_config: auto.action_config || {},
         };
         return;
       }
@@ -666,6 +674,7 @@ export function buildAutoSyncScheduleState(
           owned: true,
           next_run: auto.next_run,
           trigger_config: auto.trigger_config || {},
+          action_config: auto.action_config || {},
         };
       }
     } else if (auto.trigger_type === 'weekly_time') {
@@ -681,6 +690,7 @@ export function buildAutoSyncScheduleState(
           owned: true,
           next_run: auto.next_run,
           trigger_config: auto.trigger_config || {},
+          action_config: auto.action_config || {},
         };
       }
     }
@@ -1516,12 +1526,17 @@ export function autoSyncSchedulePayload(
   playlist: MirroredRow,
   playlistId: number | string,
   trigger: { trigger_type: string; trigger_config: unknown },
+  existingConfig?: Record<string, unknown> | null,
 ): Record<string, unknown> {
+  const action = autoSyncActionForPlaylist(playlist, playlistId);
   return {
     name: `Auto-Sync: ${playlist.name}`,
     trigger_type: trigger.trigger_type,
     trigger_config: trigger.trigger_config,
-    ...autoSyncActionForPlaylist(playlist, playlistId),
+    action_type: action.action_type,
+    // the board's target keys win, anything else the row already had (a
+    // sync_mode set in the builder) rides along (#1704)
+    action_config: { ...existingConfig, ...action.action_config },
     then_actions: [],
     group_name: 'Playlist Auto-Sync',
     owned_by: 'auto_sync',

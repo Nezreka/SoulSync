@@ -354,6 +354,39 @@ export function legacyStylesheets() {
   return walk(join(WEBUI, 'static'), /\.css$/, /[\\/]dist[\\/]/, undefined, []);
 }
 
+// Layout doesn't change what a selector or an at-rule matches, so keys ignore
+// it: reflowing minified CSS must not read as removed selectors. Quoted
+// strings and [attr] brackets are left as written.
+function outsideLiterals(text, fn) {
+  return text
+    .split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\[[^\]]*\])/)
+    .map((part, i) => (i % 2 ? part : fn(part)))
+    .join('');
+}
+const layout = (part) =>
+  part
+    .replace(/\s+/g, ' ')
+    .replace(/\(\s*/g, '(')
+    .replace(/\s*\)/g, ')')
+    .replace(/\s*,\s*/g, ', ');
+/** `@media (max-width:900px)` and `@media ( max-width: 900px )` are one key. */
+export function atRuleKey(name, params) {
+  const p = outsideLiterals(params.trim(), (part) =>
+    layout(part)
+      .replace(/\s*:\s*/g, ': ')
+      .replace(/(^|[\s,(:/*+-])\.(\d)/g, '$10.$2'),
+  );
+  return `@${name.toLowerCase()} ${p}`.trim();
+}
+/** `.a>.b`, `.a > .b` and `.a\n> .b` are one key. */
+export function selectorKey(selector) {
+  return outsideLiterals(selector.trim(), (part) =>
+    layout(part)
+      .replace(/\s*([>+~])\s*/g, ' $1 ')
+      .replace(/\(\s+/g, '('),
+  );
+}
+
 /** Every individual selector, keyed by the at-rules it sits in. */
 function selectorKeys(cssText, name) {
   const out = new Set();
@@ -368,8 +401,8 @@ function selectorKeys(cssText, name) {
     if (inKeyframes(rule)) return;
     const ctx = [];
     for (let p = rule.parent; p && p.type === 'atrule'; p = p.parent)
-      ctx.unshift(`@${p.name} ${p.params}`.replace(/\s+/g, ' '));
-    for (const sel of rule.selectors) out.add([...ctx, sel.replace(/\s+/g, ' ')].join(' | '));
+      ctx.unshift(atRuleKey(p.name, p.params));
+    for (const sel of rule.selectors) out.add([...ctx, selectorKey(sel)].join(' | '));
   });
   return out;
 }

@@ -31,6 +31,8 @@ import { FeedbackMenu } from './feedback-menu';
 
 export interface RecommendedModalProps {
   artists: RecommendedArtist[];
+  /** the hero's picks open this too, under their own name */
+  title?: string;
   /** The source from the response that filled this modal, if there was one. */
   source: string | null;
   /** The module-level cached source — the last resort for a primed open. */
@@ -46,6 +48,7 @@ export interface RecommendedModalProps {
 
 export function RecommendedModal({
   artists,
+  title = REC_MODAL_TITLE,
   source,
   cachedSource,
   watchingIds,
@@ -67,7 +70,7 @@ export function RecommendedModal({
       <div className="modal-container playlist-modal recommended-modal">
         <div className="playlist-modal-header">
           <div className="playlist-header-content" style={{ width: '100%' }}>
-            <h2>{REC_MODAL_TITLE}</h2>
+            <h2>{title}</h2>
             <div className="playlist-quick-info">
               <span className="playlist-track-count">{countLabel}</span>
             </div>

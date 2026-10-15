@@ -836,6 +836,40 @@ def _release(media_type: str) -> None:
         _running[media_type] = False
 
 
+# ── stop: "cancel all" on the downloads page halts in-flight wishlist searches ──
+# a run snapshots the generation when it starts; a bump means stop. cancelling the
+# download rows alone left a 700-item search-all grinding on and grabbing more.
+_stop_gen = [0]
+
+
+def request_stop() -> None:
+    """Tell every running drain / search-all to stop searching and grabbing."""
+    with _running_lock:
+        _stop_gen[0] += 1
+
+
+def stop_generation() -> int:
+    with _running_lock:
+        return _stop_gen[0]
+
+
+def stop_requested(gen: int) -> bool:
+    return stop_generation() != gen
+
+
+def _default_max_downloads(media_type: str) -> int:
+    """The drain automation's 'Max downloads per run' for this kind (default 3).
+    search-all honours it too, so one click can't hand the clients the whole wishlist."""
+    action = 'video_process_movie_wishlist' if media_type == 'movie' else 'video_process_episode_wishlist'
+    try:
+        from database.music_database import get_database
+        row = get_database().get_system_automation_by_action(action) or {}
+        cfg = json.loads(row.get('action_config') or '{}')
+        return max(1, int(cfg.get('max_simultaneous_downloads', 3) or 3))
+    except Exception:   # noqa: BLE001 - unreadable config fails open to the default
+        return 3
+
+
 def _wishlist_db_key(item: Dict[str, Any], media_type: str) -> tuple:
     tmdb = item.get('tmdb_id') or item.get('show_tmdb_id')
     kind = 'movie' if media_type == 'movie' else 'episode'
@@ -936,6 +970,7 @@ def auto_video_process_wishlist(
         return {'status': 'skipped', 'reason': 'already_running',
                 '_manages_own_progress': True}
     try:
+        gen = stop_generation()   # "cancel all" bumps it: stop searching + grabbing
         root = target_dir(media_type)
         if not root:
             where = 'Movie' if media_type == 'movie' else 'TV'
@@ -994,6 +1029,7 @@ def auto_video_process_wishlist(
         notrun = [0]       # the search never ran (slskd didn't accept it)
         refused = [0]      # releases passed the profile; the download client said no
         deferred = [0]      # budget spent: left on the wishlist for the next run
+        stopped = [0]       # cancel all hit mid-run: left on the wishlist untouched
         slots_claimed = [0]  # atomic grab-budget claims this run (never > max_downloads)
         total = len(todo)
         lock = threading.Lock()
@@ -1003,6 +1039,9 @@ def auto_video_process_wishlist(
             # rest wait for the next tick — no search wasted, no outcome
             # recorded (this is not a fruitless search), no row lost.
             with lock:
+                if stop_requested(gen):
+                    stopped[0] += 1
+                    return
                 if slots_claimed[0] >= max_downloads:
                     deferred[0] += 1
                     return
@@ -1027,6 +1066,10 @@ def auto_video_process_wishlist(
                 # here, so the check + increment must be one locked step — at
                 # most `max_downloads` items are ever handed to the clients.
                 with lock:
+                    if stop_requested(gen):
+                        # the search finished after cancel all — grab nothing
+                        stopped[0] += 1
+                        return
                     slot = slots_claimed[0] < max_downloads
                     if slot:
                         slots_claimed[0] += 1
@@ -1152,6 +1195,8 @@ def auto_video_process_wishlist(
         if deferred[0]:
             tail.append('%d deferred to the next run (download cap %d)'
                         % (deferred[0], max_downloads))
+        if stopped[0]:
+            tail.append('%d skipped (stopped by cancel all)' % stopped[0])
         breakdown = (' · ' + ', '.join(tail)) if tail else ''
         done = ('Grabbed %d %s(s) of %d searched%s' % (grabbed[0], label, searched[0], breakdown)) if grabbed[0] \
             else ('Searched %d %s(s), grabbed 0%s' % (searched[0], label, breakdown))

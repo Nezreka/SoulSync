@@ -1010,13 +1010,24 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error updating playlist '{playlist_name}': {e}")
             return False
     
-    def set_playlist_image(self, playlist_name: str, image_url: str) -> bool:
-        """Set the poster image for a playlist from a URL."""
-        if not self.ensure_connection() or not image_url:
+    def set_playlist_image(self, playlist_name: str, image_url: str,
+                           local_path: Optional[str] = None) -> bool:
+        """Set the poster image for a playlist from a URL, or from a local
+        file when one is given and exists.
+
+        Plex fetches a URL itself, so a SoulSync-local address (127.0.0.1)
+        breaks when Plex runs in another container or host. A local file
+        sidesteps the network entirely via uploadPoster(filepath=...).
+        """
+        if not self.ensure_connection() or (not image_url and not local_path):
             return False
         try:
+            import os
             playlist = self.server.playlist(playlist_name)
-            playlist.uploadPoster(url=image_url)
+            if local_path and os.path.isfile(local_path):
+                playlist.uploadPoster(filepath=local_path)
+            else:
+                playlist.uploadPoster(url=image_url)
             logger.info(f"Set playlist poster for '{playlist_name}'")
             return True
         except Exception as e:

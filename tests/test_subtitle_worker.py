@@ -142,7 +142,8 @@ def test_cycle_downloads_and_marks_have(db, tmp_path, monkeypatch):
     fs = FakeFS()
     stats = worker.run_cycle(db, _settings(), fs)
     assert stats == {"attempted": 1, "downloaded": 1, "missed": 0, "skipped": 0,
-                     "upgraded": 0, "upgrade_checked": 0, "upgrade_skipped": 0}
+                     "upgraded": 0, "upgrade_checked": 0, "upgrade_skipped": 0,
+                     "requeued": 0}
     assert db.subtitle_have("download", dl_id, "en")
     assert fs.texts[os.path.join(str(tmp_path), "Movie.2024.1080p.WEB-GROUP.en.srt")] == "srt-data"
     assert db.subtitle_quota_used("scripted") == 1
@@ -276,6 +277,100 @@ def test_on_download_fires_per_successful_download(monkeypatch):
     assert text == "srt"
     # Only the SUCCESSFUL download() calls burn quota — the two Nones don't.
     assert burns == ["multi"]
+
+
+def test_quota_check_skips_exhausted_provider(monkeypatch):
+    """A provider whose quota_check returns False downloads nothing, even when
+    a later provider in the chain still has room. Exempt providers are never
+    checked."""
+    import core.video.subtitles.providers as pkg
+    from core.video.subtitles.providers import fetch_subtitle_detailed
+    from core.video.subtitles.providers.base import SubtitleQuery
+
+    class First(SubtitleProvider):
+        id = "first"
+        display_name = "First"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r1")]
+
+        def download(self, candidate):
+            return "srt-first"
+
+    class Second(SubtitleProvider):
+        id = "second"
+        display_name = "Second"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r2")]
+
+        def download(self, candidate):
+            return "srt-second"
+
+    monkeypatch.setattr(pkg, "get_providers",
+                        lambda: {"first": First(), "second": Second()})
+    q = SubtitleQuery(identity={}, language="en",
+                      filename="Movie.2024.1080p.WEB-GROUP.mkv")
+    # "first" is exhausted → skipped; "second" still has room → wins.
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["first", "second"], lambda k, d=None: 0.0,
+        quota_check=lambda p: p != "first")
+    assert text == "srt-second" and pid == "second"
+    # No quota_check → old behavior: first provider wins.
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["first", "second"], lambda k, d=None: 0.0)
+    assert text == "srt-first" and pid == "first"
+
+
+def test_quota_check_skips_search_too(monkeypatch):
+    """An exhausted provider is skipped BEFORE its search() — a search is an
+    API call, and its candidates could never be downloaded anyway."""
+    import core.video.subtitles.providers as pkg
+    from core.video.subtitles.providers import fetch_subtitle_detailed
+    from core.video.subtitles.providers.base import SubtitleQuery
+
+    searches = []
+
+    class Exhausted(SubtitleProvider):
+        id = "exhausted"
+        display_name = "Exhausted"
+
+        @property
+        def needs_key(self):
+            return False
+
+        def is_configured(self, get_setting):
+            return True
+
+        def search(self, query):
+            searches.append(1)
+            return [_cand(title="Movie.2024.1080p.WEB-GROUP", ref="r1")]
+
+        def download(self, candidate):
+            return "srt"
+
+    monkeypatch.setattr(pkg, "get_providers", lambda: {"exhausted": Exhausted()})
+    q = SubtitleQuery(identity={}, language="en",
+                      filename="Movie.2024.1080p.WEB-GROUP.mkv")
+    text, pid, _c, _s = fetch_subtitle_detailed(
+        q, ["exhausted"], lambda k, d=None: 0.0,
+        quota_check=lambda p: False)
+    assert text is None and pid is None
+    assert searches == []  # never searched
 
 
 # ── Phase 3: per-item language override enforcement in the fetch path ──────

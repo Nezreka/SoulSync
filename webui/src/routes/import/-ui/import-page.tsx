@@ -98,6 +98,12 @@ function ImportJobs() {
 
 function ImportJob({ entry }: { entry: ImportQueueEntry }) {
   const failed = entry.status === 'error' || (entry.status === 'done' && entry.errors.length > 0);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailFilter, setDetailFilter] = useState<string>('all');
+  const dispositions = entry.dispositions ?? [];
+  const filtered =
+    detailFilter === 'all' ? dispositions : dispositions.filter((d) => d.decision === detailFilter);
+  const filterOptions = ['all', ...Array.from(new Set(dispositions.map((d) => d.decision)))];
   return (
     <div className={styles.job}>
       {entry.imageUrl ? (
@@ -123,6 +129,51 @@ function ImportJob({ entry }: { entry: ImportQueueEntry }) {
             ))}
           </ul>
         ) : null}
+        {dispositions.length > 0 ? (
+          <div>
+            <button
+              type="button"
+              className={styles.jobDetailToggle}
+              onClick={() => setDetailOpen((open) => !open)}
+              aria-expanded={detailOpen}
+            >
+              {detailOpen ? 'Hide track details' : `Show track details (${dispositions.length})`}
+            </button>
+            {detailOpen ? (
+              <div className={styles.jobDetailList}>
+                <div
+                  className={styles.jobDetailFilters}
+                  role="group"
+                  aria-label="Filter tracks by outcome"
+                >
+                  {filterOptions.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      className={clsx(styles.jobDetailFilter, {
+                        [styles.active]: detailFilter === option,
+                      })}
+                      onClick={() => setDetailFilter(option)}
+                    >
+                      {option === 'all' ? 'All' : dispositionLabel(option)}
+                    </button>
+                  ))}
+                </div>
+                <ul>
+                  {filtered.map((d, i) => (
+                    <li key={i} className={styles.jobDetailRow} title={d.reason}>
+                      <span className={clsx(styles.jobDetailBadge, styles[`badge_${d.decision}`])}>
+                        {dispositionLabel(d.decision)}
+                      </span>
+                      <span className={styles.jobDetailTrack}>{d.track_name}</span>
+                      <span className={styles.jobDetailFile}>{d.file_name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <div className={styles.jobSide}>
         <div className={styles.progress}>
@@ -142,4 +193,19 @@ function ImportJob({ entry }: { entry: ImportQueueEntry }) {
       </div>
     </div>
   );
+}
+
+function dispositionLabel(decision: string): string {
+  switch (decision) {
+    case 'imported':
+      return 'Imported';
+    case 'skipped_owned':
+      return 'Already owned';
+    case 'upgraded':
+      return 'Upgraded';
+    case 'error':
+      return 'Failed';
+    default:
+      return decision;
+  }
 }

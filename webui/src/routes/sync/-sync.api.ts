@@ -486,6 +486,8 @@ export async function clearMirroredDiscovery(
 export interface MirroredPlaylistDetail {
   error?: string;
   name?: string;
+  /** the rename when there is one, else name */
+  display_name?: string;
   source?: string;
   source_playlist_id?: string;
   source_ref?: string;
@@ -505,6 +507,8 @@ export interface MirroredPlaylistDetail {
     duration_ms?: number;
     image_url?: string;
     source_track_id?: string;
+    /** when it joined the playlist; null for rows from before that was kept */
+    added_at?: string | null;
   }[];
 }
 

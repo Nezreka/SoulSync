@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 
 import requests
 
 from core.metadata import registry as metadata_registry
+from core.metadata.album_tracks import _artist_catalog_weight
 from core.metadata.artist_image import _extract_artist_image_url
 from core.metadata.discography import (
     _extract_lookup_value,
     _normalize_artist_name,
-    _pick_best_artist_match,
     _search_artists_for_source,
 )
 from core.metadata.lookup import MetadataLookupOptions
@@ -117,6 +118,42 @@ def _fetch_musicmap_similar_artist_names(artist_name: str) -> List[str]:
     return similar_artist_names
 
 
+# how many search results a musicmap name is checked against. one request
+# either way; the first hit is often a namesake (deezer ranks a 78-fan
+# "Korn" above the real band, a 16-fan "Cold" above Cold)
+_MATCH_SEARCH_LIMIT = 10
+
+# letters bands swap in as styling: KoЯn, P!nk, Ke$ha
+_LOOKALIKES = str.maketrans({'я': 'r', '!': 'i', '$': 's', 'ø': 'o'})
+
+
+def _name_keys(value: Any) -> set:
+    """the forms a name can match under: accents dropped, punctuation and
+    spaces dropped, with and without the look-alike letters read back."""
+    text = unicodedata.normalize('NFKD', str(value or '').casefold())
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    keys = set()
+    for form in (text, text.translate(_LOOKALIKES)):
+        key = ''.join(ch for ch in form if ch.isalnum())
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _pick_named_artist(search_results: List[Any], artist_name: str) -> Optional[Any]:
+    """the search result that IS this name, or None. never a blind first
+    result or a near spelling: that stored Colde for Cold and a thai pop act
+    for Korn. among namesakes the biggest catalog wins."""
+    target = _name_keys(artist_name)
+    if not target:
+        return None
+    named = [
+        a for a in search_results or []
+        if _name_keys(_extract_lookup_value(a, 'name', 'artist_name', 'title')) & target
+    ]
+    return max(named, key=_artist_catalog_weight) if named else None
+
+
 def _cached_artist_image_url(url: Optional[str]) -> Optional[str]:
     """Register a remote artist image with the cache and return its local URL.
 
@@ -191,8 +228,9 @@ def _resolve_musicmap_artist_source_ids(artist_name: str, source_chain: List[str
             searched_source_ids[source] = None
             continue
 
-        search_results = _search_artists_for_source(source, client, artist_name, limit=1)
-        searched_source_ids[source] = _extract_lookup_value(search_results[0], 'id', 'artist_id') if search_results else None
+        search_results = _search_artists_for_source(source, client, artist_name, limit=_MATCH_SEARCH_LIMIT)
+        searched = _pick_named_artist(search_results, artist_name)
+        searched_source_ids[source] = _extract_lookup_value(searched, 'id', 'artist_id')
 
     return searched_source_ids
 
@@ -211,11 +249,11 @@ def _match_musicmap_similar_artist(
         if not client:
             continue
 
-        search_results = _search_artists_for_source(source, client, candidate_name, limit=1)
+        search_results = _search_artists_for_source(source, client, candidate_name, limit=_MATCH_SEARCH_LIMIT)
         if not search_results:
             continue
 
-        matched_artist = _pick_best_artist_match(search_results, candidate_name)
+        matched_artist = _pick_named_artist(search_results, candidate_name)
         if not matched_artist:
             continue
 

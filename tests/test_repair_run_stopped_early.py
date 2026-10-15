@@ -52,6 +52,31 @@ def test_a_full_run_is_still_completed(tmp_path):
     assert retired == ['quality_upgrade']
 
 
+def test_a_run_cut_short_by_the_worker_stopping_is_not_completed(tmp_path):
+    """The worker's own stop flag makes every job's check_stop() return early
+    with a normal-looking result. That used to be recorded 'completed' and then
+    retired findings off a partial scan."""
+    w, retired = _worker(tmp_path, JobResult(scanned=1200))
+    w.should_stop = True
+    w._run_job('quality_upgrade', forced=True)
+    assert _last_run(w) == (
+        'stopped', 'Repair worker stopped before the job finished', 1200)
+    assert retired == []
+
+
+def test_a_user_cancel_is_still_cancelled(tmp_path):
+    w, retired = _worker(tmp_path, JobResult(scanned=10))
+    orig = w._jobs['quality_upgrade'].scan
+
+    def scan(context):
+        w._cancel_current_job.set()
+        return orig(context)
+
+    w._jobs['quality_upgrade'].scan = scan
+    w._run_job('quality_upgrade', forced=True)
+    assert _last_run(w)[0] == 'cancelled'
+
+
 def test_scan_completion_event_reports_actual_run_status(tmp_path):
     """Automation events must distinguish completed and stopped scans."""
     for stopped_early, expected_status in [

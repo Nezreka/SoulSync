@@ -175,6 +175,17 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     )
     mirror_tracks_hash = hashlib.md5(mirror_ids_str.encode()).hexdigest() if mirror_ids_str else ''
 
+    # #1704: the mirror's own mode, then the pipeline's, else None so the
+    # global setting decides. junk in either is skipped, not trusted
+    from core.sync.playlist_edit import VALID_SYNC_MODES, resolve_sync_mode
+    own_sync_mode = next(
+        (m for m in (pl.get('sync_mode'), config.get('sync_mode')) if m in VALID_SYNC_MODES),
+        None,
+    )
+    _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
+    _global_mode = _cm_get('playlist_sync.mode', 'reconcile') if callable(_cm_get) else None
+    sync_mode = resolve_sync_mode(own_sync_mode, _global_mode)
+
     event_data = config.get('_event_data') or {}
     try:
         tracks_added = int(event_data.get('added') or 0)
@@ -200,6 +211,11 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         # forces exactly one extra sync per mirror and is then self-consistent.
         last_quality_profile_id = last_status.get('quality_profile_id')
         quality_profile_changed = last_quality_profile_id != quality_profile_id
+        # same for the mode (#1704): same tracks synced in a new mode is a
+        # change, or switching a pipeline to replace never reached the server.
+        # a status from before the key existed ran in the global mode
+        last_sync_mode = last_status.get('sync_mode') or resolve_sync_mode(None, _global_mode)
+        sync_mode_changed = last_sync_mode != sync_mode
         # unchanged tracks are not enough: a matched file deleted since the last
         # sync changes nothing above, and skipping then never re-matched or
         # wishlisted it (#1417). checked last, it is the only part that reads
@@ -208,6 +224,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             not force_sync
             and not mirror_changed
             and not quality_profile_changed
+            and not sync_mode_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
         )
@@ -301,7 +318,21 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         log_line=f'Starting sync: {len(tracks_json)} tracks',
         log_type='success',
     )
-    skip_wishlist_add = bool(pl.get('organize_by_playlist'))
+    # Organize-by-playlist skips sync-time wishlist adds (its batch failure
+    # handling covers missing tracks instead). A pipeline run whose
+    # resolved skip_wishlist is set — the automation's "Skip wishlist
+    # processing" checkbox or the global wishlist_missing_tracks toggle
+    # (#1455) — must skip the adds too (#1689): the wishlist-phase skip
+    # alone still let every sync wishlist the tracks it was syncing.
+    # a standalone "Sync Playlist" automation never sets the key: nobody chose
+    # per click there, so the global toggle decides, as its help text says
+    # ("turn it off and syncs skip the wishlist step").
+    organize_by_playlist = bool(pl.get('organize_by_playlist'))
+    skip_add = config.get('skip_wishlist_add')
+    if skip_add is None:
+        _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
+        skip_add = callable(_cm_get) and not _cm_get('playlist_sync.wishlist_missing_tracks', True)
+    skip_wishlist_add = organize_by_playlist or bool(skip_add)
     threading.Thread(
         target=deps.run_sync_task,
         args=(
@@ -310,8 +341,13 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         ),
         kwargs={
             'skip_wishlist_add': skip_wishlist_add,
+            # Kept separate from skip_wishlist_add (#1689): the post-sync
+            # followup starts an organize download batch only for a real
+            # organize-by-playlist skip, never for a wishlist-toggle skip.
+            'organize_by_playlist': organize_by_playlist,
             # a playlist's own Sync & download click, not a schedule (#1603)
             'user_initiated': bool(config.get('user_initiated')),
+            'sync_mode': own_sync_mode,
         },
         daemon=True,
         name=f'auto-sync-{playlist_id}',

@@ -183,7 +183,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             _written = write_library_m3u(
                 _entries, _dest, entry_base_path=_base,
                 rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
-                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+                relative=bool(config_manager.get('m3u_export.relative_paths', False)))
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
@@ -391,7 +392,7 @@ def _resume_workers_after_scan():
 def _run_soulsync_full_refresh():
     """Full refresh for SoulSync standalone — wipe all soulsync records, re-scan output folder, rebuild library from file tags."""
     try:
-        from core.soulsync_client import _read_tags, _stable_id
+        from core.soulsync_client import _read_tags, _split_by_release, _stable_id
 
         transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
         if not os.path.isdir(transfer_path):
@@ -413,13 +414,21 @@ def _run_soulsync_full_refresh():
                 if os.path.splitext(fname)[1].lower() in audio_exts:
                     audio_files.append(os.path.join(root, fname))
 
+        # Deterministic order: which row keeps the plain (non-reminted)
+        # id when ids collide must not depend on filesystem walk order.
+        audio_files.sort()
+
         total = len(audio_files)
         logger.info(f"[SoulSync Full Refresh] Found {total} audio files, rebuilding library...")
         if total == 0:
             _db_update_finished_callback(0, 0, 0, 0, 0)
             return
 
-        # Group files by artist → album using tags
+        # Group files by artist → album using tags. NOTE: grouping here
+        # is by the exact tag strings (and names are not stripped),
+        # unlike the SoulSync client scan, which groups by lowercased
+        # name — the ids below follow THIS grouping, so case variants
+        # stay separate rows here instead of collapsing through the id.
         _db_update_phase_callback(f'Reading tags from {total} files...')
         artists_map = {}  # artist_name → { albums_map: { album_name → [tracks] } }
         processed = 0
@@ -443,58 +452,234 @@ def _run_soulsync_full_refresh():
         _db_update_phase_callback('Writing to database...')
         successful = 0
         failed = 0
+        collisions = 0
+        artist_count = 0
+        album_count = 0
+        claimed_album_ids = set()
+
+        # _stable_id() is md5 % 1e9 (~30 bits), so two different files /
+        # artists / albums WILL share an id once a library passes ~10^4
+        # rows (birthday bound) — #1696 lost 9 of ~143k tracks this way.
+        # INSERT OR IGNORE then drops the later row without a trace, and
+        # the old code counted every attempt as a success. The import
+        # path reached the same outcome for the same hazard (C4 in
+        # core/imports/side_effects.py — there via IntegrityError retries
+        # on a plain INSERT, here via rowcount + re-SELECT on the
+        # OR IGNORE): when an insert is ignored because the id already
+        # belongs to a DIFFERENT row, remint a deterministic suffixed
+        # id, log it, and insert under that instead. An ignored insert
+        # is never counted as a success, and a row that cannot be
+        # reminted is skipped and counted as failed — never silently
+        # filed under the row it collided with.
+        _ARTIST_SQL = """
+            INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
+            VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """
+        _ALBUM_SQL = """
+            INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """
+        _TRACK_SQL = """
+            INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
+                duration, file_path, bitrate, year, server_source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """
 
         try:
             with db._get_connection() as conn:
                 cursor = conn.cursor()
 
                 for artist_name, albums in artists_map.items():
+                    # Insert artist — remint when the id is already held
+                    # by a different artist (names differing only by case
+                    # hash to the same lowercased id). The remint seed
+                    # keeps the raw case: that is what separates the case
+                    # variants.
                     artist_id = _stable_id(artist_name.lower()) + '::soulsync'
-
-                    # Insert artist
+                    artist_state = 'inserted'  # inserted | merged | exhausted | error
+                    artist_reminted = False
                     try:
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO artists (id, name, server_source, created_at, updated_at)
-                            VALUES (?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """, (artist_id, artist_name))
+                        cursor.execute(_ARTIST_SQL, (artist_id, artist_name))
+                        ignored = cursor.rowcount == 0
+                        attempt = 0
+                        while ignored:
+                            cursor.execute("SELECT name FROM artists WHERE id = ?", (artist_id,))
+                            existing = cursor.fetchone()
+                            if existing is not None and existing[0] == artist_name:
+                                artist_state = 'merged'
+                                break
+                            attempt += 1
+                            if attempt > 10:
+                                artist_state = 'exhausted'
+                                logger.error(f"[SoulSync Full Refresh] artist id for '{artist_name}' still collides after 10 remints — skipping this artist")
+                                break
+                            new_id = _stable_id(f"{artist_name}::soulsync::{attempt}") + '::soulsync'
+                            logger.warning(f"[SoulSync Full Refresh] artist id collision: '{artist_name}' shares id {artist_id} with '{existing[0] if existing else 'no row holds that id'}' — reminting as {new_id}")
+                            artist_reminted = True
+                            artist_id = new_id
+                            cursor.execute(_ARTIST_SQL, (artist_id, artist_name))
+                            ignored = cursor.rowcount == 0
                     except Exception as e:
-                        logger.debug("soulsync artist insert failed: %s", e)
+                        artist_state = 'error'
+                        logger.error(f"[SoulSync Full Refresh] artist insert failed for '{artist_name}': {e} — skipping this artist")
+
+                    if artist_state in ('exhausted', 'error'):
+                        # Never file an artist's albums under an id
+                        # whose row is not this artist.
+                        failed += sum(len(tracks) for tracks in albums.values())
+                        continue
+                    if artist_state in ('inserted', 'merged'):
+                        artist_count += 1
+                        if artist_reminted and artist_state == 'inserted':
+                            collisions += 1
 
                     for album_name, tracks in albums.items():
-                        album_key = f"{artist_name.lower()}::{album_name.lower()}"
-                        album_id = _stable_id(album_key) + '::soulsync'
-
-                        # Get year from first track with a year
-                        year = ''
-                        for _, t in tracks:
-                            if t.get('year'):
-                                year = t['year']
-                                break
-
-                        # Insert album
+                        # Split distinct MusicBrainz releases sharing
+                        # one album name, via the same _split_by_release
+                        # helper the SoulSync client's scan uses —
+                        # otherwise their tracks aggregate under
+                        # whichever release inserted first. Guarded: one
+                        # malformed album must not abort the whole
+                        # refresh (the wipe has already committed).
                         try:
-                            cursor.execute("""
-                                INSERT OR IGNORE INTO albums (id, artist_id, title, year, track_count, server_source, created_at, updated_at)
-                                VALUES (?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            """, (album_id, artist_id, album_name, year, len(tracks)))
+                            release_groups = _split_by_release(tracks)
                         except Exception as e:
-                            logger.debug("soulsync album insert failed: %s", e)
+                            logger.error(f"[SoulSync Full Refresh] release split failed for album '{album_name}' by '{artist_name}': {e} — skipping this album")
+                            failed += len(tracks)
+                            continue
+                        for release_suffix, release_tracks in release_groups:
+                            album_key = f"{artist_name.lower()}::{album_name.lower()}{release_suffix}"
+                            album_id = _stable_id(album_key) + '::soulsync'
 
-                        # Insert tracks
-                        for file_path, tags in tracks:
-                            track_id = _stable_id(file_path) + '::soulsync'
+                            # Get year from first track with a year
+                            year = ''
+                            for _, t in release_tracks:
+                                if t.get('year'):
+                                    year = t['year']
+                                    break
+
+                            # Albums are grouped by name, so tracks whose
+                            # year tags disagree still share one row (the
+                            # first year wins). Surface that instead of
+                            # merging silently.
+                            distinct_years = sorted({str(t['year']) for _, t in release_tracks if t.get('year')})
+                            if len(distinct_years) > 1:
+                                logger.warning(f"[SoulSync Full Refresh] album '{album_name}' by '{artist_name}' has tracks with years {distinct_years} — they share one album row dated {year}")
+
+                            # Insert album — remint when the id is
+                            # already held by a different album. Album
+                            # identity includes the year, so a colliding
+                            # group from a different year splits (above,
+                            # year variance WITHIN one group merges with
+                            # a warning instead). An id already claimed
+                            # by an earlier group in this same run is a
+                            # collision even when title, artist and year
+                            # all match — that is two split releases the
+                            # stored row cannot tell apart — and the
+                            # remint seed carries the release suffix so
+                            # two releases never remint to the same id.
+                            album_state = 'inserted'  # inserted | merged | exhausted | error
+                            album_reminted = False
+                            try:
+                                cursor.execute(_ALBUM_SQL, (album_id, artist_id, album_name, year, len(release_tracks)))
+                                ignored = cursor.rowcount == 0
+                                attempt = 0
+                                while ignored:
+                                    cursor.execute("SELECT title, artist_id, year FROM albums WHERE id = ?", (album_id,))
+                                    existing = cursor.fetchone()
+                                    # The year must match exactly: a
+                                    # surviving row with no year counts
+                                    # as a different album (safer than
+                                    # merging possible pressings).
+                                    if (existing is not None and album_id not in claimed_album_ids
+                                            and existing[0] == album_name and existing[1] == artist_id
+                                            and str(existing[2] or '') == str(year or '')):
+                                        album_state = 'merged'
+                                        break
+                                    attempt += 1
+                                    if attempt > 10:
+                                        album_state = 'exhausted'
+                                        logger.error(f"[SoulSync Full Refresh] album id for '{album_name}' by '{artist_name}' still collides after 10 remints — skipping this album")
+                                        break
+                                    new_id = _stable_id(f"{artist_name}::{album_name}{release_suffix}::{year}::soulsync::{attempt}") + '::soulsync'
+                                    logger.warning(f"[SoulSync Full Refresh] album id collision: '{album_name}' by '{artist_name}' ({year}) shares id {album_id} with '{existing[0] if existing else 'no row holds that id'}' ({existing[2] if existing else '?'}) — reminting as {new_id}")
+                                    album_reminted = True
+                                    album_id = new_id
+                                    cursor.execute(_ALBUM_SQL, (album_id, artist_id, album_name, year, len(release_tracks)))
+                                    ignored = cursor.rowcount == 0
+                            except Exception as e:
+                                album_state = 'error'
+                                logger.error(f"[SoulSync Full Refresh] album insert failed for '{album_name}' by '{artist_name}': {e} — skipping this album")
+
+                            if album_state in ('exhausted', 'error'):
+                                # Never file tracks under an album id
+                                # whose row is not this album.
+                                failed += len(release_tracks)
+                                continue
+                            if album_state in ('inserted', 'merged'):
+                                claimed_album_ids.add(album_id)
+                                album_count += 1
+                                if album_reminted and album_state == 'inserted':
+                                    collisions += 1
+
+                            # Insert tracks — remint on an id collision
+                            # with a different file instead of dropping
+                            # the track.
+                            for file_path, tags in release_tracks:
+                                track_id = _stable_id(file_path) + '::soulsync'
+                                track_state = 'inserted'  # inserted | duplicate | exhausted | error
+                                track_reminted = False
+                                try:
+                                    cursor.execute(_TRACK_SQL, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
+                                          tags['disc_number'], tags['duration_ms'], file_path,
+                                          tags['bitrate'], tags.get('year', '')))
+                                    ignored = cursor.rowcount == 0
+                                    attempt = 0
+                                    while ignored:
+                                        cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (track_id,))
+                                        existing = cursor.fetchone()
+                                        if existing is not None and existing[0] == file_path:
+                                            track_state = 'duplicate'
+                                            break
+                                        attempt += 1
+                                        if attempt > 10:
+                                            track_state = 'exhausted'
+                                            logger.error(f"[SoulSync Full Refresh] track id for {file_path} still collides after 10 remints — track dropped")
+                                            break
+                                        new_id = _stable_id(f"{file_path}::soulsync::{attempt}") + '::soulsync'
+                                        logger.warning(f"[SoulSync Full Refresh] track id collision: {file_path} shares id {track_id} with {existing[0] if existing else 'no row holds that id'} — reminting as {new_id}")
+                                        track_reminted = True
+                                        track_id = new_id
+                                        cursor.execute(_TRACK_SQL, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
+                                              tags['disc_number'], tags['duration_ms'], file_path,
+                                              tags['bitrate'], tags.get('year', '')))
+                                        ignored = cursor.rowcount == 0
+                                except Exception as e:
+                                    track_state = 'error'
+                                    logger.error(f"[SoulSync Full Refresh] Track insert error: {e}")
+                                if track_state in ('inserted', 'duplicate'):
+                                    # duplicate: this file's row is in
+                                    # the library (it landed earlier in
+                                    # this same run) — present, not
+                                    # dropped, so it counts as a success
+                                    # and successful + failed == total
+                                    # always holds.
+                                    successful += 1
+                                    if track_reminted and track_state == 'inserted':
+                                        collisions += 1
+                                else:
+                                    failed += 1
+
+                            # The stored count must describe the rows
+                            # actually filed under this album, not just
+                            # the group that inserted first.
                             try:
                                 cursor.execute("""
-                                    INSERT OR IGNORE INTO tracks (id, album_id, artist_id, title, track_number, disc_number,
-                                        duration, file_path, bitrate, year, server_source, created_at, updated_at)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                """, (track_id, album_id, artist_id, tags['title'], tags['track_number'],
-                                      tags['disc_number'], tags['duration_ms'], file_path,
-                                      tags['bitrate'], tags.get('year', '')))
-                                successful += 1
+                                    UPDATE albums SET track_count = (SELECT COUNT(*) FROM tracks WHERE album_id = ?)
+                                    WHERE id = ?
+                                """, (album_id, album_id))
                             except Exception as e:
-                                failed += 1
-                                logger.error(f"[SoulSync Full Refresh] Track insert error: {e}")
+                                logger.debug("soulsync album track_count fixup failed: %s", e)
 
                 conn.commit()
         except Exception as e:
@@ -502,9 +687,9 @@ def _run_soulsync_full_refresh():
             _db_update_error_callback(f"Database error: {e}")
             return
 
-        artist_count = len(artists_map)
-        album_count = sum(len(albums) for albums in artists_map.values())
         summary = f"Full refresh complete: {successful} tracks from {album_count} albums by {artist_count} artists"
+        if collisions > 0:
+            summary += f" ({collisions} rows reminted after id collisions)"
         if failed > 0:
             summary += f" ({failed} failed)"
         logger.info(f"[SoulSync Full Refresh] {summary}")

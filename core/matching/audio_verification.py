@@ -10,6 +10,7 @@ thresholds, normalization, alias-aware comparison, cross-script handling, versio
 gate and duration guard are defined exactly once.
 """
 
+import math
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -291,6 +292,153 @@ def _find_best_title_artist_match(recordings, expected_title, expected_artist,
     return best_rec, best_title_sim, best_artist_sim
 
 
+def _release_title_identity_match(expected_title, recordings, expected_version,
+                                  *, fingerprint_score, accept_version=None):
+    """``(recording, alternate_title, source)`` when MusicBrainz lists the
+    expected title as a title of one of the fingerprinted recordings on
+    another release (``source == 'release'``) or as a recording alias
+    (``source == 'alias'``), else ``None``.
+
+    AcoustID reports a recording under its canonical MusicBrainz title, but
+    the same recording is sold under different track titles on different
+    releases — regional editions routinely retitle it. The English release
+    of a Genshin Impact soundtrack calls one recording "Myriad Sins"; the
+    recording's canonical title, and the only one AcoustID lists, is the
+    Chinese "众罪如霜露", and its artist credit there is the group HOYO-MiX
+    where the expected metadata names the composer — so title similarity
+    scored 0% and artist 11% and a correct file was reported as a wrong
+    download (#1700). String similarity between two languages' titles for
+    the SAME recording carries no information, but here the question can
+    be answered outright instead of scored: a recording's ``alternate_titles``
+    all name THIS recording (they were resolved from its MusicBrainz ID),
+    so an exact match against one of them is identity, not similarity.
+
+    Conservative on purpose — identity is only claimed when every gate
+    agrees, because a PASS here overrides a clear artist mismatch:
+
+    - the fingerprint itself must be strong in absolute terms
+      (``fingerprint_score`` >= MIN_ACOUSTID_SCORE), not merely the best
+      of a weak bunch;
+    - only the fingerprint's TOP-scoring candidates can establish it,
+      the top must be a SINGLE distinct recording, and the fingerprint
+      must not be ambiguous (:func:`fingerprint_is_ambiguous`): a stray
+      low-scored or mis-linked candidate naming the expected title
+      proves nothing about this file, and a tied top — even two
+      recordings sharing one canonical title, an original and a cover —
+      is a coin flip this check must not call;
+    - the candidate must have a canonical title at all: a title-less
+      AcoustID result has no name for an alternate to be alternate TO;
+    - only an ALTERNATE title counts. The canonical title is what the
+      ordinary title/artist comparison already judges, so a same-title
+      cover by a different artist fails exactly as before;
+    - the match must be exact under :func:`_recording_identity`, which
+      KEEPS version qualifiers — "Song (Piano Version)" on another
+      release is not the expected "Song", however the bracket-stripping
+      similarity score reads it;
+    - the recording's own version (its canonical title's label) and the
+      alternate's version label must each agree with the expected one —
+      a release that dropped the "(Instrumental)" qualifier from its
+      track listing does not un-instrumental the recording — unless the
+      caller asked for that version on purpose (``accept_version``, the
+      same loosening the version gate applies). With ``accept_version``
+      set, the two labels may therefore straddle it (canonical carries
+      the asked-for version, the alternate the bare title): that is the
+      version gate's own semantics — the recording's version is what was
+      fetched on purpose, the alternate is only the name bridge.
+
+    Known and accepted masking, in the open like this module's other
+    trade-offs: no artist evidence is required. For the reported shape
+    none exists anywhere — MusicBrainz credits the group on every
+    release while the provider credits the composer — so requiring some
+    would make the rescue impossible. What keeps a wrong file from being
+    blessed instead is the conjunction above: the wrong file's recording
+    must be the fingerprint's unambiguous top match AND carry the
+    expected title, qualifier for qualifier, as its own title on another
+    release. A skipped wrong file costs a download slot; a failed right
+    file is quarantined and never retried.
+    """
+    if not expected_title or not recordings:
+        return None
+    # A non-finite fingerprint score (NaN / inf arriving via remote JSON,
+    # where 1e999 and NaN parse to them) is no score at all: NaN compares
+    # False against the floor and inf clears every top-score gate, so
+    # both are treated as absent rather than as evidence.
+    fp_score = fingerprint_score if isinstance(
+        fingerprint_score, (int, float)) else 0.0
+    if not math.isfinite(fp_score) or fp_score < MIN_ACOUSTID_SCORE:
+        return None
+    if fingerprint_is_ambiguous(recordings):
+        return None
+
+    def _finite_score(rec):
+        score = rec.get('score')
+        if isinstance(score, (int, float)) and math.isfinite(score):
+            return float(score)
+        return None
+
+    scored = [s for s in (_finite_score(r) for r in recordings)
+              if s is not None]
+    top_score = max(scored) if scored else None
+    expected_identity = _recording_identity(expected_title)
+    if not expected_identity:
+        return None
+
+    def _top_group_key(rec):
+        return (
+            rec.get('mbid') or '',
+            _recording_identity(rec.get('title') or ''),
+            _recording_identity(rec.get('artist') or ''),
+        )
+
+    # The candidates identity may draw on: the top-scoring group, or —
+    # when no candidate carries a usable score — every candidate (an
+    # unscored list must not bypass the unique-top gate below: a
+    # same-title original/cover pair is a coin flip scored or not).
+    if top_score is not None:
+        eligible = [r for r in recordings
+                    if _finite_score(r) is not None
+                    and _finite_score(r) >= top_score]
+    else:
+        eligible = list(recordings)
+    if len({_top_group_key(r) for r in eligible}) > 1:
+        return None
+    gated = []
+    for rec in eligible:
+        if not (rec.get('title') or '').strip():
+            continue
+        canonical_version = _detect_title_version(rec.get('title') or '')
+        if (canonical_version != expected_version
+                and canonical_version != accept_version):
+            continue
+        gated.append((rec, _recording_identity(rec.get('title') or '')))
+    # Release track titles are the strong evidence and are checked
+    # first — across ALL eligible candidates, so a release listing on
+    # one copy is never reported as an alias match from another copy.
+    # Recording aliases are also official alternate names for the
+    # recording, but crowd-sourced and weaker, so they are only
+    # consulted when no release title identifies it — and the caller
+    # reports which kind matched, so the PASS reason never claims a
+    # release listing for what was an alias.
+    for key, source in (('alternate_titles', 'release'),
+                        ('alias_titles', 'alias')):
+        for rec, canonical_identity in gated:
+            alternates = rec.get(key) or []
+            if not isinstance(alternates, (list, tuple)):
+                continue
+            for alt in alternates:
+                if not isinstance(alt, str) or not alt:
+                    continue
+                if _recording_identity(alt) == canonical_identity:
+                    continue
+                alt_version = _detect_title_version(alt)
+                if (alt_version != expected_version
+                        and alt_version != accept_version):
+                    continue
+                if _recording_identity(alt) == expected_identity:
+                    return rec, alt, source
+    return None
+
+
 def fingerprint_is_ambiguous(recordings: List[dict]) -> bool:
     """True when the fingerprint's best-scoring recordings name DIFFERENT songs.
 
@@ -355,6 +503,14 @@ def evaluate(expected_title: str, expected_artist: str,
     ``aliases_provider``: iterable or callable of expected-artist aliases
     (kanji/cyrillic/etc) used to bridge cross-script comparisons.
 
+    A recording dict may carry ``alternate_titles`` (its track title on
+    other releases) and ``alias_titles`` (its recording aliases): the
+    other titles MusicBrainz lists for that same recording. An exact
+    match between the expected title and one of those titles, under the
+    gates in :func:`_release_title_identity_match`, is identity — the
+    same recording under a different name (#1700) — and passes
+    regardless of how the canonical title/artist strings score.
+
     ``accept_version``: a version label the caller went and fetched ON PURPOSE
     (Settings → prefer a version), so the version gate must not call it a wrong
     song. The source title says "Song" and the file really is "Song (Extended
@@ -404,6 +560,72 @@ def evaluate(expected_title: str, expected_artist: str,
     # Version gate: original vs instrumental/live/remix is a real difference.
     expected_version = _detect_title_version(expected_title)
     matched_version = _detect_title_version(matched_title)
+
+    # Same recording, different release title (#1700): MusicBrainz lists
+    # the expected title as this recording's title on another release, so
+    # the fingerprinted recording IS the expected song under a different
+    # name. Checked BEFORE the version gate: the gate judges the
+    # best-by-similarity recording, which may be a different candidate
+    # entirely (an instrumental namesake at a lower fingerprint score),
+    # and its verdict must not veto an identity established on the
+    # fingerprint's own top candidate — the identity check applies the
+    # version discipline to the identity recording itself (its canonical
+    # and alternate labels must both agree), so nothing the gate guards
+    # is weakened for the recording that actually identifies the file.
+    # The title/artist string scores against the canonical title are not
+    # evidence against identity established by the recording's own
+    # MusicBrainz ID — a regional retitle can score 0% on title and name
+    # a differently-credited artist while naming the same recording.
+    identity = _release_title_identity_match(
+        expected_title, recordings, expected_version,
+        fingerprint_score=fingerprint_score,
+        accept_version=accept_version)
+    if identity is not None and not no_expected_artist:
+        # no artist evidence is only waived for a retitle into another
+        # script (the reported shape: chinese canonical, english release
+        # title, composer vs group credit). a same-script retitle with a
+        # mismatched artist is how a wrong song by someone else that one
+        # release happens to list as "Intro" would get blessed.
+        _id_rec = identity[0]
+        _id_artist = _id_rec.get('artist') or ''
+        if not (is_cross_script_mismatch(expected_title, _id_rec.get('title') or '')
+                or is_cross_script_mismatch(expected_artist, _id_artist)
+                or _alias_aware_artist_sim(expected_artist, _id_artist,
+                                           aliases_provider) >= ARTIST_MATCH_THRESHOLD):
+            identity = None
+    if identity is not None:
+        id_rec, id_alt, id_source = identity
+        # Reported for the log/outcome only — plain similarity, NOT the
+        # alias-aware score: resolving artist aliases can trigger a
+        # DB/MusicBrainz lookup chain, and the identity decision does not
+        # rest on this number, so it must not pay for it.
+        id_artist_sim = 1.0 if no_expected_artist else similarity(
+            expected_artist, id_rec.get('artist') or '')
+        logger.info(
+            "Release-title identity rescued comparison: expected=%r is a "
+            "%s title of the fingerprinted recording %r by %r "
+            "(canonical title %r, artist sim=%.2f)",
+            expected_title, id_source, id_alt, id_rec.get('artist'),
+            id_rec.get('title'), id_artist_sim,
+        )
+        if id_source == 'alias':
+            id_reason = (
+                f"Same recording under a different name: MusicBrainz lists "
+                f"'{id_alt}' as an alias of this recording")
+        else:
+            id_reason = (
+                f"Same recording under a different release title: "
+                f"MusicBrainz lists this recording as '{id_alt}' on "
+                f"another release")
+        return Outcome(
+            Decision.PASS,
+            similarity(expected_title, id_alt),
+            id_artist_sim,
+            id_rec.get('title', '?') or '?',
+            id_rec.get('artist', '?') or '?',
+            id_reason,
+        )
+
     if expected_version != matched_version:
         # the caller asked for this exact version, so the file reporting it is
         # the setting working, not a mismatch.

@@ -33,6 +33,14 @@ describe.each(['ntfy', 'gotify'])('%s in the automation builder', (type) => {
   it('has a human label rather than falling through to the raw type', () => {
     expect(JS).toContain(`if (type === '${type}') return `);
   });
+
+  it('renders a Send test button when placed in THEN', () => {
+    const testCheck = JS.slice(
+      JS.indexOf("if (['discord_webhook'"),
+      JS.indexOf('onclick="_autoTestNotify'),
+    );
+    expect(testCheck).toContain(`'${type}'`);
+  });
 });
 
 describe('the two services are not treated as interchangeable', () => {

@@ -4,6 +4,7 @@ API key authentication for the SoulSync public API.
 
 import hashlib
 import hmac
+import posixpath
 import secrets
 import threading
 import uuid
@@ -36,7 +37,61 @@ def _should_persist_usage(key_hash: str, now: datetime) -> bool:
         return False
 
 
-def generate_api_key(label=""):
+# A key is either "admin" (everything, as before) or "read" (look, don't touch).
+# A record without a scope is an older key and stays admin, so nothing changes
+# on upgrade. A scope this code doesn't know is treated as read: a bad or
+# future value should lose access, not gain it.
+SCOPE_ADMIN = "admin"
+SCOPE_READ = "read"
+VALID_SCOPES = (SCOPE_ADMIN, SCOPE_READ)
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+_READ_KEY_REFUSAL = ("This API key is read-only. It can fetch library and status data "
+                     "but cannot change anything or read settings, keys or profiles.")
+
+# What a read key may fetch: GETs under /api/v1, except these. The deny-by-
+# default shape is the point. Every route added later is closed to read keys
+# until it is in /api/v1 on purpose, so a new GET can't leak by being forgotten.
+# The first four return credentials, config or account detail (profiles carry
+# the recovery question and which accounts have PINs and passwords). The video
+# calendar is a GET that updates rows: it re-queues shows missing an air time
+# before it answers (found by test_reachable_gets_write_nothing_when_run).
+READ_KEY_API_PREFIX = "/api/v1/"
+READ_KEY_DENIED_PREFIXES = (
+    "/api/v1/settings",
+    "/api/v1/api-keys",
+    "/api/v1/api-keys-internal",
+    "/api/v1/profiles",
+    "/api/v1/video/calendar",
+)
+
+
+def key_scope(record) -> str:
+    """The scope of a stored key record: admin, read, or read for anything unknown."""
+    scope = record.get("scope") if isinstance(record, dict) else None
+    if scope is None:
+        return SCOPE_ADMIN
+    return scope if scope in VALID_SCOPES else SCOPE_READ
+
+
+def read_key_may_access(method: str, path: str) -> bool:
+    """Whether a read-scope key may make this request."""
+    if method.upper() not in _SAFE_METHODS:
+        return False
+    # a path that isn't already in its plain form (//, /./, /../) is refused
+    # rather than normalised and trusted
+    if posixpath.normpath(path) != path.rstrip("/") and path != "/":
+        return False
+    if not path.startswith(READ_KEY_API_PREFIX):
+        return False
+    for prefix in READ_KEY_DENIED_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return False
+    return True
+
+
+def generate_api_key(label="", scope=SCOPE_ADMIN):
     """Generate a new API key.
 
     Returns (raw_key, key_record).  The raw key is shown to the user
@@ -49,6 +104,7 @@ def generate_api_key(label=""):
         "label": label,
         "key_hash": key_hash,
         "key_prefix": raw_key[:11],          # "sk_" + first 8 chars
+        "scope": scope,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "last_used_at": None,
     }
@@ -97,10 +153,15 @@ def _match_api_key(config_mgr, api_key):
     return None
 
 
-def _stamp_admin_context(profile_name="API"):
-    """Key-authed requests act with admin rights (an admin minted the key)."""
-    g.is_admin = True
-    g.can_download = True
+def _stamp_admin_context(profile_name="API", scope=SCOPE_ADMIN):
+    """Key-authed requests act with admin rights (an admin minted the key).
+
+    A read key gets neither admin nor download rights, so every @admin_only
+    route refuses it, GETs included.
+    """
+    is_admin = scope == SCOPE_ADMIN
+    g.is_admin = is_admin
+    g.can_download = is_admin
     g.allowed_sides = 'both'
     if getattr(g, 'profile_id', None) is None:
         g.profile_id = 1
@@ -122,6 +183,9 @@ def require_api_key(f):
         matched = _match_api_key(config_mgr, api_key)
         if not matched:
             return api_error("INVALID_KEY", "Invalid API key.", 403)
+        scope = key_scope(matched)
+        if scope == SCOPE_READ and not read_key_may_access(request.method, request.path):
+            return api_error("INSUFFICIENT_SCOPE", _READ_KEY_REFUSAL, 403)
 
         # Update last-used timestamp (best-effort, throttled to avoid rewriting
         # the full app config on every authenticated request).
@@ -139,13 +203,40 @@ def require_api_key(f):
         # multi-profile install with nothing picked), which made v1 admin
         # routes like request approve answer "Admin only" to a valid key.
         try:
-            _stamp_admin_context(matched.get("label") or "API")
+            _stamp_admin_context(matched.get("label") or "API", scope)
         except RuntimeError:
             pass
 
         return f(*args, **kwargs)
 
     return decorated
+
+
+def matched_api_key():
+    """The stored record for the key this request carries, or None."""
+    api_key = _request_api_key()
+    if not api_key:
+        return None
+    try:
+        config_mgr = current_app.soulsync["config_manager"]
+    except Exception:
+        return None
+    return _match_api_key(config_mgr, api_key)
+
+
+def enforce_read_key_scope():
+    """before_request check: a read key only gets what read_key_may_access allows.
+
+    Runs ahead of the login, launch-PIN and profile gates, which each wave a
+    valid key through. Admin keys and requests with no key pass untouched.
+    Returns a 403 response to stop the request, or None.
+    """
+    record = matched_api_key()
+    if record is None or key_scope(record) != SCOPE_READ:
+        return None
+    if read_key_may_access(request.method, request.path):
+        return None
+    return api_error("INSUFFICIENT_SCOPE", _READ_KEY_REFUSAL, 403)
 
 
 def request_has_valid_api_key() -> bool:
@@ -157,17 +248,12 @@ def request_has_valid_api_key() -> bool:
     The session gates (login / launch PIN) use this so key-authed callers that
     cannot do cookie sessions — e.g. the Companion extension's ``<img>`` tags
     hitting ``/api/image-proxy`` — are treated with the same trust as the
-    ``/api/v1/*`` public API. A valid key is admin-minted, so this grants no
-    more than the v1 path-prefix exemption already does.
+    ``/api/v1/*`` public API. A valid admin key is admin-minted, so this grants
+    no more than the v1 path-prefix exemption already does; a read key is held
+    to its narrower scope by :func:`enforce_read_key_scope`, which runs before
+    these gates.
     """
-    api_key = _request_api_key()
-    if not api_key:
-        return False
-    try:
-        config_mgr = current_app.soulsync["config_manager"]
-    except Exception:
-        return False
-    return _match_api_key(config_mgr, api_key) is not None
+    return matched_api_key() is not None
 
 
 def apply_api_key_request_context() -> bool:
@@ -175,17 +261,18 @@ def apply_api_key_request_context() -> bool:
 
     Returns True when the current request carries a valid API key, after
     setting the same ``g`` context :func:`require_api_key` sets (admin
-    rights; profile 1 when none is set). ``before_request`` gates call this
-    first and return early on True.
+    rights, or none for a read key; profile 1 when none is set).
+    ``before_request`` gates call this first and return early on True.
 
     Without this, key-authed callers that cannot do cookie sessions — e.g.
     the Companion extension's ``fetch()`` calls — reach the profile gate
     with no session profile and 401 ``profile_required`` on every non-v1
     API path, even though the login/launch-PIN gates already trust the key.
-    A valid key is admin-minted, so this grants no more than the
+    A valid admin key is admin-minted, so this grants no more than the
     ``/api/v1/*`` path-prefix exemption already does.
     """
-    if not request_has_valid_api_key():
+    record = matched_api_key()
+    if record is None:
         return False
-    _stamp_admin_context()
+    _stamp_admin_context(scope=key_scope(record))
     return True

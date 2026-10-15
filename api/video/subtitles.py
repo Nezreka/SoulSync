@@ -8,7 +8,7 @@ Endpoints (exact contract — the webui builder depends on it):
 - PUT    /api/video/subtitles/overrides/<kind>/<item_id>  {"languages": ["en","es"]}
          → {"ok": true, "languages": [...]}  (400 on bad kind / bad codes)
 - DELETE /api/video/subtitles/overrides/<kind>/<item_id> → {"ok": true}
-- GET    /api/video/subtitles/search/<kind>/<item_id>?lang=en  (kind: movie|episode)
+- GET    /api/video/subtitles/search/<kind>/<item_id>?lang=en[&forced=1]  (kind: movie|episode)
          → {"candidates": [{candidate_id, provider, title, score, hash_match,
                             download_count, language, hi, forced}]}  (score desc)
 - POST   /api/video/subtitles/manual-download
@@ -273,8 +273,18 @@ def register_routes(bp):
         # scores carry little signal and the download endpoint will refuse
         # (it can't name the sidecar) — the search still shows what's out
         # there rather than failing outright.
-        query = SubtitleQuery(identity=dict(identity), language=lang,
-                              filename=filename, moviehash=moviehash)
+        try:
+            from core.video.subtitles.worker import _hi_forced_pref
+            _pref = _hi_forced_pref(get_setting)
+        except Exception:  # noqa: BLE001
+            _pref = "off"
+        # forced=1 searches forced (foreign-parts-only) subs; full and forced
+        # never mix. manual=True keeps hi and plain side by side — the user
+        # is the one choosing.
+        forced = str(request.args.get("forced") or "").strip().lower() in ("1", "true", "yes")
+        query = SubtitleQuery(identity=dict(identity), language=lang, forced=forced,
+                              filename=filename, moviehash=moviehash,
+                              file_path=file_path, hi_forced_pref=_pref, manual=True)
         from core.video.subtitles import parse_provider_order
         order = parse_provider_order(settings.get("subtitle_provider_order"))
         try:

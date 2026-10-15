@@ -3018,6 +3018,12 @@ class VideoDatabase:
                     # download-keyed duplicate rather than orphaning it.
                     conn.execute("DELETE FROM subtitle_wanted WHERE id=?", (int(r["id"]),))
                     moved += 1
+            # history follows the rows: it holds the upgrade loop's score
+            # baseline, and the detail ui reads it by the library key.
+            conn.execute(
+                "UPDATE subtitle_fetch_history SET video_kind=?, video_id=? "
+                "WHERE video_kind='download' AND video_id=?",
+                (str(video_kind), int(video_id), int(download_id)))
             conn.commit()
             return moved
         finally:
@@ -3185,7 +3191,8 @@ class VideoDatabase:
             conn.close()
 
     # ── subtitle Phase 3: upgrade loop ────────────────────────────────────
-    def subtitle_get_upgradable(self, limit: int = 50, cooldown_hours: int = 24) -> list:
+    def subtitle_get_upgradable(self, limit: int = 50, cooldown_hours: int = 24,
+                                include_user_set: bool = False) -> list:
         """Rows the Phase 3 upgrade loop may evaluate: status='have' AND
         user_set=0 (explicit user picks are NEVER upgraded), whose upgrade
         re-check cooldown has expired (``last_upgrade_check_at`` — each video
@@ -3200,11 +3207,12 @@ class VideoDatabase:
         try:
             rows = conn.execute(
                 "SELECT * FROM subtitle_wanted "
-                "WHERE status='have' AND user_set=0 "
+                "WHERE status='have' AND (user_set=0 OR ?) "
                 "AND (last_upgrade_check_at IS NULL "
                 "OR last_upgrade_check_at < datetime('now', ?)) "
                 "ORDER BY last_upgrade_check_at ASC, id ASC LIMIT ?",
-                ("-%d hours" % hours, max(1, int(limit)))).fetchall()
+                (int(bool(include_user_set)), "-%d hours" % hours,
+                 max(1, int(limit)))).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -6527,6 +6535,33 @@ class VideoDatabase:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    def subtitle_library_videos(self) -> list:
+        """Every library movie and episode that has a media file, with what
+        the missing-subtitles job needs to group and label it: kind, id,
+        title/year (movies), show_id/show_title/season/episode (episodes).
+        Movies first, then episodes by show. One row per video, however many
+        files it has (the subtitle rows key on the video, not the file)."""
+        conn = self._get_connection()
+        try:
+            movies = conn.execute(
+                "SELECT m.id, m.title, m.year FROM movies m "
+                "WHERE EXISTS (SELECT 1 FROM media_files f WHERE f.movie_id = m.id) "
+                "ORDER BY m.title COLLATE NOCASE, m.id").fetchall()
+            episodes = conn.execute(
+                "SELECT e.id, e.show_id, e.season_number, e.episode_number, "
+                "s.title AS show_title FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE EXISTS (SELECT 1 FROM media_files f WHERE f.episode_id = e.id) "
+                "ORDER BY s.title COLLATE NOCASE, e.show_id, e.season_number, "
+                "e.episode_number").fetchall()
+        finally:
+            conn.close()
+        out = [{"kind": "movie", "id": int(r["id"]), "title": r["title"],
+                "year": r["year"]} for r in movies]
+        out += [{"kind": "episode", "id": int(r["id"]), "show_id": int(r["show_id"]),
+                 "show_title": r["show_title"], "season": r["season_number"],
+                 "episode": r["episode_number"]} for r in episodes]
+        return out
 
     def video_stored_file_path(self, kind: str, *, tmdb_id=None,
                                season=None, episode=None):

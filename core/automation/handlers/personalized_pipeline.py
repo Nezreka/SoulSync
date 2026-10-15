@@ -24,6 +24,7 @@ Config schema:
         ],
         'refresh_first': bool,    # default false
         'skip_wishlist': bool,    # default false
+        'sync_mode': str,         # replace/append/reconcile, unset = global (#1704)
     }
 
 Each kind dict has at minimum ``kind``; ``variant`` is required for
@@ -74,6 +75,24 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
 
         refresh_first = bool(config.get('refresh_first', False))
         skip_wishlist = bool(config.get('skip_wishlist', False))
+        sync_mode = config.get('sync_mode') or None
+        # Global kill-switch (#1455, #1689): when
+        # playlist_sync.wishlist_missing_tracks is OFF, missing tracks are
+        # never wishlisted, regardless of this automation's own checkbox —
+        # the mirrored pipeline adapter has always forced skip this way,
+        # but the personalized pipeline never consulted the global toggle
+        # at all, so Daily Mix syncs kept wishlisting with it off.
+        if not skip_wishlist:
+            _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
+            if callable(_cm_get) and not _cm_get(
+                    'playlist_sync.wishlist_missing_tracks', True):
+                skip_wishlist = True
+                deps.update_progress(
+                    automation_id,
+                    log_line='Global "add missing tracks to wishlist" setting '
+                             'is off — wishlist skipped for this run',
+                    log_type='info',
+                )
 
         manager = deps.build_personalized_manager()
 
@@ -132,7 +151,8 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
             deps,
             automation_id,
             playload_payloads,
-            sync_one_fn=lambda pl: _sync_personalized_playlist(deps, pl),
+            sync_one_fn=lambda pl: _sync_personalized_playlist(
+                deps, pl, skip_wishlist=skip_wishlist, sync_mode=sync_mode),
             sync_id_for_fn=lambda pl: pl['sync_id'],
             skip_wishlist=skip_wishlist,
             progress_start=51,
@@ -343,13 +363,26 @@ def _normalize_album(album: Any, track: Any, cover_url: Optional[str] = None) ->
     return normalized
 
 
-def _sync_personalized_playlist(deps: AutomationDeps, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _sync_personalized_playlist(deps: AutomationDeps, payload: Dict[str, Any],
+                                *, skip_wishlist: bool = False,
+                                sync_mode: Optional[str] = None) -> Dict[str, Any]:
     """Launch a personalized playlist sync via _run_sync_task on a
     daemon thread + return immediately with status='started'.
 
     Mirrors the mirrored ``auto_sync_playlist`` return contract so the
     shared helper can poll on ``sync_states[sync_id]`` and aggregate
-    results identically."""
+    results identically.
+
+    ``skip_wishlist`` is the pipeline's resolved wishlist skip (the
+    automation checkbox OR the global wishlist_missing_tracks toggle).
+    It has to reach the sync itself as ``skip_wishlist_add`` (#1689):
+    the shared helper's skip only suppresses the later wishlist
+    *processing* phase, while the sync adds every missing track to the
+    wishlist as it goes — with both toggles set, Daily Mix tracks were
+    still wishlisted (and later downloaded) on every run.
+
+    ``sync_mode`` is the pipeline's own mode (#1704), None leaves it to the
+    global setting."""
     sync_id = payload['sync_id']
     name = payload['name']
     tracks_json = payload['tracks_json']
@@ -358,6 +391,7 @@ def _sync_personalized_playlist(deps: AutomationDeps, payload: Dict[str, Any]) -
     threading.Thread(
         target=deps.run_sync_task,
         args=(sync_id, name, tracks_json, None, profile_id, payload.get('image_url', '')),
+        kwargs={'skip_wishlist_add': bool(skip_wishlist), 'sync_mode': sync_mode},
         daemon=True,
         name=f'auto-personalized-{sync_id}',
     ).start()

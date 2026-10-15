@@ -159,9 +159,20 @@
   object-fit: contain;
 }
 
+/* The pill's label gets its own element so it can actually ellipsis: as a
+   bare text node inside the inline-flex pill, text-overflow never applied
+   and the label hard-clipped mid-glyph — caret first (Oct 13 fold, M-06). */
+.sourceLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .caret {
   width: 11px;
   height: 11px;
+  flex-shrink: 0;
   color: var(--sp-faint);
 }
 
@@ -1286,4 +1297,25 @@
    show, so the whole legacy panel stays out of the way */
 .page :global(.search-results-container):has(:global(.search-results-placeholder)) {
   display: none;
+}
+
+/* ── phones (Oct 13 batch, M-06) ───────────────────────────────────────
+   The field itself measured clean at 390/360/412px in the harness (no
+   page overflow; the box sits inside the page at every width), but with
+   a long source name (MusicBrainz) the source pill took ~40% of the
+   field and the input was left so narrow its placeholder clipped
+   mid-word at the field's right edge, reading as the bar running off
+   the screen. Cap the pill and let it clip its own label instead; the
+   input keeps the rest. */
+@media (max-width: 640px) {
+  .searchBox {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .source {
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }

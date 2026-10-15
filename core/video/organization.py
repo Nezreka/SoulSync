@@ -56,6 +56,15 @@ DEFAULTS = {
     "subtitle_langs": "en",
     "subtitle_provider_order": '["opensubtitles"]',   # JSON list string: provider fetch chain, most-preferred first
     "subtitle_min_score": 24.0,      # candidate score gate: below this a subtitle is a miss, never downloaded
+    "subtitle_hi_forced": "off",      # hearing-impaired preference: off | prefer_hi (tiebreak only, never a filter)
+    "subtitle_forced": False,         # also grab a forced (foreign-parts-only) track per language, on top of the full one
+    # "have it" rules (bazarr parity): embedded tracks count as present unless
+    # switched off, and bitmap/ass codecs can be ignored the same way bazarr does.
+    "subtitle_use_embedded": True,
+    "subtitle_ignore_pgs": False,
+    "subtitle_ignore_vobsub": False,
+    "subtitle_ignore_ass": False,
+    "subtitle_autosync": False,       # opt-in: ffsubsync downloaded subs against the video audio (worker only)
     "subtitle_worker_interval_min": 30,  # wanted-loop retry cadence (minutes)
     "subtitle_worker_batch": 10,     # max wanted rows attempted per worker cycle
     "subtitle_daily_quota": 20,      # max subtitle DOWNLOADS per provider per day (UTC)
@@ -129,6 +138,21 @@ def normalize(raw: Any) -> dict:
             d["subtitle_min_score"] = max(0.0, min(200.0, float(raw.get("subtitle_min_score"))))
         except (TypeError, ValueError):
             pass
+    if "subtitle_hi_forced" in raw:
+        from core.video.subtitles.scoring import HI_FORCED_PREFS
+        _pref = str(raw.get("subtitle_hi_forced") or "").strip().lower()
+        if _pref in HI_FORCED_PREFS:
+            d["subtitle_hi_forced"] = _pref
+        elif _pref == "prefer_forced" and "subtitle_forced" not in raw:
+            # the old "prefer forced" meant "i want forced subs" — that's the
+            # also-grab-forced toggle now
+            d["subtitle_forced"] = True
+    for _key in ("subtitle_forced", "subtitle_use_embedded", "subtitle_ignore_pgs",
+                 "subtitle_ignore_vobsub", "subtitle_ignore_ass"):
+        if _key in raw:
+            d[_key] = bool(raw.get(_key))
+    if "subtitle_autosync" in raw:
+        d["subtitle_autosync"] = bool(raw.get("subtitle_autosync"))
     if "subtitle_upgrade_min_delta" in raw:
         try:
             d["subtitle_upgrade_min_delta"] = max(0.0, min(200.0, float(raw.get("subtitle_upgrade_min_delta"))))

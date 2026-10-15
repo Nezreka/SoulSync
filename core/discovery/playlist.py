@@ -195,13 +195,24 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                 # track's own id, so fetch it. it runs before the cache because a
                 # cached name match may be a stale wrong version, and the id is
                 # the track. a failed lookup leaves it empty and the old path runs.
+                # a user playlist's track has no service of its own, but often
+                # an id anyway: the one its page handed over when it was added,
+                # or the one the enrichment workers found for the same song in
+                # the library. a synced mirror is just its own source + id.
                 from core.discovery.direct_match import direct_source_match
-                direct_track = direct_source_match(
-                    source, discovery_source, use_spotify, track.get('source_track_id'),
-                    spotify_client=deps.spotify_client, fallback_client=itunes_client_instance)
+                from core.playlists.track_origin import origin_ids
+                direct_track = None
+                direct_by = source
+                for id_source, id_value in origin_ids(db, source, track).items():
+                    direct_track = direct_source_match(
+                        id_source, discovery_source, use_spotify, id_value,
+                        spotify_client=deps.spotify_client, fallback_client=itunes_client_instance)
+                    if direct_track:
+                        direct_by = id_source
+                        break
                 if direct_track:
                     logger.info(f"DIRECT [{i+1}/{len(undiscovered_tracks)}]: {track_name} → "
-                                f"{getattr(direct_track, 'name', '?')} (by {source} id)")
+                                f"{getattr(direct_track, 'name', '?')} (by {direct_by} id)")
 
                 # Step 1: Check discovery cache
                 cache_key = deps.get_discovery_cache_key(track_name, artist_name)

@@ -310,13 +310,19 @@ export function playlistTrackOf(track: SearchTrack): UserPlaylistTrack | null {
   const artist = (track.artists?.[0] || track.artist || '').trim();
   const title = (track.name || '').trim();
   if (!artist || !title) return null;
-  return {
+  const out: UserPlaylistTrack = {
     track_name: title,
     artist_name: artist,
     album_name: track.album || '',
     duration_ms: track.duration_ms || 0,
     image_url: track.image_url || null,
   };
+  // the result's own id: identify fetches this exact track instead of searching
+  if (track.id && track.source) {
+    out.source = track.source;
+    out.source_id = String(track.id);
+  }
+  return out;
 }
 
 export function trackMetaLine(track: SearchTrack): string {

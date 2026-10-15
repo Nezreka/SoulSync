@@ -1488,3 +1488,19 @@ def test_the_connections_tab_survives_a_phone():
         "only one axis shrinks - the well stops being square"
     )
 
+
+
+def test_every_connections_service_sits_in_a_named_group(index, js):
+    """The grid groups services by what they do (metadata, scrobbling, subtitles
+    and so on). Anything unlisted falls into "Other" so it never vanishes, but a
+    new service landing there means nobody decided where it belongs."""
+    block = js.split('const SERVICE_GROUPS = {', 1)[1].split('\n};', 1)[0]
+    lists = ' '.join(re.findall(r'ids:\s*\[([^\]]*)\]', block))
+    grouped = set(re.findall(r"'([a-z]+)'", lists))
+    connections = index.split('data-stg="connections"', 1)[1].split('data-stg="library"', 1)[0]
+    ids = set(re.findall(r'data-(?:video-)?service="([a-z]+)"', connections))
+    assert len(ids) >= 20, f"only found {len(ids)} services, the page split is off"
+    assert ids - grouped == set(), f"services with no group: {sorted(ids - grouped)}"
+
+    build = js.split('function buildServiceTiles(', 1)[1].split('\nwindow.', 1)[0]
+    assert "'Other'" in build, "an unlisted service would vanish from the grid"

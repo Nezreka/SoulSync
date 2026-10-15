@@ -8,7 +8,7 @@ Three top-level lists:
   event triggers (track_downloaded, batch_complete, etc.), signal_received,
   webhook_received.
 - `ACTIONS` — DO blocks: process_wishlist, scan_library, etc.
-- `NOTIFICATIONS` — THEN blocks: discord/pushbullet/telegram/webhook,
+- `NOTIFICATIONS` — THEN blocks: discord/pushbullet/telegram/ntfy/gotify/webhook,
   plus fire_signal and run_script then-actions.
 
 Each block carries an optional ``scope`` tag so the SAME definitions can
@@ -24,6 +24,15 @@ from __future__ import annotations
 import logging
 
 logger = logging.getLogger(__name__)
+
+# a pipeline's own sync mode (#1704), '' = the global setting. the builder
+# reads these labels from here, the sync page's card menu matches them
+_SYNC_MODE_OPTIONS = [
+    {"value": "", "label": "Use global setting"},
+    {"value": "reconcile", "label": "Reconcile (match the source)"},
+    {"value": "append", "label": "Append only (never remove tracks)"},
+    {"value": "replace", "label": "Replace (delete and recreate)"},
+]
 
 TRIGGERS: list[dict] = [
     {"type": "schedule", "label": "Schedule", "icon": "clock", "scope": "both", "description": "Run on a timer interval", "available": True,
@@ -316,6 +325,7 @@ ACTIONS: list[dict] = [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
          {"key": "all", "type": "checkbox", "label": "Process all mirrored playlists", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+         {"key": "sync_mode", "type": "select", "label": "Sync mode", "options": _SYNC_MODE_OPTIONS, "default": ""},
      ]},
     {"type": "personalized_pipeline", "label": "Personalized Playlist Pipeline", "icon": "sparkles",
      "description": "Sync personalized / discover-page playlists (Hidden Gems, Time Machine, Fresh Tape, etc.) to your media server + queue missing tracks for download.",
@@ -325,6 +335,7 @@ ACTIONS: list[dict] = [
           "description": "Multi-select: Hidden Gems, Discovery Shuffle, Time Machine (per decade), Genre playlists, Fresh Tape, The Archives, Seasonal Mix (per season)"},
          {"key": "refresh_first", "type": "checkbox", "label": "Refresh playlists before sync (regenerate snapshots)", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
+         {"key": "sync_mode", "type": "select", "label": "Sync mode", "options": _SYNC_MODE_OPTIONS, "default": ""},
      ]},
     {"type": "import_lastfm_listening", "label": "Import Last.fm Listening", "icon": "activity",
      "description": "Pull Last.fm scrobbles into SoulSync listening history so Stats and discovery stay current.",
@@ -566,7 +577,8 @@ ACTIONS: list[dict] = [
                       {"value": "wishlist_audit", "label": "Wishlist Audit"},
                       {"value": "youtube_ghosts", "label": "YouTube Ghost Files"},
                       {"value": "watched_cleanup", "label": "Watched Cleanup"},
-                      {"value": "naming_conformance", "label": "Naming Conformance"}],
+                      {"value": "naming_conformance", "label": "Naming Conformance"},
+                      {"value": "missing_subtitles", "label": "Missing Subtitles"}],
           "default": "all"}
      ]},
 ]
@@ -578,6 +590,10 @@ NOTIFICATIONS: list[dict] = [
     {"type": "pushbullet", "label": "Pushbullet", "icon": "push", "scope": "both", "description": "Push notification to phone/desktop", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
     {"type": "telegram", "label": "Telegram", "icon": "message", "scope": "both", "description": "Send a Telegram message", "available": True,
+     "variables": ["time", "name", "run_count", "status"]},
+    {"type": "ntfy", "label": "ntfy", "icon": "push", "scope": "both", "description": "Publish to an ntfy topic", "available": True,
+     "variables": ["time", "name", "run_count", "status"]},
+    {"type": "gotify", "label": "Gotify", "icon": "push", "scope": "both", "description": "Send a message to your Gotify server", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
     {"type": "webhook", "label": "Webhook (POST)", "icon": "globe", "scope": "both", "description": "Send a POST request to any URL", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
@@ -618,7 +634,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     # Exact-ish first: these would otherwise be caught by a keyword below.
     ("Timing", ("schedule", "daily_time", "weekly_time", "monthly_time", "app_started")),
     ("External", ("signal_received", "webhook_received", "fire_signal")),
-    ("Notify", ("discord_webhook", "pushbullet", "telegram", "webhook", "notify_only")),
+    ("Notify", ("discord_webhook", "pushbullet", "telegram", "ntfy", "gotify", "webhook", "notify_only")),
     ("Advanced", ("run_script",)),
     # Then keywords, most specific first.
     ("Maintenance", ("repair", "duplicate", "quality", "cleanup", "clean_", "_clean",

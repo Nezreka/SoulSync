@@ -732,3 +732,38 @@ def test_1567_r4_composer_credited_release_without_real_id_distrusted():
     # uncorroborated curator credit.
     assert context["_batch_album_distrusted"] is True
     assert md["album_artist"] == "Auli'i Cravalho"
+
+
+def _mirror_wishlist_context():
+    """wishlist rows fed by a mirrored playlist store the deezer album id as
+    an int. the distrust check called .strip() on it, enhancement died before
+    any tag was written, and the file landed untagged (Unknown Album)."""
+    track = {
+        "name": "Scoop",
+        "artists": [{"name": "Paperboys"}],
+        "album": {"name": "Paperboys", "release_date": "", "id": 1003724851},
+        "id": "4081969791",
+        "disc_number": 1,
+    }
+    return {
+        "original_search_result": dict(track, title="Scoop", artist="Paperboys"),
+        "track_info": track,
+        "spotify_album": track["album"],
+        "spotify_artist": track["artists"][0],
+    }
+
+
+def test_int_album_id_from_mirror_wishlist_still_tags():
+    md = _extract(_mirror_wishlist_context(), {"name": "Paperboys"},
+                  {"album_name": "Paperboys", "track_number": 1, "disc_number": 1})
+    assert md["title"] == "Scoop"
+    assert md["artist"] == "Paperboys"
+    assert md["album"] == "Paperboys"
+
+
+def test_int_album_id_matches_its_string_form():
+    from core.metadata.source import _album_identity_disagrees, _track_own_provider_album
+    own = _track_own_provider_album({}, {"spotify_data": {"album": {"id": 1003724851}}})
+    assert own["id"] == "1003724851"
+    assert _album_identity_disagrees(own, {"id": 1003724851, "name": "Paperboys"}) is False
+    assert _album_identity_disagrees(own, {"id": 42, "name": "Paperboys"}) is True

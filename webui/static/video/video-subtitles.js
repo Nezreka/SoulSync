@@ -56,7 +56,13 @@
     ms: 'Malay',
     ca: 'Catalan',
   };
-  var PROVIDER_NAMES = { opensubtitles: 'OpenSubtitles' };
+  var PROVIDER_NAMES = {
+    opensubtitles: 'OpenSubtitles',
+    subdl: 'SubDL',
+    subsource: 'SubSource',
+    embedded: 'Embedded',
+    whisper: 'Whisper (local)',
+  };
 
   // The override fetch for the title on screen; reset()/mount() bump it so a
   // slow response from the previous title can never paint into the new one.
@@ -94,7 +100,7 @@
       .split(/[,;\s]+/)
       .forEach(function (p) {
         var c = p.trim().toLowerCase();
-        if (/^[a-z]{2,3}(-[a-z]{2})?$/.test(c) && out.indexOf(c) === -1) out.push(c);
+        if (/^[a-z]{2,3}(-[a-z]{2,4})?$/.test(c) && out.indexOf(c) === -1) out.push(c);
       });
     return out;
   }
@@ -150,6 +156,7 @@
       '.vsub-select{flex:1;min-width:0;padding:10px 12px;font-size:14px;color:inherit;font-family:inherit;' +
       'background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:10px;outline:none;}' +
       '.vsub-select option{background:#14141c;}' +
+      '.vsub-select--type{flex:0 0 auto;width:auto;}' +
       '.vsub-merr{margin:12px 18px 0;font-size:13px;color:#ff6b6b;line-height:1.5;}' +
       '.vsub-mok{margin:12px 18px 0;font-size:13px;color:#4ade80;line-height:1.5;' +
       'background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.25);border-radius:10px;padding:10px 12px;}' +
@@ -548,6 +555,10 @@
       '<select class="vsub-select" data-vsub-m="lang" aria-label="Subtitle language">' +
       langOptions(defaultLang) +
       '</select>' +
+      '<select class="vsub-select vsub-select--type" data-vsub-m="type" aria-label="Subtitle type">' +
+      '<option value="full">Full</option>' +
+      '<option value="forced">Forced (foreign parts)</option>' +
+      '</select>' +
       '<button class="vsub-btn vsub-btn--primary" type="button" data-vsub-m="search">Search</button>' +
       '</div>' +
       '<div class="vsub-merr" data-vsub-m="err" role="alert" hidden></div>' +
@@ -562,6 +573,11 @@
     var errEl = ov.querySelector('[data-vsub-m="err"]');
     var okEl = ov.querySelector('[data-vsub-m="ok"]');
     var langSel = ov.querySelector('[data-vsub-m="lang"]');
+    // the language the shown results were searched in. candidates are cached
+    // server-side per language, so a download must send this, not whatever
+    // the picker was changed to since.
+    var searchedLang = langSel.value;
+    var typeSel = ov.querySelector('[data-vsub-m="type"]');
 
     function showErr(msg) {
       errEl.hidden = false;
@@ -579,6 +595,8 @@
     function doSearch() {
       if (!document.body.contains(ov)) return;
       var lang = langSel.value;
+      var forced = typeSel.value === 'forced';
+      searchedLang = lang;
       hideErr();
       hideOk();
       searchBtn.disabled = true;
@@ -588,8 +606,10 @@
         '<div class="vsub-hint vsub-hint--center"><span class="vsub-spin"></span> ' +
         'Searching for ' +
         esc(langLabel(lang)) +
+        (forced ? ' forced' : '') +
         ' subtitles\u2026</div>';
-      fetch(SEARCH_URL + kind + '/' + itemId + '?lang=' + encodeURIComponent(lang), {
+      fetch(SEARCH_URL + kind + '/' + itemId + '?lang=' + encodeURIComponent(lang) +
+        (forced ? '&forced=1' : ''), {
         headers: { Accept: 'application/json' },
       })
         .then(function (r) {
@@ -601,9 +621,13 @@
           var cands = (body && body.candidates) || [];
           if (!cands.length) {
             box.innerHTML =
-              '<div class="vsub-hint vsub-hint--center">No subtitles found for ' +
+              '<div class="vsub-hint vsub-hint--center">No ' +
+              (forced ? 'forced ' : '') +
+              'subtitles found for ' +
               esc(langLabel(lang)) +
-              ' \u2014 try another language.</div>';
+              (forced
+                ? ' \u2014 most titles have no foreign-language scenes to force.</div>'
+                : ' \u2014 try another language.</div>');
             return;
           }
           box.innerHTML =
@@ -641,7 +665,7 @@
         body: JSON.stringify({
           kind: kind,
           item_id: itemId,
-          lang: langSel.value,
+          lang: searchedLang,
           candidate_id: cid,
         }),
       })

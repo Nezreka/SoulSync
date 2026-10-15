@@ -542,3 +542,27 @@ def test_old_db_without_user_set_column_gets_migrated(tmp_path):
     assert isinstance(row_id, int)
     rows = db.subtitle_get_for_video("download", 7)
     assert len(rows) == 1 and rows[0]["user_set"] == 0
+
+
+def test_hook_records_the_score_the_upgrade_loop_needs(db, monkeypatch):
+    # the upgrade loop never upgrades blind: without a scored 'downloaded'
+    # history row it skipped every subtitle the import hook fetched.
+    from types import SimpleNamespace
+    seen = {}
+
+    def fake(query, provider_order, get_setting, on_download=None, skip_background=False):
+        seen["pref"] = query.hi_forced_pref
+        if query.language == "en":
+            return "srt", "opensubtitles", SimpleNamespace(title="M.2020.WEB"), 72.5
+        return None, None, SimpleNamespace(title="weak"), 12.0
+
+    monkeypatch.setattr("core.video.subtitles.providers.fetch_subtitle_detailed", fake)
+    db.set_setting("opensubtitles_api_key", "test-key")
+    write_subtitles_for(db, _dl(), "/lib/M (2020)/M (2020).mkv",
+                        {"subtitle_langs": "en,es", "subtitle_hi_forced": "prefer_hi"},
+                        FakeFS())
+    assert db.subtitle_latest_download_score("download", 7, "en") == 72.5
+    hist = {h["language"]: h for h in db.subtitle_get_history("download", 7)}
+    assert hist["en"]["outcome"] == "downloaded" and hist["en"]["provider"] == "opensubtitles"
+    assert hist["es"]["outcome"] == "below_threshold" and hist["es"]["score"] == 12.0
+    assert seen["pref"] == "prefer_hi"

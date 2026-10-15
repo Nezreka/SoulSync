@@ -176,7 +176,13 @@ def build_inbox(
             True,
         )
         match = _parse_match(hist.get('match_data')) if hist else None
-        rel = os.path.relpath(cand.path, staging_root) if staging_root else cand.path
+        try:
+            rel = os.path.relpath(cand.path, staging_root) if staging_root else cand.path
+        except ValueError:
+            # Windows: the candidate's path is on another drive/share than
+            # the staging root (a history path from before the folder moved
+            # mounts) — relpath has no answer there; the full path stands.
+            rel = cand.path
         if rel == '.':
             rel = ''
         rows.append({

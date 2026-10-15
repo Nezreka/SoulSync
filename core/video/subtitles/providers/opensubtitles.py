@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable
 
-from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery
+from .base import SubtitleCandidate, SubtitleProvider, SubtitleQuery, flag_filter
 
 BASE = "https://api.opensubtitles.com/api/v1"
 _UA = "SoulSync v1.0"
@@ -47,10 +47,17 @@ def search_params(identity: dict, lang: str) -> dict | None:
     id is used with season/episode; for a movie, the imdb/tmdb id. None if unidentified."""
     identity = identity if isinstance(identity, dict) else {}
     params = {"languages": lang}
-    if identity.get("season") is not None and identity.get("tmdb_id"):
-        params["parent_tmdb_id"] = identity["tmdb_id"]
+    if identity.get("season") is not None and (identity.get("tmdb_id")
+                                                or identity.get("imdb_id")):
+        # episodes carry the SHOW's ids. a bare imdb_id here would be the show
+        # feature itself, so it must go out as parent_imdb_id.
+        if identity.get("tmdb_id"):
+            params["parent_tmdb_id"] = identity["tmdb_id"]
+        else:
+            params["parent_imdb_id"] = re.sub(r"^tt", "", str(identity["imdb_id"]).lower())
         params["season_number"] = identity["season"]
-        params["episode_number"] = identity.get("episode")
+        if identity.get("episode") is not None:
+            params["episode_number"] = identity["episode"]
         return params
     if identity.get("imdb_id"):
         params["imdb_id"] = re.sub(r"^tt", "", str(identity["imdb_id"]).lower())
@@ -67,7 +74,9 @@ def _headers(key: str) -> dict:
 
 
 def _get_json(url: str, params: dict, headers: dict) -> Any:
-    req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params), headers=headers)
+    # the api redirects unless query params are alphabetically ordered
+    req = urllib.request.Request(url + "?" + urllib.parse.urlencode(sorted(params.items())),
+                                 headers=headers)
     with urllib.request.urlopen(req, timeout=20) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -108,10 +117,15 @@ def opensubtitles_fetcher(api_key: Any) -> Callable | None:
     return fetch
 
 
-def _candidates_from_search(search_json: Any, lang: str, provider_id: str,
-                            hash_match: bool = False) -> list[SubtitleCandidate]:
+def _candidates_from_search(search_json: Any, lang: str,
+                            provider_id: str) -> list[SubtitleCandidate]:
     """Every matching-language subtitle in a /subtitles response as a candidate,
-    most-downloaded first. Pure."""
+    most-downloaded first. Pure.
+
+    hash_match comes from each row's own ``moviehash_match``: a moviehash
+    query returns every sub for the feature it identifies, and only the rows
+    the api flags were actually timed for this exact file.
+    """
     if not isinstance(search_json, dict):
         return []
     want = str(lang or "").lower()
@@ -133,10 +147,11 @@ def _candidates_from_search(search_json: Any, lang: str, provider_id: str,
             provider_id=provider_id,
             language=want,
             hi=bool(attrs.get("hearing_impaired")),
-            forced=bool(attrs.get("forced")),
+            # opensubtitles calls forced subs foreign_parts_only
+            forced=bool(attrs.get("foreign_parts_only") or attrs.get("forced")),
             title=title,
             download_ref=file_id,
-            hash_match=bool(hash_match),
+            hash_match=attrs.get("moviehash_match") is True,
             download_count=dl_count,
         )))
     ranked.sort(key=lambda pair: pair[0], reverse=True)
@@ -168,33 +183,24 @@ class OpenSubtitlesProvider(SubtitleProvider):
         if not self._api_key:
             return []
         identity = query.identity if isinstance(query.identity, dict) else {}
-        # Hash-first (Phase 2 scoring): a moviehash search proves the subtitle was
-        # timed for THIS exact release. Those candidates are marked hash_match and
-        # dominate scoring. The metadata search still runs for corroboration and
-        # for files too small to hash.
-        seen_refs = set()
-        merged: list[SubtitleCandidate] = []
+        # Hash-first (Phase 2 scoring): the moviehash rides along with the id
+        # query (one call, like bazarr) and the api flags the rows timed for
+        # THIS exact release (moviehash_match) — those dominate scoring.
+        # Unidentified titles fall back to a hash-only search.
         moviehash = str(getattr(query, "moviehash", "") or "").strip().lower()
-        if moviehash:
-            try:
-                hash_cands = _candidates_from_search(
-                    self._search_api({"moviehash": moviehash, "languages": query.language}),
-                    query.language, self.id, hash_match=True)
-            except Exception:  # noqa: BLE001 - hash search is a bonus, never fatal
-                hash_cands = []
-            for c in hash_cands:
-                seen_refs.add(c.download_ref)
-            merged.extend(hash_cands)
         params = search_params(identity, query.language)
         if params is None:
-            cands = []
-        else:
-            cands = _candidates_from_search(self._search_api(params), query.language,
-                                            self.id, hash_match=False)
-        for c in cands:
-            if c.download_ref not in seen_refs:
-                seen_refs.add(c.download_ref)
-                merged.append(c)
+            if not moviehash:
+                return []
+            params = {"languages": query.language}
+        if moviehash:
+            params["moviehash"] = moviehash
+        # ai translations are excluded by default, same as bazarr.
+        params["ai_translated"] = "exclude"
+        # forced and full are separate wanted rows: ask the api for the kind
+        # this row wants so the right ones make the first page.
+        params["foreign_parts_only"] = "only" if query.forced else "exclude"
+        merged = _candidates_from_search(self._search_api(params), query.language, self.id)
         # Exact-flag matches are preferred; when nothing matches the query's
         # flags exactly, degrade (Bazarr-style) to the unfiltered list — still
         # most-downloaded-first — rather than returning a total miss. The old
@@ -204,9 +210,7 @@ class OpenSubtitlesProvider(SubtitleProvider):
         # NOTE: the hi/forced degradation applies to the merged list; hash
         # matches keep their hash_match flag through it (scoring, not filtering,
         # decides).
-        want_hi, want_forced = bool(query.hi), bool(query.forced)
-        exact = [c for c in merged if c.hi == want_hi and c.forced == want_forced]
-        return exact or merged
+        return flag_filter(merged, query)
 
     def download(self, candidate: SubtitleCandidate) -> str | None:
         if not self._api_key or candidate is None:

@@ -21,6 +21,7 @@ from api.source_playlists import (
     youtube_playlist_states,
 )
 from core.api_validation import parse_strict_bool, parse_strict_int
+from core.playlists import user_playlists as _up
 from core.profile_context import get_current_profile_id
 from utils.logging_config import get_logger
 
@@ -45,6 +46,13 @@ def configure(**deps):
         if name not in g:
             raise KeyError(f"mirrored_playlists.configure: unknown dep {name!r}")
         g[name] = value
+
+
+def _cover_base_dir():
+    # uploaded user-playlist covers; deleted with the playlist so orphaned
+    # webp files don't accumulate in storage.
+    base = getattr(config_manager, "base_dir", None) if config_manager else None
+    return str(base) if base else None
 
 
 bp = Blueprint('mirrored_playlists', __name__)
@@ -306,7 +314,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -327,6 +335,19 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             if quality_profile_id is None:
                 return jsonify({"error": "Invalid quality_profile_id"}), 400
 
+        # #1704: null or '' clears back to the global mode, else a real mode.
+        # no fingerprint reset needed, the sync status remembers the mode
+        sync_mode = None
+        if 'sync_mode' in data:
+            from core.sync.playlist_edit import VALID_SYNC_MODES
+            raw_mode = data.get('sync_mode')
+            if raw_mode is None or raw_mode == '':
+                sync_mode = ''
+            elif raw_mode in VALID_SYNC_MODES:
+                sync_mode = raw_mode
+            else:
+                return jsonify({"error": "Invalid sync_mode"}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -335,6 +356,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             profile_id=profile_id,
             organize_by_playlist=organize_by_playlist,
             quality_profile_id=quality_profile_id,
+            sync_mode=sync_mode,
         )
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404
@@ -694,6 +716,7 @@ def delete_mirrored_playlist_endpoint(playlist_id):
     try:
         database = get_database()
         if database.delete_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id()):
+            _up.remove_cover_file(playlist_id, _cover_base_dir())
             return jsonify({"success": True})
         return jsonify({"error": "Playlist not found"}), 404
     except Exception as e:
@@ -725,6 +748,7 @@ def batch_delete_mirrored_playlists_endpoint():
         deleted, not_deleted = [], []
         for pid in dict.fromkeys(ids):
             if database.delete_mirrored_playlist(pid, profile_id=scope):
+                _up.remove_cover_file(pid, _cover_base_dir())
                 deleted.append(pid)
             else:
                 not_deleted.append(pid)

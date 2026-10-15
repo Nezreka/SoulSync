@@ -155,6 +155,7 @@ function setTrackInfo(track) {
 
     document.getElementById('artist-name').textContent = _stripSourceIdPrefix(track.artist) || 'Unknown Artist';
     document.getElementById('album-name').textContent = _stripSourceIdPrefix(track.album) || 'Unknown Album';
+    npSetPreviewBadge(!!track.is_preview);
 
     // Check if title needs scrolling (similar to GUI app)
     setTimeout(() => {
@@ -215,6 +216,14 @@ function setTrackInfo(track) {
     });
 }
 
+// a deezer clip (#1312) is 30 seconds of the song, not the song. the mini
+// player says so here and now playing in its format badges, so a clip
+// ending early never reads as a broken stream.
+function npSetPreviewBadge(on) {
+    const badge = document.getElementById('player-preview-badge');
+    if (badge) badge.hidden = !on;
+}
+
 function checkAndEnableScrolling(element, text) {
     // Remove any existing scrolling class and reset styles
     element.classList.remove('scrolling');
@@ -259,6 +268,7 @@ function clearTrack() {
 
     document.getElementById('artist-name').textContent = 'Unknown Artist';
     document.getElementById('album-name').textContent = 'Unknown Album';
+    npSetPreviewBadge(false);
     // Reset play button SVGs (don't use textContent — it destroys SVG children)
     const clearPlayBtn = document.getElementById('play-button');
     const clearPlayIcon = clearPlayBtn.querySelector('.play-icon');
@@ -496,7 +506,8 @@ async function startStream(searchResult) {
             album: searchResult.album || 'Unknown Album',
             username: searchResult.username,
             filename: searchResult.filename,
-            image_url: searchResult.image_url || searchResult.album_cover_url || null
+            image_url: searchResult.image_url || searchResult.album_cover_url || null,
+            is_preview: !!searchResult.preview
         });
 
         showLoadingAnimation();
@@ -689,6 +700,7 @@ async function updateStreamStatus() {
                         album: ti.album || 'Unknown Album',
                         filename: ti.filename || '',
                         is_library: !!ti.is_library,
+                        is_preview: !!ti.is_preview,
                         image_url: ti.image_url || null,
                         id: ti.id || null,
                         artist_id: ti.artist_id || null,
@@ -2062,7 +2074,12 @@ function updateNpTrackInfo() {
         if (badgesEl) {
             badgesEl.innerHTML = '';
             const filename = currentTrack.filename || '';
-            if (filename) {
+            if (currentTrack.is_preview) {
+                const badge = document.createElement('span');
+                badge.className = 'np-format-badge preview';
+                badge.textContent = '30s preview';
+                badgesEl.appendChild(badge);
+            } else if (filename) {
                 const ext = getFileExtension(filename);
                 if (ext) {
                     let label = ext.toUpperCase();
@@ -2612,6 +2629,23 @@ function playNext(track) {
     npScheduleQueuePrefetch();
 }
 
+// a whole album onto the end of the queue: one toast, one render, not one per
+// track the way calling addToQueue in a loop did.
+function addTracksToQueue(tracks) {
+    const list = npPrepareQueueTracks((tracks || []).filter(Boolean));
+    if (!list.length) return;
+    const firstNew = npQueue.length;
+    npQueue.push(...list);
+    showToast(list.length === 1 ? 'Added to queue' : `Added ${list.length} songs to queue`, 'success');
+    renderNpQueue();
+    updateNpPrevNextButtons();
+    npScheduleQueuePrefetch();
+    // same as addToQueue: nothing playing, so start with what was just added
+    if (!currentTrack) {
+        playQueueItem(firstNew);
+    }
+}
+
 function removeFromQueue(index) {
     if (index < 0 || index >= npQueue.length) return;
     const wasCurrentTrack = (index === npQueueIndex);
@@ -2704,6 +2738,30 @@ function playPreviousInQueue() {
     playQueueItem(prev);
 }
 
+// a missing queue song with auto-download off was skipped. with the stream
+// source on deezer previews it plays its 30s clip instead (#1312). null
+// means no clip (another stream source, or deezer doesn't have the song),
+// and the caller skips like before.
+async function npFindQueuePreview(track, signal) {
+    try {
+        const response = await fetch('/api/enhanced-search/stream-track', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                track_name: track.title || '',
+                artist_name: track.artist || '',
+                album_name: track.album || '',
+                preview_only: true,
+            }),
+            signal,
+        });
+        const data = await response.json();
+        return (data && data.success && data.result && data.result.preview) ? data.result : null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function playQueueItem(index, options = {}) {
     const generation = npPlaybackGeneration;
     const signal = npPlaybackAbort.signal;
@@ -2722,9 +2780,14 @@ async function playQueueItem(index, options = {}) {
     npLoadingQueueItem = true;
     npQueueIndex = index;
     const track = npQueue[index];
+    let preview = null;
 
     try {
-        if (!track.file_path) {
+        if (!track.file_path && !npAutoDownloadQueue) {
+            preview = await npFindQueuePreview(track, signal);
+            if (!isCurrent()) return { status: 'superseded' };
+        }
+        if (!track.file_path && !preview) {
             setTrackInfo({
                 title: track.title,
                 artist: track.artist,
@@ -2743,7 +2806,41 @@ async function playQueueItem(index, options = {}) {
             track.is_library = true;
             if (loadingText) loadingText.textContent = 'Loading track…';
         }
-        if (track.is_library) {
+        if (preview) {
+            const previousSetup = npPlaybackSetup;
+            npPlaybackSetup = new Promise(resolve => { releaseSetup = resolve; });
+            await previousSetup;
+            if (!isCurrent()) return { status: 'superseded' };
+            await stopStream();
+            if (!isCurrent()) return { status: 'superseded' };
+            setTrackInfo({
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                username: preview.username,
+                filename: preview.filename,
+                is_library: false,
+                is_preview: true,
+                image_url: track.image_url || preview.image_url || null,
+                artist_id: track.artist_id,
+                album_id: track.album_id,
+            });
+            showLoadingAnimation();
+            const response = await fetch(API.stream.start, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(preview),
+            });
+            const result = await response.json();
+            if (!isCurrent()) return { status: 'superseded' };
+            if (!result.success) throw new Error(result.error || 'Preview unavailable');
+            if (audioPlayer) audioPlayer.loop = (npRepeatMode === 'one');
+            const playback = await startAudioPlayback(isCurrent, signal);
+            if (playback?.status !== 'played') {
+                if (playback?.status === 'superseded') return playback;
+                throw new Error(playback?.error || 'Playback did not start');
+            }
+        } else if (track.is_library) {
             const previousSetup = npPlaybackSetup;
             npPlaybackSetup = new Promise(resolve => { releaseSetup = resolve; });
             await previousSetup;
@@ -2832,7 +2929,7 @@ async function playQueueItem(index, options = {}) {
 
     renderNpQueue();
     updateNpPrevNextButtons();
-    return { status: track.is_library ? 'played' : 'unsupported' };
+    return { status: (track.is_library || preview) ? 'played' : 'unsupported' };
 }
 
 function npFocusQueueAction(index, action) {
@@ -3868,6 +3965,9 @@ let npPlayId = null;
 let npPlayGeneration = 0;
 function npMaybeLogPlay() {
     if (npPlayLogged || !currentTrack || !audioPlayer) return;
+    // a 30s clip isn't a listen: it would land in recently played and
+    // smart-radio recency for a song nobody heard
+    if (currentTrack.is_preview) return;
     if (!isFinite(audioPlayer.currentTime) || audioPlayer.currentTime < 10) return;
     npPlayLogged = true;   // set first so a slow request can't double-fire
     const gen = npPlayGeneration;   // a late response for a skipped track must not claim this track's id

@@ -13,6 +13,7 @@ import time
 from typing import List, Optional, Callable, Tuple
 
 from core.itunes_client import Track, Artist, Album
+from core.lookup_failures import report_lookup_failure
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +77,14 @@ class HydrabaseClient:
         """
         ws, lock = self.get_ws_and_lock()
         if ws is None:
+            report_lookup_failure()
             return None
         try:
             if not ws.connected:
+                report_lookup_failure()
                 return None
         except Exception:
+            report_lookup_failure()
             return None
 
         nonce = int(time.time() * 1000)
@@ -102,6 +106,7 @@ class HydrabaseClient:
                     remaining = deadline - time.time()
                     if remaining <= 0:
                         logger.warning(f"Hydrabase response timeout for ({request_type}, '{query}')")
+                        report_lookup_failure()
                         return None
 
                     ws.settimeout(remaining)
@@ -139,6 +144,7 @@ class HydrabaseClient:
 
         except Exception as e:
             logger.error(f"Hydrabase query failed ({request_type}, '{query}'): {e}")
+            report_lookup_failure()
             return None
 
     @staticmethod

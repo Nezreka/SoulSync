@@ -6,6 +6,7 @@ import { server } from '@/test/msw';
 import {
   blockVideoRelease,
   cancelVideoDownload,
+  stopVideoWishlistSearches,
   clearVideoBlocklist,
   clearVideoDownloads,
   clearVideoHistory,
@@ -146,6 +147,12 @@ describe('the mutations hit the right endpoints with the right bodies', () => {
     await cancelVideoDownload(11);
     expect(seen).toHaveLength(1);
     expect(JSON.parse(seen[0].body)).toEqual({ id: 11 });
+  });
+
+  it('stopVideoWishlistSearches posts to search-stop', async () => {
+    const seen = capture('post', '/api/video/wishlist/search-stop', { success: true });
+    await stopVideoWishlistSearches();
+    expect(seen).toHaveLength(1);
   });
 
   it('retryVideoDownload posts {id} — and {id, next:true} for another release', async () => {

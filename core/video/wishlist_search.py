@@ -93,8 +93,51 @@ def _all_source_search(item: Dict[str, Any], media_type: str):
     return [], "; ".join(skips) or None
 
 
-def _one(item: Dict[str, Any], media_type: str, target: str, *, all_sources: bool = False) -> bool:
+class _Budget:
+    """One batch's grab budget + stop check. cap=None is uncapped (a click on one
+    title or season); search-all passes the drain's 'Max downloads per run'."""
+
+    def __init__(self, cap=None):
+        self.cap = cap
+        self.gen = vpw.stop_generation()
+        self.used = 0
+        self.stopped = 0
+        self.deferred = 0
+        self._lock = threading.Lock()
+
+    def _closed(self) -> bool:
+        if vpw.stop_requested(self.gen):
+            self.stopped += 1
+            return True
+        if self.cap is not None and self.used >= self.cap:
+            self.deferred += 1
+            return True
+        return False
+
+    def open(self) -> bool:
+        """Worth searching at all? (cheap pre-check, so a spent budget skips the search)."""
+        with self._lock:
+            return not self._closed()
+
+    def claim(self) -> bool:
+        with self._lock:
+            if self._closed():
+                return False
+            self.used += 1
+            return True
+
+    def give_back(self) -> None:
+        """A refused grab isn't a download, hand the slot to a later item."""
+        with self._lock:
+            self.used -= 1
+
+
+def _one(item: Dict[str, Any], media_type: str, target: str, *, all_sources: bool = False,
+         budget: "_Budget | None" = None) -> bool:
+    budget = budget or _Budget()
     try:
+        if not budget.open():
+            return False
         item = {**item, "_user_initiated": True}
         found = _all_source_search(item, media_type) if all_sources else vpw._default_search(item, media_type)
         cands = found[0] if isinstance(found, tuple) else found
@@ -103,23 +146,33 @@ def _one(item: Dict[str, Any], media_type: str, target: str, *, all_sources: boo
             logger.info("manual search: no acceptable release for %s",
                         item.get("title") or item.get("show_title"))
             return False
-        return bool(vpw._default_enqueue(item, best, cands or [], media_type, target))
+        if not budget.claim():
+            return False
+        ok = bool(vpw._default_enqueue(item, best, cands or [], media_type, target))
+        if not ok:
+            budget.give_back()
+        return ok
     except Exception:   # noqa: BLE001 - one item failing must not kill the batch
         logger.exception("manual wishlist search failed for %r",
                          item.get("title") or item.get("show_title"))
         return False
 
 
-def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool = False) -> None:
+def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool = False,
+               cap=None) -> None:
     try:
         target = vpw._default_target_dir(media_type)
         if not target:
             logger.warning("manual search: no %s library folder set — dropping %d item(s)",
                            media_type, len(todo))
             return
+        budget = _Budget(cap)
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="wl-manual") as ex:
-            grabbed = sum(1 for ok in ex.map(lambda it: _one(it, media_type, target, all_sources=all_sources), todo) if ok)
-        logger.info("manual wishlist search: %d/%d %s item(s) grabbed", grabbed, len(todo), media_type)
+            grabbed = sum(1 for ok in ex.map(
+                lambda it: _one(it, media_type, target, all_sources=all_sources, budget=budget), todo) if ok)
+        logger.info("manual wishlist search: %d/%d %s item(s) grabbed%s%s", grabbed, len(todo), media_type,
+                    (", %d left for later (cap %d)" % (budget.deferred, cap)) if budget.deferred else "",
+                    (", %d skipped (stopped by cancel all)" % budget.stopped) if budget.stopped else "")
     finally:
         _finish(todo, media_type)
 
@@ -149,6 +202,8 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
 
 def search_all() -> Dict[str, str]:
     """Run the full (gated) wishlist drain NOW for both kinds, in the background.
+    Grabs stop at the drain's 'Max downloads per run' (a click once handed the
+    clients the whole wishlist); "cancel all" on the downloads page stops it.
     Per kind: 'started', 'busy' (a drain tick is already running), or 'empty'.
     Scoped to the requesting profile's wishlist — a user clicking "search all"
     searches their own list, not everyone's."""
@@ -189,10 +244,16 @@ def search_all() -> Dict[str, str]:
                 _finish(todo, media_type)
                 return
             try:
-                _run_batch(todo, media_type)
+                _run_batch(todo, media_type, cap=vpw._default_max_downloads(media_type))
             finally:
                 vpw._release(media_type)
 
         threading.Thread(target=_guarded, daemon=True, name="wishlist-search-all").start()
         out[media_type] = "started"
     return out
+
+
+def stop_all() -> None:
+    """Cancel all: halt every running search-all, manual search and drain tick.
+    Items already searched-but-not-grabbed simply stay on the wishlist."""
+    vpw.request_stop()
