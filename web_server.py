@@ -19115,6 +19115,37 @@ def mlm_delete(match_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/playlists/<playlist_id>/ownership-preview', methods=['POST'])
+def playlist_ownership_preview(playlist_id):
+    """which of these tracks are already in the library, before Begin Analysis.
+
+    the same answer the analysis gives, read-only, so the album modal opens
+    with found/missing filled in instead of 'pending'.
+    """
+    data = request.get_json(silent=True) or {}
+    tracks = data.get('tracks') or []
+    if not isinstance(tracks, list) or not tracks:
+        return jsonify({"success": False, "error": "No tracks provided"}), 400
+    try:
+        from core.downloads.master import preview_ownership
+        from database.music_database import MusicDatabase
+        is_album = bool(data.get('is_album_download', False))
+        results = preview_ownership(
+            MusicDatabase(), tracks,
+            album_context=data.get('album_context'),
+            artist_context=data.get('artist_context'),
+            is_album=is_album,
+            profile_id=get_current_profile_id() or 1,
+            source=_downloads_history.detect_sync_source(playlist_id),
+            active_server=config_manager.get_active_media_server(),
+            allow_duplicates=config_manager.get('wishlist.allow_duplicate_tracks', True),
+        )
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        logger.error(f"[Ownership Preview] {playlist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):
     """
