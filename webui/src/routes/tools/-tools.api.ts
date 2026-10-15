@@ -53,7 +53,13 @@ function postJson(url: string, body?: unknown): Promise<Response> {
  * unavailable — the vanilla logs a warning and leaves the UI as it was, which
  * matters because this runs on a 5s poll.
  */
-export async function fetchRepairStatus(): Promise<RepairStatus | null> {
+export function fetchRepairStatus(): Promise<RepairStatus | null>;
+export function fetchRepairStatus<T>(readResponse: (response: Response) => Promise<T>): Promise<T>;
+export async function fetchRepairStatus<T>(
+  readResponse?: (response: Response) => Promise<T>,
+): Promise<T | RepairStatus | null> {
+  // Strict callers own error parsing; Tools retains its historical null-on-error contract.
+  if (readResponse) return readResponse(await fetch('/api/repair/status'));
   try {
     const response = await fetch('/api/repair/status');
     if (!response.ok) return null;
@@ -439,7 +445,12 @@ export async function startBulkFix(options: {
  * transient failure so the poller keeps going rather than declaring the run
  * finished — the vanilla's `catch { return; }` has exactly that effect.
  */
-export async function fetchBulkFixStatus(): Promise<BulkFixStatus | null> {
+export function fetchBulkFixStatus(): Promise<BulkFixStatus | null>;
+export function fetchBulkFixStatus<T>(readResponse: (response: Response) => Promise<T>): Promise<T>;
+export async function fetchBulkFixStatus<T>(
+  readResponse?: (response: Response) => Promise<T>,
+): Promise<T | BulkFixStatus | null> {
+  if (readResponse) return readResponse(await fetch('/api/repair/bulk-fix/status'));
   try {
     const response = await fetch('/api/repair/bulk-fix/status');
     return (await response.json()) as BulkFixStatus;

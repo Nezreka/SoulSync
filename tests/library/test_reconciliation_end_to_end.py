@@ -35,7 +35,7 @@ def defer_background_refresh_in_synchronous_scan_tests(monkeypatch):
     # These fixtures rescan explicitly with controlled catalog and fingerprint
     # responses. A daemon refresh would outlive the fixture and race its database.
     monkeypatch.setattr(RepairWorker, '_schedule_album_refresh',
-                        lambda self, case_id, folder: True)
+                        lambda self, case_id, folder, **kwargs: True)
 
 
 def test_distinctive_version_position_blocks_shorter_release_retag():
@@ -564,6 +564,16 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     item = worker.get_review_case(case_id)['items'][0]
     assert item['finding_type'] == 'reconciliation_intent'
     assert client.fingerprints == client.lookups == 1
+
+    walked = []
+    original_walk = module.walk_library
+    with monkeypatch.context() as narrow_patch:
+        narrow_patch.setattr(module, 'walk_library',
+                             lambda root: walked.append(root) or original_walk(root))
+        narrow = scan.scan(context, target_folder=str(folder))
+    assert narrow.scanned == 1
+    assert walked == []  # Saved membership avoids even the artist/library walk.
+    assert worker.get_review_case(case_id)['items'][0]['finding_type'] == 'reconciliation_intent'
 
     result = worker.apply_review_decision(case_id, item['id'],
                                           evidence_token=item['evidence_token'],

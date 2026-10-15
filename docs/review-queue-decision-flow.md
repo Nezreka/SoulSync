@@ -12,7 +12,8 @@ flowchart TD
     Evidence --> Healthy{"Usable evidence service?"}
     Healthy -->|"Service outage / invalid key"| Preserve["Preserve affected previous findings; report incomplete scan"]
     Healthy -->|"Yes, including isolated unknown files"| Candidates["Load and compare candidate release tracklists"]
-    Candidates --> Match["Score every plausible file-slot pair; solve maximum-weight one-to-one assignment"]
+    Candidates --> Facts["Cache per-file and per-slot version facts, ordered title comparisons, duration differences and recording support; index positions and close supported alternatives"]
+    Facts --> Match["Score every plausible file-slot pair with unchanged thresholds; solve maximum-weight one-to-one assignment"]
     Match --> Edition{"Release identity needs a decision?"}
     Edition -->|Yes| ReleaseReview["Persist candidate mappings and one release question; defer dependent repairs"]
     Edition -->|No| Plan["Classify assignments, duplicates, extra files, missing slots and exact metadata changes"]
@@ -25,6 +26,8 @@ flowchart TD
     Choice -->|"Apply metadata / choose duplicate keeper / quarantine"| Guards
     Choice -->|"Request wanted absent tracks"| Wishlist["Add exact source tracks to wishlist; keep pending fulfillment visible"]
     Wishlist -->|"No immediate full reanalysis"| Queue
+    Wishlist --> Arrival["Completed download batch: locate affected existing cases by physical folder or pending sibling request"]
+    Arrival --> Refresh
     Guards -->|"Evidence changed"| Stale["Report stale evidence; refresh when required; do not apply old proposal"]
     Stale --> Start
     Guards -->|"Valid"| Apply["Execute only the selected operation; record success or partial failure"]
@@ -43,7 +46,18 @@ A successful full scan retires obsolete findings and, when plan persistence comp
 flowchart TD
     Roots{"AcoustID client available and all library roots accessible?"}
     Roots -->|No| Stop["Stop early; retain existing review state"]
-    Roots -->|Yes| Walk["Walk supported audio extensions; exclude watchlist-removal recovery directories"]
+    Roots -->|Yes| Scope{"Requested inventory scope"}
+    Scope -->|"Routine review refresh"| Saved{"Saved roots, database membership and surrounding directory observations agree?"}
+    Saved -->|Yes| Known["Reuse ordered logical-album paths; load only its album database rows; retain trusted group anchor"]
+    Known --> Stat
+    Saved -->|"Changed membership / new sibling files"| Discover["Discover sibling folders and related album rows, including same-title fragments"]
+    Scope -->|"Manual reanalysis / edition choice / download arrival"| Discover
+    Discover --> Bounded{"One verifiable discovery root preserves grouping order?"}
+    Bounded -->|Yes| LocalWalk["Walk selected discovery root; run the same logical-album grouping rules"]
+    LocalWalk --> Join
+    Bounded -->|No| Walk
+    Saved -->|"Old plan / changed configured roots / unusable scope evidence"| Walk
+    Scope -->|"Full library scan"| Walk["Walk all configured roots; exclude watchlist-removal recovery directories"]
     Walk --> Join["Join stored library paths to actual files; accept path aliases only with physical-file identity"]
     Join --> Logical["Group folders into logical album inventory"]
     Logical --> Stat["Read path, size and nanosecond modification time"]
@@ -276,6 +290,8 @@ flowchart TD
 
 The UI distinguishes **confirmed by evidence**, **previously reviewed**, **numbering preview**, **ready metadata**, **unresolved**, and **waiting for fulfillment**. A purple selected-row outline means selection only; it does not change risk or confidence. A green completed decision is distinct from a ready action that has not yet been applied. Counts refer to albums, tracks/slots, actions or grouped field changes as labeled; these quantities are not interchangeable.
 
+Queue mode totals use a count-only summary request and shared SQL predicates; they do not hydrate album pages or artwork. Finding readiness, whole-album buckets and the historical ready-action total remain distinct projections. Refresh overlays count an existing case once even when it is on another page.
+
 Right-hand panels share the workspace column definition. On narrow screens the queue becomes a vertically scrollable list above the album; track detail uses the responsive inspector. The presentation helpers and extracted row/detail components share labels and data coercion instead of defining them independently in each view.
 
 ## 9. Applying decisions and refreshing safely
@@ -320,8 +336,12 @@ Additional application constraints:
 | Cached tag/fingerprint/lookup evidence | [`core/library/reconciliation_evidence.py`](../core/library/reconciliation_evidence.py): `ReconciliationEvidence` |
 | Pair eligibility, weights, confidence, competing files and boundary checks | [`core/library/reconciliation_plan.py`](../core/library/reconciliation_plan.py): `_pair_weight`, `reconcile_folder` |
 | Whole-album one-to-one optimization | [`core/matching/assignment.py`](../core/matching/assignment.py): `assign_max_weight` |
+| Shared category/tier policy and SQL filters | [`core/repair_review_policy.py`](../core/repair_review_policy.py) |
+| Scoped inventory and download-driven discovery | [`core/library/reconciliation_inventory.py`](../core/library/reconciliation_inventory.py) |
+| Typed candidates and common pair display facts | [`core/library/reconciliation_candidates.py`](../core/library/reconciliation_candidates.py) |
 | Risk tiers, decision grouping and queue projection | [`core/repair_review_queue.py`](../core/repair_review_queue.py): `_finding_tier`, `build_decisions`, `classify_case`, `get_case` |
 | Apply guards, pin/preview, reanalysis and operation lifecycle | [`core/repair_worker.py`](../core/repair_worker.py): review methods and `_fix_reconciliation_*` handlers |
+| Memoized assignment groups and selection indexes | [`review-album-model.ts`](../webui/src/routes/review/-ui/review-album-model.ts) |
 | Page state, navigation, polling, plan and workspace | [`webui/src/routes/review/-ui/review-page.tsx`](../webui/src/routes/review/-ui/review-page.tsx) |
 | Shared labels, assignment rows and action inspector | [`review-presentation.ts`](../webui/src/routes/review/-ui/review-presentation.ts), [`assignment-row.tsx`](../webui/src/routes/review/-ui/assignment-row.tsx), [`selected-action-detail.tsx`](../webui/src/routes/review/-ui/selected-action-detail.tsx) |
 | Release comparison, raw facts and audio evidence | [`reconciliation-evidence.tsx`](../webui/src/routes/review/-ui/reconciliation-evidence.tsx), [`review-audio.tsx`](../webui/src/routes/review/-ui/review-audio.tsx) |

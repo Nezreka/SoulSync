@@ -74,6 +74,8 @@ const finding = {
 };
 
 function auxiliary(url: string) {
+  if (url.startsWith('/api/repair/review-queue/summary?'))
+    return reply({ all: 1, review: 1, ready: 0, files: 0, ready_total: 0 });
   if (url === '/api/repair/finding-types') return reply({ types: [] });
   if (url === '/api/repair/bulk-fix/status') return reply({ running: false });
   if (url === '/api/repair/status') return reply({ current_job: null });

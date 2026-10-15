@@ -19,7 +19,12 @@ from typing import Any
 from core.auto_import_worker import _read_file_tags
 from core.imports.staging import AUDIO_EXTENSIONS
 from core.library.path_resolver import resolve_library_file_path
+from core.library.reconciliation_candidates import ScoredCandidate, pair_display_fields
 from core.library_reorganize import _safe_filename
+from core.library.reconciliation_inventory import (
+    ScanScope, InventoryRequest, load_inventory_request, track_selection,
+    known_membership_agrees, discovery_roots, inventory_record, directory_observations,
+)
 from core.library.reconciliation_evidence import (
     ReconciliationEvidence, album_folders_audio_path_digest,
 )
@@ -159,10 +164,22 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     """
     groups = {folder: list(paths) for folder, paths in folders.items()}
 
+    # Lists only grow during this pass. Cache by identity and length, retaining
+    # the list to avoid identity reuse after a group is removed.
+    group_facts = {}
+
+    def cached_fact(name, paths, compute):
+        key = (name, id(paths))
+        previous = group_facts.get(key)
+        if previous is None or previous[1] != len(paths):
+            previous = (paths, len(paths), compute())
+            group_facts[key] = previous
+        return previous[2]
+
     def album_ids(paths):
-        return {tracks[os.path.normpath(path)]['album_id'] for path in paths
+        return cached_fact('albums', paths, lambda: {tracks[os.path.normpath(path)]['album_id'] for path in paths
                 if os.path.normpath(path) in tracks and
-                tracks[os.path.normpath(path)].get('album_id') is not None}
+                tracks[os.path.normpath(path)].get('album_id') is not None})
 
     by_album: dict[object, list[str]] = defaultdict(list)
     for folder, paths in groups.items():
@@ -179,7 +196,7 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
             merged.extend(groups.pop(folder))
         groups[representative] = merged
 
-    def positions(paths):
+    def compute_positions(paths):
         values = set()
         for path in paths:
             row = tracks.get(os.path.normpath(path)) or {}
@@ -192,6 +209,10 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
                 return set()
             values.add((disc_number, track_number))
         return values
+
+    def positions(paths):
+        # The soundtrack rule accumulates positions into its own working set.
+        return set(cached_fact('positions', paths, lambda: compute_positions(paths)))
 
     def release_identity(album):
         if album.get('canonical_source') and album.get('canonical_album_id'):
@@ -245,6 +266,24 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
     def base_title(album):
         return normalize(re.split(r'\s*[\[(]', str(album.get('album_title') or ''), maxsplit=1)[0])
 
+    def sibling_key(folder, album):
+        return (os.path.dirname(folder), base_title(album),
+                normalize(album.get('artist_name') or ''),
+                album.get('owner_profile_id') or 1)
+
+    sibling_groups = defaultdict(list)
+    for folder, paths in groups.items():
+        ids = album_ids(paths)
+        if len(ids) == 1:
+            sibling_groups[sibling_key(folder, albums.get(next(iter(ids))) or {})].append(folder)
+
+    def siblings(folder, album):
+        # Preserve original dict order and all ambiguous candidates. Merges
+        # only remove keys; existing checks reject groups that became mixed-ID.
+        for candidate in sibling_groups.get(sibling_key(folder, album), ()):
+            if candidate in groups:
+                yield candidate, groups[candidate]
+
     for fragment in sorted(list(groups)):
         if fragment not in groups or len(groups[fragment]) != 1:
             continue
@@ -257,7 +296,7 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
         if not fragment_positions or not base_title(fragment_album):
             continue
         candidates = []
-        for anchor, paths in groups.items():
+        for anchor, paths in siblings(fragment, fragment_album):
             if (anchor == fragment or len(paths) < 3 or
                     os.path.dirname(anchor) != os.path.dirname(fragment)):
                 continue
@@ -314,7 +353,7 @@ def _group_logical_albums(folders: dict[str, list[str]], tracks: dict,
             continue
         extra_positions = positions(groups[deluxe_folder])
         candidates = []
-        for regular_folder, regular_paths in groups.items():
+        for regular_folder, regular_paths in siblings(deluxe_folder, deluxe_album):
             if (regular_folder == deluxe_folder or len(regular_paths) < 8 or
                     os.path.dirname(regular_folder) != os.path.dirname(deluxe_folder)):
                 continue
@@ -502,7 +541,7 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
         plan = reconcile_folder(files, slots)
         clear = sum(pair['confidence'] == 'clear' for pair in plan['pairs'])
         matched = len(plan['pairs'])
-        scored.append((clear, matched, -len(plan['extra_files']),
+        scored.append(ScoredCandidate(clear, matched, -len(plan['extra_files']),
                        source, release_id, slots, plan))
     return scored
 
@@ -958,24 +997,20 @@ def _candidate_evidence(files: list[dict], scored: tuple,
         ]
         alternatives.sort(key=support_rank, reverse=True)
         pairs.append({
-            'file': os.path.basename(file['path']),
+            **pair_display_fields(file, slot),
             'tag_title': file['tags'].get('title') or '',
-            'file_duration_ms': file['tags'].get('duration_ms') or file.get('duration_ms') or 0,
             'audio_title': top.get('title') or '',
             'audio_artist': top.get('artist') or '',
             'audio_score': top.get('score'),
             'audio_recording_count': sum(identity(recording) == top_identity
                                          for recording in recordings),
             'audio_alternatives': alternatives,
-            'slot_title': slot['title'],
             'slot_recording_disambiguation':
             slot.get('recording_disambiguation') or '',
             'local_recording_disambiguation':
             (file.get('db') or {}).get('recording_disambiguation') or '',
             'slot_number': slot.get('track_number'),
             'disc_number': slot.get('disc_number'),
-            'slot_duration_ms': slot.get('duration_ms') or 0,
-            'slot_preview_url': slot.get('preview_url') or '',
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'confidence': pair['confidence'],
             'reasons': pair['reasons'],
@@ -1061,12 +1096,12 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
                 categories.add('metadata')
         assignments.append({
             'status': status,
-            'file_path': file['path'], 'file': os.path.basename(file['path']),
+            'file_path': file['path'], **pair_display_fields(file, slot),
             'track_id': row.get('id'),
             'current_title': tags.get('title') or row.get('title') or '',
             'current_track_number': tags.get('track_number'),
             'current_disc_number': tags.get('disc_number') or 1,
-            'slot_title': slot['title'], 'slot_artist': slot.get('artist') or '',
+            'slot_artist': slot.get('artist') or '',
             'slot_track_number': slot.get('track_number'),
             'slot_disc_number': slot.get('disc_number') or 1,
             'display_track_number': display_slot.get('track_number'),
@@ -1074,9 +1109,6 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'current_tags': tags, 'acoustid': file.get('acoustid') or {},
             'confidence': pair['confidence'], 'reasons': pair.get('reasons') or [],
             'ambiguity_reasons': pair.get('ambiguity_reasons') or [],
-            'file_duration_ms': tags.get('duration_ms') or file.get('duration_ms') or 0,
-            'slot_duration_ms': slot.get('duration_ms') or 0,
-            'slot_preview_url': slot.get('preview_url') or '',
             'duration_delta_ms': pair.get('duration_delta_ms'),
             'audio_title': audio.get('title') or '',
             'audio_artist': audio.get('artist') or '',
@@ -1125,30 +1157,28 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
 
 def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
                       numbering_mode: str = '') -> dict:
-    release_slots, candidate_plan = row[5], row[6]
+    candidate = ScoredCandidate(*row)
+    release_slots, candidate_plan = candidate.slots, candidate.plan
     media = release_meta.get('media') or []
     formats = [str(medium.get('format') or '') for medium in media
                if isinstance(medium, dict) and medium.get('format')]
     return {
-        'source': row[3], 'release_id': row[4], 'clear': row[0],
+        'source': candidate.source, 'release_id': candidate.release_id, 'clear': candidate.clear,
         'release_title': release_meta.get('name') or release_meta.get('title') or '',
         'country': release_meta.get('country') or '',
         'date': release_meta.get('date') or release_meta.get('release_date') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
         'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
         'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
-        'matched': row[1], 'total_slots': len(release_slots),
+        'matched': candidate.matched, 'total_slots': len(release_slots),
         'missing': len(candidate_plan['missing_slots']),
         'extra': len(candidate_plan['extra_files']),
         'continuous_numbering': bool(_continuous_numbering(row)),
         'pairs': [{
-            'file': os.path.basename(files[pair['file_index']]['path']),
+            **pair_display_fields(files[pair['file_index']], release_slots[pair['slot_index']],
+                                  duration_fallback=False, strict_title=False),
             'file_path': files[pair['file_index']]['path'],
             'local_title': (files[pair['file_index']].get('tags') or {}).get('title') or '',
-            'file_duration_ms': (files[pair['file_index']].get('tags') or {}).get('duration_ms') or 0,
-            'slot_title': release_slots[pair['slot_index']].get('title') or '',
-            'slot_duration_ms': release_slots[pair['slot_index']].get('duration_ms') or 0,
-            'slot_preview_url': release_slots[pair['slot_index']].get('preview_url') or '',
             'slot_source_track_id': release_slots[pair['slot_index']].get('source_track_id') or '',
             'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
             'track_number': release_slots[pair['slot_index']].get('track_number'),
@@ -1170,6 +1200,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            state: str = '', intent_scope: str = '',
                            action_changes: dict[str, dict] | None = None,
                            numbering_mode: str = '',
+                           inventory: dict | None = None,
                            wanted_slots: set[str] | None = None,
                            wishlisted_slots: set[tuple[str, str]] | None = None) -> str:
     clear, matched, _extras, source, release_id, slots, plan = scored
@@ -1230,6 +1261,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'source': source, 'release_id': release_id, 'state': state,
             'intent_scope': intent_scope,
             'numbering_mode': numbering_mode,
+            'inventory': inventory,
             'release_track_count': len(slots), 'local_file_count': len(files),
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
@@ -1465,7 +1497,7 @@ class LibraryReconciliationJob(RepairJob):
             merged['album_title_policy'] = 'preserve'
         return merged
 
-    def _load_rows(self, context: JobContext, roots: list[str]) -> tuple[dict, dict]:
+    def _load_rows(self, context: JobContext, roots: list[str], selection=None) -> tuple[dict, dict]:
         """One DB read for path→track and album metadata, with old-schema guards."""
         conn = context.db._get_connection()
         try:
@@ -1503,7 +1535,8 @@ class LibraryReconciliationJob(RepairJob):
                 FROM tracks t LEFT JOIN albums al ON al.id = t.album_id
                 {artist_join}
                 WHERE t.file_path IS NOT NULL AND t.file_path != ''
-            ''')
+                  {('AND ' + selection[0]) if selection else ''}
+            ''', selection[1] if selection else [])
             names = [column[0] for column in cursor.description]
             rows = cursor.fetchall()
             tracks = {}
@@ -1693,7 +1726,8 @@ class LibraryReconciliationJob(RepairJob):
                 continue
         return by_profile
 
-    def scan(self, context: JobContext, *, target_folder: str | None = None) -> JobResult:
+    def scan(self, context: JobContext, *, target_folder: str | None = None,
+             scope: ScanScope | str = ScanScope.ALBUM) -> JobResult:
         scan_started = time.perf_counter()
         result = JobResult()
         client = context.acoustid_client
@@ -1715,7 +1749,30 @@ class LibraryReconciliationJob(RepairJob):
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
             return result
-        tracks, albums = self._load_rows(context, roots)
+        inventory_request = load_inventory_request(context.db, target_folder, ScanScope(scope), roots=roots)
+        def selection_for(request):
+            return track_selection(context.db, request, title_key=_album_identity_title,
+                base_title_key=lambda title: normalize(re.split(r'\s*[\[(]', str(title or ''), maxsplit=1)[0]))
+        selection = selection_for(inventory_request)
+        if selection is None:
+            inventory_request = InventoryRequest(ScanScope.LIBRARY)
+        tracks, albums = (self._load_rows(context, roots, selection) if selection else
+                          self._load_rows(context, roots))
+        if (inventory_request.scope == ScanScope.ALBUM and
+                not known_membership_agrees(inventory_request, tracks)):
+            inventory_request = InventoryRequest(ScanScope.DISCOVERY, inventory_request.saved)
+            selection = selection_for(inventory_request)
+            if selection is None:
+                inventory_request = InventoryRequest(ScanScope.LIBRARY)
+            tracks, albums = (self._load_rows(context, roots, selection) if selection else
+                              self._load_rows(context, roots))
+        walk_roots = roots
+        if inventory_request.scope == ScanScope.DISCOVERY:
+            walk_roots = discovery_roots(inventory_request, tracks, roots)
+            if walk_roots is None:
+                inventory_request = InventoryRequest(ScanScope.LIBRARY)
+                tracks, albums = self._load_rows(context, roots)
+                walk_roots = roots
         intents = self._intents(context)
         wishlisted_by_profile = self._wishlisted_slots(context)
         assignment_overrides = self._assignment_overrides(context)
@@ -1725,21 +1782,27 @@ class LibraryReconciliationJob(RepairJob):
                 playlist_membership = context.playlist_membership() or {}
             except Exception as exc:
                 logger.debug('Could not read playlist membership: %s', exc)
-        folders: dict[str, list[str]] = defaultdict(list)
-        for root in roots:
-            if not os.path.isdir(root):
-                continue
-            for dirpath, dirs, filenames in walk_library(root):
-                # Watchlist-removal snapshots are recovery material outside
-                # the active library. Auditing them manufactures duplicate,
-                # extra and unresolved findings for files awaiting deletion.
-                dirs[:] = [name for name in dirs
-                           if not name.casefold().startswith(_WATCHLIST_REMOVAL_PREFIX)]
-                for name in filenames:
-                    if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
-                        folders[dirpath].append(os.path.join(dirpath, name))
-        folders = _group_disc_folders(folders, tracks, roots)
-        folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+        if inventory_request.scope == ScanScope.ALBUM:
+            folders = {os.path.normpath(target_folder): list(inventory_request.saved['paths'])}
+            trusted_logical_groups = {}
+            if inventory_request.saved.get('trusted_album_id') is not None:
+                trusted_logical_groups[os.path.normpath(target_folder)] = inventory_request.saved['trusted_album_id']
+        else:
+            folders: dict[str, list[str]] = defaultdict(list)
+            for root in walk_roots:
+                if not os.path.isdir(root):
+                    continue
+                for dirpath, dirs, filenames in walk_library(root):
+                    # Watchlist-removal snapshots are recovery material outside
+                    # the active library. Auditing them manufactures duplicate,
+                    # extra and unresolved findings for files awaiting deletion.
+                    dirs[:] = [name for name in dirs
+                               if not name.casefold().startswith(_WATCHLIST_REMOVAL_PREFIX)]
+                    for name in filenames:
+                        if os.path.splitext(name)[1].lower() in AUDIO_EXTENSIONS:
+                            folders[dirpath].append(os.path.join(dirpath, name))
+            folders = _group_disc_folders(folders, tracks, roots)
+            folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
         target_member_folders: set[str] = set()
         if target_folder is not None:
             target_folder = os.path.normpath(target_folder)
@@ -1767,8 +1830,13 @@ class LibraryReconciliationJob(RepairJob):
             album_folder_counts.update({tracks[os.path.normpath(path)]['album_id']
                 for path in paths if os.path.normpath(path) in tracks and
                 tracks[os.path.normpath(path)].get('album_id') is not None})
+        if inventory_request.scope == ScanScope.ALBUM:
+            for album_id in inventory_request.album_ids:
+                album_folder_counts[album_id] = inventory_request.saved.get(
+                    'album_folder_counts', {}).get(str(album_id), 1)
         if target_folder is not None:
             folders = {target_folder: folders[target_folder]}
+        directory_cache = {}
         release_cache = {}
         release_meta_cache = {}
         release_search_cache = {}
@@ -1814,10 +1882,9 @@ class LibraryReconciliationJob(RepairJob):
                         # and surface only this track as uncertain.
                     playlists = (list(playlist_membership.get(str(db_row['id']), []))
                                  if db_row else [])
-                    files.append({'path': path, 'tags': cache.read_tags(path, _read_file_tags),
-                                  'acoustid': audio, 'db': db_row,
-                                  'playlists': playlists,
-                                  'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns})
+                    files.append(cache.file_evidence(path, _read_file_tags, audio=audio,
+                        library_fields={'db': db_row, 'playlists': playlists,
+                                        'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns}))
                     result.scanned += 1
                 # The evidence cache uses its own SQLite connection. Release
                 # its write lock before create_finding opens another one.
@@ -1862,6 +1929,13 @@ class LibraryReconciliationJob(RepairJob):
                                  'evidence_signature': _evidence_signature(files, album_id)}):
                         result.findings_created += 1
                     continue
+                member_folders = sorted({os.path.dirname(file['path']) for file in files})
+                parents = tuple(sorted({os.path.dirname(path) for path in member_folders}))
+                if parents not in directory_cache:
+                    directory_cache[parents] = directory_observations(member_folders, roots)
+                album_inventory = inventory_record(files, trusted_album_id=trusted_anchor_id,
+                    album_folder_counts={key: album_folder_counts[key] for key in album_counts},
+                    roots=roots, observations=directory_cache[parents])
                 candidates = self._release_candidates(
                     files, album, context,
                     exact_musicbrainz_releases=exact_musicbrainz_releases)
@@ -1887,7 +1961,7 @@ class LibraryReconciliationJob(RepairJob):
                     numbering_mode == 'digital' and best_expanded and
                     not _continuous_numbering(best_expanded)
                 )
-                if needs_digital and not any(row[3] == 'musicbrainz' for row in scored):
+                if needs_digital and not any(row.source == 'musicbrainz' for row in scored):
                     searched = [candidate for candidate in _search_release_candidates(
                         album, context, release_search_cache) if candidate not in candidates]
                     exact_musicbrainz_releases.update(
@@ -1898,7 +1972,7 @@ class LibraryReconciliationJob(RepairJob):
                         files, searched, release_cache, exact_musicbrainz_releases))
                     best_expanded = (max(scored, key=rank_candidate) if scored else None)
                 group_seed = max(
-                    (row for row in scored if row[3] == 'musicbrainz'),
+                    (row for row in scored if row.source == 'musicbrainz'),
                     key=rank_candidate,
                     default=None,
                 )
@@ -1924,7 +1998,7 @@ class LibraryReconciliationJob(RepairJob):
                     candidates.extend(editions)
                     scored.extend(_score_release_candidates(
                         files, editions, release_cache, exact_musicbrainz_releases))
-                if not scored or max(row[1] for row in scored) == 0:
+                if not scored or max(row.matched for row in scored) == 0:
                     searched = [candidate for candidate in _search_release_candidates(
                         album, context, release_search_cache) if candidate not in candidates]
                     exact_musicbrainz_releases.update(
@@ -2014,7 +2088,7 @@ class LibraryReconciliationJob(RepairJob):
                                         exact_musicbrainz_releases))
                                                for row in scored[:6]],
                                 'evidence_signature': _evidence_signature(
-                                    files, [(row[3], row[4], row[0], row[1])
+                                    files, [(row.source, row.release_id, row.clear, row.matched)
                                             for row in scored]),
                             }):
                             result.findings_created += 1
@@ -2025,7 +2099,7 @@ class LibraryReconciliationJob(RepairJob):
                 best_unpinned_rank = _candidate_rank(files, scored[0], numbering_mode)
                 if album and album.get('canonical_locked'):
                     pinned_row = next((row for row in scored
-                                       if (row[3], row[4]) ==
+                                       if (row.source, row.release_id) ==
                                        (album.get('canonical_source'),
                                         str(album.get('canonical_album_id') or ''))), None)
                     if pinned_row:
@@ -2034,7 +2108,7 @@ class LibraryReconciliationJob(RepairJob):
                 clear, matched, _extras, source, release_id, slots, plan = scored[0]
                 locked_conflict = bool(album and album.get('canonical_locked') and
                                        (not pinned_row or
-                                        (pinned_row[1] == 0 and
+                                        (pinned_row.matched == 0 and
                                          _candidate_rank(files, pinned_row, numbering_mode) !=
                                          best_unpinned_rank)))
                 tied_rows = [row for row in scored
@@ -2116,14 +2190,14 @@ class LibraryReconciliationJob(RepairJob):
                             'locked': bool(album.get('canonical_locked')),
                         } if album else None,
                         'evidence_signature': _evidence_signature(
-                            files, [(row[3], row[4], row[0], row[1])
+                            files, [(row.source, row.release_id, row.clear, row.matched)
                                     for row in ranked_candidates]),
                     }
                     case_id = _persist_selected_plan(
-                        context.db, choice_common, files, scored[0],
+                        context.db, choice_common, files, scored[0], inventory=album_inventory,
                         candidates=ranked_candidates, state='release_conflict',
                         candidate_metadata={
-                            (row[3], row[4]): _release_metadata(
+                            (row.source, row.release_id): _release_metadata(
                                 row, release_meta_cache, exact_musicbrainz_releases)
                             for row in ranked_candidates[:6]
                         },
@@ -2170,7 +2244,7 @@ class LibraryReconciliationJob(RepairJob):
                         logger.warning('Ignoring conflicting manual assignments for %s: %s',
                                        folder, exc)
                     else:
-                        scored[0] = (sum(pair['confidence'] == 'clear' for pair in plan['pairs']),
+                        scored[0] = ScoredCandidate(sum(pair['confidence'] == 'clear' for pair in plan['pairs']),
                                      len(plan['pairs']), -len(plan['extra_files']),
                                      source, release_id, slots, plan)
                 release_meta = _release_metadata(
@@ -2650,9 +2724,9 @@ class LibraryReconciliationJob(RepairJob):
                                 }] }):
                                 result.findings_created += 1
                 case_id = _persist_selected_plan(
-                    context.db, common, files, scored[0], candidates=scored,
+                    context.db, common, files, scored[0], inventory=album_inventory, candidates=scored,
                     candidate_metadata={
-                        (row[3], row[4]): _release_metadata(
+                        (row.source, row.release_id): _release_metadata(
                             row, release_meta_cache, exact_musicbrainz_releases)
                         for row in scored[:6]
                     },
@@ -2681,6 +2755,7 @@ class LibraryReconciliationJob(RepairJob):
                                                 target_folder=member_folder)
         finally:
             elapsed_seconds = time.perf_counter() - scan_started
+            cache.metrics['inventory_scope'] = inventory_request.scope.value
             cache.metrics['inventory_seconds'] = round(inventory_seconds, 3)
             cache.metrics['elapsed_seconds'] = round(elapsed_seconds, 3)
             logger.info('Library reconciliation: %d files, %d findings, %d fingerprints, '

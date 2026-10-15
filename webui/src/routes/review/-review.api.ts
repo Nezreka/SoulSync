@@ -1,5 +1,7 @@
 import type { BulkFixStatus, RepairFinding } from '../tools/-tools.types';
 
+import { fetchRepairStatus, fetchBulkFixStatus } from '../tools/-tools.api';
+
 export interface ReviewPlan {
   ready: number;
   manual: number;
@@ -241,13 +243,8 @@ export async function fetchReviewQueueModeTotals(
   q = '',
   category = '',
 ): Promise<ReviewQueueModeTotals> {
-  const [all, review, ready, files] = await Promise.all([
-    fetchReviewQueue(0, q, category, '', 1),
-    fetchReviewQueue(0, q, category, 'manual', 1),
-    fetchReviewQueue(0, q, category, 'ready', 1),
-    fetchReviewQueue(0, q, category, 'destructive', 1),
-  ]);
-  return { all: all.total, review: review.total, ready: ready.total, files: files.total };
+  const params = new URLSearchParams({ q, category, job_id: 'library_reconciliation' });
+  return readJson<ReviewQueueModeTotals>(await fetch(`/api/repair/review-queue/summary?${params}`));
 }
 
 export async function applyReviewDecisionGroup(
@@ -331,7 +328,7 @@ export async function runReconciliationScan(): Promise<void> {
 }
 
 export async function fetchReconciliationScanStatus(): Promise<ReconciliationScanStatus> {
-  return readJson<ReconciliationScanStatus>(await fetch('/api/repair/status'));
+  return fetchRepairStatus(readJson<ReconciliationScanStatus>);
 }
 
 export async function fetchLastReconciliationRun(): Promise<ReconciliationRun | null> {
@@ -417,5 +414,5 @@ export async function reanalyzeReviewCase(caseId: string): Promise<void> {
 }
 
 export async function fetchReviewApplyStatus(): Promise<BulkFixStatus> {
-  return readJson<BulkFixStatus>(await fetch('/api/repair/bulk-fix/status'));
+  return fetchBulkFixStatus(readJson<BulkFixStatus>);
 }

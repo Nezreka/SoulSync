@@ -459,25 +459,13 @@ describe('simple mode triage buttons', () => {
     });
   });
 
-  it('inspect quarantine shows the findings, opened on the quarantined type', async () => {
+  it('links file actions to the shared review queue while keeping Tools in simple mode', async () => {
     const { container } = render(<MaintenanceHero />);
     await flush();
     const chassis = container.querySelector('.repair-advanced-chassis') as HTMLElement;
     expect(chassis.hidden).toBe(true);
-
-    const button = await screen.findByRole('button', { name: /Inspect Quarantine/ });
-    await waitFor(() => expect(button.closest('button')?.disabled).toBe(false));
-    fetchMock.mockClear();
-    fireEvent.click(button);
-    await flush();
-
-    expect(chassis.hidden).toBe(false);
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([url]) => String(url).includes('finding_type=orphan_file')),
-      ).toBe(true),
-    );
-    // shown for this visit only, the saved preference stays simple
+    const link = await screen.findByRole('link', { name: /File actions/ });
+    expect(link.getAttribute('href')).toBe('/review?mode=files');
     expect(localStorage.getItem('soulsync_operations_mode')).toBeNull();
   });
 });

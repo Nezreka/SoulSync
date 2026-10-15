@@ -98,6 +98,21 @@ class ReconciliationEvidence:
         self.conn.execute('DELETE FROM reconcile_acoustid_results WHERE expires_at <= ?',
                           (int(time.time()),))
 
+    def file_evidence(self, path: str, tag_loader, *, audio: dict | None = None,
+                      library_fields: dict | None = None) -> dict:
+        """Load common evidence while keeping each caller's evidence scope.
+
+        A scan supplies its already checked audio and database/stat/playlist
+        fields. A manual preview intentionally has only tags and audio, as it
+        did before this extraction; enriching it would change matching policy.
+        """
+        return {
+            'path': path,
+            'tags': self.read_tags(path, tag_loader),
+            'acoustid': audio if audio is not None else self.identify(path),
+            **(library_fields or {}),
+        }
+
     def close(self):
         self.conn.commit()
         self.conn.close()

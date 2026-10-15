@@ -102,6 +102,24 @@ def repair_review_queue_list():
         return jsonify({'error': 'Could not load review queue'}), 500
 
 
+@bp.route('/api/repair/review-queue/summary', methods=['GET'])
+def repair_review_queue_summary():
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify(dict.fromkeys(('all', 'review', 'ready', 'files', 'ready_total'), 0))
+    status = request.args.get('status') or 'pending'
+    if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
+        return jsonify({'error': 'Invalid finding status'}), 400
+    try:
+        return jsonify(worker.get_review_summary(
+            status=status, q=request.args.get('q') or '',
+            job_id=request.args.get('job_id') or '',
+            category=request.args.get('category') or ''))
+    except Exception as exc:
+        logger.error('Error loading review queue summary: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not load review queue summary'}), 500
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>', methods=['GET'])
 def repair_review_queue_case(case_id):
     worker = _repair_worker()

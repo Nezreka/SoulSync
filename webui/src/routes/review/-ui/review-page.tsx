@@ -29,6 +29,7 @@ import {
   type ReviewQueueModeTotals,
 } from '../-review.api';
 import { fetchFindingTypes } from '../../tools/-tools.api';
+import { usePolledStatus } from '../../tools/-tools.polling';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
 import { ProviderReleaseId } from './provider-release-id';
@@ -38,6 +39,7 @@ import {
   ReleaseComparison,
   StatusChip,
 } from './reconciliation-evidence';
+import { buildAlbumModel, decisionOrder } from './review-album-model';
 import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
 import {
@@ -92,19 +94,6 @@ const queueModes: Array<{ value: QueueMode; label: string; risk: string }> = [
   { value: 'files', label: 'File actions', risk: 'destructive' },
   { value: 'all', label: 'All', risk: '' },
 ];
-
-const decisionOrder: Record<string, number> = {
-  release_conflicts: 0,
-  album_completeness: 1,
-  pending_fulfillment: 2,
-  numbering: 2,
-  audio_conflicts: 3,
-  title_issues: 4,
-  duplicates: 5,
-  extra_files: 6,
-  title_conventions: 7,
-  metadata: 8,
-};
 
 function caseStatusSummary(item: ReviewCaseSummary): string {
   if (item.refreshing) return 'Reanalyzing this album · updated decisions will appear here';
@@ -350,39 +339,36 @@ export function ReviewPage() {
     if (caseListRef.current) caseListRef.current.scrollTop = 0;
   }, [page, queueMode, category]);
 
+  const scanHistoryLive = useRef(true);
   useEffect(() => {
-    let live = true;
+    scanHistoryLive.current = true;
     void fetchLastReconciliationRun()
       .then((run) => {
-        if (live) setLastRun(run);
+        if (scanHistoryLive.current) setLastRun(run);
       })
       .catch(() => undefined);
-    const poll = async () => {
-      try {
-        const status = await fetchReconciliationScanStatus();
-        if (!live) return;
-        setScanStatus(status);
-        const scanning = status.current_job?.job_id === 'library_reconciliation';
-        if (wasScanning.current && !scanning) {
-          void fetchLastReconciliationRun()
-            .then((run) => {
-              if (live) setLastRun(run);
-            })
-            .catch(() => undefined);
-        }
-        wasScanning.current = scanning;
-      } catch {
-        // Status is supporting context; a temporary poll failure should not
-        // hide the review queue or block a decision.
-      }
-    };
-    void poll();
-    const timer = window.setInterval(() => void poll(), 15000);
     return () => {
-      live = false;
-      window.clearInterval(timer);
+      scanHistoryLive.current = false;
     };
   }, []);
+  usePolledStatus({
+    fetcher: () => fetchReconciliationScanStatus().catch(() => null),
+    isRunning: (status) => status.current_job?.job_id === 'library_reconciliation',
+    intervalMs: 15000,
+    pollWhileIdle: true,
+    onState: (status) => {
+      setScanStatus(status);
+      const scanning = status.current_job?.job_id === 'library_reconciliation';
+      if (wasScanning.current && !scanning) {
+        void fetchLastReconciliationRun()
+          .then((run) => {
+            if (scanHistoryLive.current) setLastRun(run);
+          })
+          .catch(() => undefined);
+      }
+      wasScanning.current = scanning;
+    },
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -497,64 +483,31 @@ export function ReviewPage() {
   const typeInfo = active ? catalog[active.finding_type] : undefined;
   const mutationBusy = busy || applyBusy || reviewCase?.refresh?.state === 'running';
   const plan = reviewCase?.plan || emptyPlan;
-  const decisions = [...(reviewCase?.decisions || plan.decisions || [])].sort(
-    (left, right) => (decisionOrder[left.category] ?? 99) - (decisionOrder[right.category] ?? 99),
-  );
-  const assignments = reviewCase?.album_plan?.assignments || [];
-  const pendingAssignments = assignments.filter(
-    (row) => !['confirmed', 'not_owned', 'settled'].includes(row.status),
-  );
-  const duplicateExtraFindings = new Set(
-    pendingAssignments
-      .filter((row) => row.status === 'duplicate' && row.finding_id != null)
-      .map((row) => row.finding_id),
-  );
-  const versionConflictAssignments = pendingAssignments
-    .filter(
-      (row) =>
-        row.relationship === 'version_conflict' &&
-        row.status !== 'change' &&
-        row.status !== 'missing',
-    )
-    .sort((left, right) => {
-      const relationship = (left.relationship_key || '').localeCompare(
-        right.relationship_key || '',
-      );
-      if (relationship) return relationship;
-      return left.status === 'extra' ? -1 : right.status === 'extra' ? 1 : 0;
-    });
-  const attentionAssignments = [
-    ...versionConflictAssignments,
-    ...pendingAssignments
-      .filter(
-        (row) =>
-          row.relationship !== 'version_conflict' &&
-          row.status !== 'change' &&
-          row.status !== 'missing' &&
-          !(row.status === 'uncertain' && duplicateExtraFindings.has(row.finding_id)),
-      )
-      .sort((left, right) => {
-        const order: Record<string, number> = {
-          uncertain: 0,
-          extra: 1,
-          duplicate: 1,
-          missing: 2,
-          change: 3,
-          not_owned: 4,
-        };
-        return (order[left.status] ?? 9) - (order[right.status] ?? 9);
-      }),
-  ];
-  const changeAssignments = pendingAssignments.filter((row) => row.status === 'change');
-  const missingAssignments = pendingAssignments.filter(
-    (row) => row.status === 'missing' && row.relationship !== 'version_conflict',
-  );
-  const pairedConflictCount = versionConflictAssignments.filter(
-    (row) => row.status === 'extra',
-  ).length;
-  const settledAssignments = assignments.filter((row) =>
-    ['confirmed', 'not_owned', 'settled'].includes(row.status),
-  );
+  const albumModel = useMemo(() => buildAlbumModel(reviewCase), [reviewCase]);
+  const {
+    decisions,
+    assignments,
+    attentionAssignments,
+    changeAssignments,
+    missingAssignments,
+    pairedConflictCount,
+    settledAssignments,
+    reviewDecisions,
+    pendingDecisions,
+    wishlistedCount,
+    releaseChoicePending,
+    releaseHasMultipleDiscs,
+    hasIntentDecision,
+    readyDecisions,
+    reviewMetadataCount,
+    readyIncludedInGroup,
+    assignmentsByFinding,
+    assignmentsByKey,
+    assignmentsByPath,
+    decisionsByFinding,
+    decisionMembers,
+    releaseOrderedAssignments,
+  } = albumModel;
   const readyChangeGroups = useMemo(
     () => groupReadyChanges(reviewCase?.items || []),
     [reviewCase?.items],
@@ -566,12 +519,8 @@ export function ReviewPage() {
   const matchingFilter = (row: AlbumAssignment) =>
     !trackFilter ||
     (trackFilter.startsWith('decision:')
-      ? decisions.some(
-          (decision) =>
-            `decision:${decision.id}` === trackFilter &&
-            row.finding_id != null &&
-            decision.finding_ids.includes(row.finding_id),
-        )
+      ? row.finding_id != null &&
+        Boolean(decisionMembers.get(trackFilter.slice(9))?.has(row.finding_id))
       : trackFilter === 'uncertain'
         ? row.status === 'uncertain'
         : trackFilter === 'duplicate'
@@ -589,40 +538,8 @@ export function ReviewPage() {
                     : Object.keys(row.changes || {}).some(
                         (field) => readyFieldGroup(field).key === trackFilter,
                       ));
-  const activeDecision = active
-    ? decisions.find((decision) => decision.finding_ids.includes(active.id))
-    : undefined;
-  const reviewDecisions = decisions.filter(
-    (decision) => decision.risk !== 'ready' && decision.category !== 'pending_fulfillment',
-  );
-  const pendingDecisions = decisions.filter(
-    (decision) => decision.category === 'pending_fulfillment',
-  );
-  const wishlistedCount = assignments.filter(
-    (row) => row.fulfillment_state === 'wishlisted',
-  ).length;
-  const releaseChoicePending = reviewDecisions.some(
-    (decision) => decision.category === 'release_conflicts',
-  );
-  const releaseHasMultipleDiscs = assignments.some((row) => Number(row.slot_disc_number || 1) > 1);
-  const hasIntentDecision = reviewDecisions.some(
-    (decision) => decision.category === 'album_completeness',
-  );
-  const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
-  const reviewMetadataCount =
-    reviewCase?.items.filter(
-      (item) => item.finding_type === 'reconciliation_metadata' && item.review_tier !== 'ready',
-    ).length || 0;
-  const readyIncludedInGroup = reviewDecisions.some(
-    (decision) =>
-      ['metadata', 'numbering', 'title_conventions'].includes(decision.category) &&
-      decision.finding_ids.some((id) =>
-        reviewCase?.items.some((item) => item.id === id && item.review_tier === 'ready'),
-      ),
-  );
-  const activeAssignment = active
-    ? assignments.find((row) => row.finding_id === active.id)
-    : undefined;
+  const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
+  const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
   const releaseCandidates = [
     ...(reviewCase?.album_plan?.candidates || records(record(active?.details).candidates)).filter(
@@ -645,7 +562,7 @@ export function ReviewPage() {
     if (albumView !== 'tracks' || !reviewCase) return;
     if (activeRowKey && assignments.some((row) => assignmentKey(row) === activeRowKey)) return;
     const first =
-      assignments.find((row) => row.finding_id === activeId) ||
+      assignmentsByFinding.get(activeId) ||
       assignments.find((row) => row.finding_id && row.action_state !== 'waiting') ||
       assignments[0];
     if (first) {
@@ -657,7 +574,7 @@ export function ReviewPage() {
 
   const selectFinding = (findingId: number | null, rowKey?: string) => {
     setActiveId((current) => (current === findingId ? null : findingId));
-    const target = assignments.find((row) => row.finding_id === findingId);
+    const target = assignmentsByFinding.get(findingId);
     setActiveRowKey(rowKey || (target ? assignmentKey(target) : null));
     if (target?.status === 'change')
       setOpenGroups((current) => (current.includes('changes') ? current : [...current, 'changes']));
@@ -693,9 +610,7 @@ export function ReviewPage() {
       setTrackFilter(`decision:${decision.id}`);
       setActiveId(first);
       setActiveRowKey(
-        assignments.find((row) => row.finding_id === first)
-          ? assignmentKey(assignments.find((row) => row.finding_id === first)!)
-          : null,
+        assignmentsByFinding.get(first) ? assignmentKey(assignmentsByFinding.get(first)!) : null,
       );
       setOpenGroups(['changes', 'missing', 'settled']);
     }
@@ -1178,8 +1093,7 @@ export function ReviewPage() {
       )?.file_path ||
       ''
     : '';
-  const comparisonDurationMs =
-    assignments.find((row) => row.file_path === comparisonPath)?.file_duration_ms || 0;
+  const comparisonDurationMs = assignmentsByPath.get(comparisonPath)?.file_duration_ms || 0;
 
   const actionDetail = (compact = false) =>
     active && reviewCase ? (
@@ -1218,17 +1132,6 @@ export function ReviewPage() {
       />
     );
   };
-
-  const releaseOrderedAssignments = assignments
-    .filter((row) => !(row.status === 'missing' && row.relationship === 'version_conflict'))
-    .sort(
-      (left, right) =>
-        Number(left.slot_disc_number || left.current_disc_number || 1) -
-          Number(right.slot_disc_number || right.current_disc_number || 1) ||
-        Number(left.slot_track_number || left.current_track_number || 0) -
-          Number(right.slot_track_number || right.current_track_number || 0) ||
-        (left.file || '').localeCompare(right.file || ''),
-    );
 
   return (
     <main className={`page-shell review-queue-root ${styles.page}`}>
@@ -2220,8 +2123,7 @@ export function ReviewPage() {
                         </button>
                         {activeRowKey && active ? (
                           <>
-                            {assignments.find((row) => assignmentKey(row) === activeRowKey)
-                              ?.status === 'missing' && (
+                            {assignmentsByKey.get(activeRowKey)?.status === 'missing' && (
                               <p>
                                 This release track has no assigned local file. Review the album
                                 scope if you do not own it.
@@ -2232,7 +2134,7 @@ export function ReviewPage() {
                         ) : activeRowKey &&
                           assignments.some((row) => assignmentKey(row) === activeRowKey) ? (
                           <AssignmentEvidence
-                            row={assignments.find((row) => assignmentKey(row) === activeRowKey)!}
+                            row={assignmentsByKey.get(activeRowKey)!}
                             album={reviewCase}
                           />
                         ) : (

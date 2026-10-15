@@ -61,6 +61,8 @@ function reply(body: unknown, status = 200) {
 function setup(current: unknown = album, status = 200) {
   fetchMock.mockImplementation(async (input: string) => {
     const url = new URL(input, 'http://localhost');
+    if (url.pathname === '/api/repair/review-queue/summary')
+      return reply({ all: 1, review: 1, ready: 0, files: 0, ready_total: 0 });
     if (url.pathname === '/api/repair/review-queue')
       return reply({ items: [{ ...next, pending: 1 }], total: 1, page: 0, limit: 30 });
     if (url.pathname.endsWith('/album:1:first')) return reply(current, status);

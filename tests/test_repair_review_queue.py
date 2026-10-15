@@ -92,7 +92,7 @@ def test_release_candidate_can_be_pinned_without_release_finding():
                             'clear': 10, 'matched': 10}],
         },
     }
-    worker._schedule_album_refresh = lambda *_args: True
+    worker._schedule_album_refresh = lambda *_args, **_kwargs: True
 
     result = worker.pin_review_release(
         'case', source='musicbrainz', release_id='new',
@@ -126,7 +126,7 @@ def test_manual_musicbrainz_release_is_previewed_before_pinning(monkeypatch, tmp
         'album_id': 7, 'folder': '/music/album',
         'album_plan': {'source': 'itunes', 'release_id': 'old', 'candidates': []},
     }
-    worker._schedule_album_refresh = lambda *_args: True
+    worker._schedule_album_refresh = lambda *_args, **_kwargs: True
     args = {'case_id': 'case', 'source': 'musicbrainz', 'release_id': release_id,
             'expected_source': 'itunes', 'expected_release_id': 'old'}
     from core.library.reconciliation_evidence import ReconciliationEvidence
@@ -206,10 +206,10 @@ def test_reanalyze_review_case_targets_only_its_folder():
     case = {'folder': '/music/Ghost/Prequelle', 'items': []}
     worker.get_review_case = lambda *_args, **_kwargs: case
     calls = []
-    worker._schedule_review_refresh = lambda *args: calls.append(args) or True
+    worker._schedule_review_refresh = lambda *args, **kwargs: calls.append((args, kwargs)) or True
 
     assert worker.reanalyze_review_case('prequelle-case')
-    assert calls == [('prequelle-case', '/music/Ghost/Prequelle', case)]
+    assert calls == [(('prequelle-case', '/music/Ghost/Prequelle', case), {'scope': 'discovery'})]
     worker.get_review_case = lambda *_args, **_kwargs: None
     assert not worker.reanalyze_review_case('stale-case')
 
@@ -1064,3 +1064,62 @@ def test_stale_duplicate_library_id_refreshes_without_removing_a_file(tmp_path):
         ]})
     assert not result['success'] and result['refresh_required']
     assert path.read_bytes() == b'unchanged audio'
+
+
+def test_summary_matches_paginated_modes_without_loading_plans(monkeypatch):
+    from core.repair_review_queue import queue_summary
+    import core.repair_review_queue as queue
+    db = _Database()
+    for index, (kind, changes, confidence) in enumerate([
+        ('reconciliation_metadata', {}, 'clear'),
+        ('reconciliation_metadata', {'track_number': {'old': 2, 'new': 1}}, 'clear'),
+        ('reconciliation_metadata', {'artist': {'old': 'Old', 'new': 'New'}}, 'clear'),
+        ('reconciliation_release', {}, 'clear'),
+        ('reconciliation_duplicate', {}, 'clear'),
+        ('reconciliation_missing', {}, 'clear'),
+        ('reconciliation_metadata', {}, 'ambiguous'),
+    ], 1):
+        db.add(index, f'/music/{index}/song.flac', {
+            'album_id': index, 'album_title': f'Album {index}',
+            'changes': changes, 'confidence': confidence,
+        }, job_id='library_reconciliation', kind=kind)
+    for category in ('', 'metadata', 'numbering', 'album_completeness', 'duplicates'):
+        for query in ('', 'Album 1', 'no matching album'):
+            expected = {label: list_cases(db, job_id='library_reconciliation',
+                                         category=category, q=query, risk=risk)['total']
+                        for label, risk in [('all', ''), ('review', 'manual'),
+                                            ('ready', 'ready'), ('files', 'destructive')]}
+            expected['ready_total'] = list_cases(db, job_id='library_reconciliation')['ready_total']
+            with monkeypatch.context() as patch:
+                patch.setattr(queue, 'classify_case', lambda *a: (_ for _ in ()).throw(
+                    AssertionError('Summary must not hydrate page plans')))
+                assert queue_summary(db, job_id='library_reconciliation',
+                                     category=category, q=query) == expected
+            db.conn.rollback()  # test connection deliberately ignores close()
+
+
+def test_refresh_overlay_counts_existing_case_once_across_pages():
+    db = _Database()
+    for finding_id in (1, 2):
+        db.add(finding_id, f'/music/{finding_id}/song.flac', {
+            'album_id': finding_id, 'album_title': f'Album {finding_id}',
+            'changes': {}, 'confidence': 'clear',
+        }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    cases = list_cases(db, job_id='library_reconciliation')['items']
+    key = cases[1]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._album_refresh_lock = threading.Lock()
+    worker._album_refreshes = {key: {'state': 'running', 'snapshot': get_case(db, key)}}
+    page = worker.get_review_cases(limit=1, job_id='library_reconciliation')
+    assert len(page['items']) == 2  # Keep the active album visible while refreshing.
+    assert page['total'] == 2  # It is already counted on a later page.
+    summary = worker.get_review_summary(job_id='library_reconciliation')
+    assert summary['all'] == summary['ready'] == 2
+    db.conn.rollback()
+    db.conn.execute('UPDATE repair_findings SET status = ? WHERE review_case_key = ?',
+                    ('resolved', key))
+    db.conn.commit()
+    # The snapshot temporarily fills the gap after apply retires the findings.
+    assert worker.get_review_summary(job_id='library_reconciliation')['all'] == 2
+    db.conn.rollback()

@@ -46,6 +46,8 @@ def ensure_schema(conn) -> None:
                     ON reconcile_album_plans(state, updated_at)''')
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_album
                     ON reconcile_album_plans(profile_id, album_id)''')
+    conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_folder
+                    ON reconcile_album_plans(album_folder, updated_at)''')
 
 
 def persist_album_plan(db, header: dict[str, Any], payload: dict[str, Any]) -> str:

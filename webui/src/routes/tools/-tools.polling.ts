@@ -43,6 +43,8 @@ export interface PollOptions<T> {
   onState?: (state: T, previous: T | null) => void;
   /** Skip the mount hydrate (the media scan starts on click, not on load). */
   hydrateOnMount?: boolean;
+  /** Continue observing idle jobs, including after a failed initial request. */
+  pollWhileIdle?: boolean;
 }
 
 export function usePolledStatus<T>({
@@ -51,6 +53,7 @@ export function usePolledStatus<T>({
   intervalMs,
   onState,
   hydrateOnMount = true,
+  pollWhileIdle = false,
 }: PollOptions<T>): PolledStatus<T> {
   const [state, setState] = useState<T | null>(null);
   const [polling, setPolling] = useState(false);
@@ -85,9 +88,9 @@ export function usePolledStatus<T>({
     stateRef.current = next;
     setState(next);
     onStateRef.current?.(next, previous);
-    if (!isRunningRef.current(next)) stop();
+    if (!pollWhileIdle && !isRunningRef.current(next)) stop();
     return next;
-  }, [stop]);
+  }, [stop, pollWhileIdle]);
 
   const arm = useCallback(() => {
     if (timerRef.current) return;
@@ -101,7 +104,7 @@ export function usePolledStatus<T>({
     mountedRef.current = true;
     if (hydrateOnMount) {
       void refresh().then((first) => {
-        if (mountedRef.current && first && isRunningRef.current(first)) arm();
+        if (mountedRef.current && (pollWhileIdle || (first && isRunningRef.current(first)))) arm();
       });
     }
     return () => {

@@ -10,9 +10,13 @@ afterEach(() => {
 
 it('shows album counts from the queue and links each kind of work to its view', async () => {
   const fetchMock = vi.fn((url: string) => {
-    const risk = new URL(url, 'http://localhost').searchParams.get('risk');
-    const total = risk === 'manual' ? 3 : risk === 'ready' ? 2 : risk === 'destructive' ? 1 : 5;
-    return Promise.resolve({ ok: true, json: async () => ({ total, items: [] }) });
+    return Promise.resolve({
+      ok: true,
+      json: async () =>
+        url.includes('/review-queue/summary')
+          ? { all: 5, review: 3, ready: 2, files: 1 }
+          : { runs: [] },
+    });
   });
   vi.stubGlobal('fetch', fetchMock);
 
@@ -36,7 +40,9 @@ it('starts an album scan without launching the generic maintenance playbook', as
     Promise.resolve({
       ok: true,
       json: async () =>
-        url.includes('review-queue') ? { total: 0, items: [] } : { success: true },
+        url.includes('review-queue')
+          ? { all: 0, review: 0, ready: 0, files: 0 }
+          : { success: true },
     }),
   );
   vi.stubGlobal('fetch', fetchMock);
