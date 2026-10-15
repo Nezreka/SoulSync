@@ -273,6 +273,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 sample_keys = list(matched_downloads_context.keys())[:5]
                 logger.info(f"[Post-Processing] Sample of existing keys: {sample_keys}")
 
+        # A routed artist's files belong in the audiobook folder, not the music library.
+        from core.audiobook_routing import routed_root_for_context
+        transfer_dir = routed_root_for_context(context) or transfer_dir
+
         expected_final_path = (context or {}).get('_final_processed_path')
 
         # RESILIENT FILE-FINDING LOOP: Try up to 3 times with delays
