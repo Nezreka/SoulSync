@@ -3490,6 +3490,8 @@ async function loadSettingsData() {
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
+        const _m3uRelEl = document.getElementById('m3u-relative-paths');
+        if (_m3uRelEl) _m3uRelEl.checked = settings.m3u_export?.relative_paths === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
         document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
         document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
@@ -6657,6 +6659,7 @@ async function saveSettings(quiet = false) {
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
+            relative_paths: _cfgBool('m3u-relative-paths'),
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
             rewrite_to: document.getElementById('m3u-rewrite-to').value || '',

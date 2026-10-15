@@ -56,10 +56,11 @@ def test_finalize_composes_with_the_hash_guard():
 
 def test_web_server_writers_use_the_shared_finalizer():
     ws = (_ROOT.parent / 'web_server.py').read_text(encoding='utf-8')
-    # both playlist writers wrap the FULL line (base included) in the finalizer
-    assert ws.count("_m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)") == 1
-    assert ws.count("_m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)") == 1
-    assert "finalize_m3u_entry" in ws
+    # both playlist writers hand the raw path to one helper that does base,
+    # rewrite and the relative mode in one place
+    assert ws.count("_m3u_entry_path(fp, m3u_folder)") == 1
+    assert ws.count("_m3u_entry_path(file_path, m3u_folder)") == 1
+    assert "m3u_entry_line" in ws
     # library export + scan-sync auto-writer pass the mapping through. two
     # of the three sites moved with the db-update and artist-detail lifts
     needle = "rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or ''"

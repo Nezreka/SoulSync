@@ -3509,17 +3509,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def _m3u_entry_path(path):
-    """Final transforms for one m3u entry line: the prefix hot-swap
-    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
-    playback-machine path out) and the '#' comment-guard (#1072). Shared
-    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
-    just feeds it the configured mapping. Empty settings = '#'-guard only."""
-    from core.library.m3u_export import finalize_m3u_entry
-    return finalize_m3u_entry(
+def _m3u_entry_path(path, m3u_dir=None):
+    """One m3u entry line from a library file path: relative to ``m3u_dir``
+    when m3u_export.relative_paths is on and the file is being written there,
+    else the base path prepend + prefix hot-swap (wolf39us). the '#'
+    comment-guard (#1072) applies either way. Shared logic lives in
+    core.library.m3u_export.m3u_entry_line; this just feeds it the settings."""
+    from core.library.m3u_export import m3u_entry_line
+    relative = bool(m3u_dir) and bool(config_manager.get('m3u_export.relative_paths', False))
+    return m3u_entry_line(
         path,
+        entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
         rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
         rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+        relative_to=m3u_dir if relative else '',
     )
 
 
@@ -3539,8 +3542,8 @@ def _regenerate_batch_m3u(batch, tracks):
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
 
         # Resolve file paths from library DB
         from collections import defaultdict
@@ -3585,7 +3588,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
+                path = _m3u_entry_path(fp, m3u_folder)
                 lines.append(path)
                 found += 1
             else:
@@ -3596,8 +3599,6 @@ def _regenerate_batch_m3u(batch, tracks):
             return  # Don't overwrite with an all-missing M3U
 
         m3u_content = '\n'.join(lines)
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
         os.makedirs(m3u_folder, exist_ok=True)
         safe_fn = _sanitize_filename(playlist_name)
         m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
@@ -3692,9 +3693,6 @@ def generate_playlist_m3u():
         if save_to_disk and not force and not config_manager.get('m3u_export.enabled', False):
             return jsonify({"success": True, "skipped": True, "reason": "m3u_export disabled"})
 
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
-
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
@@ -3754,6 +3752,17 @@ def generate_playlist_m3u():
             )
             file_path_map[idx] = matched_path
 
+        # where it will be saved, worked out up front so entries can be
+        # relative to it. a content-only request has no folder: absolute.
+        will_save = save_to_disk and (force or config_manager.get('m3u_export.enabled', False))
+        m3u_folder = None
+        if will_save:
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
+
         # --- build M3U content ---
         import datetime as _dt
         found_count = 0
@@ -3775,7 +3784,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
+                entry = _m3u_entry_path(file_path, m3u_folder)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -3795,12 +3804,7 @@ def generate_playlist_m3u():
 
         # --- optionally save to disk ---
         saved_path = None
-        if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year,
-                                              sample_track_path=next(
-                                                  (p for p in file_path_map.values() if p), None))
+        if will_save:
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')

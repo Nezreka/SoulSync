@@ -7058,10 +7058,28 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="m3u-relative-paths">
+                                                        Write M3U entries relative to the playlist file
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <div class="setting-help-text setting-help-body" hidden>
+                                                        Entries become <code>../Artist/Album/01 - Song.flac</code>
+                                                        instead of the full path SoulSync sees, so a saved M3U still
+                                                        works when the folder is opened from a network share, another
+                                                        machine or a sync tool. Tracks that don't share a folder with
+                                                        the playlist keep their full path, and the base path and
+                                                        prefix rewrite below still apply to those.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>M3U Entry Base Path:</label>
                                                     <div class="path-input-group">
                                                         <input type="text" id="m3u-entry-base-path"
-                                                            placeholder="e.g. /mnt/music (leave empty for relative paths)"
+                                                            placeholder="e.g. /mnt/music (leave empty to use paths as stored)"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>

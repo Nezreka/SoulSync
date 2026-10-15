@@ -977,6 +977,7 @@ class ConfigManager:
             "m3u_export": {
                 "enabled": False,
                 "entry_base_path": "",
+                "relative_paths": False,
                 "library_enabled": False,
                 "library_path": ""
             },

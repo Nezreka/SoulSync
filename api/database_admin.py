@@ -183,7 +183,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             _written = write_library_m3u(
                 _entries, _dest, entry_base_path=_base,
                 rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
-                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+                relative=bool(config_manager.get('m3u_export.relative_paths', False)))
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
