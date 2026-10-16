@@ -572,26 +572,30 @@ class AutoImportWorker:
             return
 
         candidates = self._enumerate_folders(staging)
+        # folders that already have a finished row (failed and needs-attention
+        # included) are only listed, never re-run. count them apart so the log
+        # doesn't read like the same folders are imported every minute.
+        settled, fresh = [], []
+        for c in candidates:
+            (settled if self._is_already_processed(c) else fresh).append(c)
+        summary = f"{len(candidates)} candidates in {staging}"
+        if settled:
+            summary += (f" ({len(settled)} already handled, left alone until you"
+                        f" retry or fix them in the import inbox)")
         if self._scan_problems:
             unreadable = '; '.join(f"{p['path']}: {p['error']}" for p in self._scan_problems[:3])
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging} "
-                        f"(could not read: {unreadable})")
-        else:
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
-        if not candidates:
+            summary += f" (could not read: {unreadable})"
+        logger.info(f"[Auto-Import] Scan cycle: {summary}")
+        if not fresh:
             return
 
         if self._executor is None:
             logger.warning("[Auto-Import] Executor not initialized — skipping scan")
             return
 
-        for candidate in candidates:
+        for candidate in fresh:
             if self.should_stop or self.paused:
                 break
-
-            # Skip if already processed (DB-level dedup)
-            if self._is_already_processed(candidate):
-                continue
 
             # Skip if already submitted to / running in the pool. This
             # de-dupes across the timer loop + manual scan triggers
