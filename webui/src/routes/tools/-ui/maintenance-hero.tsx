@@ -74,16 +74,6 @@ function settingText(value: unknown): string {
   return '';
 }
 
-function EmptyState({ icon, title, text }: { icon: string; title: string; text: string }) {
-  return (
-    <div className="repair-empty-state">
-      <div className="repair-empty-icon">{icon}</div>
-      <div className="repair-empty-title">{title}</div>
-      <div className="repair-empty-text">{text}</div>
-    </div>
-  );
-}
-
 // ── Job help overlay ─────────────────────────────────────────────────────────
 
 /**
