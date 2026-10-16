@@ -41,34 +41,26 @@ from services.sync_service import PlaylistSyncService
 
 def _seed(db: MusicDatabase):
     """AC/DC own an album; a Various Artists compilation carries per-track
-    credits (Nirvana has NO artist row of its own; AC/DC guest-appears);
-    Drake owns one track."""
+    credits (AC/DC guest-appears); Drake owns one track. Library v2 port:
+    every track has a live file and is recognized by the 'plex' server."""
+    from tests import lib2_seed
+
     conn = db._get_connection()
-    c = conn.cursor()
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES ('a-acdc','AC/DC','plex')")
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES ('a-va','Various Artists','plex')")
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES ('a-drake','Drake','plex')")
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al-bib','a-acdc','Back in Black','plex')")
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al-party','a-va','VA Party Mix','plex')")
-    c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al-fatd','a-drake','For All The Dogs','plex')")
     rows = [
-        ('t1', 'al-bib', 'a-acdc', 'Hells Bells', None),
-        ('t2', 'al-bib', 'a-acdc', 'Back in Black', None),
-        ('t3', 'al-bib', 'a-acdc', 'You Shook Me All Night Long', None),
-        ('t4', 'al-party', 'a-va', 'Smells Like Teen Spirit', 'Nirvana'),
-        ('t5', 'al-party', 'a-va', 'Come As You Are', 'Nirvana'),
-        ('t6', 'al-party', 'a-va', 'Thunderstruck', 'AC/DC'),
-        ('t7', 'al-fatd', 'a-drake', 'First Person Shooter', None),
+        ('AC/DC', 'Back in Black', 'Hells Bells', None),
+        ('AC/DC', 'Back in Black', 'Back in Black', None),
+        ('AC/DC', 'Back in Black', 'You Shook Me All Night Long', None),
+        ('Various Artists', 'VA Party Mix', 'Smells Like Teen Spirit', 'Nirvana'),
+        ('Various Artists', 'VA Party Mix', 'Come As You Are', 'Nirvana'),
+        ('Various Artists', 'VA Party Mix', 'Thunderstruck', 'AC/DC'),
+        ('Drake', 'For All The Dogs', 'First Person Shooter', None),
     ]
-    for tid, alid, aid, title, tartist in rows:
-        c.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_artist, server_source)"
-            " VALUES (?,?,?,?,?,?)",
-            (tid, alid, aid, title, tartist, 'plex'),
-        )
+    for n, (artist, album, title, credit) in enumerate(rows, start=1):
+        lib2_seed.track(conn, artist, album, title, credit=credit, track_artist=credit,
+                        server_source='plex', server_id=f't{n}',
+                        album_cols={'server_source': 'plex', 'server_id': f'al-{album}'})
     conn.commit()
     conn.close()
-    db.ensure_norm_backfilled()
 
 
 @pytest.fixture()

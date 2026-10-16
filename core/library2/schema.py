@@ -563,6 +563,8 @@ _ADDED_COLUMNS = (
      "ALTER TABLE lib2_albums ADD COLUMN canonical_score REAL"),
     ("lib2_albums", "canonical_resolved_at",
      "ALTER TABLE lib2_albums ADD COLUMN canonical_resolved_at TIMESTAMP"),
+    ("lib2_albums", "reorganize_placement",
+     "ALTER TABLE lib2_albums ADD COLUMN reorganize_placement TEXT"),
     ("lib2_albums", "canonical_locked",
      "ALTER TABLE lib2_albums ADD COLUMN canonical_locked INTEGER"),
     # The pinned release's track count, remembered after the first successful

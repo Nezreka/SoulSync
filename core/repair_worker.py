@@ -5000,15 +5000,18 @@ class RepairWorker:
             return {'success': False, 'error': result.get('error') or 'Could not write tags'}
         written = result.get('written_fields') or []
         # the Library-v2 copy of this file shows the new tags right away
-        conn = self.db._get_connection()
         try:
-            row = conn.execute(
-                "SELECT id FROM lib2_track_files WHERE path IN (?, ?) AND file_state = 'active' LIMIT 1",
-                (raw_path, resolved)).fetchone()
-        finally:
-            conn.close()
-        if row:
-            self._refresh_lib2_tag_cache({'library_v2': {'file_id': row[0]}}, resolved)
+            conn = self.db._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT id FROM lib2_track_files WHERE path IN (?, ?) AND file_state = 'active' LIMIT 1",
+                    (raw_path, resolved)).fetchone()
+            finally:
+                conn.close()
+            if row:
+                self._refresh_lib2_tag_cache({'library_v2': {'file_id': row[0]}}, resolved)
+        except Exception as exc:  # noqa: BLE001 - the tags are written; the cache catches up on scan
+            logger.debug("tag cache refresh after untagged fix skipped: %s", exc)
         return {'success': True, 'action': 'wrote_tags',
                 'message': f"Wrote {', '.join(written)}"}
 
@@ -5560,10 +5563,8 @@ class RepairWorker:
 
         res = apply_album_year_fix(
             db=self.db,
-            # album_id stays as-is: on Navidrome-backed libraries album ids
-            # are TEXT soul ids (e.g. '2G0CgWoRXSwDbwnkmPpg6e'), and int()
-            # raises on those. apply_album_year_fix only uses the id in SQL
-            # parameter bindings, which are type-agnostic. (#1633)
+            # the catalogue id from the finding's subject; a Navidrome TEXT
+            # album id (#1633) is a server mapping here, never this id
             album_id=album_id,
             canonical_year=str(canonical_year),
             canonical_date=canonical_date,

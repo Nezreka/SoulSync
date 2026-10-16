@@ -93,23 +93,18 @@ class _Resp:
         return False
 
 
-def _seed(db, artist_id, name, track_paths):
+def _seed(db, name, track_paths):
+    """Library v2 port: an owned artist with one album of these files.
+    Returns the catalogue artist id the endpoints take."""
+    from tests import lib2_seed
+
     conn = db._get_connection()
     try:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name) VALUES (?, ?)", (artist_id, name))
-        conn.execute("INSERT OR REPLACE INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                     (f"{artist_id}-alb", artist_id, "Album"))
+        artist_id = lib2_seed.artist(conn, name)
         for i, path in enumerate(track_paths):
-            conn.execute(
-                "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, file_path) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (f"{artist_id}-t{i}", f"{artist_id}-alb", artist_id, f"t{i}", path))
-        # every source already tried, so the enrichment workers leave the rows alone
-        for table, row_id in (('artists', artist_id), ('albums', f"{artist_id}-alb")):
-            for col in [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
-                        if r[1].endswith('_match_status')]:
-                conn.execute(f"UPDATE {table} SET {col} = 'not_found' WHERE id = ?", (row_id,))
+            lib2_seed.track(conn, name, "Album", f"t{i}", path=path)
         conn.commit()
+        return artist_id
     finally:
         conn.close()
 
@@ -117,9 +112,14 @@ def _seed(db, artist_id, name, track_paths):
 def _unseed(db, artist_id):
     conn = db._get_connection()
     try:
-        conn.execute("DELETE FROM tracks WHERE artist_id = ?", (artist_id,))
-        conn.execute("DELETE FROM albums WHERE artist_id = ?", (artist_id,))
-        conn.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+        tracks = [r[0] for r in conn.execute(
+            "SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id"
+            " WHERE al.primary_artist_id = ?", (artist_id,))]
+        for track_id in tracks:
+            conn.execute("DELETE FROM lib2_track_files WHERE track_id = ?", (track_id,))
+            conn.execute("DELETE FROM lib2_tracks WHERE id = ?", (track_id,))
+        conn.execute("DELETE FROM lib2_albums WHERE primary_artist_id = ?", (artist_id,))
+        conn.execute("DELETE FROM lib2_artists WHERE id = ?", (artist_id,))
         conn.commit()
     finally:
         conn.close()
@@ -137,9 +137,10 @@ def server(monkeypatch):
     db = web_server.get_database()
     seeded = []
 
-    def seed(artist_id, name, paths):
-        _seed(db, artist_id, name, paths)
+    def seed(name, paths):
+        artist_id = _seed(db, name, paths)
         seeded.append(artist_id)
+        return artist_id
 
     yield web_server.app.test_client(), seed
     for artist_id in seeded:
@@ -151,9 +152,9 @@ def test_picking_a_photo_for_a_loose_root_artist_leaves_the_root_alone(server, t
     root = tmp_path / "music"
     loose = _touch(str(root / "ASOT 1294 - 01.flac"))
     _touch(str(root / "Akon" / "Trouble" / "01.flac"))
-    seed('jpg-1', 'Armin van Buuren', [loose])
+    artist_id = seed('Armin van Buuren', [loose])
 
-    r = client.post('/api/artist/jpg-1/art', json={'url': 'https://example.invalid/a.jpg'})
+    r = client.post(f'/api/artist/{artist_id}/art', json={'url': 'https://example.invalid/a.jpg'})
     body = r.get_json()
     assert r.status_code == 200 and body['success'] is True
     assert body['disk_written'] is False
@@ -165,9 +166,9 @@ def test_picking_a_photo_for_a_loose_root_artist_leaves_the_root_alone(server, t
 def test_picking_a_photo_writes_into_the_artist_folder(server, tmp_path):
     client, seed = server
     track = _touch(str(tmp_path / "music" / "Tiësto" / "Kaleidoscope" / "01.flac"))
-    seed('jpg-2', 'Tiësto', [track])
+    artist_id = seed('Tiësto', [track])
 
-    body = client.post('/api/artist/jpg-2/art', json={'url': 'https://example.invalid/t.jpg'}).get_json()
+    body = client.post(f'/api/artist/{artist_id}/art', json={'url': 'https://example.invalid/t.jpg'}).get_json()
     assert body['disk_written'] is True and body['disk_skipped'] is None
     assert os.path.exists(tmp_path / "music" / "Tiësto" / "artist.jpg")
     assert not os.path.exists(tmp_path / "music" / "artist.jpg")
@@ -176,9 +177,9 @@ def test_picking_a_photo_writes_into_the_artist_folder(server, tmp_path):
 def test_write_image_to_disk_refuses_the_root_too(server, tmp_path):
     client, seed = server
     loose = _touch(str(tmp_path / "music" / "ASOT 1294 - 02.flac"))
-    seed('jpg-3', 'Armin van Buuren', [loose])
+    artist_id = seed('Armin van Buuren', [loose])
 
-    r = client.post('/api/artist/jpg-3/write-image-to-disk',
+    r = client.post(f'/api/artist/{artist_id}/write-image-to-disk',
                     json={'image_url': 'https://example.invalid/a.jpg'})
     assert r.status_code == 400
     assert 'no folder named after this artist' in r.get_json()['error']

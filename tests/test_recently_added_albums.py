@@ -165,15 +165,13 @@ def _history_only(db, title, album, file_path, created='2026-08-10 12:00:00'):
 
 
 def _track_at(db, file_path):
+    # Library v2 port: a library file under some other album
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ra-x', 'RA X')")
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('ra-xa', 'ra-x', 'RA XA')")
-        conn.execute("INSERT INTO tracks (album_id, artist_id, title, file_path) VALUES ('ra-xa', 'ra-x', 't', ?)",
-                     (file_path,))
+        lib2_seed.track(conn, 'RA X', 'RA XA', 't', path=file_path)
         conn.commit()
 
 
-POINT_LOOKUP = 'SELECT album_id, artist_id FROM tracks WHERE file_path = ?'
+POINT_LOOKUP = 'SELECT t.album_id, al.primary_artist_id FROM lib2_track_files f'
 
 
 def _track_path_queries(monkeypatch, point_lookups=None):
@@ -187,7 +185,7 @@ def _track_path_queries(monkeypatch, point_lookups=None):
             if flat.startswith(POINT_LOOKUP):
                 if point_lookups is not None:
                     point_lookups.append(flat)
-            elif 'FROM tracks WHERE file_path' in flat:
+            elif 'FROM lib2_track_files WHERE' in flat:
                 seen.append(flat)
             return super().execute(sql, params)
 
@@ -273,21 +271,24 @@ def test_card_carries_the_library_album_its_newest_track_is_in(tmp_path):
     _land(db, 'Track 1', 'Camellia', 'U.U.F.O.', file_path='/m/ufo/1.flac')
     cards = db.get_recently_added_albums(limit=20)
     # _land files every track under the fixture album
-    assert cards[0]['album_id'] == 'ra-fixture-album'
-    assert cards[0]['artist_id'] == 'ra-fixture-artist'
+    with db._get_connection() as conn:
+        album = conn.execute("SELECT id, primary_artist_id FROM lib2_albums"
+                             " WHERE title = 'Recently Added Fixture Album'").fetchone()
+    assert cards[0]['album_id'] == album[0]
+    assert cards[0]['artist_id'] == album[1]
 
 
 def test_a_path_that_moved_roots_finds_the_album_by_name(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Some Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Moved Album')")
+        album = lib2_seed.album(conn, 'Some Artist', 'Moved Album')
+        artist = lib2_seed.artist(conn, 'Some Artist')
         conn.commit()
     _history_only(db, 'Moved', 'Moved Album', '/downloads/staging/Artist - Album/01 - Moved.flac')
     _track_at(db, r'\\nas\music\Artist - Album\01 - MOVED.flac')
     cards = db.get_recently_added_albums(limit=20)
-    assert cards[0]['album_id'] == 'al1'
-    assert cards[0]['artist_id'] == 'ar1'
+    assert cards[0]['album_id'] == album
+    assert cards[0]['artist_id'] == artist
 
 
 def test_no_library_album_leaves_the_card_single_track(tmp_path):

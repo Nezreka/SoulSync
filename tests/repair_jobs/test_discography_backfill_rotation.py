@@ -1,12 +1,12 @@
-"""#1709 / #1716 on Library v2: a stopped library-wide pass resumes.
+"""#1709 on Library v2: a stopped library-wide pass resumes.
 
-Upstream's Discography Backfill rescanned the same first artists every run
-and a stopped Library Reorganize started over at the first album. Here the
-retired backfill's job is Monitored Discography Refresh, which walks every
-monitored artist each run, so the per-run window does not apply; the resume
-does. Both jobs share ``RepairJob.resume_index`` / ``save_checkpoint``: a
-stopped run resumes right after the last item it finished, a finished pass
-clears the checkpoint, and a vanished or foreign checkpoint starts at the top.
+Upstream's Discography Backfill rescanned the same first artists every run.
+Here the retired backfill's job is Monitored Discography Refresh, which walks
+every monitored artist each run, so the per-run window does not apply; the
+resume does. It shares ``RepairJob.resume_index`` / ``save_checkpoint`` with
+Library Reorganize (tests/test_reorganize_resume_1716.py): a stopped run
+resumes right after the last item it finished, a finished pass clears the
+checkpoint, and a vanished or foreign checkpoint starts at the top.
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import pytest
 
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.lib2_discography_refresh import Lib2DiscographyRefreshJob
-from core.repair_jobs.library_reorganize import LibraryReorganizeJob
 
 KEY = "repair.jobs.monitored_discography_refresh.scan_checkpoint"
 
@@ -120,49 +119,3 @@ def test_no_config_manager_starts_at_the_top(monkeypatch):
     ctx = JobContext(db=None, transfer_folder="/music", config_manager=None)
     assert job.resume_index(ctx, [1, 2, 3]) == 0
     job.save_checkpoint(ctx, 2)  # no store: nothing to do, nothing raised
-
-
-# -- Library Reorganize (#1716) ---------------------------------------------
-
-def _reorganize(monkeypatch, config, albums, *, stop_after=None, scope=None):
-    planned = []
-
-    def preview(_db, _cm, album_id, mode="api"):
-        planned.append(album_id)
-        return {"status": "planned", "tracks": []}
-
-    monkeypatch.setattr("core.library2.reorganize_bridge.preview_album_reorganize", preview)
-    monkeypatch.setattr(LibraryReorganizeJob, "_albums",
-                        staticmethod(lambda _ctx: [{"id": a, "title": "", "artist_name": ""}
-                                                   for a in albums]))
-    ctx = JobContext(
-        db=None, transfer_folder="/music", config_manager=config,
-        should_stop=lambda: stop_after is not None and len(planned) >= stop_after,
-    )
-    if scope is not None:
-        ctx.scope = scope
-    LibraryReorganizeJob().scan(ctx)
-    return planned
-
-
-def test_reorganize_resumes_where_a_stopped_scan_left_off(monkeypatch):
-    config = _Config()
-    assert _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1) == [10]
-    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [11, 12]
-    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [10, 11, 12]
-
-
-def test_reorganize_starts_over_when_dry_run_changes(monkeypatch):
-    config = _Config()
-    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
-    config.store["repair.jobs.library_reorganize.settings"] = {"dry_run": False}
-    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [10, 11, 12]
-
-
-def test_a_scoped_reorganize_run_never_touches_the_checkpoint(monkeypatch):
-    config = _Config()
-    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
-    saved = config.store["repair.jobs.library_reorganize.scan_checkpoint"]
-    assert _reorganize(monkeypatch, config, [10, 11, 12],
-                       scope={"file_paths": ["/music/a.flac"]}) == [10, 11, 12]
-    assert config.store["repair.jobs.library_reorganize.scan_checkpoint"] == saved

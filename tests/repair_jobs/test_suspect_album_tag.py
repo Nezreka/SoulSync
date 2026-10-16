@@ -398,7 +398,7 @@ def test_1567_multi_track_poisoned_batch_flagged():
     f = findings[0]
     assert f["finding_type"] == "suspect_album_tag"
     assert f["entity_type"] == "album"
-    assert f["entity_id"] == "7"
+    assert f["entity_id"] == "lib2:7"
     assert f["severity"] == "warning"
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])
     assert f["details"]["album_title"] == "Music"
@@ -493,80 +493,69 @@ def test_1567_multi_track_single_record_type_exempt():
 import sqlite3 as _sqlite3
 
 
+class _Keeper:
+    def close(self):
+        pass
+
+
+def _lib2_sig4_db(albums):
+    """Library v2 port of the real-SQL Signal 4 fixtures: ``albums`` is a list of
+    ``(album_id, title, album_artist, spotify_id, track_count, tracks)`` with
+    ``tracks`` as ``(credited_artist, track_artist, number, disc)``. Every track
+    has a live primary file, so it counts as owned."""
+    import tempfile
+
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(tempfile.mkdtemp() + "/sig4.db")
+    conn = db._get_connection()
+    artists = {}
+
+    def artist(name):
+        if name not in artists:
+            artists[name] = conn.execute(
+                "INSERT INTO lib2_artists (name, name_key) VALUES (?, ?)",
+                (name, name.lower())).lastrowid
+        return artists[name]
+
+    for album_id, title, album_artist, spotify_id, track_count, tracks in albums:
+        conn.execute(
+            "INSERT INTO lib2_albums (id, primary_artist_id, title, album_type, track_count, spotify_id, origin)"
+            " VALUES (?, ?, ?, 'album', ?, ?, 'library')",
+            (album_id, artist(album_artist), title, track_count, spotify_id))
+        for n, (credited, track_artist, number, disc) in enumerate(tracks):
+            track_id = conn.execute(
+                "INSERT INTO lib2_tracks (album_id, title, track_number, disc_number, track_artist)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (album_id, f"{title} {n}", number, disc, track_artist)).lastrowid
+            conn.execute("INSERT INTO lib2_track_artists (track_id, artist_id) VALUES (?, ?)",
+                         (track_id, artist(credited)))
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                         (track_id, f"/music/{album_artist}/{title}/{track_id}.flac"))
+    conn.commit()
+    conn.close()
+    return db, _Keeper()
+
+
 def _real_sig4_db():
-    """In-memory DB (shared cache — scan() opens and closes its connection
-    twice) with three multi-track albums:
-
-    - 100 "DJ Mix 2026": genuine 2-disc comp, 6 tracks / 6 distinct artists,
-      credited to DJ Mixmaster, real provider album id. Track numbers repeat
-      ACROSS discs only — must stay quiet.
-    - 200 "Music": the #1567 fingerprint — 11 tracks, 9 distinct artists,
-      duplicate track numbers WITHIN disc 1, placeholder provider id.
-      Must fire.
-    - 300 "Curator's Choice": curator-credited comp, clean 1..5 numbering,
-      3 distinct artists, album artist not among them, REAL provider id.
-      Must stay quiet (M3 curator-credit exemption).
-    """
-    keeper = _sqlite3.connect("file:sig4m3?mode=memory&cache=shared", uri=True)
-    keeper.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
-    keeper.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
-                     record_type TEXT, track_count INTEGER, thumb_url TEXT,
-                     spotify_album_id TEXT, itunes_album_id TEXT,
-                     artist_id INTEGER)""")
-    keeper.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INTEGER,
-                     artist_id INTEGER, title TEXT, track_number INTEGER,
-                     disc_number INTEGER, file_path TEXT)""")
-    artists = [
-        (1, "DJ Mixmaster"), (2, "Nickelback"), (3, "Foo Fighters"),
-        (4, "Godsmack"), (5, "Staind"), (6, "Default"),
-        (7, "Three Days Grace"), (8, "Audioslave"), (9, "Finger Eleven"),
-        (10, "Red Hot Chili Peppers"), (11, "Curator Dan"),
-        (12, "Alpha Band"), (13, "Beta Band"), (14, "Gamma Band"),
-    ]
-    keeper.executemany("INSERT INTO artists (id, name) VALUES (?, ?)", artists)
-    keeper.executemany(
-        "INSERT INTO albums (id, title, record_type, track_count, spotify_album_id, artist_id)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        [
-            (100, "DJ Mix 2026", "album", 6, "realDJmix123", 1),
-            (200, "Music", "album", 10, "wishlist_album", 2),
-            (300, "Curator's Choice", "album", 5, "realCurator456", 11),
-        ],
-    )
-    tracks = []
-    tid = 1000
-    # Album 100: disc 1 tracks 1-3, disc 2 tracks 1-3 (repeats across discs only)
-    for disc, aids in ((1, (3, 4, 5)), (2, (6, 7, 8))):
-        for n, aid in enumerate(aids, start=1):
-            tid += 1
-            tracks.append((tid, 100, aid, f"Mix Track {disc}-{n}", n, disc,
-                           f"/music/DJ Mixmaster/DJ Mix 2026/{disc}-{n}.flac"))
-    # Album 200: 11 tracks, single disc, numbers 1..6 then 1..5 again (dups)
-    poison_artists = [2, 3, 4, 5, 6, 7, 8, 9, 10, 3, 4]
-    poison_numbers = [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5]
-    for n, aid in zip(poison_numbers, poison_artists):
-        tid += 1
-        tracks.append((tid, 200, aid, f"Poison Track {tid}", n, 1,
-                       f"/music/Nickelback/Music/{tid}.flac"))
-    # Album 300: clean 1..5 numbering, 3 distinct artists, curator credit
-    for n, aid in enumerate((12, 13, 14, 12, 13), start=1):
-        tid += 1
-        tracks.append((tid, 300, aid, f"Curated {n}", n, 1,
-                       f"/music/Curator Dan/Curator's Choice/{n}.flac"))
-    keeper.executemany(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, disc_number, file_path)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        tracks,
-    )
-    keeper.commit()
-
-    class _DB:
-        def _get_connection(self):
-            conn = _sqlite3.connect("file:sig4m3?mode=memory&cache=shared", uri=True)
-            conn.row_factory = _sqlite3.Row
-            return conn
-
-    return _DB(), keeper
+    """three multi-track albums: 100 a genuine 2-disc comp (numbers repeat
+    across discs only, real provider id), 200 the #1567 fingerprint (dup
+    numbers within disc 1, placeholder id), 300 a curator-credited comp with
+    clean numbering and a real provider id."""
+    dj = [(a, None, n, disc) for disc, names in ((1, ("Foo Fighters", "Godsmack", "Staind")),
+                                                  (2, ("Default", "Three Days Grace", "Audioslave")))
+          for n, a in enumerate(names, start=1)]
+    poison_artists = ["Nickelback", "Foo Fighters", "Godsmack", "Staind", "Default",
+                      "Three Days Grace", "Audioslave", "Finger Eleven",
+                      "Red Hot Chili Peppers", "Foo Fighters", "Godsmack"]
+    poison = [(a, None, n, 1) for a, n in zip(poison_artists, [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5])]
+    curated = [(a, None, n, 1) for n, a in enumerate(
+        ("Alpha Band", "Beta Band", "Gamma Band", "Alpha Band", "Beta Band"), start=1)]
+    return _lib2_sig4_db([
+        (100, "DJ Mix 2026", "DJ Mixmaster", "realDJmix123", 6, dj),
+        (200, "Music", "Nickelback", "wishlist_album", 10, poison),
+        (300, "Curator's Choice", "Curator Dan", "realCurator456", 5, curated),
+    ])
 
 
 def _sig4_context(db):
@@ -602,7 +591,7 @@ def test_1567_m3_multidisc_comp_stays_quiet_but_poison_fires():
     assert result.findings_created == 1
     assert len(findings) == 1
     f = findings[0]
-    assert f["entity_id"] == "200"
+    assert f["entity_id"] == "lib2:200"
     assert f["details"]["album_title"] == "Music"
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])
 
@@ -670,72 +659,20 @@ def test_1567_m3_dup_numbers_fire_despite_real_id():
 
 
 def _real_sig4_nulldisc_db():
-    """In-memory DB with two albums, both with disc_number NULL on every row:
-
-    - 400 "Null Disc Box Set": legit 2-disc rip, track numbers 1-12 twice,
-      6 distinct artists, album artist among the track artists. Must stay
-      quiet — no disc is provable, so the duplicate-numbers half must not
-      fire.
-    - 500 "Music (Null Disc)": the #1567 shape on NULL discs — 11 tracks, 9
-      distinct artists, album artist a pure STRANGER (not on any track —
-      hits must be 0 for the artist half to fire), placeholder provider id.
-      The dup half is blind here, but the album-artist half must still fire.
-    """
-    keeper = _sqlite3.connect("file:sig4nulldisc?mode=memory&cache=shared", uri=True)
-    keeper.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
-    keeper.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
-                     record_type TEXT, track_count INTEGER, thumb_url TEXT,
-                     spotify_album_id TEXT, itunes_album_id TEXT,
-                     artist_id INTEGER)""")
-    keeper.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INTEGER,
-                     artist_id INTEGER, title TEXT, track_number INTEGER,
-                     disc_number INTEGER, file_path TEXT)""")
-    artists = [
-        (20, "Alpha Band"), (21, "Beta Band"), (22, "Gamma Band"),
-        (23, "Delta Band"), (24, "Epsilon Band"), (25, "Zeta Band"),
-        (26, "Nickelback"), (27, "Foo Fighters"), (28, "Godsmack"),
-        (29, "Staind"), (30, "Default"), (31, "Three Days Grace"),
-        (32, "Audioslave"), (33, "Finger Eleven"),
-        (34, "Red Hot Chili Peppers"), (35, "Stranger Sam"),
-    ]
-    keeper.executemany("INSERT INTO artists (id, name) VALUES (?, ?)", artists)
-    keeper.executemany(
-        "INSERT INTO albums (id, title, record_type, track_count, spotify_album_id, artist_id)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        [
-            (400, "Null Disc Box Set", "album", 24, "wishlist_album", 20),
-            (500, "Music (Null Disc)", "album", 11, "wishlist_album", 35),
-        ],
-    )
-    tracks = []
-    tid = 2000
-    # Album 400: two "discs" of 1-12, disc_number NULL everywhere
-    for rep in range(2):
-        for n, aid in enumerate((20, 21, 22, 23, 24, 25) * 2, start=1):
-            tid += 1
-            tracks.append((tid, 400, aid, f"Box Track r{rep}-{n}", n, None,
-                           f"/music/Alpha Band/Null Disc Box Set/{tid}.flac"))
-    # Album 500: #1567 shape, disc_number NULL everywhere
-    poison_artists = [26, 27, 28, 29, 30, 31, 32, 33, 34, 27, 28]
-    poison_numbers = [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5]
-    for n, aid in zip(poison_numbers, poison_artists):
-        tid += 1
-        tracks.append((tid, 500, aid, f"Null Poison {tid}", n, None,
-                       f"/music/Nickelback/Music (Null Disc)/{tid}.flac"))
-    keeper.executemany(
-        "INSERT INTO tracks (id, album_id, artist_id, title, track_number, disc_number, file_path)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        tracks,
-    )
-    keeper.commit()
-
-    class _DB:
-        def _get_connection(self):
-            conn = _sqlite3.connect("file:sig4nulldisc?mode=memory&cache=shared", uri=True)
-            conn.row_factory = _sqlite3.Row
-            return conn
-
-    return _DB(), keeper
+    """disc_number NULL everywhere: 400 a legit two-"disc" box set (1-12
+    twice, album artist among the track artists) must stay quiet; 500 the
+    #1567 shape whose album artist is a stranger fires via the artist half."""
+    box = [(a, None, n, None) for _rep in range(2)
+           for n, a in enumerate(("Alpha Band", "Beta Band", "Gamma Band", "Delta Band",
+                                  "Epsilon Band", "Zeta Band") * 2, start=1)]
+    poison_artists = ["Nickelback", "Foo Fighters", "Godsmack", "Staind", "Default",
+                      "Three Days Grace", "Audioslave", "Finger Eleven",
+                      "Red Hot Chili Peppers", "Foo Fighters", "Godsmack"]
+    poison = [(a, None, n, None) for a, n in zip(poison_artists, [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5])]
+    return _lib2_sig4_db([
+        (400, "Null Disc Box Set", "Alpha Band", "wishlist_album", 24, box),
+        (500, "Music (Null Disc)", "Stranger Sam", "wishlist_album", 11, poison),
+    ])
 
 
 def test_1567_r2_null_disc_numbers_do_not_trip_dup_check():
@@ -752,7 +689,7 @@ def test_1567_r2_null_disc_numbers_do_not_trip_dup_check():
     assert result.findings_created == 1
     assert len(findings) == 1
     f = findings[0]
-    assert f["entity_id"] == "500"
+    assert f["entity_id"] == "lib2:500"
     reasons = f["details"]["reasons"]
     assert any("not among the" in r for r in reasons)
     assert not any("duplicate track numbers" in r for r in reasons)
@@ -766,49 +703,18 @@ def test_1567_r2_null_disc_numbers_do_not_trip_dup_check():
 
 
 def _real_sig4_batch_artist_db():
-    """In-memory DB in the true #1567 production shape: all 11 tracks carry
-    the BATCH artist_id (Nickelback, id 2) — the per-track truth lives only
-    in tracks.track_artist. The old tar.name-counting query sees 1 distinct
-    artist and goes blind; the track_artist query sees 9 and fires."""
-    keeper = _sqlite3.connect("file:sig4batch?mode=memory&cache=shared", uri=True)
-    keeper.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
-    keeper.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
-                     record_type TEXT, track_count INTEGER, thumb_url TEXT,
-                     spotify_album_id TEXT, itunes_album_id TEXT,
-                     artist_id INTEGER)""")
-    keeper.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, album_id INTEGER,
-                     artist_id INTEGER, track_artist TEXT, title TEXT,
-                     track_number INTEGER, disc_number INTEGER, file_path TEXT)""")
-    keeper.execute("INSERT INTO artists (id, name) VALUES (2, 'Nickelback')")
-    keeper.execute(
-        "INSERT INTO albums (id, title, record_type, track_count,"
-        " spotify_album_id, artist_id) VALUES (700, 'Music', 'album', 10,"
-        " 'wishlist_album', 2)"
-    )
+    """the true #1567 production shape: every track credited to the BATCH
+    artist (Nickelback), the per-track truth only in track_artist."""
     real_artists = [
         "Nickelback", "Finger Eleven", "Foo Fighters", "Godsmack", "Staind",
         "Default", "Three Days Grace", "Audioslave", "Red Hot Chili Peppers",
         "Foo Fighters", "Godsmack",
     ]
     numbers = [1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5]
-    rows = []
-    for i, (artist, num) in enumerate(zip(real_artists, numbers)):
-        rows.append((2000 + i, 700, 2, artist, f"Poison Track {i}", num, 1,
-                     f"/music/Nickelback/Music/{i}.flac"))
-    keeper.executemany(
-        "INSERT INTO tracks (id, album_id, artist_id, track_artist, title,"
-        " track_number, disc_number, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        rows,
-    )
-    keeper.commit()
-
-    class _DB:
-        def _get_connection(self):
-            conn = _sqlite3.connect("file:sig4batch?mode=memory&cache=shared", uri=True)
-            conn.row_factory = _sqlite3.Row
-            return conn
-
-    return _DB(), keeper
+    return _lib2_sig4_db([
+        (700, "Music", "Nickelback", "wishlist_album", 10,
+         [("Nickelback", artist, num, 1) for artist, num in zip(real_artists, numbers)]),
+    ])
 
 
 def test_1567_r4_signal4_counts_track_artist_not_batch_artist_id():
@@ -826,7 +732,7 @@ def test_1567_r4_signal4_counts_track_artist_not_batch_artist_id():
     assert result.findings_created == 1
     assert len(findings) == 1
     f = findings[0]
-    assert f["entity_id"] == "700"
+    assert f["entity_id"] == "lib2:700"
     assert f["details"]["album_title"] == "Music"
     assert f["details"]["distinct_artists"] == 9
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])

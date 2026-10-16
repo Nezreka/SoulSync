@@ -41,29 +41,33 @@ class _Candidate:
 
 @pytest.fixture
 def library(tmp_path):
+    # Library v2: the owned copy is a lib2 track with a live file row
     path = str(tmp_path / "library.db")
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
+    conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
     conn.execute(
-        """CREATE TABLE tracks (
-            id INTEGER PRIMARY KEY, album_id INTEGER,
-            spotify_track_id TEXT, itunes_track_id TEXT, deezer_id TEXT,
-            tidal_id TEXT, qobuz_id TEXT, musicbrainz_recording_id TEXT,
-            audiodb_id TEXT, soul_id TEXT, isrc TEXT, file_path TEXT)"""
+        """CREATE TABLE lib2_tracks (
+            id INTEGER PRIMARY KEY, album_id INTEGER, spotify_id TEXT,
+            musicbrainz_id TEXT, soul_id TEXT, isrc TEXT, external_ids TEXT DEFAULT '{}')"""
+    )
+    conn.execute(
+        """CREATE TABLE lib2_track_files (
+            id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT, is_primary INTEGER DEFAULT 1,
+            file_state TEXT DEFAULT 'active', owner_profile_id INTEGER)"""
     )
     conn.execute(
         """CREATE TABLE auto_import_history (
             id INTEGER PRIMARY KEY, folder_path TEXT, folder_hash TEXT, status TEXT,
             match_data TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"""
     )
-    album_id = conn.execute("INSERT INTO albums (title) VALUES ('Collide With The Sky')").lastrowid
+    album_id = conn.execute("INSERT INTO lib2_albums (title) VALUES ('Collide With The Sky')").lastrowid
     lib_file = tmp_path / "Music" / "Pierce The Veil" / "Collide With The Sky" / "02 Hell Above.flac"
     lib_file.parent.mkdir(parents=True)
     lib_file.write_bytes(b"library copy")
-    conn.execute(
-        "INSERT INTO tracks (album_id, musicbrainz_recording_id, file_path) VALUES (?, 'mbid-owned', ?)",
-        (album_id, str(lib_file)),
-    )
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks (album_id, musicbrainz_id) VALUES (?, 'mbid-owned')", (album_id,),
+    ).lastrowid
+    conn.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (?, ?)", (track_id, str(lib_file)))
     conn.commit()
     conn.close()
     return path

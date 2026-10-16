@@ -19,6 +19,7 @@ database/*.db-shm
 database/*.db-wal*
 database/*.db.backup_*
 database/*.histbak
+database/backups/
 database/api_call_history.json
 # Runtime caches/download state are instance data, never source assets.
 database/lib2_artwork/

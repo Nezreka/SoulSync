@@ -2837,7 +2837,8 @@ def reorganize_album_rename_only(
         _persist_compilation_record_type(db, album_id)
 
     if (metadata_source == 'api' and _run_placed_everything(summary, stop_check)
-            and not any(t.get('collision') for t in tracks)):
+            and tracks and all(t.get('matched') and t.get('file_exists')
+                               and not t.get('collision') for t in tracks)):
         mark_album_placed(db, album_id, preview.get('source'), preview.get('source_album_id'))
     return summary
 
@@ -2875,16 +2876,12 @@ def _run_placed_everything(summary: dict, stop_check) -> bool:
 
 
 def mark_album_placed(db, album_id, source, source_album_id, fingerprint=None) -> bool:
-    """Close the album's pending "would move" findings, which describe a move
-    that's done (#1701).
-
-    Library v2: the planner reads the catalogue, not a provider release, so
-    upstream's per-album placement memory (the release and naming fingerprint
-    it was placed with) has no column here yet; that part is an open port
-    decision and nothing is stored. Returns whether a placement was recorded."""
+    """Remember native placement and close its completed move findings (#1701)."""
     conn = None
     try:
         conn = db._get_connection()
+        from core.library2.reorganize_placement import record_placement
+        placed = record_placement(conn, album_id, fingerprint or naming_fingerprint())
         conn.execute(
             "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
             "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
@@ -2894,6 +2891,7 @@ def mark_album_placed(db, album_id, source, source_album_id, fingerprint=None) -
             (str(album_id),),
         )
         conn.commit()
+        return placed
     except Exception as e:
         logger.warning("[Reorganize] couldn't close findings of album %s: %s", album_id, e)
     finally:

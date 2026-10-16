@@ -22,6 +22,8 @@ class LibraryReorganizeJob(RepairJob):
         "Scans Library-v2 albums that own files and computes their destination "
         "with the same planner and queue as interactive Reorganize. Dry run is "
         "enabled by default and creates review findings; live mode queues albums.\n\n"
+        "Placed albums stay put until naming settings, a manual pin or manual metadata "
+        "changes. Enable Recheck Placed to plan them again.\n\n"
         "A library-wide scan that gets stopped (or a restart) picks up at the album "
         "it stopped on next time, then goes back to the top once it reaches the end. "
         "Changing dry run or your naming settings starts it over."
@@ -29,7 +31,7 @@ class LibraryReorganizeJob(RepairJob):
     icon = "repair-icon-reorganize"
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {"dry_run": True}
+    default_settings = {"dry_run": True, "recheck_placed_albums": False}
     setting_options = {"dry_run": [True, False]}
     auto_fix = True
     supports_file_scope = True
@@ -62,7 +64,7 @@ class LibraryReorganizeJob(RepairJob):
         conn = context.db._get_connection()
         try:
             rows = conn.execute(
-                """SELECT al.id, al.title,
+                """SELECT al.id, al.title, al.reorganize_placement,
                           al.primary_artist_id AS artist_id,
                           COALESCE(ar.name, 'Unknown Artist') AS artist_name
                      FROM lib2_albums al
@@ -109,12 +111,15 @@ class LibraryReorganizeJob(RepairJob):
         from core.library_reorganize import naming_fingerprint
 
         dry_run = self._dry_run(context)
+        settings = (context.config_manager.get("repair.jobs.library_reorganize.settings", {})
+                    if context.config_manager else {}) or {}
+        recheck = bool(settings.get("recheck_placed_albums", False))
         albums = self._albums(context)
         # #1716: a library-wide scan resumes right after the last album a run
         # finished under the same mode and naming; a scoped run never touches
         # that checkpoint.
         library_wide = get_scope_file_paths(context) is None
-        scan_key = f"{'dry' if dry_run else 'live'}|{naming_fingerprint()}"
+        scan_key = f"{'dry' if dry_run else 'live'}|{int(recheck)}|{naming_fingerprint()}"
         start = self.resume_index(context, [a["id"] for a in albums], scan_key) if library_wide else 0
         if start:
             logger.info("Reorganize: resuming at album %d of %d", start + 1, len(albums))
@@ -126,6 +131,14 @@ class LibraryReorganizeJob(RepairJob):
             if stopping:
                 return result
             album_id = int(album["id"])
+            if not recheck and album.get("reorganize_placement"):
+                from contextlib import closing
+                from core.library2.reorganize_placement import placement_settled
+                with closing(context.db._get_connection()) as conn:
+                    settled = placement_settled(conn, album_id, naming_fingerprint())
+                if settled:
+                    result.skipped += 1
+                    continue
             # There is deliberately no `legacy_album_id IS NOT NULL` gate here.
             # That back-reference is written ONLY by the one-shot upgrade
             # importer; the post-download catalogue writer (autolink) never
@@ -165,6 +178,11 @@ class LibraryReorganizeJob(RepairJob):
                 if track.get("matched") and track.get("new_path")
                 and not track.get("unchanged") and track.get("file_exists")
             ]
+            if (library_wide and tracks and not mismatched
+                    and all(t.get("matched") and t.get("file_exists") and t.get("unchanged")
+                            and not t.get("collision") for t in tracks)):
+                from core.library_reorganize import mark_album_placed
+                mark_album_placed(context.db, album_id, preview.get("source"), None)
             if dry_run:
                 for track in mismatched:
                     # `track_id` is ALREADY the lib2 id: the preview is built

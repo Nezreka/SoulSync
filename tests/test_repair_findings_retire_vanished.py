@@ -295,7 +295,7 @@ def _same_name_orphan(worker, tmp_path):
     track.parent.mkdir(parents=True)
     track.write_bytes(b"audio")
     fid = _add(worker, track, job_id="orphan_file_detector", finding_type="orphan_file")
-    worker.db._conn.execute("INSERT INTO tracks (file_path) VALUES (?)",
+    worker.db._conn.execute("INSERT INTO lib2_track_files (path) VALUES (?)",
                             ("/music/Artist/Album (Deluxe)/01 - Intro.flac",))
     worker.db._conn.commit()
     return track, fid

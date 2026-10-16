@@ -198,3 +198,24 @@ def test_untagged_fix_leaves_a_hand_tagged_file_alone(tmp_path, monkeypatch):
     res = worker._fix_untagged_download("file", "1", str(path), {"file_path": str(path)})
     assert res["success"] is False and "Hand-tagged" in res["error"]
     assert os.path.exists(path)
+
+
+# -- 72749f414 / #1715: only owned artist spellings reach the fuzzy search ------
+
+def test_an_artist_the_library_does_not_own_never_reaches_the_fuzzy_title_search(db):
+    with db._get_connection() as conn:
+        seed.track(conn, "Taylor Smith", "Greatest Hits", "Blue Sky")
+        seed.artist(conn, "Taylor Swift")  # watched, owns nothing
+        conn.commit()
+    track, conf = db.check_track_exists("Blue Sky", "Taylor Swift", confidence_threshold=0.7)
+    assert track is None and conf < 0.7
+
+
+@pytest.mark.parametrize("library, asked", [
+    ("AC/DC", "ACDC"), ("Björk", "Bjork"), ("Beyoncé", "Beyonce")])
+def test_punctuation_and_accent_spellings_still_count_as_owned(db, library, asked):
+    with db._get_connection() as conn:
+        seed.track(conn, library, "Album", "Song")
+        conn.commit()
+    assert db._library_artist_forms([asked]) == [asked]
+    assert db._library_artist_forms(["Nobody At All"]) == []

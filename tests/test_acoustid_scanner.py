@@ -1085,22 +1085,17 @@ class _Library:
         default: these files are written moments before the pass, inside it."""
         import core.repair_jobs.acoustid_scanner as scanner_mod
         monkeypatch.setattr(scanner_mod, 'VERIFIED_CUTOFF_SLACK_S', slack)
-        rows = list(self.rows.values())
-
-        class _Cursor:
-            def execute(self, query, params=None):
-                return self
-
-            def fetchone(self):
-                return None
-
-            def fetchall(self):
-                return rows
-
-        cursor = _Cursor()
-        conn = SimpleNamespace(cursor=lambda: cursor, close=lambda: None)
-        context = _make_context([])
-        context.db = SimpleNamespace(_get_connection=lambda: conn)
+        # Library v2 port: the scanner reads native subjects; feed the same
+        # rows straight to its loader (no lib2_file_id, so paths go through
+        # the patched _resolve_path like the legacy rows did)
+        tracks = {tid: {'title': row[1], 'artist': row[2], 'file_path': row[3],
+                        'track_number': row[4], 'album_title': row[5],
+                        'duration_ms': row[10], 'db_verification_status': row[12]}
+                  for tid, row in self.rows.items()}
+        if getattr(self, '_context', None) is None:
+            self._context = _make_context([], self.tmp_path)
+        context = self._context
+        context.check_stop = lambda: False
 
         def _get(key, default=None):
             if key.endswith('.settings'):
@@ -1112,6 +1107,7 @@ class _Library:
 
         scanned = []
         job = AcoustIDScannerJob()
+        monkeypatch.setattr(job, "_load_db_tracks", lambda _ctx: dict(tracks))
         monkeypatch.setattr(
             job, "_resolve_path",
             lambda file_path, _c: None if any(

@@ -406,61 +406,45 @@ def test_rename_album_folder_docker_paths(tmp_path):
 
 
 def test_repair_worker_fix_execution_with_text_album_id(tmp_path):
-    """#1633: Navidrome-backed libraries use TEXT soul ids for albums.
-
-    The fix handler used to cast album_id to int, which raised
-    "invalid literal for int()" on ids like '2G0CgWoRXSwDbwnkmPpg6e' and
-    failed every album_release_year_mismatch finding with HTTP 400.
-    """
+    """#1633 on Library v2: a Navidrome-backed album's TEXT id is its server
+    id; the finding names the catalogue row, and the fix must not trip over
+    the text id riding in the details."""
     db = MusicDatabase(str(tmp_path / "test.db"))
-    album_id = "2G0CgWoRXSwDbwnkmPpg6e"
+    soul_id = "2G0CgWoRXSwDbwnkmPpg6e"
     album_dir = tmp_path / "10 Years" / "Deconstructed (2022)"
     f1 = album_dir / "01.flac"
     _make_flac(f1, {'DATE': '2022', 'ALBUM': 'Deconstructed', 'ARTIST': '10 Years'})
 
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', '10 Years')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, year) VALUES (?, 'ar1', 'Deconstructed', 2022)",
-            (album_id,),
-        )
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES ('t1', ?, 'ar1', 'Track 1', ?)",
-            (album_id, str(f1)),
-        )
+        album_id = lib2_seed.album(conn, '10 Years', 'Deconstructed', year=2022,
+                                   server_source='navidrome', server_id=soul_id)
+        lib2_seed.file_track(conn, 1, album_id, 'Track 1', str(f1))
         conn.commit()
 
     worker = RepairWorker(db, transfer_folder=str(tmp_path))
     worker._config_manager = _MockConfig()
 
     details = {
-        'album_id': album_id,
+        'album_id': soul_id,
         'canonical_year': '2021',
         'canonical_date': '2021-06-04',
-        'tracks': [{'id': 't1', 'file_path': str(f1)}],
+        'tracks': [{'id': 'lib2:1', 'file_path': str(f1)}],
         'folder_path': str(album_dir),
         'new_folder_name': 'Deconstructed (2021)',
     }
 
-    outcome = worker._execute_fix('album_release_year_mismatch', 'album', album_id, str(f1), details)
+    outcome = worker._execute_fix('album_release_year_mismatch', 'album', f'lib2:{album_id}', str(f1), details)
     assert outcome['success'] is True
     assert outcome['action'] == 'aligned_release_year'
 
-    # Verify folder was renamed
     new_dir = tmp_path / "10 Years" / "Deconstructed (2021)"
     assert os.path.isdir(new_dir)
     assert not os.path.exists(album_dir)
-
-    # Verify audio file tags were written
     tags = read_file_year_tags(str(new_dir / "01.flac"))
     assert tags['original_year'] == '2021'
     assert tags['date'] == '2021-06-04'
 
-    # Verify the database album year was updated (TEXT id matched correctly)
     with db._get_connection() as conn:
-        yr = conn.execute("SELECT year FROM albums WHERE id = ?", (album_id,)).fetchone()[0]
-        assert yr == 2021
-        tyr = conn.execute("SELECT year FROM tracks WHERE id = 't1'").fetchone()[0]
-        assert tyr == 2021
-        new_fp = conn.execute("SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0]
+        assert conn.execute("SELECT year FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()[0] == 2021
+        new_fp = conn.execute("SELECT path FROM lib2_track_files WHERE track_id = 1").fetchone()[0]
         assert "Deconstructed (2021)" in new_fp

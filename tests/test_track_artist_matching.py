@@ -44,7 +44,7 @@ def db_with_soundtrack(tmp_path: Path):
 
     from tests.support.catalogue_seed import seed_library_track
 
-    seed_library_track(
+    track_id = seed_library_track(
         conn,
         artist="Lin-Manuel Miranda",
         album="Vaiana (English Version/Original Motion Picture Soundtrack)",
@@ -54,6 +54,12 @@ def db_with_soundtrack(tmp_path: Path):
         file_path="/music/where_you_are.mp3", bitrate=320,
         track_artist="Christopher Jackson", server_source="plex",
     )
+    # Native scanning stores performer credits in the indexed junction as
+    # well as preserving the raw credit string for matching/scoring.
+    performer = cursor.execute("INSERT INTO lib2_artists(name,name_key) "
+                               "VALUES('Christopher Jackson','christopher jackson')").lastrowid
+    cursor.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) "
+                   "VALUES(?,?,'featured',1)", (track_id, performer))
     conn.commit()
     conn.close()
     return db

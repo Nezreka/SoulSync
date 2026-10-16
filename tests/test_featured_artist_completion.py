@@ -37,8 +37,7 @@ def db_with_feat_track(tmp_path: Path):
     db = MusicDatabase(database_path=str(db_path))
     conn = db._get_connection()
     cursor = conn.cursor()
-    # Both sides on purpose: the scan half of this file writes the catalogue,
-    # while the completion matcher below still reads the legacy tracks table.
+    # Use the same native credits and file state as the scanner.
     artist = cursor.execute(
         "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
         " VALUES ('Artist1', 'artist1', 'jellyfin', 'ar-1')",
@@ -59,6 +58,11 @@ def db_with_feat_track(tmp_path: Path):
                        artist_id=artist, server_source='jellyfin',
                        track_number=3, duration=200000,
                        track_artist='Artist1; Artist2'),))
+    # Native scanning materializes each credit as an artist/junction. The
+    # indexed presence gate intentionally does not parse raw tag strings.
+    guest = cursor.execute("INSERT INTO lib2_artists(name,name_key) VALUES('Artist2','artist2')").lastrowid
+    cursor.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) "
+                   "SELECT id,?,'featured',1 FROM lib2_tracks WHERE server_id='tr-1'", (guest,))
     conn.commit()
     conn.close()
     return db

@@ -7,6 +7,7 @@ re-encode off via the autouse fixture.
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -413,7 +414,7 @@ def test_probe_quality_cache_expires_and_reprobes(monkeypatch):
     }, calls=calls)
     client = _bare_client()
     now = {'t': 1_000.0}
-    monkeypatch.setattr(youtube_client.time, 'monotonic', lambda: now['t'])
+    monkeypatch.setattr(youtube_client, 'time', SimpleNamespace(monotonic=lambda: now['t']))
     client.refresh_claimed_quality([_yt_track(filename='abc123||Song')])
     assert len(calls) == 1
     now['t'] += client._PROBE_INFO_TTL_S + 1

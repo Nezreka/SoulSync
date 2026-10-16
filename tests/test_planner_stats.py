@@ -18,14 +18,14 @@ from database.music_database import MusicDatabase, _planner_stats_threads
 
 @pytest.fixture()
 def db(tmp_path):
+    # Library v2 port: the catalogue the matchers search is lib2_*
     d = MusicDatabase(database_path=str(tmp_path / "music.db"))
     c = sqlite3.connect(str(d.database_path))
-    c.execute("INSERT INTO artists (id, name, name_norm, name_key, server_source) VALUES ('1', 'Artist One', 'artist one', 'artistone', 'plex')")
-    c.execute("INSERT INTO albums (id, artist_id, title, title_norm, server_source) VALUES ('10', '1', 'Album', 'album', 'plex')")
+    c.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (1, 'Artist One', 'artist one')")
+    c.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (10, 1, 'Album')")
     c.executemany(
-        "INSERT INTO tracks (id, album_id, artist_id, title, title_norm, track_artist_norm, server_source) "
-        "VALUES (?, '10', '1', ?, ?, 'artist one', 'plex')",
-        [(str(1000 + i), f"Song {i}", f"song {i}") for i in range(3000)])
+        "INSERT INTO lib2_tracks (id, album_id, title, server_source) VALUES (?, 10, ?, 'plex')",
+        [(1000 + i, f"Song {i}") for i in range(3000)])
     c.commit()
     c.close()
     return d
@@ -33,47 +33,16 @@ def db(tmp_path):
 
 def _forget_stats_for(db, index):
     c = sqlite3.connect(str(db.database_path))
-    c.execute("ANALYZE tracks")
+    c.execute("ANALYZE lib2_tracks")
     c.execute("DELETE FROM sqlite_stat1 WHERE idx = ?", (index,))
     c.commit()
     c.close()
 
 
-def _title_search_plans(db, monkeypatch):
-    plans = []
-
-    class Cursor(sqlite3.Cursor):
-        def execute(self, sql, params=()):
-            flat = " ".join(sql.split())
-            if "tracks.title_norm" in flat and flat.startswith("SELECT"):
-                plans.append([r[3] for r in super().execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()])
-            return super().execute(sql, params)
-
-    class Conn(sqlite3.Connection):
-        def cursor(self, *a, **k):
-            return super().cursor(Cursor)
-
-    from core.text.normalize import normalize_for_comparison as nfc
-
-    real = MusicDatabase._get_connection
-
-    def connect(self):
-        c = sqlite3.connect(str(self.database_path), factory=Conn)
-        c.row_factory = sqlite3.Row
-        c.create_function("norm_text", 1, lambda x: nfc(x) if x else "", deterministic=True)
-        c.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
-        return c
-
-    monkeypatch.setattr(MusicDatabase, "_get_connection", connect)
-    db.check_track_exists("A Song That Is Not Here", "Artist One", confidence_threshold=0.7, server_source="plex")
-    monkeypatch.setattr(MusicDatabase, "_get_connection", real)
-    return plans
-
-
 def test_an_unanalyzed_index_is_found(db):
-    _forget_stats_for(db, "idx_tracks_source_owner")
+    _forget_stats_for(db, "idx_lib2_tracks_album")
     c = sqlite3.connect(str(db.database_path))
-    assert "tracks" in MusicDatabase._tables_missing_planner_stats(c.cursor())
+    assert "lib2_tracks" in MusicDatabase._tables_missing_planner_stats(c.cursor())
     c.close()
 
 
@@ -84,12 +53,8 @@ def test_small_tables_are_left_alone(tmp_path):
     c.close()
 
 
-def test_the_boot_kick_analyzes_it_and_title_searches_stop_walking_server_source(db, monkeypatch):
-    _forget_stats_for(db, "idx_tracks_source_owner")
-    before = _title_search_plans(db, monkeypatch)
-    # the bug, reproduced: the unanalyzed index drives the search
-    assert any(any("idx_tracks_source_owner" in s for s in p) for p in before), before
-
+def test_the_boot_kick_analyzes_a_table_with_an_unanalyzed_index(db):
+    _forget_stats_for(db, "idx_lib2_tracks_album")
     db._kick_planner_stats_thread()
     t = _planner_stats_threads.get(str(db.database_path))
     assert t is not None
@@ -99,10 +64,6 @@ def test_the_boot_kick_analyzes_it_and_title_searches_stop_walking_server_source
     c = sqlite3.connect(str(db.database_path))
     assert MusicDatabase._tables_missing_planner_stats(c.cursor()) == []
     c.close()
-    after = _title_search_plans(db, monkeypatch)
-    assert after
-    for p in after:
-        assert not any("idx_tracks_source_owner" in s for s in p), p
 
 
 def test_nothing_to_analyze_starts_no_thread(db):
@@ -128,9 +89,6 @@ def test_a_finished_scan_refreshes_the_stats():
     calls = []
 
     class FakeDb:
-        def ensure_norm_backfilled(self):
-            calls.append("norm")
-
         def refresh_planner_stats(self):
             calls.append("stats")
 
@@ -139,7 +97,7 @@ def test_a_finished_scan_refreshes_the_stats():
     w.post_scan_hook = None
     w.database = FakeDb()
     w._emit_finished(0, 0, 0, 0, 0)
-    assert calls == ["norm", "stats", "finished"]
+    assert calls == ["stats", "finished"]
 
 
 def test_a_without_rowid_table_is_not_flagged_forever(tmp_path):

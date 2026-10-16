@@ -74,21 +74,15 @@ def test_the_origin_survives_edits_and_the_match_that_follows(mdb):
 # ── library: the id the workers found ───────────────────────────────────
 
 
-def _library_track(db, title, artist, **ids):
+def _library_track(db, title, artist, spotify_track_id=None, deezer_id=None):
+    """Library v2 port: the workers keep spotify in its column and the rest in
+    external_ids."""
+    from tests import lib2_seed
+
+    external = json.dumps({"deezer": deezer_id} if deezer_id else {})
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('lar', ?)", (artist,))
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('lal', 'lar', 'Alb')")
-        cols = ", ".join(["album_id", "artist_id", "title", "file_path", *ids])
-        marks = ", ".join("?" for _ in range(4 + len(ids)))
-        conn.execute(f"INSERT INTO tracks ({cols}) VALUES ({marks})",
-                     ("lal", "lar", title, f"/m/{title}.flac", *ids.values()))
-        conn.commit()
-    # the norm columns are filled the way a scan fills them
-    with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET title_norm = ? WHERE title = ?",
-                     (db._normalize_for_comparison(title), title))
-        conn.execute("UPDATE artists SET name_norm = ? WHERE id = 'lar'",
-                     (db._normalize_for_comparison(artist),))
+        lib2_seed.track(conn, artist, "Alb", title, spotify_id=spotify_track_id,
+                        external_ids=external)
         conn.commit()
 
 

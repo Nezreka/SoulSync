@@ -69,8 +69,13 @@ class FakeDB:
 
 
 @pytest.fixture
-def api(tmp_path):
+def api(tmp_path, monkeypatch):
     """A test client over a seeded lib2 DB. Yields (client, FakeDB, ids)."""
+    # Route tests exercise the migration transaction, not a delayed real
+    # provider reconcile against the process-wide database two minutes later.
+    # The trigger's debounce/runner and both migration hooks have own tests.
+    monkeypatch.setattr('core.library2.unmapped_trigger.schedule_unmapped_artist_reconcile',
+                        lambda *args, **kwargs: True)
     db_path = str(tmp_path / "lib2.db")
     conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
@@ -2938,11 +2943,13 @@ def test_refresh_artist_without_albums_scans_nothing(api):
     assert state["result"]["scanned"] == 0
 
 
-def test_refresh_drops_unreadable_artwork_and_thumbnails(api):
+def test_refresh_drops_unreadable_artwork_and_thumbnails(api, monkeypatch):
     """Refresh rebuilds covers in place; a cached file that is no JPEG goes,
     and BOTH variants with it — the thumb wins the serve fast path, so a stale
     one would pin the old cover in lists forever."""
     client, db, ids = api
+    # Exercise the real rebuild/invalid-JPEG handling without external providers.
+    monkeypatch.setattr('core.library2.artwork._provider_art_url', lambda *a, **kw: None)
     from core.library2.artwork import artwork_file, thumb_file
     files = [
         artwork_file(db, "artist", ids["artist"]),
@@ -2964,6 +2971,8 @@ def test_refresh_drops_unreadable_artwork_and_thumbnails(api):
 def test_artist_refresh_scans_all_albums_and_file_versions(api, monkeypatch, tmp_path):
     from core.library2.scan import _file_rows_in_scope
     client, db, ids = api
+    # Exercise the real rebuild/invalid-JPEG handling without external providers.
+    monkeypatch.setattr('core.library2.artwork._provider_art_url', lambda *a, **kw: None)
     expected, scanned = set(), []
     with _conn(db) as conn:
         conn.execute('DELETE FROM lib2_track_files')

@@ -11058,6 +11058,52 @@ class MusicDatabase:
 
             # Return unique variations
             return list(set(variations))
+    def _library_artist_forms(self, artist_variations: List[str]) -> List[str]:
+        """The artist spellings this library owns tracks of: as the album
+        artist or a per-track credit, matched by exact name or by the stored
+        folded key (upstream ``_artist_present``, on the Library v2 catalogue).
+        Indexed lookups only; any error keeps every form (search as before)."""
+        from core.library2.importer import normalize_name
+
+        forms = [a for a in dict.fromkeys(artist_variations) if a]
+        if not forms:
+            return []
+        try:
+            conn = self._get_connection()
+            try:
+                owned = _owned_sql('artist', 'a')
+                kept = []
+                for form in forms:
+                    if conn.execute(
+                            f"SELECT 1 FROM lib2_artists a WHERE (a.name = ? OR a.name_key = ?) "
+                            f"AND {owned} LIMIT 1", (form, normalize_name(form))).fetchone():
+                        kept.append(form)
+                if kept:
+                    return kept
+                # punctuation/accent-only differences ("ACDC" for "AC/DC",
+                # "Bjork" for "Björk") are the same artist: compare folded keys
+                # inside the name_key ranges that can hold them (the key's first
+                # letter, plus names starting outside ASCII) -- index ranges,
+                # not a table scan
+                from core.text.normalize import normalize_key
+                for form in forms:
+                    key = normalize_key(form)
+                    if not key:
+                        continue
+                    for (name,) in conn.execute(
+                            f"SELECT a.name FROM lib2_artists a WHERE ((a.name_key >= ? AND a.name_key < ?)"
+                            f" OR a.name_key >= ?) AND {owned}",
+                            (key[0], chr(ord(key[0]) + 1), chr(128))):
+                        if normalize_key(name) == key:
+                            kept.append(form)
+                            break
+                return kept
+            finally:
+                conn.close()
+        except Exception as e:  # noqa: BLE001 - a failed probe must not hide a match
+            logger.debug(f"artist presence probe failed for {forms}: {e}")
+            return forms
+
     def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
@@ -11114,11 +11160,19 @@ class MusicDatabase:
                 for i, var in enumerate(title_variations):
                     logger.debug(f"  {i+1}. '{var}'")
 
+                # upstream 72749f414 / #1715: only the artist forms the library
+                # owns get searched. A form with no rows sends the loop into the
+                # fuzzy word search over every artist, which is how a "Blue Sky"
+                # by Taylor Smith answered for one by Taylor Swift. With none,
+                # the album-aware fallback below gets its turn.
+                artist_variations = self._library_artist_forms(self._get_artist_variations(artist))
+                if not artist_variations:
+                    logger.debug(f"'{artist}' has no rows in the library — skipping title search")
+
                 # Try each title variation
-                for title_variation in title_variations:
+                for title_variation in (title_variations if artist_variations else []):
                     # Search for potential matches with this variation
                     potential_matches = []
-                    artist_variations = self._get_artist_variations(artist)
                     for artist_variation in artist_variations:
                         potential_matches.extend(self.search_tracks(title=title_variation, artist=artist_variation, limit=20, server_source=server_source))
 
