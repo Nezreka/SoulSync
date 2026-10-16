@@ -56,14 +56,14 @@ def test_incremental_picks_up_new_episodes_of_known_show(db, monkeypatch):
     monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)   # let incremental run on a tiny DB
     scanner = sc.VideoLibraryScanner(db)
     show_v1 = {"server_id": "s1", "title": "Show", "seasons": [
-        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1"}]}]}
+        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1", "file": {"relative_path": "e1.mkv"}}]}]}
     scanner.scan_sync(lambda: FakeSource([], [show_v1]), mode="full")
     assert db.dashboard_stats()["library"]["episodes"] == 1
 
     show_v2 = {"server_id": "s1", "title": "Show", "seasons": [
         {"season_number": 1, "episodes": [
-            {"server_id": "e1", "episode_number": 1, "title": "E1"},
-            {"server_id": "e2", "episode_number": 2, "title": "E2"}]}]}
+            {"server_id": "e1", "episode_number": 1, "title": "E1", "file": {"relative_path": "e1.mkv"}},
+            {"server_id": "e2", "episode_number": 2, "title": "E2", "file": {"relative_path": "e2.mkv"}}]}]}
     st = scanner.scan_sync(lambda: FakeSource([], [show_v2]), mode="incremental")
     assert st["shows"] == 1                                   # re-processed (had a new episode)
     assert db.dashboard_stats()["library"]["episodes"] == 2   # the new episode landed
@@ -76,7 +76,7 @@ def test_incremental_skips_fully_present_show(db, monkeypatch):
     monkeypatch.setattr(sc, "INCREMENTAL_MIN_LIBRARY", 1)
     scanner = sc.VideoLibraryScanner(db)
     show = {"server_id": "s1", "title": "Show", "seasons": [
-        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1"}]}]}
+        {"season_number": 1, "episodes": [{"server_id": "e1", "episode_number": 1, "title": "E1", "file": {"relative_path": "e1.mkv"}}]}]}
     scanner.scan_sync(lambda: FakeSource([], [show]), mode="full")   # sets the delta baseline
     # Unchanged → not in the delta → source yields nothing on the next incremental.
     st = scanner.scan_sync(lambda: FakeSource([], []), mode="incremental")

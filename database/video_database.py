@@ -4021,6 +4021,7 @@ class VideoDatabase:
                     "OR mf.episode_id IN (SELECT e.id FROM episodes e JOIN shows s ON s.id=e.show_id "
                     "WHERE s.server_source=?)") if server_source else \
                    "SELECT COALESCE(SUM(size_bytes), 0) FROM media_files"
+        from core.video.stats import ACTIVE_STATUSES
         conn = self._get_connection()
         try:
             def scalar(sql: str, params=()):
@@ -4030,17 +4031,22 @@ class VideoDatabase:
                 "library": {
                     "movies": scalar("SELECT COUNT(*) FROM movies" + mw, sv),
                     "shows": scalar("SELECT COUNT(*) FROM shows" + mw, sv),
+                    # an episode row is not an owned episode: tmdb backfill adds the
+                    # ones you don't have, so only count the ones with a file
                     "episodes": scalar(
-                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id" + sw, sv),
+                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id"
+                        + (sw + " AND" if sw else " WHERE") + " e.has_file=1", sv),
                     "size_bytes": scalar(size_sql, (sv + sv) if server_source else ()),
                 },
+                # video_downloads is the live queue. the old downloads table is
+                # never written, so reading it kept these tiles at 0
                 "downloads": {
                     "active": scalar(
-                        "SELECT COUNT(*) FROM downloads "
-                        "WHERE status IN ('queued','downloading','importing')"),
-                    "finished": scalar("SELECT COUNT(*) FROM downloads WHERE status = 'completed'"),
+                        "SELECT COUNT(*) FROM video_downloads WHERE status IN ("
+                        + ",".join("?" * len(ACTIVE_STATUSES)) + ")", ACTIVE_STATUSES),
+                    "finished": scalar("SELECT COUNT(*) FROM video_downloads WHERE status = 'completed'"),
                     "speed_bps": scalar(
-                        "SELECT COALESCE(SUM(download_speed_bps), 0) FROM downloads "
+                        "SELECT COALESCE(SUM(speed_bps), 0) FROM video_downloads "
                         "WHERE status = 'downloading'"),
                 },
                 # Curated watchlist (explicit follows + actively-airing library

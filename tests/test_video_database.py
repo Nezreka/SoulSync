@@ -195,15 +195,21 @@ def test_dashboard_stats_counts_content_and_downloads(db):
         # airing library show → on the curated watchlist by default
         conn.execute("INSERT INTO shows(id,title,monitored,tmdb_id,status) VALUES (1,'S',1,555,'continuing')")
         conn.execute("INSERT INTO seasons(id,show_id,season_number) VALUES (1,1,1)")
-        conn.execute("INSERT INTO episodes(id,show_id,season_id,season_number,episode_number) "
-                     "VALUES (1,1,1,1,1)")
+        conn.execute("INSERT INTO episodes(id,show_id,season_id,season_number,episode_number,has_file) "
+                     "VALUES (1,1,1,1,1,1)")
+        # backfilled from tmdb, not on disk: not a library episode
+        conn.execute("INSERT INTO episodes(id,show_id,season_id,season_number,episode_number,has_file) "
+                     "VALUES (2,1,1,1,2,0)")
         conn.execute("INSERT INTO media_files(movie_id,relative_path,size_bytes) VALUES (1,'m.mkv',1000)")
-        conn.execute("INSERT INTO downloads(movie_id,title,status,download_speed_bps) "
-                     "VALUES (1,'d','downloading',500)")
+        # the live queue is video_downloads; the old downloads table is never written
+        for title, status, speed in [("d", "downloading", 500), ("q", "queued", 0),
+                                     ("c", "completed", 0), ("f", "failed", 0)]:
+            conn.execute("INSERT INTO video_downloads(kind,title,status,speed_bps) VALUES ('movie',?,?,?)",
+                         (title, status, speed))
         conn.commit()
     s = db.dashboard_stats()
     assert s["library"] == {"movies": 1, "shows": 1, "episodes": 1, "size_bytes": 1000}
-    assert s["downloads"]["active"] == 1 and s["downloads"]["speed_bps"] == 500
+    assert s["downloads"] == {"active": 2, "finished": 1, "speed_bps": 500}
     # watchlist = the airing show (curated default); wishlist is cleared for now
     assert s["watchlist"] == 1 and s["wishlist"] == 0
 
