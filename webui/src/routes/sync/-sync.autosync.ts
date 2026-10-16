@@ -5,6 +5,8 @@
  * module is pinned differentially in -sync.autosync.test.ts.
  */
 
+import { isLiveBeatportRef } from './-beatport.lists';
+
 /* ── Constants (auto-sync.js 12, 106-110) ─────────────────────────────────── */
 
 export const AUTO_SYNC_BUCKETS: readonly number[] = [1, 2, 4, 8, 12, 16, 24, 48, 72, 168];
@@ -266,11 +268,8 @@ export function autoSyncSourceLabel(source: string | null | undefined): string {
  * lists, a genre's lists, or a chart. an old random chart hash and a release
  * (which never changes) don't.
  */
-const BEATPORT_LIVE_REF =
-  /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
-
 export function beatportMirrorRefreshes(playlist: MirroredRow | null | undefined): boolean {
-  return BEATPORT_LIVE_REF.test(String(playlist?.source_playlist_id ?? '').toLowerCase());
+  return isLiveBeatportRef(playlist?.source_playlist_id);
 }
 
 /** a dated snapshot of a beatport list: '<ref>@2026-10-16'. frozen, never refreshes. */
@@ -279,7 +278,7 @@ export function beatportMirrorIsSnapshot(playlist: MirroredRow | null | undefine
   const at = id.lastIndexOf('@');
   if (at < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(id.slice(at + 1))) return false;
   const ref = id.slice(0, at);
-  return BEATPORT_LIVE_REF.test(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
+  return isLiveBeatportRef(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
 }
 
 /**
