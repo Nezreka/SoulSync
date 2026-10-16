@@ -577,11 +577,13 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
 
 # A mirrored row's source id is whichever provider the playlist came from
 # (upstream 4c738a0c0: deezer/tidal/qobuz/itunes count, not only spotify). Each
-# arm matches an index (lib2 schema: idx_lib2_tracks_ext_<service>), so the OR
-# stays a multi-index lookup instead of a catalogue scan per playlist row.
+# arm matches an index (lib2 schema: idx_lib2_tracks_spotify and
+# idx_lib2_tracks_ext_<service>), so the OR stays a multi-index lookup instead
+# of a catalogue scan per playlist row. The unary + drops the column's TEXT
+# affinity: with it SQLite will not compare through the expression index.
 _MIRRORED_ID_SERVICES = ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes')
 _MIRRORED_ID_MATCH = "(t.spotify_id = mpt.source_track_id OR " + " OR ".join(
-    f"TRIM(CAST(json_extract(t.external_ids,'$.{service}') AS TEXT)) = mpt.source_track_id"
+    f"TRIM(CAST(json_extract(t.external_ids,'$.{service}') AS TEXT)) = +mpt.source_track_id"
     for service in _MIRRORED_ID_SERVICES) + ")"
 
 # Preserve positive sync matches for aliases/collaborations. A current provider

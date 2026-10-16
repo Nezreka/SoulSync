@@ -277,6 +277,8 @@ _CONTENT_FILTER_DEFAULTS = {
     "include_acoustic": False,
     "include_compilations": False,
     "include_instrumentals": False,
+    # upstream c63800221: only tracks credited to the watched artist
+    "include_other_artists": False,
 }
 
 
@@ -772,6 +774,32 @@ def _expand_artist_discography(
     return stats
 
 
+def _uncredited_track_ids(conn, album_id: int, track_ids: List[int]) -> set:
+    """Tracks no monitored artist of this album is credited on (upstream
+    c63800221: a tribute album, soundtrack or compilation must not make every
+    other artist's track wanted). Aliases count as their canonical artist.
+    Fails open: an album without a monitored artist, or a track without any
+    credit, is never excluded."""
+    if not track_ids:
+        return set()
+    watched = {row[0] for row in conn.execute(
+        """SELECT COALESCE(ar.canonical_artist_id, ar.id) FROM lib2_artists ar
+            WHERE ar.monitored = 1
+              AND (ar.id = (SELECT primary_artist_id FROM lib2_albums WHERE id = ?)
+                   OR ar.id IN (SELECT artist_id FROM lib2_album_artists WHERE album_id = ?))""",
+        (album_id, album_id))}
+    if not watched:
+        return set()
+    credits: Dict[int, set] = {}
+    marks = ",".join("?" for _ in track_ids)
+    for track_id, artist_id in conn.execute(
+        f"""SELECT ta.track_id, COALESCE(ar.canonical_artist_id, ar.id)
+              FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
+             WHERE ta.track_id IN ({marks})""", list(track_ids)):
+        credits.setdefault(track_id, set()).add(artist_id)
+    return {track_id for track_id, artists in credits.items() if not artists & watched}
+
+
 def _track_content_excluded(
     track_title: str, album_title: str, filters: Dict[str, bool],
 ) -> bool:
@@ -918,6 +946,8 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 filters = filters_cache[content_artist_id] = _artist_content_filters(
                     conn, content_artist_id)
 
+            if not filters.get("include_other_artists", False):
+                vetoed = set(vetoed) | _uncredited_track_ids(conn, album_id, album_track_ids)
             auto_monitor_ids = [
                 r["id"] for r in album_tracks
                 if r["id"] not in vetoed

@@ -22,6 +22,7 @@ WATCHLIST_BOOLEAN_FIELDS = (
     "include_acoustic",
     "include_compilations",
     "include_instrumentals",
+    "include_other_artists",
     "auto_download",
 )
 WATCHLIST_PROVIDER_FIELDS = {
@@ -151,6 +152,9 @@ def get_artist_settings(conn, artist_id: int, *, profile_id: int = 1) -> Dict[st
         ),
         "include_instrumentals": _bool_value(
             watchlist, columns, "include_instrumentals", False
+        ),
+        "include_other_artists": _bool_value(
+            watchlist, columns, "include_other_artists", False
         ),
         "auto_download": _bool_value(watchlist, columns, "auto_download", True),
         "lookback_days": watchlist["lookback_days"] if "lookback_days" in columns else None,

@@ -805,6 +805,7 @@ export async function updateLibraryV2ArtistSettings(
     | 'include_acoustic'
     | 'include_compilations'
     | 'include_instrumentals'
+    | 'include_other_artists'
     | 'auto_download'
     | 'lookback_days'
     | 'preferred_metadata_source'
@@ -828,6 +829,7 @@ export async function updateLibraryV2ArtistSettings(
         include_acoustic: settings.include_acoustic,
         include_compilations: settings.include_compilations,
         include_instrumentals: settings.include_instrumentals,
+        include_other_artists: settings.include_other_artists,
         auto_download: settings.auto_download,
         lookback_days: settings.lookback_days,
         preferred_metadata_source: settings.preferred_metadata_source,

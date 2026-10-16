@@ -2313,6 +2313,7 @@ function MonitoredArtistSettings({
                   ['include_acoustic', 'Acoustic'],
                   ['include_compilations', 'Compilations'],
                   ['include_instrumentals', 'Instrumentals'],
+                  ['include_other_artists', 'Other artists'],
                 ] as const
               ).map(([field, label]) => (
                 <label key={field} className={styles.checkOption}>

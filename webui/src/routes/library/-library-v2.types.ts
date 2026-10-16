@@ -235,6 +235,7 @@ export interface LibraryV2ArtistSettings {
   include_acoustic: boolean;
   include_compilations: boolean;
   include_instrumentals: boolean;
+  include_other_artists: boolean;
   auto_download: boolean;
   lookback_days: number | null;
   preferred_metadata_source: string | null;
