@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from core.profile_context import get_background_profile
-from core.playlists.user_playlists import PIPELINE_SKIPPED_SOURCES
+from core.playlists.user_playlists import pipeline_runs
 
 
 DISCOVERY_TIMEOUT_SECONDS = 3600
@@ -352,7 +352,7 @@ def _resolve_pipeline_playlists(
 
 
 def _filter_refreshable_playlists(playlists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [pl for pl in playlists if pl.get('source', '') not in PIPELINE_SKIPPED_SOURCES]
+    return [pl for pl in playlists if pipeline_runs(pl)]
 
 
 def _summarize_playlist_names(playlists: List[Dict[str, Any]]) -> str:

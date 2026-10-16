@@ -1185,7 +1185,7 @@ export function MirroredTab({
               const exportStatus = exportJobs.statuses[row.id];
               const state = libraryCardState(row);
               // #1289: an all-playlists pipeline schedules this card only if
-              // the backend actually processes its source (file/beatport are skipped).
+              // the backend actually processes its source (file is skipped).
               const pipelineCovers =
                 cardSchedules.hasAllPipeline && autoSyncPipelineCoversPlaylist(row);
               return renaming === row.id ? (
@@ -1254,9 +1254,9 @@ export function MirroredTab({
                   selected={selected.has(row.id)}
                   onToggleSelect={() => toggleSelected(row.id)}
                   primary={
-                    // The pipeline endpoint rejects file/beatport outright, and
-                    // lastfm cannot be scheduled either — same guard the board
-                    // uses, so the card never offers a run that 400s.
+                    // The pipeline endpoint rejects file outright, and lastfm
+                    // or a frozen beatport mirror cannot be scheduled either —
+                    // same guard the board uses.
                     !autoSyncCanSchedulePlaylist(row)
                       ? null
                       : {

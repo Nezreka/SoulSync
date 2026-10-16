@@ -608,8 +608,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
-        from core.playlists.user_playlists import PIPELINE_SKIPPED_SOURCES
-        if playlist.get('source') in PIPELINE_SKIPPED_SOURCES:
+        from core.playlists.user_playlists import pipeline_runs
+        if not pipeline_runs(playlist):
             return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
         if _get_automation_deps() is None:
             return jsonify({"error": "Playlist pipeline is not available"}), 503

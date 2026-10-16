@@ -42,12 +42,39 @@ LIKED_SOURCE_ID = 'liked'
 LIKED_NAME = 'Liked Songs'
 
 # sources with nothing upstream to pull from. refresh skips them; the
-# pipeline still runs identify / sync / download on them.
-NO_UPSTREAM_SOURCES = ('file', 'beatport', USER_PLAYLIST_SOURCE)
+# pipeline still runs identify / sync / download on them. beatport isn't one:
+# a beatport mirror keyed by its list ref refreshes like any other source,
+# only an old random-hash mirror or a release doesn't (has_upstream).
+NO_UPSTREAM_SOURCES = ('file', USER_PLAYLIST_SOURCE)
 
 # sources the pipeline won't run at all (it 400s them). user playlists are
-# NOT in here, they get the whole pipeline.
-PIPELINE_SKIPPED_SOURCES = ('file', 'beatport')
+# NOT in here, they get the whole pipeline. beatport is decided per mirror
+# (pipeline_runs): a live list gets the whole pipeline, an old random-hash
+# mirror stays out like it always was, so an all-playlists run never starts
+# syncing and downloading a chart frozen months ago.
+PIPELINE_SKIPPED_SOURCES = ('file',)
+
+
+def has_upstream(playlist) -> bool:
+    """whether a mirror has a source refresh can pull it from again."""
+    source = (playlist or {}).get('source', '')
+    if source in NO_UPSTREAM_SOURCES:
+        return False
+    if source == 'beatport':
+        from core.playlists.sources.beatport import is_refreshable_mirror
+        return is_refreshable_mirror(playlist)
+    return True
+
+
+def pipeline_runs(playlist) -> bool:
+    """whether the playlist pipeline takes this mirror at all."""
+    source = (playlist or {}).get('source', '')
+    if source in PIPELINE_SKIPPED_SOURCES:
+        return False
+    if source == 'beatport':
+        from core.playlists.sources.beatport import is_refreshable_mirror
+        return is_refreshable_mirror(playlist)
+    return True
 
 MAX_NAME_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 1000

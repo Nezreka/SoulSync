@@ -261,29 +261,45 @@ export function autoSyncSourceLabel(source: string | null | undefined): string {
 }
 
 /**
- * file + beatport have no external refresh hook; lastfm radios are
- * seed-specific snapshots that never change upstream — re-syncing would just
- * re-discover the same tracks, so they are excluded from the board.
+ * a beatport mirror refreshes when its id is a live list ref (the same rule as
+ * core/playlists/sources/beatport.py is_refreshable_mirror): the homepage
+ * lists, a genre's lists, or a chart. an old random chart hash and a release
+ * (which never changes) don't.
+ */
+const BEATPORT_LIVE_REF =
+  /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
+
+export function beatportMirrorRefreshes(playlist: MirroredRow | null | undefined): boolean {
+  return BEATPORT_LIVE_REF.test(String(playlist?.source_playlist_id ?? '').toLowerCase());
+}
+
+/**
+ * file has no external refresh hook, nor does a beatport mirror that isn't a
+ * live list; lastfm radios are seed-specific snapshots that never change
+ * upstream — re-syncing would just re-discover the same tracks, so they are
+ * excluded from the board.
  */
 export function autoSyncCanSchedulePlaylist(playlist: MirroredRow | null | undefined): boolean {
   if (!playlist) return false;
   const src = playlist.source || '';
-  return !['file', 'beatport', 'lastfm'].includes(src);
+  if (src === 'beatport') return beatportMirrorRefreshes(playlist);
+  return !['file', 'lastfm'].includes(src);
 }
 
 /**
  * Whether an all-playlists pipeline actually processes this playlist.
- * Mirrors the backend filter (pipeline.py:325, refresh_mirrored.py:78):
- * file/beatport sources are skipped. NOTE: lastfm is NOT excluded here —
- * the backend processes it, even though autoSyncCanSchedulePlaylist won't
- * let you schedule it directly.
+ * Mirrors the backend filter (user_playlists.pipeline_runs): file is skipped,
+ * and so is a beatport mirror that isn't a live list. NOTE: lastfm is NOT
+ * excluded here — the backend processes it, even though
+ * autoSyncCanSchedulePlaylist won't let you schedule it directly.
  */
 export function autoSyncPipelineCoversPlaylist(
-  playlist: { source?: string | null } | null | undefined,
+  playlist: { source?: string | null; source_playlist_id?: string | number } | null | undefined,
 ): boolean {
   if (!playlist) return false;
   const src = playlist.source || '';
-  return !['file', 'beatport'].includes(src);
+  if (src === 'beatport') return beatportMirrorRefreshes(playlist as MirroredRow);
+  return src !== 'file';
 }
 
 /* ── Automation linkage (auto-sync.js 218-241) ────────────────────────────── */

@@ -383,7 +383,7 @@ describe('source labels + scheduling eligibility (differential)', () => {
     expect(autoSyncSourceLabel(null)).toBe('Other');
   });
 
-  it('autoSyncCanSchedulePlaylist excludes exactly file/beatport/lastfm', () => {
+  it('autoSyncCanSchedulePlaylist excludes file, lastfm and frozen beatport mirrors', () => {
     for (const s of SOURCES.filter((x): x is string => typeof x === 'string')) {
       expect(autoSyncCanSchedulePlaylist({ source: s }), s).toBe(
         vanilla.autoSyncCanSchedulePlaylist({ source: s } as never),
@@ -392,6 +392,24 @@ describe('source labels + scheduling eligibility (differential)', () => {
     expect(autoSyncCanSchedulePlaylist({ source: 'file' })).toBe(false);
     expect(autoSyncCanSchedulePlaylist({ source: 'beatport' })).toBe(false);
     expect(autoSyncCanSchedulePlaylist({ source: 'lastfm' })).toBe(false);
+    // a beatport mirror keyed by its live list ref refreshes, so it can be
+    // scheduled; an old random chart hash or a release can't
+    for (const ref of [
+      'hype-10',
+      'top-100',
+      'genre:trance-main-floor:7:hype-10',
+      'chart:weekend-picks:905427',
+    ]) {
+      expect(
+        autoSyncCanSchedulePlaylist({ source: 'beatport', source_playlist_id: ref }),
+        ref,
+      ).toBe(true);
+    }
+    for (const id of ['a1b2c3d4e5', 'release:the-jump-ep:7473727', 'genre:x:7:top-50', '']) {
+      expect(autoSyncCanSchedulePlaylist({ source: 'beatport', source_playlist_id: id }), id).toBe(
+        false,
+      );
+    }
     expect(autoSyncCanSchedulePlaylist({ source: 'spotify' })).toBe(true);
     expect(autoSyncCanSchedulePlaylist({})).toBe(true); // missing source is schedulable
     expect(autoSyncCanSchedulePlaylist(null)).toBe(false);
@@ -1627,14 +1645,23 @@ describe('isValidTimezone', () => {
 });
 
 describe('autoSyncPipelineCoversPlaylist (#1289)', () => {
-  // Mirrors the backend filter (pipeline.py:325, refresh_mirrored.py:78):
-  // file/beatport sources are skipped by an all-playlists pipeline run.
-  // lastfm is NOT excluded — the backend processes it.
-  it('covers everything except file and beatport sources', () => {
+  // Mirrors the backend filter (user_playlists.pipeline_runs): file is
+  // skipped, and so is a beatport mirror that isn't a live list. lastfm is
+  // NOT excluded — the backend processes it.
+  it('covers everything except file and frozen beatport mirrors', () => {
     expect(autoSyncPipelineCoversPlaylist(null)).toBe(false);
     expect(autoSyncPipelineCoversPlaylist(undefined)).toBe(false);
     expect(autoSyncPipelineCoversPlaylist({ source: 'file' })).toBe(false);
     expect(autoSyncPipelineCoversPlaylist({ source: 'beatport' })).toBe(false);
+    expect(
+      autoSyncPipelineCoversPlaylist({ source: 'beatport', source_playlist_id: 'a1b2c3' }),
+    ).toBe(false);
+    expect(
+      autoSyncPipelineCoversPlaylist({
+        source: 'beatport',
+        source_playlist_id: 'genre:trance-main-floor:7:hype-10',
+      }),
+    ).toBe(true);
     expect(autoSyncPipelineCoversPlaylist({ source: 'youtube' })).toBe(true);
     expect(autoSyncPipelineCoversPlaylist({ source: 'spotify' })).toBe(true);
     expect(autoSyncPipelineCoversPlaylist({ source: 'lastfm' })).toBe(true);

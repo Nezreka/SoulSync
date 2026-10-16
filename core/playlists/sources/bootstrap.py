@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 from core.playlists.sources.base import (
+    SOURCE_BEATPORT,
     SOURCE_DEEZER,
     SOURCE_ITUNES_LINK,
     SOURCE_LASTFM,
@@ -25,6 +26,7 @@ from core.playlists.sources.base import (
     SOURCE_YOUTUBE,
     SOURCE_YTMUSIC,
 )
+from core.playlists.sources.beatport import BeatportPlaylistSource
 from core.playlists.sources.deezer import DeezerPlaylistSource
 from core.playlists.sources.itunes_link import ITunesLinkPlaylistSource
 from core.playlists.sources.lastfm import LastFMPlaylistSource
@@ -70,6 +72,7 @@ def build_playlist_source_registry(
     reg.register(SOURCE_DEEZER, lambda: DeezerPlaylistSource(deezer_client_getter))
     reg.register(SOURCE_TIDAL, lambda: TidalPlaylistSource(tidal_client_getter))
     reg.register(SOURCE_QOBUZ, lambda: QobuzPlaylistSource(qobuz_client_getter))
+    reg.register(SOURCE_BEATPORT, lambda: BeatportPlaylistSource())
 
     _no_url_parser = lambda url: None
     reg.register(
