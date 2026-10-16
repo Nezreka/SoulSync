@@ -111,6 +111,11 @@ def parse_release(title: Any) -> dict:
         "is_season_pack": False,
         "is_series_pack": False,
     }
+    # a DVD remux ('Duckman S01 NTSC DVD REMUX') is a disc at SD, not a
+    # resolution-less blu-ray remux: read as remux it had no tier at all
+    if (out["source"] == "remux" and not out["resolution"]
+            and re.search(r"\b(dvd|ntsc|pal)\b", t, re.I)):
+        out["source"] = "dvd"
     g = _GROUP.search(t)
     if g:
         out["group"] = g.group(1)
@@ -242,6 +247,41 @@ def acceptable_titles(want_title: Any) -> set:
     return {n for n in (normalize_title(x) for x in items) if n}
 
 
+# a wanted title that ends in its year: "Big Brother (2023)", "Dark Matter 2024"
+_WANT_YEAR_SUFFIX = re.compile(r"^(.*?\S)[\s.]*\(?((?:19|20)\d{2})\)?\s*$")
+
+
+def _year_qualified_wants(want_title: Any) -> list:
+    """(normalized base title, year) for every wanted title that ends in a year.
+    a title that IS a year ("1917") has no base and isn't one."""
+    if want_title is None:
+        return []
+    items = [want_title] if isinstance(want_title, str) else list(want_title)
+    out = []
+    for raw in items:
+        m = _WANT_YEAR_SUFFIX.match(str(raw or "").strip())
+        if not m:
+            continue
+        base = normalize_title(m.group(1))
+        if base:
+            out.append((base, int(m.group(2))))
+    return out
+
+
+def title_region_year(cand: Any):
+    """public name for the year in a release's title region, see below"""
+    return _release_title_year(str(cand or ""))
+
+
+def _release_title_year(cand: str):
+    """the year a release name carries right after its title, or None:
+    'Big.Brother.2023.S03E16' -> 2023, 'Blade Runner 2049 2017 1080p' -> 2017"""
+    m = _META_BOUNDARY.search(cand)
+    head = cand[:m.start()] if m else cand
+    years = list(_YEAR_TOKEN.finditer(head))
+    return int(years[-1].group()) if years else None
+
+
 def titles_match(release_name: Any, want_title: Any) -> bool:
     """True when a release's parsed title matches ANY acceptable title (primary +
     aliases). Exact after normalization, tolerating only trailing edition words
@@ -256,6 +296,14 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
     wants = acceptable_titles(want_title)
     if not wants:
         return True
+    # "Big Brother (2023)" is how a library names a show to tell it from the
+    # others, and the scene writes it 'Big.Brother.2023.S03E16', whose title
+    # parses as "Big Brother" with the year cut off. that never equals
+    # "big brother 2023", so every release for the show was "Wrong title". a
+    # year-qualified title matches its bare base when the release carries the
+    # same year (one either way). a release WITHOUT a year still doesn't, so
+    # "Avatar: The Last Airbender (2024)" never takes the 2005 show's files.
+    year_wants = _year_qualified_wants(want_title)
     raw = str(release_name or "")
     cands = [raw]
     segs = [s for s in re.split(r"[\\/]+", raw) if s.strip()]
@@ -267,6 +315,11 @@ def titles_match(release_name: Any, want_title: Any) -> bool:
         if not got:
             continue
         saw_any = True
+        if year_wants:
+            rel_year = _release_title_year(cand)
+            if rel_year and any(got == base and abs(rel_year - year) <= 1
+                                for base, year in year_wants):
+                return True
         for want in wants:
             if got == want:
                 return True
@@ -295,5 +348,5 @@ def search_title(release_name: Any) -> str:
     return value or str(release_name or "")
 
 
-__all__ = ["parse_release", "extract_title", "normalize_title",
+__all__ = ["parse_release", "extract_title", "normalize_title", "title_region_year",
            "acceptable_titles", "titles_match", "has_absolute_episode", "search_title"]

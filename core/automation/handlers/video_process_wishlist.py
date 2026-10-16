@@ -74,6 +74,10 @@ def pick_best(candidates: List[Dict[str, Any]], min_rank: int = 0) -> Optional[D
 # blocking an item without turning a stuck item into an indexer hammer.
 MAX_GRAB_ATTEMPTS = 3
 MIN_SEASON_PACK_EPISODES = 3
+# a season that had an episode this recently is still airing: no pack exists
+# yet, so its episodes are searched one by one (Sonarr only reaches for a
+# season pack once the season has aired)
+SEASON_PACK_QUIET_DAYS = 10
 SOURCE_REFUSAL_LIMIT = 2
 SOURCE_COOLDOWN_SECONDS = 6 * 60 * 60
 _SOURCE_REFUSALS: Dict[tuple, int] = {}
@@ -340,15 +344,41 @@ def _packable_episode(item: Dict[str, Any]) -> bool:
     return bool(item.get("show_tmdb_id") and item.get("show_title"))
 
 
+def season_still_airing(rows: List[Dict[str, Any]], today: Optional[str] = None,
+                        quiet_days: int = SEASON_PACK_QUIET_DAYS) -> bool:
+    """Whether a show season is still airing, from its newest known air date
+    (the library's last episode for the season, or the wished episodes' own
+    dates). nothing known at all counts as aired, the pack try still falls back
+    to the episodes."""
+    import datetime as _dt
+    dates = []
+    for r in rows or []:
+        for value in (r.get("season_last_air"), r.get("air_date")):
+            text = str(value or "")[:10]
+            if len(text) == 10:
+                dates.append(text)
+    if not dates:
+        return False
+    today_d = _dt.date.fromisoformat(today) if today else _dt.date.today()
+    try:
+        newest = _dt.date.fromisoformat(max(dates))
+    except ValueError:
+        return False
+    return newest > today_d - _dt.timedelta(days=quiet_days)
+
+
 def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
-                         min_missing: int = MIN_SEASON_PACK_EPISODES) -> List[Dict[str, Any]]:
+                         min_missing: int = MIN_SEASON_PACK_EPISODES,
+                         today: Optional[str] = None) -> List[Dict[str, Any]]:
     """Synthetic season-search rows for shows with many missing episodes.
 
     The ordinary drain receives one wishlist row per episode. When several rows
     belong to the same show season, searching each SxxExx first burns indexer
     budget and misses the release shape Sonarr prefers: one season pack. This
     groups only straightforward missing standard episodes; upgrades, daily/anime
-    numbering, and seasons with an in-flight member stay on the per-episode path.
+    numbering, seasons with an in-flight member, and seasons still airing (no
+    pack can exist yet) stay on the per-episode path. Each pack carries its
+    member rows, so a pack search that finds nothing falls back to them.
     """
     try:
         floor = max(2, int(min_missing or MIN_SEASON_PACK_EPISODES))
@@ -371,12 +401,15 @@ def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
         if any(("episode", show_id, season, int(r.get("episode_number") or 0)) in active_set
                for r in rows):
             continue
+        if season_still_airing(rows, today=today):
+            continue
         first = rows[0]
         pack = dict(first)
         pack["episode_number"] = None
         pack["episode_title"] = None
         pack["_pack_members"] = [
             (int(r.get("season_number") or 0), int(r.get("episode_number") or 0)) for r in rows]
+        pack["_pack_rows"] = list(rows)
         out.append(pack)
     return out
 
@@ -415,6 +448,28 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
     return out
 
 
+_TITLE_YEAR = re.compile(r"\((\d{4})\)\s*$")
+
+
+def show_year_for(item: Dict[str, Any]) -> Optional[str]:
+    """The SHOW's year (its first-air year) for an episode row, or None.
+
+    never the episode's own air year. that was what this used, so a release
+    named the way the scene names a year-disambiguated show,
+    'Dark.Matter.2024.S02E08', was rejected as "Wrong year (2024, wanted 2026)"
+    by the drain and again by the importer, and the right episode sat on the
+    wishlist forever. the library's show year first, then a "(2024)" in the
+    title, else no year at all (no year means no year judgement)."""
+    year = item.get("show_year")
+    try:
+        if year:
+            return str(int(str(year)[:4]))
+    except (TypeError, ValueError):
+        pass
+    m = _TITLE_YEAR.search(str(item.get("show_title") or "").strip())
+    return m.group(1) if m else None
+
+
 def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     """The ``search_ctx`` the download row carries (drives the monitor's requery).
     Carries ``titles`` — the primary title plus TMDB aliases — so both the initial pick
@@ -427,7 +482,7 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
         ctx = {"scope": scope, "title": item.get("show_title"),
                "season": item.get("season_number"),
                "episode": item.get("episode_number"),
-               "year": (str(item.get("air_date") or "")[:4] or None),
+               "year": show_year_for(item),
                # full air date — daily series (Daily Show / Kimmel / soaps) release by
                # DATE, not SxxExx; the ranker + retry queries key off this.
                "air_date": (str(item.get("air_date") or "")[:10] or None)}
@@ -1031,7 +1086,7 @@ def auto_video_process_wishlist(
         deferred = [0]      # budget spent: left on the wishlist for the next run
         stopped = [0]       # cancel all hit mid-run: left on the wishlist untouched
         slots_claimed = [0]  # atomic grab-budget claims this run (never > max_downloads)
-        total = len(todo)
+        total = [len(todo)]
         lock = threading.Lock()
 
         def _one(it):
@@ -1151,7 +1206,10 @@ def auto_video_process_wishlist(
             # while its release was available the whole time. A budget-deferred
             # item is skipped for the same reason: the release exists, it just
             # waits for the next tick.
-            if not didnt_run and not (usable and not ok) and not budget_deferred:
+            # A pack try that falls back to its episodes records nothing itself:
+            # each episode's own search is the verdict about that episode.
+            pack_falls_back = bool(it.get("_pack_rows")) and not ok
+            if not didnt_run and not (usable and not ok) and not budget_deferred and not pack_falls_back:
                 # Keep the receipt. Every candidate was just judged and is about to
                 # be discarded; the best one refused for a reason about
                 # AVAILABILITY (not "wrong season", which is only search noise) is
@@ -1175,8 +1233,23 @@ def auto_video_process_wishlist(
                     rejected[0] += 1
                 deps.update_progress(
                     automation_id, phase='Searching + grabbing…',
-                    progress=10 + int(85 * searched[0] / max(total, 1)),
+                    progress=10 + int(85 * min(searched[0], total[0]) / max(total[0], 1)),
                     log_line=msg, log_type=lt)
+            # A season pack that didn't land: search its episodes one by one,
+            # this run. Before, the pack's "Not a full-season pack" verdict was
+            # stamped on every member and they were never searched on their own,
+            # so a season with plenty of single-episode releases sat untouched.
+            fall_back = (it.get("_pack_rows") and not ok and not didnt_run
+                         and not budget_deferred and not stop_requested(gen))
+            if fall_back:
+                rows = list(it["_pack_rows"])
+                with lock:
+                    total[0] += len(rows)
+                deps.update_progress(automation_id, log_type='info',
+                                     log_line="No season pack for '%s' — searching its %d episode(s) one by one"
+                                              % (name, len(rows)))
+                for row in rows:
+                    _one(row)
 
         with ThreadPoolExecutor(max_workers=concurrency) as ex:
             list(ex.map(_one, todo))

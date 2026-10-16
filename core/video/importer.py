@@ -275,9 +275,11 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 # came via air date (the year token there is the air date, and the
                 # date itself is the stronger identity).
                 if numbering_ok:
+                    from core.video.quality_eval import tv_year_mismatch
+                    from core.video.release_parse import title_region_year
                     want_year = _as_int(ctx.get("year"))
-                    rel_year = parsed.get("year")
-                    if want_year and rel_year and (rel_year < want_year or rel_year > want_year + 1):
+                    rel_year = title_region_year(parsed.get("title"))
+                    if tv_year_mismatch(rel_year, want_year):
                         return _reject("Release is from %s, not %s (%s)"
                                        % (rel_year, ctx.get("title") or "this show", want_year))
     else:

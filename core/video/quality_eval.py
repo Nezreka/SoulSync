@@ -30,6 +30,20 @@ def _as_year(v: Any):
         return None
 
 
+def tv_year_mismatch(release_year: Any, show_year: Any) -> bool:
+    """True when a release's year says it's a DIFFERENT show than the wanted
+    one ("Dark Matter (2015)" vs "Dark Matter (2024)"). a year off by one
+    either way is the same show: a first-air date late in the year, a pilot,
+    or a miniseries year the scene uses ("Battlestar.Galactica.2003" for the
+    2004 series). unknown on either side is no judgement.
+
+    callers pass the year in the release's TITLE region (title_region_year):
+    that's where the scene puts a show's disambiguating year. a year after the
+    SxxExx ('Natural High S03E03 2025 1080p') is the air year, not the show's."""
+    py, wy = _as_year(release_year), _as_year(show_year)
+    return bool(py and wy and abs(py - wy) > 1)
+
+
 def resolution_rank(res: Any) -> int:
     """Map a raw resolution token to a rank int (4=4K … 1=SD, 0=unknown)."""
     s = str(res or "").strip().lower()
@@ -162,7 +176,10 @@ def tier_key(source, resolution) -> str:
     if pre == "dvd":
         return "dvd"
     if not resolution:
-        return ""
+        # 'Show.S15E14.HDTV.x264-GRP' with no resolution is the classic SD
+        # broadcast release, which Sonarr reads as SDTV. it used to die as
+        # "Unknown / unsupported quality" with no setting that could take it.
+        return "sdtv" if pre == "hdtv" else ""
     if resolution in _SD_RESOLUTIONS:
         # The ladder collapses SD deliberately: below 720p the source barely
         # matters and the two source-less tiers (dvd / sdtv) are what the UI
@@ -179,6 +196,7 @@ def tier_key(source, resolution) -> str:
 
 def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
               want_date=None, want_absolute=None):
+    from core.video.release_parse import title_region_year
     """Validate a hit actually matches what was searched (Sonarr/Radarr-style): the
     TITLE must match the wanted film/show (not just be a substring — 'The Cloverfield
     Paradox 2018' must NOT satisfy a search for 'Paradox (2017)'), an episode search
@@ -236,9 +254,9 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
         # (earlier year, or >1 later, is a different show); an unknown year passes
         # because TV scene releases usually omit it. Skipped when the match came via
         # air date (the year token there is the air date itself, not disambiguation).
-        py, wy = parsed.get("year"), _as_year(want_year)
-        if wy and py and (py < wy or py > wy + 1):
-            return None, "Wrong year (%s — wanted %s)" % (py, wy)
+        show_year = title_region_year(parsed.get("title"))
+        if tv_year_mismatch(show_year, want_year):
+            return None, "Wrong year (%s — wanted %s)" % (show_year, _as_year(want_year))
         return None, None
     if scope == "season":
         if not parsed.get("is_season_pack"):
@@ -247,17 +265,17 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
             return None, "Wrong season"
         # Same show-identity gate as episodes: a year-tagged pack for the wrong
         # show's season must not satisfy this show's season search.
-        py, wy = parsed.get("year"), _as_year(want_year)
-        if wy and py and (py < wy or py > wy + 1):
-            return None, "Wrong year (%s — wanted %s)" % (py, wy)
+        show_year = title_region_year(parsed.get("title"))
+        if tv_year_mismatch(show_year, want_year):
+            return None, "Wrong year (%s — wanted %s)" % (show_year, _as_year(want_year))
         return None, None
     if scope == "series":
         if not parsed.get("is_series_pack"):
             return None, "Not a complete-series pack"
         # Same show-identity gate: a year-tagged complete pack for the wrong show.
-        py, wy = parsed.get("year"), _as_year(want_year)
-        if wy and py and (py < wy or py > wy + 1):
-            return None, "Wrong year (%s — wanted %s)" % (py, wy)
+        show_year = title_region_year(parsed.get("title"))
+        if tv_year_mismatch(show_year, want_year):
+            return None, "Wrong year (%s — wanted %s)" % (show_year, _as_year(want_year))
         return None, None
     return None, None
 

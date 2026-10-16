@@ -7801,7 +7801,15 @@ class VideoDatabase:
                 # matching on a title that scene naming may spell differently. MAX
                 # picks a populated id over a NULL sibling row, same as series_type.
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
-                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
+                # the SHOW's year, for the show-identity gate and the $year in TV
+                # paths. an episode's own air year is not it (#dark-matter-2024).
+                "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "
+                "  FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS show_year, "
+                # the newest air date the library knows for this season: a season
+                # still airing has no pack yet, so the drain shouldn't look for one
+                "(SELECT MAX(e.air_date) FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number) AS season_last_air "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL " + _pf
                 + (" AND " + _due_sql("w") + " " if due_only else "")
                 # Un-following a show means stop bothering with it. The airing scan
@@ -7875,7 +7883,9 @@ class VideoDatabase:
                 "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
                 "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
-                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
+                "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "
+                "  FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS show_year "
                 "FROM video_wishlist w WHERE w.profile_id=? AND w.kind='episode' AND w.tmdb_id=?" + where +
                 " ORDER BY w.season_number, w.episode_number", [int(profile_id)] + args)]
         finally:
