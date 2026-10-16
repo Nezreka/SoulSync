@@ -77,6 +77,21 @@ def artist_names_for_context(context: Any) -> List[str]:
     return names
 
 
+def audiobook_folder_configured() -> bool:
+    """True once the user has set an audiobook folder.
+
+    ``library_root()`` falls back to ``./audiobooks`` (``/app/audiobooks`` in
+    Docker) when nothing is set. That is a folder inside the container: a route
+    that wrote there would lose every download on the next rebuild.
+    """
+    try:
+        from core.settings import config_manager
+        return bool(str(config_manager.get("library.audiobooks_path", "")
+                        or config_manager.get("audiobooks.download_path", "")).strip())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def audiobook_root() -> str:
     """The audiobook library folder, resolved for this container."""
     from core.audiobook_organizer import library_root
@@ -93,6 +108,8 @@ def routed_root_for_context(context: Any, database: Any = None) -> Optional[str]
     """
     names = artist_names_for_context(context)
     if not names or not is_routed_artist(names[0], database):
+        return None
+    if not audiobook_folder_configured():  # never fall back to a folder inside the container
         return None
     return audiobook_root() or None
 

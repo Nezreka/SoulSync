@@ -281,7 +281,8 @@ def _owned_in_library(track: dict, album_name: str, profile_id=None) -> bool:
         server = config_manager.get_active_media_server()
         for name in filter(None, names):
             found, confidence = db.check_track_exists(
-                title, str(name), confidence_threshold=0.7, server_source=server, album=album_name)
+                title, str(name), confidence_threshold=0.7, server_source=server, album=album_name,
+                include_downloads=True)
             if found and confidence >= 0.7:
                 return True
     except Exception as exc:

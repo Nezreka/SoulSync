@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/r
 
 import {
   AUDIOBOOK_ROUTES_QUERY_KEY,
+  fetchFolderConfigured,
   fetchRoutedNames,
   moveExistingAlbums,
   refreshAudiobookMetadata,
@@ -25,6 +26,16 @@ export function routedNamesQueryOptions(names: string[]) {
 export function useRoutedArtists(names: string[]): Set<string> {
   const query = useQuery(routedNamesQueryOptions(names));
   return new Set(query.data ?? []);
+}
+
+/** Whether an audiobook folder is set. Unknown counts as set: the server has the last word. */
+export function useAudiobookFolderConfigured(): boolean {
+  const query = useQuery({
+    queryKey: [...AUDIOBOOK_ROUTES_QUERY_KEY, 'folder'] as const,
+    queryFn: fetchFolderConfigured,
+    staleTime: 30_000,
+  });
+  return query.data !== false;
 }
 
 /**
@@ -62,14 +73,13 @@ async function offerToMoveExisting(name: string): Promise<void> {
   const preview = await moveExistingAlbums(name, false);
   const { toMove, clashes } = summariseMove(preview);
   if (toMove === 0) return;
-  const note = clashes > 0 ? `\n${clashes} album(s) already exist there and stay as they are.` : '';
-  if (
-    !window.confirm(
-      `Move ${toMove} album folder(s) of ${name} from the music library to the audiobook folder?${note}\n\nYour media server needs a library scan afterwards.`,
-    )
-  ) {
-    return;
-  }
+  const note = clashes > 0 ? ` ${clashes} album(s) already exist there and stay as they are.` : '';
+  const confirmed = await window.showConfirmDialog?.({
+    title: 'Move albums',
+    message: `Move ${toMove} album folder(s) of ${name} from the music library to the audiobook folder?${note} Your media server needs a library scan afterwards.`,
+    confirmText: 'Move',
+  });
+  if (!confirmed) return;
   const done = await moveExistingAlbums(name, true);
   window.showToast?.(
     `Moved ${done.moved} album(s)${done.failed ? `, ${done.failed} failed` : ''}`,

@@ -34,6 +34,15 @@ export async function fetchRoutedNames(names: string[]): Promise<string[]> {
   return assertSuccess(payload, 'Could not check audiobook routing.').routed;
 }
 
+/** False until the user has set an audiobook folder; the server refuses routes before that. */
+export async function fetchFolderConfigured(): Promise<boolean> {
+  const payload = await readJson<Success & { audiobook_folder_configured: boolean }>(
+    apiClient.get('audiobook-routes'),
+  );
+  return assertSuccess(payload, 'Could not read the audiobook folder setting.')
+    .audiobook_folder_configured;
+}
+
 export async function setAudiobookRoute(name: string, routed: boolean): Promise<void> {
   const payload = routed
     ? await readJson<Success>(apiClient.post('audiobook-routes', { json: { name } }))

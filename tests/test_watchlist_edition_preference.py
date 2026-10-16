@@ -283,7 +283,7 @@ def _reissue_harness(monkeypatch, preference):
     owned_titles = set(base_tracks)
 
     def check_track_exists(title, artist, confidence_threshold=0.7,
-                           server_source=None, album=None):
+                           server_source=None, album=None, include_downloads=False):
         if title in owned_titles:
             return (
                 types.SimpleNamespace(
@@ -389,7 +389,7 @@ def test_reissue_all_keeps_todays_extras_only_behaviour(monkeypatch):
 def _owner_check_db():
     """Library claims the fuzzy title/artist/album match (a published row)."""
     def check_track_exists(title, artist, confidence_threshold=0.7,
-                           server_source=None, album=None):
+                           server_source=None, album=None, include_downloads=False):
         if title == "Track 01":
             return (
                 types.SimpleNamespace(

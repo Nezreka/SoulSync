@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  fetchFolderConfigured,
   fetchRoutedNames,
   moveExistingAlbums,
   refreshAudiobookMetadata,
@@ -51,6 +52,14 @@ describe('audiobook route requests', () => {
         body: { names: ['Queen', 'Bobby & Max'] },
       },
     ]);
+  });
+
+  it('reads whether an audiobook folder is configured', async () => {
+    const calls = stubFetch(() =>
+      jsonResponse({ success: true, artists: [], audiobook_folder_configured: false }),
+    );
+    expect(await fetchFolderConfigured()).toBe(false);
+    expect(calls).toEqual([{ method: 'GET', path: '/api/audiobook-routes', body: null }]);
   });
 
   it('does not call the server for an empty list', async () => {

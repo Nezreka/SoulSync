@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { routedNamesQueryOptions, useSetAudiobookRoute } from './audiobook-routes.queries';
+import {
+  routedNamesQueryOptions,
+  useAudiobookFolderConfigured,
+  useSetAudiobookRoute,
+} from './audiobook-routes.queries';
 
 type Props = {
   /** The artist's display name; the server normalises it. */
@@ -18,6 +22,8 @@ export function AudiobookRouteToggle({ name, className }: Props) {
   const toggle = useSetAudiobookRoute(name);
   const routed = (query.data ?? []).includes(name);
   const unknown = query.isPending || query.isError;
+  // Switching an artist off must always work; switching one on needs a folder to file into.
+  const noFolder = !useAudiobookFolderConfigured() && !routed;
 
   return (
     <button
@@ -25,11 +31,13 @@ export function AudiobookRouteToggle({ name, className }: Props) {
       className={`${className ?? ''}${routed ? ' watching' : ''}`.trim()}
       id="library-artist-audiobook-btn"
       aria-pressed={routed}
-      disabled={unknown || toggle.isPending}
+      disabled={unknown || noFolder || toggle.isPending}
       title={
-        routed
-          ? 'Downloads by this artist are filed in your audiobook library. Click to file them as music again.'
-          : 'File downloads by this artist in your audiobook library instead of the music library.'
+        noFolder
+          ? 'Set the audiobook folder first (Settings > Library > Folders).'
+          : routed
+            ? 'Downloads by this artist are filed in your audiobook library. Click to file them as music again.'
+            : 'File downloads by this artist in your audiobook library instead of the music library.'
       }
       onClick={() => toggle.mutate(!routed)}
     >

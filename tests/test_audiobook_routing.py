@@ -22,6 +22,7 @@ def folders(tmp_path, monkeypatch):
     books.mkdir()
     monkeypatch.setattr("core.imports.paths.shared_transfer_root", lambda: str(transfer))
     monkeypatch.setattr(routing, "audiobook_root", lambda: str(books))
+    monkeypatch.setattr(routing, "audiobook_folder_configured", lambda: True)
     return transfer, books
 
 
@@ -115,7 +116,7 @@ def test_routed_download_counts_as_owned(db, folders):
     episode.write_bytes(b"x")
     _record_download(db, episode, "Fibis Ferienresort", "Bobby & Max")
 
-    track, confidence = db.check_track_exists("Fibis Ferienresort", "Bobby & Max")
+    track, confidence = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", include_downloads=True)
     assert track is not None and confidence >= 0.8
     assert track.file_path == str(episode)
 
@@ -124,7 +125,7 @@ def test_deleted_file_is_no_longer_owned(db, folders):
     _, books = folders
     routing.add_route("Bobby & Max", db)
     _record_download(db, books / "gone.mp3", "Fibis Ferienresort", "Bobby & Max")
-    track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max")
+    track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", include_downloads=True)
     assert track is None
 
 
@@ -134,7 +135,7 @@ def test_unrouted_artist_download_is_not_owned_by_the_ledger(db, folders):
     episode.parent.mkdir(parents=True)
     episode.write_bytes(b"x")
     _record_download(db, episode, "Bohemian Rhapsody", "Queen")
-    track, _ = db.check_track_exists("Bohemian Rhapsody", "Queen")
+    track, _ = db.check_track_exists("Bohemian Rhapsody", "Queen", include_downloads=True)
     assert track is None
 
 
@@ -154,6 +155,7 @@ def test_routes_api_roundtrip(db, monkeypatch):
     from api.audiobook_routes import create_blueprint
 
     monkeypatch.setattr("database.music_database.get_database", lambda *a, **k: db)
+    monkeypatch.setattr(routing, "audiobook_folder_configured", lambda: True)
     app = Flask(__name__)
     app.register_blueprint(create_blueprint())
     client = app.test_client()
@@ -268,7 +270,7 @@ def test_moved_albums_stay_owned_through_the_ledger(db, folders):
     folder = _album(transfer, "Bobby & Max", "Folge 84", files=("01 - Fibis Ferienresort.mp3",))
     _record_download(db, folder / "01 - Fibis Ferienresort.mp3", "Fibis Ferienresort", "Bobby & Max")
     routing.move_existing("Bobby & Max", apply=True)
-    track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max")
+    track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", include_downloads=True)
     assert track is not None and track.file_path.startswith(str(books))
 
 
@@ -458,6 +460,7 @@ def _tag_flac(tmp_path, monkeypatch, db, artist, *, routed):
         routing.add_route(artist, db)
     monkeypatch.setattr("database.music_database.get_database", lambda: db)
     monkeypatch.setattr(routing, "audiobook_root", lambda: str(tmp_path / "audiobooks"))
+    monkeypatch.setattr(routing, "audiobook_folder_configured", lambda: True)
     meta = {"title": "Kapitel 1", "artist": artist, "album_artist": artist, "album": "Folge 1",
             "track_number": 1, "total_tracks": 2, "disc_number": 1, "genre": "Rock"}
 
@@ -482,3 +485,82 @@ def test_routed_album_is_tagged_as_audiobook(tmp_path, db, monkeypatch):
 
 def test_unrouted_album_keeps_its_source_genre(tmp_path, db, monkeypatch):
     assert _tag_flac(tmp_path, monkeypatch, db, "Coldplay", routed=False) == ["Rock"]
+
+
+# ---------------------------------------------------------------------------
+# review: sync must not see routed ids, folder must exist, writes are admin-only
+# ---------------------------------------------------------------------------
+
+def test_a_sync_style_lookup_never_sees_a_routed_id(db, folders):
+    """Sync callers ask "is it on the media server"; a ``routed:N`` id means nothing there."""
+    _, books = folders
+    routing.add_route("Bobby & Max", db)
+    episode = books / "Bobby & Max" / "Folge 84" / "01 - Fibis Ferienresort.mp3"
+    episode.parent.mkdir(parents=True)
+    episode.write_bytes(b"x")
+    _record_download(db, episode, "Fibis Ferienresort", "Bobby & Max")
+
+    for kwargs in ({}, {"server_source": "plex"}, {"album": "Folge 84"}):
+        track, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", **kwargs)
+        assert track is None
+    owned, _ = db.check_track_exists("Fibis Ferienresort", "Bobby & Max", include_downloads=True)
+    assert str(owned.id).startswith("routed:")
+
+
+def test_nothing_is_routed_until_an_audiobook_folder_is_configured(db, folders, monkeypatch):
+    routing.add_route("Bobby & Max", db)
+    assert routing.routed_root_for_context(_context("Bobby & Max"), db)
+    monkeypatch.setattr(routing, "audiobook_folder_configured", lambda: False)
+    assert routing.routed_root_for_context(_context("Bobby & Max"), db) is None
+
+
+def test_folder_setting_counts_only_when_filled_in(monkeypatch):
+    from core.settings import config_manager
+
+    values = {}
+    monkeypatch.setattr(config_manager, "get", lambda key, default=None: values.get(key, default))
+    assert routing.audiobook_folder_configured() is False
+    values["audiobooks.download_path"] = "  "
+    assert routing.audiobook_folder_configured() is False
+    values["library.audiobooks_path"] = "/media/audiobooks"
+    assert routing.audiobook_folder_configured() is True
+
+
+def _client(db, monkeypatch, *, admin=True, configured=True):
+    from flask import Flask
+
+    from api.audiobook_routes import create_blueprint
+
+    monkeypatch.setattr("database.music_database.get_database", lambda *a, **k: db)
+    monkeypatch.setattr(routing, "audiobook_folder_configured", lambda: configured)
+    monkeypatch.setattr("core.profile_context.is_admin_request", lambda: admin)
+    app = Flask(__name__)
+    app.register_blueprint(create_blueprint())
+    return app.test_client()
+
+
+def test_routing_is_refused_without_an_audiobook_folder(db, monkeypatch):
+    client = _client(db, monkeypatch, configured=False)
+    reply = client.post("/api/audiobook-routes", json={"name": "Bobby & Max"})
+    assert reply.status_code == 409 and "audiobook folder" in reply.get_json()["error"]
+    assert routing.list_routes(db) == []
+    assert client.get("/api/audiobook-routes").get_json()["audiobook_folder_configured"] is False
+
+
+def test_only_admins_can_change_routes_or_move_folders(db, folders, monkeypatch):
+    transfer, _ = folders
+    _album(transfer, "Bobby & Max", "Folge 84")
+    routing.add_route("Bobby & Max", db)
+    client = _client(db, monkeypatch, admin=False)
+    for method, url, body in (
+        ("post", "/api/audiobook-routes", {"name": "Queen"}),
+        ("delete", "/api/audiobook-routes/Bobby & Max", None),
+        ("post", "/api/audiobook-routes/Bobby & Max/move", {"apply": True}),
+        ("post", "/api/audiobook-routes/Bobby & Max/refresh", {}),
+    ):
+        assert getattr(client, method)(url, json=body).status_code == 403
+    assert [a["label"] for a in routing.list_routes(db)] == ["Bobby & Max"]
+    assert (transfer / "Bobby & Max" / "Folge 84").is_dir()
+    # reading stays open: every card asks which artists are routed
+    assert client.post("/api/audiobook-routes/check", json={"names": ["Bobby & Max"]}).status_code == 200
+    assert client.get("/api/audiobook-routes").status_code == 200

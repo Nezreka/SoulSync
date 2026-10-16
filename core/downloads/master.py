@@ -780,7 +780,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                                 else:
                                     artist_name = str(artist)
                                 db_track, track_confidence = db.check_track_exists(
-                                    track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
+                                    track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album,
+                                    include_downloads=True,
                                 )
                                 if db_track and track_confidence >= 0.7:
                                     # Re-release gate (5BILLION round 3): the hit
@@ -810,7 +811,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     else:
                         artist_name = str(artist)
                     db_track, track_confidence = db.check_track_exists(
-                        track_name, artist_name, confidence_threshold=0.7, server_source=active_server
+                        track_name, artist_name, confidence_threshold=0.7, server_source=active_server,
+                        include_downloads=True,
                     )
                     if db_track and track_confidence >= 0.7:
                         found, confidence = True, track_confidence

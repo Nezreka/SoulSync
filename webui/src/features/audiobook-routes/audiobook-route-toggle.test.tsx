@@ -21,7 +21,7 @@ const MOVE_PREVIEW = {
 };
 
 /** A tiny server: `routed` is its state, every request is recorded. */
-function stubServer(initiallyRouted: boolean, preview = MOVE_PREVIEW) {
+function stubServer(initiallyRouted: boolean, preview = MOVE_PREVIEW, folderConfigured = true) {
   let routed = initiallyRouted;
   const requests: string[] = [];
   vi.stubGlobal(
@@ -32,6 +32,12 @@ function stubServer(initiallyRouted: boolean, preview = MOVE_PREVIEW) {
       const text = await request.text();
       const body = text ? JSON.parse(text) : null;
       requests.push(`${request.method} ${path}${body ? ' ' + JSON.stringify(body) : ''}`);
+      if (request.method === 'GET')
+        return jsonResponse({
+          success: true,
+          artists: [],
+          audiobook_folder_configured: folderConfigured,
+        });
       if (path === '/check')
         return jsonResponse({ success: true, routed: routed ? ['Bobby & Max'] : [] });
       if (path.endsWith('/refresh'))
@@ -71,6 +77,7 @@ describe('AudiobookRouteToggle', () => {
 
   afterEach(() => {
     cleanup();
+    Reflect.deleteProperty(window, 'showConfirmDialog');
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -85,7 +92,8 @@ describe('AudiobookRouteToggle', () => {
 
   it('routes the artist, then offers to move what is already in the music library', async () => {
     const requests = stubServer(false);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.fn(async () => true);
+    window.showConfirmDialog = confirm;
     renderToggle();
     const button = await screen.findByRole('button', { name: /treat as audiobook/i });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
@@ -94,8 +102,8 @@ describe('AudiobookRouteToggle', () => {
 
     await waitFor(() => expect(requests.some((r) => r.endsWith('/refresh'))).toBe(true));
     expect(confirm).toHaveBeenCalledOnce();
-    expect(String(confirm.mock.calls[0]?.[0])).toContain('Move 1 album folder(s)');
-    const order = requests.filter((r) => !r.startsWith('POST /check'));
+    expect(JSON.stringify(confirm.mock.calls[0])).toContain('Move 1 album folder(s)');
+    const order = requests.filter((r) => !r.startsWith('POST /check') && !r.startsWith('GET'));
     expect(order).toEqual([
       'POST / {"name":"Bobby & Max"}',
       'POST /Bobby%20%26%20Max/move {"apply":false}',
@@ -107,7 +115,7 @@ describe('AudiobookRouteToggle', () => {
 
   it('leaves the albums alone when the move is declined', async () => {
     const requests = stubServer(false);
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    window.showConfirmDialog = vi.fn(async () => false);
     renderToggle();
     const button = await screen.findByRole('button', { name: /treat as audiobook/i });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
@@ -120,7 +128,8 @@ describe('AudiobookRouteToggle', () => {
 
   it('does not ask about moving when there is nothing to move', async () => {
     stubServer(false, { ...MOVE_PREVIEW, items: [] });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.fn(async () => true);
+    window.showConfirmDialog = confirm;
     renderToggle();
     const button = await screen.findByRole('button', { name: /treat as audiobook/i });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
@@ -133,7 +142,8 @@ describe('AudiobookRouteToggle', () => {
 
   it('stops routing with one click and never offers a move', async () => {
     const requests = stubServer(true);
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.fn(async () => true);
+    window.showConfirmDialog = confirm;
     renderToggle();
     const button = await screen.findByRole('button', { name: /audiobook/i });
     await waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('true'));
@@ -143,5 +153,25 @@ describe('AudiobookRouteToggle', () => {
     await waitFor(() => expect(requests.some((r) => r.startsWith('DELETE'))).toBe(true));
     expect(confirm).not.toHaveBeenCalled();
     expect(requests.some((r) => r.includes('/move') || r.includes('/refresh'))).toBe(false);
+  });
+
+  it('is disabled with an explanation until an audiobook folder is set', async () => {
+    const requests = stubServer(false, MOVE_PREVIEW, false);
+    renderToggle();
+    const button = (await screen.findByRole('button', {
+      name: /treat as audiobook/i,
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(button.title).toContain('Set the audiobook folder first'));
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(requests.some((r) => r.startsWith('POST / '))).toBe(false);
+  });
+
+  it('can still switch an artist off when the folder setting has gone', async () => {
+    stubServer(true, MOVE_PREVIEW, false);
+    renderToggle();
+    const button = (await screen.findByRole('button', { name: /audiobook/i })) as HTMLButtonElement;
+    await waitFor(() => expect(button.getAttribute('aria-pressed')).toBe('true'));
+    expect(button.disabled).toBe(false);
   });
 });

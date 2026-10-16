@@ -12247,7 +12247,7 @@ class MusicDatabase:
                        names + scope_params)
         return cursor.fetchone() is not None
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -12422,9 +12422,12 @@ class MusicDatabase:
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
-            routed = self._routed_download_match(title, artist, confidence_threshold)
-            if routed is not None:
-                return routed
+            # Only callers that ask "do we already have this file" opt in. A sync
+            # asks "is it on the media server", and a ``routed:`` id means nothing there.
+            if include_downloads:
+                routed = self._routed_download_match(title, artist, confidence_threshold)
+                if routed is not None:
+                    return routed
 
             logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
