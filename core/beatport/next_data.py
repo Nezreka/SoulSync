@@ -121,12 +121,15 @@ def _name(obj: Any) -> str:
     return str(obj or '').strip()
 
 
-def _image(image: Any, size: str = '1400x1400') -> str:
-    """an image object's url. dynamic_uri is a {w}x{h} template."""
+def _image(image: Any, size: str = '1400x1400', prefer_size: bool = False) -> str:
+    """an image object's url. dynamic_uri is a {w}x{h} template; prefer_size
+    takes it at ``size`` over the fixed uri (a 1400px cover is a lot for a card)."""
     if isinstance(image, str):
         return image.replace('{w}x{h}', size)
     if not isinstance(image, dict):
         return ''
+    if prefer_size and image.get('dynamic_uri'):
+        return str(image['dynamic_uri']).replace('{w}x{h}', size)
     uri = image.get('uri') or ''
     if not uri and image.get('dynamic_uri'):
         uri = str(image['dynamic_uri']).replace('{w}x{h}', size)
@@ -329,4 +332,131 @@ def release_meta(next_data: Any) -> Optional[Dict[str, Any]]:
                 'track_count': data.get('track_count') or 0,
                 'url': f"{BASE_URL}/release/{data.get('slug') or 'release'}/{data['id']}",
             }
+    return None
+
+
+# -- browse sections (page modules) ------------------------------------------
+#
+# a page's curated rows (hype picks, new releases, the hero slideshow, featured
+# and dj charts) are "page modules". their ids change every week, their TYPE
+# names don't, so a section is found by type. the html scrape for these had
+# gone quiet: new releases, both chart rows and the genre hero all came back
+# empty, and hero titles were glued to the artist ("Jinx (Club Mix)Imbermind").
+
+def page_modules(next_data: Any) -> List[Tuple[str, list]]:
+    """(module type name, its items) for every module on the page, in page order."""
+    types: Dict[str, str] = {}
+    order: List[str] = []
+    items: Dict[str, list] = {}
+    for key, data in queries(next_data):
+        if key.startswith('page-modules') and isinstance(data, dict):
+            for m in data.get('results') or []:
+                if isinstance(m, dict) and m.get('id') is not None:
+                    mid = str(m['id'])
+                    types[mid] = _name(m.get('type'))
+                    order.append(mid)
+        m = re.match(r'^page-module-(\d+)-items', key)
+        if m and isinstance(data, dict):
+            items[m.group(1)] = data.get('results') or []
+    return [(types[mid], items[mid]) for mid in order if mid in items]
+
+
+def module_items(next_data: Any, type_name: str) -> Optional[list]:
+    """the raw items of the first module of this type, or None."""
+    for mtype, items in page_modules(next_data):
+        if mtype == type_name:
+            return items
+    return None
+
+
+def normalize_release(raw: Any, rank: Optional[int] = None,
+                      image_override: str = '') -> Optional[Dict[str, Any]]:
+    """a release object as the browse cards read it (title, artist, label,
+    url, image_url), plus the ids the release download needs."""
+    if not isinstance(raw, dict) or not raw.get('id') or not raw.get('name'):
+        return None
+    artists = _artists(raw.get('artists'))
+    names = ', '.join(a['name'] for a in artists)
+    out = {
+        'title': str(raw['name']).strip(),
+        'artist': names or 'Various Artists',
+        'artists_string': names or 'Various Artists',
+        'label': _name(raw.get('label')) or 'Unknown Label',
+        'url': f"{BASE_URL}/release/{raw.get('slug') or 'release'}/{raw['id']}",
+        'image_url': image_override or _image(raw.get('image'), '500x500', prefer_size=True),
+        'release_id': raw['id'],
+        'catalog_number': str(raw.get('catalog_number') or ''),
+        'release_date': str(raw.get('new_release_date') or raw.get('publish_date') or ''),
+        'type': 'release',
+        'source': 'next_data',
+    }
+    if rank is not None:
+        out['rank'] = rank
+    return out
+
+
+def normalize_chart(raw: Any) -> Optional[Dict[str, Any]]:
+    """a chart object as the chart cards read it (name, creator, url, image)."""
+    if not isinstance(raw, dict) or not raw.get('id') or not raw.get('name'):
+        return None
+    person = raw.get('person') if isinstance(raw.get('person'), dict) else {}
+    return {
+        'name': str(raw['name']).strip(),
+        'creator': str(person.get('owner_name') or _name(raw.get('artist')) or 'Beatport').strip(),
+        'url': f"{BASE_URL}/chart/{raw.get('slug') or 'chart'}/{raw['id']}",
+        'image': _image(raw.get('image'), '500x500', prefer_size=True),
+        'track_count': raw.get('track_count') or 0,
+        'source': 'next_data',
+    }
+
+
+def module_releases(next_data: Any, type_name: str, limit: Optional[int] = None,
+                    banner_art: bool = False) -> Optional[List[Dict[str, Any]]]:
+    """a release module as cards. banner_art takes the module item's own image
+    (the wide slideshow art) over the release cover."""
+    items = module_items(next_data, type_name)
+    if items is None:
+        return None
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        art = _image(it.get('image'), '920x642') if banner_art else ''
+        release = normalize_release(it.get('item'), image_override=art)
+        if release:
+            out.append(release)
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def module_charts(next_data: Any, type_name: str, limit: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+    items = module_items(next_data, type_name)
+    if items is None:
+        return None
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        chart = normalize_chart(it.get('item') if isinstance(it, dict) else None)
+        if chart:
+            out.append(chart)
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def top_releases(next_data: Any, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
+    """the page's top 10 releases query (homepage or genre), ranked."""
+    for key, data in queries(next_data):
+        if 'top-10-releases' in key:
+            results = _results(data)
+            if results is None:
+                continue
+            out = []
+            for raw in results:
+                rel = normalize_release(raw, rank=len(out) + 1)
+                if rel:
+                    out.append(rel)
+                if len(out) >= limit:
+                    break
+            return out
     return None
