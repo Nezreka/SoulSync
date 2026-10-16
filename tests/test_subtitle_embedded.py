@@ -83,12 +83,31 @@ def test_search_matches_language_and_flags(monkeypatch, tmp_path):
     p, _calls = _provider(monkeypatch, payload,
                           which={"ffmpeg": "/usr/bin/ffmpeg",
                                  "ffprobe": "/usr/bin/ffprobe"})
+    # plain query: the plain stream wins, hi is pruned (shared flag_filter)
     cands = p.search(SubtitleQuery(language="en", file_path=str(f)))
-    assert len(cands) == 2
+    assert len(cands) == 1
     assert cands[0].language == "en" and not cands[0].hi
-    assert cands[1].hi and cands[1].title == "SDH"
     assert cands[0].download_ref["sub_index"] == 0
+    # prefer_hi keeps both for the scoring tiebreak
+    cands = p.search(SubtitleQuery(language="en", file_path=str(f),
+                                   hi_forced_pref="prefer_hi"))
+    assert len(cands) == 2
+    assert cands[1].hi and cands[1].title == "SDH"
     assert cands[1].download_ref["sub_index"] == 1
+
+
+def test_search_never_offers_a_forced_stream_for_a_plain_row(monkeypatch, tmp_path):
+    # a forced stream only covers foreign-language lines; landing it as the
+    # plain <stem>.en.srt would leave near-empty subtitles.
+    payload = _ffprobe_payload(_stream(codec="subrip", lang="eng", forced=1))
+    f = tmp_path / "m.mkv"
+    f.write_bytes(b"x")
+    p, _calls = _provider(monkeypatch, payload,
+                          which={"ffmpeg": "/usr/bin/ffmpeg",
+                                 "ffprobe": "/usr/bin/ffprobe"})
+    assert p.search(SubtitleQuery(language="en", file_path=str(f))) == []
+    assert len(p.search(SubtitleQuery(language="en", forced=True,
+                                      file_path=str(f)))) == 1
 
 
 def test_search_needs_file_path(monkeypatch):

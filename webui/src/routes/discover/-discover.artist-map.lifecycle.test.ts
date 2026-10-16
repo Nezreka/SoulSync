@@ -6,6 +6,7 @@ import {
   artMapAttachCanvas,
   artMapMeasureFull,
   artMapMeasureResize,
+  artMapMeasureResizeStacked,
   artMapMeasureWithSidebar,
   artMapResetWorld,
   artMapTeardown,
@@ -97,6 +98,19 @@ describe('the three measurements', () => {
   it('subtracts only the sidebar that is actually showing', () => {
     expect(artMapMeasureResize(1400, 900, 0, 56).width).toBe(1400);
     expect(artMapMeasureResize(1400, 900, 260, 56).width).toBe(1140);
+  });
+
+  it('measures the stacked phone layout by height, not width (Oct 13 fold, M-11)', () => {
+    // A 390px phone, an 844px-tall container, a 100px toolbar and a 300px
+    // genre strip: the canvas keeps the FULL width and loses the strip
+    // from its height. The row formula returned max(120, 390 − 390) = 120
+    // wide here — the collapsed-strip bug.
+    expect(artMapMeasureResizeStacked(390, 844, 300, 100)).toEqual({
+      width: 390,
+      height: 444,
+    });
+    expect(artMapMeasureResizeStacked(390, 844, 0, null).height).toBe(794);
+    expect(artMapMeasureResizeStacked(100, 90, 300, 56)).toEqual({ width: 120, height: 120 });
   });
 });
 

@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { YearAlbum, YearInListening, YearSlideKind } from '../-year.types';
 
@@ -110,9 +111,19 @@ export function YearStory({ onClose }: YearStoryProps) {
     };
   }, []);
 
-  return (
+  // Portalled to <body>: the overlay is position:fixed, but it mounts
+  // inside .stats-container, whose backdrop-filter makes it the
+  // containing block for fixed descendants — the overlay was sized to
+  // the stats page's full scroll height (measured 3531px in an 844px
+  // viewport), leaving the controls thousands of pixels below the fold
+  // and the slide pinned to the top of a mostly-empty screen (Oct 13
+  // batch, M-17). At body level, fixed means the viewport again. The
+  // data attribute is the hook mobile.css hides the hamburger behind
+  // (the overlay's own class is a hashed CSS module).
+  return createPortal(
     <div
       className={styles.overlay}
+      data-year-story-overlay
       role="dialog"
       aria-modal="true"
       aria-label="Your Year in Listening"
@@ -170,7 +181,8 @@ export function YearStory({ onClose }: YearStoryProps) {
           {current === slides.length - 1 ? 'Done' : 'Next'}
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

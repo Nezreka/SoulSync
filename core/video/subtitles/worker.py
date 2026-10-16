@@ -266,7 +266,8 @@ def run_cycle(db, settings, fs=None) -> dict:
 
         from . import (parse_provider_order, srt_name,
                        effective_subtitle_languages, SubtitleLookupError,
-                       valid_lang_code)
+                       valid_lang_code, is_wanted_variant)
+        from . import existing as existing_subs
         from .providers import fetch_subtitle_detailed
         from .providers.base import SubtitleQuery
         from .scoring import opensubtitles_hash
@@ -350,8 +351,10 @@ def run_cycle(db, settings, fs=None) -> dict:
                                                         settings)
                 except SubtitleLookupError:
                     _eff = None
-                if _eff is not None and \
-                        lang.lower() not in {str(x).lower() for x in _eff}:
+                # a forced row is residue too once "also grab forced" is off
+                if (_eff is not None and
+                        lang.lower() not in {str(x).lower() for x in _eff}) \
+                        or not is_wanted_variant(row, settings):
                     try:
                         db.subtitle_delete_row(video_kind, video_id, lang,
                                                hi=hi, forced=forced)
@@ -387,19 +390,22 @@ def run_cycle(db, settings, fs=None) -> dict:
                 continue
 
             filename = os.path.basename(file_path)
-            # Disk check BEFORE any network fetch: if the subtitle landed
-            # between cycles (user drop, another process), mark 'have' without
-            # burning provider quota on a download we don't need.
+            # "have it" check BEFORE any network fetch (bazarr rules): a
+            # sidecar that landed between cycles, a differently-named one
+            # (.eng.srt, .en.sdh.srt, an unlabeled movie.srt) or an embedded
+            # track all count — mark 'have' without burning provider quota.
             name = srt_name(file_path, lang, hi=hi, forced=forced)
             folder = os.path.dirname(file_path)
             try:
-                if name.lower() in {str(n).lower()
-                                    for n in (fs.list_dir(folder) or [])}:
-                    db.subtitle_mark(video_kind, video_id, lang, "have",
-                                     hi=hi, forced=forced, count_attempt=False)
-                    continue
+                listing = [str(n) for n in (fs.list_dir(folder) or [])]
             except Exception:  # noqa: BLE001 - a failed listing just means "not there"
-                pass
+                listing = []
+            if existing_subs.covered(
+                    existing_subs.existing_tracks(file_path, get_setting, names=listing),
+                    lang, hi=hi, forced=forced):
+                db.subtitle_mark(video_kind, video_id, lang, "have",
+                                 hi=hi, forced=forced, count_attempt=False)
+                continue
             moviehash = opensubtitles_hash(file_path)
             query = SubtitleQuery(identity=dict(identity), language=lang,
                                   hi=hi, forced=forced,
@@ -486,6 +492,7 @@ def run_cycle(db, settings, fs=None) -> dict:
         stats["upgraded"] = int((_up or {}).get("upgraded") or 0)
         stats["upgrade_checked"] = int((_up or {}).get("checked") or 0)
         stats["upgrade_skipped"] = int((_up or {}).get("skipped") or 0)
+        stats["requeued"] = int((_up or {}).get("requeued") or 0)
     except Exception:  # noqa: BLE001 - the worker never takes down the process
         logger.exception("subtitle worker cycle failed")
     return stats
@@ -542,7 +549,7 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
     ``settings`` is the normalized settings dict; ``fs`` injects
     ``list_dir``/``write_text`` (defaults to the real filesystem).
     """
-    stats = {"checked": 0, "upgraded": 0, "skipped": 0}
+    stats = {"checked": 0, "upgraded": 0, "skipped": 0, "requeued": 0}
     try:
         settings = settings or {}
         if not settings.get("download_subtitles"):
@@ -559,7 +566,8 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
 
         from . import (parse_provider_order, srt_name,
                        effective_subtitle_languages, SubtitleLookupError,
-                       valid_lang_code)
+                       valid_lang_code, is_wanted_variant)
+        from . import existing as existing_subs
         from .providers import rank_candidates
         from .providers.base import SubtitleQuery
         from .scoring import opensubtitles_hash
@@ -580,7 +588,8 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
         delta = _upgrade_min_delta(get_setting)
         if fs is None:
             fs = _default_fs()
-        rows = db.subtitle_get_upgradable(batch, UPGRADE_COOLDOWN_HOURS)
+        rows = db.subtitle_get_upgradable(batch, UPGRADE_COOLDOWN_HOURS,
+                                          include_user_set=True)
 
         def _stamp(r):
             try:
@@ -644,8 +653,10 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
                                                         settings)
                 except SubtitleLookupError:
                     _eff = None
-                if _eff is not None and \
-                        lang.lower() not in {str(x).lower() for x in _eff}:
+                # a forced row is residue too once "also grab forced" is off
+                if (_eff is not None and
+                        lang.lower() not in {str(x).lower() for x in _eff}) \
+                        or not is_wanted_variant(row, settings):
                     try:
                         db.subtitle_delete_row(video_kind, video_id, lang,
                                                hi=hi, forced=forced)
@@ -653,6 +664,36 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
                         pass
                     stats["skipped"] += 1
                     continue
+
+            file_path, identity = _resolve_file(db, row)
+            if not file_path or not os.path.exists(file_path):
+                _stamp(row)
+                stats["skipped"] += 1
+                continue
+
+            # Still there? (bazarr re-indexes on every scan.) A deleted
+            # sidecar, a re-encoded file that lost its embedded track, or
+            # embedded subs switched off — 'have' is a claim, re-check it.
+            # Manual picks too: a gone pick is gone. Re-queued as 'wanted'
+            # without an attempt, so the retry pass fetches it next cycle.
+            try:
+                _listing = [str(n) for n in (fs.list_dir(os.path.dirname(file_path)) or [])]
+            except Exception:  # noqa: BLE001
+                _listing = None
+            if _listing is not None and not existing_subs.covered(
+                    existing_subs.existing_tracks(file_path, get_setting, names=_listing),
+                    lang, hi=hi, forced=forced):
+                db.subtitle_mark(video_kind, video_id, lang, "wanted",
+                                 hi=hi, forced=forced)
+                db.subtitle_log_fetch(video_kind, video_id, lang, "miss",
+                                      provider="", hi=hi, forced=forced,
+                                      candidate_title="no longer on disk, re-queued")
+                _stamp(row)
+                stats["requeued"] += 1
+                continue
+            if row.get("user_set"):
+                _stamp(row)  # explicit picks are verified, never upgraded
+                continue
 
             # The baseline: the current subtitle's score from fetch history.
             try:
@@ -668,11 +709,6 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
             if not quota_ok(db, provider_order, get_setting, quota_limit):
                 logger.info("subtitle upgrade: daily quota exhausted, ending pass")
                 break
-            file_path, identity = _resolve_file(db, row)
-            if not file_path or not os.path.exists(file_path):
-                _stamp(row)
-                stats["skipped"] += 1
-                continue
 
             filename = os.path.basename(file_path)
             moviehash = opensubtitles_hash(file_path)
@@ -767,235 +803,82 @@ def run_upgrade_cycle(db, settings, fs=None) -> dict:
     return stats
 
 
-# ── library backfill sweep ─────────────────────────────────────────────────
-# The wanted loop only retries rows created at import — videos already in the
-# library have no wanted rows. This sweep creates them (idempotent), so the
-# worker picks them up on its normal cadence. Manual trigger only for now
-# (API endpoint); the shape is schedule-safe for later.
-
-_backfill_lock = threading.Lock()
-_backfill_state: dict = {
-    "state": "idle",  # idle | running | done | error
-    "started_at": None,
-    "videos_seen": 0,
-    "rows_created": 0,
-    "marked_have": 0,
-    "error": None,
-}
+# ── library gaps (the Missing Subtitles maintenance job) ────────────────────
+# New imports get their wanted rows from the import hook; videos already in
+# the library (or added straight to plex/jellyfin) get them from the Tools
+# page's Missing Subtitles job, which runs these two on its schedule.
 
 
-def _library_video_ids(db) -> list:
-    """[(kind, id)] for library movies + episodes that have a media file.
-    De-duped. Never raises."""
-    out: list = []
+def subtitle_gaps(db, settings, kind: str, vid: int) -> dict | None:
+    """What one library video is missing, read-only.
+
+    ``{"missing": [(lang, hi, forced)], "covered": [(lang, hi, forced)]}`` —
+    ``missing`` are wanted shapes (per-title overrides + the forced toggle)
+    with no row yet and nothing on disk or embedded; ``covered`` are ones
+    already there (any sidecar naming, or embedded) that aren't recorded as
+    'have' yet. Shapes the worker already owns (a wanted/failed row) are in
+    neither. None when the video file can't be resolved. Never raises."""
     try:
-        conn = db._get_connection()
-        try:
-            for kind, col in (("movie", "movie_id"), ("episode", "episode_id")):
-                try:
-                    rows = conn.execute(
-                        "SELECT DISTINCT %s FROM media_files "
-                        "WHERE %s IS NOT NULL" % (col, col))
-                    for r in rows:
-                        try:
-                            out.append((kind, int(r[col])))
-                        except (TypeError, ValueError):
-                            pass
-                except Exception:  # noqa: BLE001 - one kind failing skips just it
-                    pass
-        finally:
-            conn.close()
-    except Exception:  # noqa: BLE001
-        pass
-    return out
-
-
-def _backfill_one_video(db, settings, kind: str, vid: int) -> dict:
-    """Create wanted rows for one library video's effective languages.
-
-    Idempotent (``subtitle_want`` is INSERT OR IGNORE). Mirrors the import
-    hook's row shape exactly (user_set=0, plain hi/forced flags). Skips
-    languages already 'have', and records on-disk sidecars as 'have' without
-    burning an attempt. Returns per-video stats. Never raises."""
-    stats = {"rows_created": 0, "marked_have": 0}
-    try:
-        from . import (effective_subtitle_languages, parse_langs, srt_name,
-                       valid_lang_code, SubtitleLookupError)
+        from . import (effective_subtitle_languages, parse_langs,
+                       valid_lang_code, SubtitleLookupError, wanted_variants)
+        from . import existing as existing_subs
         file_path, _identity = _resolve_file(
             db, {"video_kind": kind, "video_id": vid})
         if not file_path or not os.path.exists(file_path):
-            return stats
+            return None
         # Per-title language overrides win; an UNKNOWN set (transient lookup
         # failure) falls back to the global list — exactly what the import
-        # hook does on SubtitleLookupError (the worker's residue check
-        # reconciles once lookups succeed). Mirror that.
+        # hook does (the worker's residue check reconciles once lookups work).
         try:
             langs = effective_subtitle_languages(db, kind, vid, settings)
         except SubtitleLookupError:
             langs = parse_langs((settings or {}).get("subtitle_langs"))
-        except Exception:  # noqa: BLE001
-            return stats
-        try:
-            rows = db.subtitle_get_for_video(kind, vid)
-        except Exception:  # noqa: BLE001
-            return stats
-        existing: dict = {}
-        for r in rows:
-            try:
-                existing[(str(r.get("language") or "").lower(),
-                          bool(r.get("hi")), bool(r.get("forced")))] = \
-                    str(r.get("status") or "")
-            except Exception:  # noqa: BLE001
-                pass
-        folder = os.path.dirname(file_path)
-        try:
-            on_disk = {str(n).lower() for n in os.listdir(folder)}
-        except OSError:
-            on_disk = set()
-        for lang in langs:
+        rows = db.subtitle_get_for_video(kind, vid)
+        status = {(str(r.get("language") or "").lower(), bool(r.get("hi")),
+                   bool(r.get("forced"))): str(r.get("status") or "") for r in rows}
+
+        def _get(k, d=None):
+            return (settings or {}).get(k, d)
+        tracks = None  # probed lazily: nothing to check means no ffprobe
+        out = {"missing": [], "covered": []}
+        for lang, hi, forced in wanted_variants(langs, settings):
             if not valid_lang_code(lang):
                 continue
-            key = (str(lang).lower(), False, False)
-            if existing.get(key) == "have":
-                continue
-            name = srt_name(file_path, lang)
-            if name.lower() in on_disk:
-                # Sidecar already there (user drop, another process): record
-                # 'have' without burning a fetch attempt.
-                try:
-                    if key not in existing:
-                        db.subtitle_want(kind, vid, lang)
-                    db.subtitle_mark(kind, vid, lang, "have",
-                                     count_attempt=False)
-                    stats["marked_have"] += 1
-                except Exception:  # noqa: BLE001
-                    pass
-                continue
-            if key in existing:
-                continue  # wanted/failed already — the worker owns it
-            try:
-                db.subtitle_want(kind, vid, lang)
-                stats["rows_created"] += 1
-            except Exception:  # noqa: BLE001
-                pass
+            key = (str(lang).lower(), hi, forced)
+            if status.get(key) in ("have", "wanted", "failed"):
+                continue  # recorded, or the worker already owns it
+            if tracks is None:
+                tracks = existing_subs.existing_tracks(file_path, _get)
+            if existing_subs.covered(tracks, lang, hi=hi, forced=forced):
+                out["covered"].append(key)
+            else:
+                out["missing"].append(key)
+        return out
     except Exception:  # noqa: BLE001
-        logger.exception("subtitle backfill failed for %s %s", kind, vid)
-    return stats
+        logger.exception("subtitle gap check failed for %s %s", kind, vid)
+        return None
 
 
-def ensure_wanted_rows_for_library(db, settings, batch=None) -> dict:
-    """Create ``subtitle_wanted`` rows for library videos missing subtitles.
-
-    Idempotent — safe to run repeatedly. Respects the master
-    ``download_subtitles`` toggle (off → no-op), per-title language overrides,
-    existing 'have' rows, and on-disk sidecars. Throttled: at most
-    ``subtitle_worker_batch`` videos per call (the worker's own batch cap —
-    creating rows is DB-only, but a huge library shouldn't block a request
-    thread). Returns stats. Never raises.
-    """
-    stats = {"videos_seen": 0, "rows_created": 0, "marked_have": 0,
-             "skipped": 0}
-    try:
-        settings = settings or {}
-        if not settings.get("download_subtitles"):
-            stats["skipped"] = "disabled"
-            return stats
+def queue_gaps(db, kind: str, vid: int, gaps: dict) -> tuple[int, int]:
+    """Apply ``subtitle_gaps``: create wanted rows for what's missing (the
+    worker fetches them within quota) and record what's already there as
+    'have' without an attempt. Returns (queued, marked_have). Never raises."""
+    queued = marked = 0
+    for lang, hi, forced in (gaps or {}).get("missing") or []:
         try:
-            cap = max(1, int(settings.get("subtitle_worker_batch",
-                                          DEFAULT_BATCH)
-                             if batch is None else batch))
-        except (TypeError, ValueError):
-            cap = DEFAULT_BATCH
-        for kind, vid in _library_video_ids(db):
-            if stats["videos_seen"] >= cap:
-                break
-            stats["videos_seen"] += 1
-            one = _backfill_one_video(db, settings, kind, vid)
-            stats["rows_created"] += one["rows_created"]
-            stats["marked_have"] += one["marked_have"]
-    except Exception:  # noqa: BLE001
-        logger.exception("subtitle backfill sweep failed")
-    return stats
-
-
-def backfill_status() -> dict:
-    """A copy of the backfill thread state. Never raises."""
-    with _backfill_lock:
-        return dict(_backfill_state)
-
-
-def _run_backfill_thread(db_provider) -> None:
-    """Full paced sweep: every library video, ``subtitle_worker_batch`` at a
-    time with a short breather between passes — DB-only work, but never
-    hammer. Runs on a daemon thread; state via ``backfill_status()``."""
-    global _backfill_state
-    try:
-        db = db_provider()
-        if db is None:
-            with _backfill_lock:
-                _backfill_state.update(state="error",
-                                       error="no database handle")
-            return
-        settings = _load_settings(db)
-        # Defense in depth: the endpoint checks the master toggle, but it
-        # could have been flipped after the sweep started. Off → stop.
-        if not settings.get("download_subtitles"):
-            with _backfill_lock:
-                _backfill_state.update(state="done", error="disabled mid-sweep")
-            return
+            db.subtitle_want(kind, vid, lang, hi=hi, forced=forced)
+            queued += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("could not queue %s subtitles for %s %s", lang, kind, vid)
+    for lang, hi, forced in (gaps or {}).get("covered") or []:
         try:
-            batch = max(1, int(settings.get("subtitle_worker_batch",
-                                            DEFAULT_BATCH)))
-        except (TypeError, ValueError):
-            batch = DEFAULT_BATCH
-        videos = _library_video_ids(db)
-        seen = created = marked = 0
-        for i in range(0, len(videos), batch):
-            # Re-check the master toggle per batch: a big library takes
-            # minutes (2s breathers), and disabling subtitles mid-sweep
-            # must stop the sweep, not just future ones.
-            if i > 0 and not _load_settings(db).get("download_subtitles"):
-                with _backfill_lock:
-                    _backfill_state.update(state="done",
-                                           error="disabled mid-sweep")
-                return
-            for kind, vid in videos[i:i + batch]:
-                one = _backfill_one_video(db, settings, kind, vid)
-                seen += 1
-                created += one["rows_created"]
-                marked += one["marked_have"]
-            with _backfill_lock:
-                _backfill_state.update(videos_seen=seen,
-                                       rows_created=created,
-                                       marked_have=marked)
-            if i + batch < len(videos):
-                time.sleep(2)  # breather — paced, never hammer
-        with _backfill_lock:
-            _backfill_state.update(state="done")
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("subtitle backfill thread failed")
-        with _backfill_lock:
-            _backfill_state.update(state="error", error=str(exc))
-
-
-def start_backfill(db_provider) -> tuple[bool, str | None]:
-    """Start the library backfill sweep on a daemon thread. (True, None) on
-    start; (False, reason) when a sweep is already running. Never raises."""
-    try:
-        with _backfill_lock:
-            if _backfill_state.get("state") == "running":
-                return False, "a backfill sweep is already running"
-            from datetime import datetime as _dt, timezone as _tz
-            _backfill_state.update(state="running",
-                                   started_at=_dt.now(_tz.utc).isoformat(),
-                                   videos_seen=0, rows_created=0,
-                                   marked_have=0, error=None)
-        threading.Thread(target=_run_backfill_thread, args=(db_provider,),
-                         daemon=True, name="subtitle-backfill").start()
-        return True, None
-    except Exception as exc:  # noqa: BLE001
-        return False, str(exc)
-
+            db.subtitle_want(kind, vid, lang, hi=hi, forced=forced)
+            db.subtitle_mark(kind, vid, lang, "have", hi=hi, forced=forced,
+                             count_attempt=False)
+            marked += 1
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record %s subtitles for %s %s", lang, kind, vid)
+    return queued, marked
 
 def _load_settings(db) -> dict:
     try:
@@ -1043,5 +926,4 @@ def ensure_started(db_provider) -> None:
 
 
 __all__ = ["ensure_started", "run_cycle", "run_upgrade_cycle", "row_eligible",
-           "backoff_hours", "quota_ok", "ensure_wanted_rows_for_library",
-           "start_backfill", "backfill_status"]
+           "backoff_hours", "quota_ok", "subtitle_gaps", "queue_gaps"]

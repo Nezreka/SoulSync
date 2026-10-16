@@ -844,6 +844,15 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       pushIf(rows, d.artist, 'Artist');
       return <DetailGrid rows={rows} />;
 
+    case 'untagged_download':
+      pushIf(rows, d.track_title, 'Track');
+      pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.album_title, 'Album');
+      if (list<string>(d.missing).length)
+        rows.push(['Missing tags', list<string>(d.missing).join(', ')]);
+      pushIf(rows, d.file_path, 'File', 'path');
+      return <DetailGrid rows={rows} />;
+
     case 'empty_folder': {
       pushIf(rows, d.folder_path, 'Folder', 'path');
       const junk = list<string>(d.junk_files);

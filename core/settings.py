@@ -972,11 +972,16 @@ class ConfigManager:
                 # setting, read directly by `core/auto_import_worker.py` — a
                 # Staging folder-layout quirk, not a quality preference, so it
                 # deliberately does NOT live on a quality profile.
-                "folder_artist_override": True
+                "folder_artist_override": True,
+                # off: staging keeps whatever an import didn't move (the user's
+                # own files). on: a folder whose every track was imported or
+                # found already in the library is removed from staging.
+                "clear_finished_from_staging": False
             },
             "m3u_export": {
                 "enabled": False,
                 "entry_base_path": "",
+                "relative_paths": False,
                 "library_enabled": False,
                 "library_path": ""
             },

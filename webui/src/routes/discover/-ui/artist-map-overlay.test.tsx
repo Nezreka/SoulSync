@@ -150,8 +150,12 @@ describe('mounting', () => {
   });
 
   it('measures the GENRE map differently, allowing for its sidebar', () => {
-    // The genre map prefers the canvas's own laid-out size and the content row's
-    // height; using the full-width measurement would run it under the sidebar.
+    // The genre map prefers the canvas's own laid-out size in BOTH axes.
+    // (Oct 13 fold, M-11: the height used to be the content ROW's height.
+    // In the desktop row the two are the same number, but in the stacked
+    // phone layout the row also holds the genre strip, so the backing
+    // store came out taller than the displayed canvas — ellipses instead
+    // of circles, and hit-testing that drifted from the drawing.)
     render(
       <ArtMapOverlay
         {...props({
@@ -161,8 +165,63 @@ describe('mounting', () => {
       />,
     );
     expect(artMap.width).toBe(1180); //  the canvas's own width, not the container's
-    expect(artMap.height).toBe(812); //  the content ROW, not the container (900)
-    //                                    nor the full measurement (900 - 56).
+    expect(artMap.height).toBe(844); //  the canvas's own height, not the row's (812)
+    //                                    nor the container's (900).
+  });
+});
+
+describe('the canvas ResizeObserver', () => {
+  // jsdom has no ResizeObserver; this fake records the callback so a test
+  // can fire layout changes the way the browser would when the genre strip
+  // grows after its data lands.
+  class FakeResizeObserver {
+    static instances: FakeResizeObserver[] = [];
+    callback: ResizeObserverCallback;
+    disconnected = false;
+    constructor(callback: ResizeObserverCallback) {
+      this.callback = callback;
+      FakeResizeObserver.instances.push(this);
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {
+      this.disconnected = true;
+    }
+    fire(width: number, height: number): void {
+      this.callback(
+        [{ contentRect: { width, height } } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+  }
+
+  beforeEach(() => {
+    FakeResizeObserver.instances = [];
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('re-measures through the host when the laid-out canvas drifts from the believed size', () => {
+    const host = noopHost();
+    render(<ArtMapOverlay {...props({ host })} />);
+    // Mount sized the map 1400x844 (see the mounting suite).
+    const observer = FakeResizeObserver.instances[0];
+    expect(observer).toBeDefined();
+    observer.fire(1400, 844);
+    expect(host.resized).not.toHaveBeenCalled();
+    // The genre strip landing shrinks the canvas without a window resize.
+    observer.fire(1180, 500);
+    expect(host.resized).toHaveBeenCalledTimes(1);
+  });
+
+  it('disconnects on unmount', () => {
+    const { unmount } = render(<ArtMapOverlay {...props()} />);
+    const observer = FakeResizeObserver.instances[0];
+    unmount();
+    expect(observer.disconnected).toBe(true);
   });
 });
 
@@ -416,5 +475,34 @@ describe('artMapHandleResize', () => {
     sidebar.style.display = 'none';
     artMapHandleResize(el, canvas, sidebar);
     expect(artMap.width).toBe(1400);
+  });
+
+  it('in the stacked phone layout a resize costs height, not width (Oct 13 fold, M-11)', () => {
+    const { container } = render(
+      <ArtMapOverlay
+        {...props({
+          kind: 'genre',
+          sidebarGenres: [{ name: 'Rock', count: 1 }],
+        })}
+      />,
+    );
+    const el = container.querySelector('#artist-map-container') as HTMLElement;
+    const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+    const sidebar = container.querySelector('#artmap-genre-sidebar') as HTMLElement;
+    // The strip spans the whole container width (1400 here, as the phone
+    // strip spans 390): the row formula would floor the canvas width at
+    // 120px. Its height (300) comes off the canvas height instead.
+    vi.spyOn(sidebar, 'offsetWidth', 'get').mockReturnValue(1400);
+    vi.spyOn(sidebar, 'offsetHeight', 'get').mockReturnValue(300);
+
+    artMapHandleResize(el, canvas, sidebar);
+    // The regression this guards: the row formula floored the width at
+    // max(120, 1400 − 1400) = 120. The stacked formula keeps it whole.
+    expect(artMap.width).toBe(1400);
+    // 900 container − 300 strip − 300 toolbar. The toolbar reads 300 here
+    // because jsdom's offsetHeight lives on the prototype, so the instance
+    // spy above sets it for every element; the pure formula is asserted
+    // with distinct numbers in the lifecycle tests.
+    expect(artMap.height).toBe(300);
   });
 });

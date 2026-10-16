@@ -51,7 +51,7 @@ def test_section_lives_in_the_video_panel(panel):
     for element_id in ("vo-subs-dl", "vo-sub-langs", "subchain-widget",
                        "subchain-pool", "subchain-list",
                        "vo-sub-hi-forced", "vo-sub-autosync",
-                       "vo-sub-backfill", "vo-sub-backfill-status"):
+                       "vo-sub-open-job", "vo-sub-job-status"):
         assert f'id="{element_id}"' in panel, element_id
 
 
@@ -117,8 +117,36 @@ def test_hi_forced_preference_wired(panel, video_js):
     assert 'id="vo-sub-hi-forced"' in panel
     assert "set('vo-sub-hi-forced', _videoOrg.subtitle_hi_forced || 'off')" in video_js
     assert "subtitle_hi_forced: val('vo-sub-hi-forced') || 'off'" in video_js
-    for value in ("off", "prefer_hi", "prefer_forced"):
+    for value in ("off", "prefer_hi"):
         assert f'value="{value}"' in panel
+    # forced is its own toggle now, never a preference
+    assert 'value="prefer_forced"' not in panel
+
+
+def test_forced_and_have_it_toggles_wired(panel, video_js):
+    for element_id, key in (("vo-sub-forced", "subtitle_forced"),
+                            ("vo-sub-use-embedded", "subtitle_use_embedded"),
+                            ("vo-sub-ignore-pgs", "subtitle_ignore_pgs"),
+                            ("vo-sub-ignore-vobsub", "subtitle_ignore_vobsub"),
+                            ("vo-sub-ignore-ass", "subtitle_ignore_ass")):
+        assert f'id="{element_id}"' in panel, element_id
+        assert f"{key}: on('{element_id}')" in video_js, key
+
+
+def test_every_subtitle_control_autosaves(video_js):
+    # the hi preference and auto-sync used to have no change listener, so
+    # flipping them never saved on its own
+    block = video_js[video_js.index("'vo-sub-worker-interval', 'vo-sub-worker-batch'"):]
+    block = block[:block.index("forEach")]
+    for element_id in ("vo-sub-hi-forced", "vo-sub-autosync", "vo-sub-forced",
+                       "vo-sub-use-embedded", "vo-sub-ignore-pgs",
+                       "vo-sub-ignore-vobsub", "vo-sub-ignore-ass"):
+        assert f"'{element_id}'" in block, element_id
+
+
+def test_subdl_and_subsource_have_test_buttons(index):
+    for svc in ("subdl", "subsource", "opensubtitles", "fanart"):
+        assert f'data-video-test-service="{svc}"' in index, svc
 
 
 def test_autosync_toggle_wired(panel, video_js):
@@ -127,10 +155,23 @@ def test_autosync_toggle_wired(panel, video_js):
     assert "subtitle_autosync: on('vo-sub-autosync')" in video_js
 
 
-def test_backfill_button_wired(panel, video_js):
-    assert 'id="vo-sub-backfill"' in panel
-    assert "startBackfill" in video_js
-    assert "/api/video/subtitles/backfill" in video_js
+def test_library_sweep_points_at_the_tools_job(panel, video_js):
+    # the one-off backfill button became the Missing Subtitles maintenance job
+    assert 'id="vo-sub-backfill"' not in panel
+    assert "/api/video/subtitles/backfill" not in video_js
+    assert 'id="vo-sub-open-job"' in panel
+    assert "MISSING_SUBS_JOB = 'missing_subtitles'" in video_js
+    assert "page: 'video-tools'" in video_js
+    assert ".repair-job-card[data-job-id=" in video_js
+
+
+def test_tools_page_knows_the_job():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "webui/static/video/video-repair.js").read_text(
+        encoding="utf-8")
+    assert "missing_subtitles: 'Missing Subtitles'" in js
+    assert "missing_subtitles: 'Queue Subtitles'" in js
+    assert "if (f.finding_type === 'missing_subtitles') return subtitlesDetailHTML(d);" in js
 
 
 def test_advanced_knobs_wired(panel, video_js):

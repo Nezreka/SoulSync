@@ -1476,6 +1476,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
@@ -1942,6 +1943,7 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            self._requeue_similar_artists_rematch(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2042,6 +2044,7 @@ class MusicDatabase:
         'sample_analysis_v1':        ('table', 'sample_analysis'),
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
+        'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
     }
 
     def _record_migration(self, cursor, name):
@@ -2210,6 +2213,20 @@ class MusicDatabase:
                 if album_cols and _col not in album_cols:
                     cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
                     logger.info("Added %s column to albums table (canonical version)", _col)
+
+            # #1701: where reorganize last placed the album. the release it used
+            # and a fingerprint of the naming settings at the time, so a later
+            # scan keeps that release and only re-flags when the user changes
+            # their naming or pins a different version. NULL = never placed.
+            _placement_cols = {
+                'reorganize_source': 'TEXT DEFAULT NULL',
+                'reorganize_album_id': 'TEXT DEFAULT NULL',
+                'reorganize_fp': 'TEXT DEFAULT NULL',
+            }
+            for _col, _typedef in _placement_cols.items():
+                if album_cols and _col not in album_cols:
+                    cursor.execute(f"ALTER TABLE albums ADD COLUMN {_col} {_typedef}")
+                    logger.info("Added %s column to albums table (#1701)", _col)
 
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
@@ -2790,6 +2807,18 @@ class MusicDatabase:
                 logger.info("Added organize_by_playlist column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_sync_mode_column(self, cursor):
+        """Per-playlist sync mode (#1704). null means use the global
+        playlist_sync.mode, so existing mirrors keep doing what they did."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'sync_mode' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN sync_mode TEXT DEFAULT NULL")
+                logger.info("Added sync_mode column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding sync_mode column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_custom_name_column(self, cursor):
         """Add custom_name (a user alias) for a mirrored playlist.
@@ -5144,6 +5173,30 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_similarartists_status ON artists (similar_artists_match_status, id)")
         except Exception as e:
             logger.error(f"Error adding similar-artists worker columns: {e}")
+
+    def _requeue_similar_artists_rematch(self, cursor):
+        """one-time: fetch every artist's similar artists again.
+
+        names used to resolve to the first search hit, so stored similars hold
+        namesakes (a thai pop act as Korn, Colde for Cold). the worker never
+        re-runs a matched artist and the watchlist only refetches after 30
+        days, so neither would heal them. requeue both; replace_similar_artists
+        swaps each set as it lands. occurrence_count goes back to one per row:
+        every refetch had bumped it and the reader sums it."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_similar_artists_rematch_applied'")
+            if cursor.fetchone():
+                return
+            cursor.execute("UPDATE artists SET similar_artists_match_status = NULL "
+                           "WHERE similar_artists_match_status IS NOT NULL")
+            requeued = max(cursor.rowcount, 0)
+            cursor.execute("UPDATE similar_artists SET occurrence_count = 1, "
+                           "last_updated = datetime('now', '-60 days')")
+            cursor.execute("CREATE TABLE _similar_artists_rematch_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artists_rematch')
+            logger.info("similar artists rematch: requeued %s library artists", requeued)
+        except Exception as e:
+            logger.error(f"Error requeueing similar artists rematch: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
@@ -12367,9 +12420,116 @@ class MusicDatabase:
 
             # Album-aware fallback: find album by title (any artist), check tracks on it
             # Handles multi-artist albums filed under a different artist in the library
-            if album and best_confidence < confidence_threshold:
+            if album and (artist or '').strip() and best_confidence < confidence_threshold:
                 logger.debug(f"Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
                 try:
+                    # (#1715) Evidence helpers, computed once per call. A
+                    # "placeholder" artist name carries no artist evidence
+                    # either way; anything else is a real filing/credit
+                    # that can agree or conflict with the searched artist.
+                    try:
+                        from core.imports.compilation import is_various_artists_name as _is_va_name
+                    except Exception as _va_import_err:
+                        logger.debug(f"Album-aware fallback: VA-name helper unavailable: {_va_import_err}")
+                        _is_va_name = None
+                    try:
+                        from core.text.normalize import normalize_key as _artist_nkey
+                    except Exception as _nkey_import_err:
+                        logger.debug(f"Album-aware fallback: normalize_key unavailable: {_nkey_import_err}")
+                        _artist_nkey = self._normalize_for_comparison
+                    _placeholder_squashed = {
+                        'unknown', 'unknownartist', 'unknownartists',
+                        'artistunknown', 'noartist', 'unknownalbum',
+                        'unknownalbumartist', 'untitled',
+                    }
+
+                    def _placeholder_artist(name):
+                        n = (name or '').strip()
+                        if not n:
+                            return True
+                        if _is_va_name is not None and _is_va_name(n):
+                            return True
+                        # MusicBrainz/Picard spellings: '[Unknown]',
+                        # '<Unknown>', '[No Artist]' — brackets are
+                        # punctuation around the placeholder, not a name.
+                        core = self._normalize_for_comparison(n).strip(' []<>(){}')
+                        return core.replace(' ', '') in _placeholder_squashed
+
+                    # Exact artist-evidence keys for the searched artist:
+                    # every known variation, keyed the way artists.name_key
+                    # is ('AC/DC' == 'ACDC', spacing unified). Fuzzy
+                    # similarity is NOT identity — edit-distance-1 names
+                    # (John William vs John Williams) must not pass.
+                    _artist_keys = {
+                        _artist_nkey(v) for v in self._get_artist_variations(artist)
+                    } | {_artist_nkey(artist)}
+                    _split_re = r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*'
+
+                    def _evidence_keys(db_track):
+                        """Keyed artist names the row evidences: the album
+                        artist and the per-track credit, each whole and
+                        split on credit delimiters — a joint filing
+                        ('Simon & Garfunkel', 'Tony Bennett & Lady Gaga')
+                        evidences EACH partner, in either field."""
+                        keys = set()
+                        for name in (db_track.artist_name, getattr(db_track, 'track_artist', None)):
+                            if not name:
+                                continue
+                            keys.add(_artist_nkey(name))
+                            for piece in re.split(_split_re, self._normalize_for_comparison(name), flags=re.IGNORECASE):
+                                if piece.strip():
+                                    keys.add(_artist_nkey(piece))
+                        return keys
+
+                    def _fallback_row_confidence(db_track):
+                        """(confidence, is_evidence) for one fallback row,
+                        or None when the row must not match. (#1715) This
+                        fallback used to take title_sim as the whole
+                        confidence, so a same-titled track on a same-named
+                        album by a COMPLETELY DIFFERENT artist matched at
+                        1.0: playlist sync put the wrong song on the
+                        playlist and counted the real track as owned, so
+                        it was never wishlisted or downloaded."""
+                        _title_score, _title_passed = self._score_title_similarity(title, db_track)
+                        if not _title_passed:
+                            return None
+                        if _placeholder_artist(db_track.track_artist) and _placeholder_artist(db_track.artist_name):
+                            # No usable artist evidence anywhere on the
+                            # row (placeholder album artist and a
+                            # placeholder or missing credit — the
+                            # soundtrack-rip shape). Title+album is the
+                            # only signal, so the title must clear every
+                            # guard the scorer applies AND be
+                            # near-identical: a merely similar title here
+                            # is a different song ('Believe' vs
+                            # 'Believer'), which a raw char ratio waved
+                            # through.
+                            if _title_score < 0.95:
+                                return None
+                            return _title_score, False
+                        # The row DOES carry artist evidence — a real
+                        # per-track credit, or filing under a specific
+                        # artist. This fallback is the only path that can
+                        # surface a cross-artist row at all, so the
+                        # evidence must be exact: a keyed name/piece equal
+                        # to a searched-artist variation. Deliberate
+                        # trade: a soundtrack filed under its composer
+                        # with no per-track credit no longer matches its
+                        # performer here — that filing is
+                        # indistinguishable from the wrong-artist case
+                        # above. An exact key is artist similarity 1.0,
+                        # so the confidence is the scorer's weighting
+                        # with the artist term at full marks.
+                        if not (_evidence_keys(db_track) & _artist_keys):
+                            return None
+                        return _title_score * 0.5 + 0.5, True
+
+                    _fallback_gate = max(0.7, confidence_threshold)
+                    _evidence_best = None
+                    _evidence_best_conf = 0.0
+                    _plain_best = None
+                    _plain_best_conf = 0.0
+
                     album_candidates = self.search_albums(title=album, artist="", limit=10, server_source=server_source)
                     for album_candidate in album_candidates:
                         album_title_sim = max(
@@ -12390,8 +12550,10 @@ class MusicDatabase:
                             JOIN albums al ON al.id = t.album_id
                             WHERE t.album_id = ? {source_filter}
                         """, params)
+                        _rows = cursor.fetchall()
+                        conn.close()
 
-                        for row in cursor.fetchall():
+                        for row in _rows:
                             # DatabaseTrack is a strict dataclass — only the declared
                             # fields go in __init__; the joined artist/album/server
                             # values are attached afterwards just like _rows_to_tracks
@@ -12408,17 +12570,41 @@ class MusicDatabase:
                             db_track.album_title = row['album_title']
                             db_track.server_source = row['server_source']
                             db_track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
-                            title_sim = max(
-                                self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
-                                self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
-                            )
-                            if title_sim > best_confidence and title_sim >= 0.7:
-                                best_confidence = title_sim
-                                best_match = db_track
+                            try:
+                                _scored = _fallback_row_confidence(db_track)
+                            except Exception as _row_err:
+                                # One bad row must not abandon the whole
+                                # fallback (remaining rows/albums may hold
+                                # the real match).
+                                logger.debug(f"Album-aware fallback row scoring failed for '{db_track.title}': {_row_err}")
+                                continue
+                            if _scored is None:
+                                continue
+                            _conf, _is_evidence = _scored
+                            if _is_evidence:
+                                if _conf > _evidence_best_conf:
+                                    _evidence_best_conf = _conf
+                                    _evidence_best = db_track
+                            elif _conf > _plain_best_conf:
+                                _plain_best_conf = _conf
+                                _plain_best = db_track
 
-                        if best_match and best_confidence >= 0.7:
-                            logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
-                            return best_match, best_confidence
+                    # A row WITH artist evidence outranks a no-evidence row
+                    # even at a lower weighted confidence: the scales are
+                    # not comparable (pure guarded title vs title+artist),
+                    # and the credited row is the one whose artist agrees.
+                    if _evidence_best is not None and _evidence_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_evidence_best.title}' by '{_evidence_best.artist_name}' (confidence: {_evidence_best_conf:.3f})")
+                        return _evidence_best, _evidence_best_conf
+                    if _plain_best is not None and _plain_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_plain_best.title}' by '{_plain_best.artist_name}' (confidence: {_plain_best_conf:.3f})")
+                        return _plain_best, _plain_best_conf
+                    # Fold the strongest fallback score into the diagnostic
+                    # best the no-match return below reports.
+                    for _m, _c in ((_evidence_best, _evidence_best_conf), (_plain_best, _plain_best_conf)):
+                        if _m is not None and _c > best_confidence:
+                            best_match = _m
+                            best_confidence = _c
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
@@ -13656,6 +13842,151 @@ class MusicDatabase:
         from core.text.normalize import normalize_for_comparison
         return normalize_for_comparison(text)
     
+    def _score_title_similarity(self, search_title: str, db_track: DatabaseTrack):
+        """The guarded title score from _calculate_track_confidence, split
+        out so the album-aware fallback can apply the SAME title guards
+        (length penalty, context/subtitle qualifier handling, word-level
+        plausibility, 0.6 floor) instead of trusting a raw char ratio
+        (#1715 review). Returns (score, passed): when passed is False the
+        score is the halved sub-threshold value _calculate_track_confidence
+        returns immediately; when True, score is the title similarity the
+        artist weighting should use."""
+        search_title_norm = self._normalize_for_comparison(search_title)
+        db_title_norm = self._normalize_for_comparison(db_track.title)
+
+        # Direct similarity with Unicode normalization
+        title_similarity = self._string_similarity(search_title_norm, db_title_norm)
+
+        # Also try with cleaned versions (removing parentheses, brackets, etc.)
+        clean_search_title = self._clean_track_title_for_comparison(search_title)
+        clean_db_title = self._clean_track_title_for_comparison(db_track.title)
+        clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
+
+        # Use the best title similarity (direct or cleaned)
+        best_title_similarity = max(title_similarity, clean_title_similarity)
+
+        # Length ratio penalty: if the DB title is significantly longer/shorter than the
+        # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
+        # SequenceMatcher gives high scores when the shorter string is fully contained
+        # in the longer one, which causes false positives for prefix/suffix matches.
+        len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
+        len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
+        if len_search > 0 and len_db > 0:
+            len_ratio = min(len_search, len_db) / max(len_search, len_db)
+            if len_ratio < 0.7:
+                # Titles differ in length by more than 30% — penalize heavily
+                best_title_similarity *= len_ratio
+
+        # #808: a parenthetical qualifier that merely RESTATES the release
+        # context is album context, not a version difference. Wishlist
+        # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
+        # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
+        # the qualifier appears in the album title, yet the length-ratio
+        # penalty above crushed the pair to ~0.17 and wishlist cleanup
+        # never recognised the owned edition. Strip qualifiers confirmed
+        # by the db album title (or by the other title) and score that
+        # variant with its OWN length guard — genuine version markers
+        # ('(Live)' on a studio album) appear in no context, keep their
+        # qualifier, and keep their penalty.
+        db_album_norm = self._normalize_for_comparison(
+            getattr(db_track, 'album_title', '') or '')
+        from core.text.title_match import strip_redundant_context_qualifiers
+        ctx_search = strip_redundant_context_qualifiers(
+            search_title_norm, db_album_norm, db_title_norm)
+        ctx_db = strip_redundant_context_qualifiers(
+            db_title_norm, db_album_norm, search_title_norm)
+        if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
+            ctx_sim = self._string_similarity(ctx_search, ctx_db)
+            ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
+            if ctx_ratio < 0.7:
+                ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
+            best_title_similarity = max(best_title_similarity, ctx_sim)
+
+        # #825: a bracketed qualifier that is a SUBTITLE — not a version
+        # marker and not numeric — is the same song. 'Llamando a la tierra
+        # (Serenade From the Stars)' vs the library's bare 'Llamando a la
+        # tierra': the subtitle restates nothing (so #808 keeps it) and the
+        # length penalty crushed the pair to ~0.14 — sync re-added it to
+        # the wishlist forever and cleanup (same matcher) never removed it.
+        # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
+        # are kept by the helper, so their mismatch penalty still stands.
+        from core.text.title_match import strip_subtitle_qualifiers
+        sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
+        sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
+        if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
+            sub_sim = self._string_similarity(sub_search, sub_db)
+            sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
+            if sub_ratio < 0.7:
+                sub_sim *= sub_ratio  # stripped forms still length-guarded
+            best_title_similarity = max(best_title_similarity, sub_sim)
+
+        # Word-level guard: SequenceMatcher's char ratio over-credits
+        # different songs that share a long substring or only a stopword
+        # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
+        # vs "Around the World" = 0.62). Since a same-artist comparison
+        # always scores artist = 1.0, the title is the only discriminator,
+        # so a bad-but-moderate title score gets carried over the threshold
+        # (#769). Reject pairs that aren't near-identical AND share no
+        # significant word — the real track is then reported missing.
+        from core.text.title_match import titles_plausibly_same
+        if not titles_plausibly_same(
+            clean_search_title or search_title_norm,
+            clean_db_title or db_title_norm,
+            best_title_similarity,
+        ):
+            return best_title_similarity * 0.5, False  # below any threshold
+
+        # Require minimum title similarity to prevent a perfect artist match from
+        # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
+        if best_title_similarity < 0.6:
+            return best_title_similarity * 0.5, False  # Can never exceed 0.3, well below any threshold
+
+        return best_title_similarity, True
+
+    def _score_artist_similarity(self, search_artist: str, db_track: DatabaseTrack) -> float:
+        """The artist score from _calculate_track_confidence, split out so
+        its exact semantics can be reused and probed on their own
+        (#1715)."""
+        search_artist_norm = self._normalize_for_comparison(search_artist)
+        db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
+
+        artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+        # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+        # often differs from the per-track artist (e.g. Vaiana OST is filed under
+        # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+        # Jackson). Score against tracks.track_artist too and take the better
+        # match so playlist sync can find these.
+        #
+        # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+        # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+        # delimiters and score each piece independently. Without this, a
+        # discography completion check for Artist2 would miss a track stored
+        # in the library under Artist1's album with a "feat. Artist2" credit.
+        db_track_artist = getattr(db_track, 'track_artist', None)
+        if db_track_artist:
+            db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+            # Whole-string similarity first as the floor.
+            track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+            # Then split on multi-artist delimiters and score each piece —
+            # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+            # "x" between names all show up here in real-world tags.
+            pieces = re.split(
+                r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                db_track_artist_norm,
+                flags=re.IGNORECASE,
+            )
+            for piece in pieces:
+                piece = piece.strip()
+                if not piece:
+                    continue
+                piece_sim = self._string_similarity(search_artist_norm, piece)
+                if piece_sim > track_artist_sim:
+                    track_artist_sim = piece_sim
+            artist_similarity = max(artist_similarity, track_artist_sim)
+
+        return artist_similarity
+
     def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
         """Calculate confidence score for track match with enhanced cleaning and Unicode normalization"""
         try:
@@ -13664,139 +13995,20 @@ class MusicDatabase:
             search_artist_norm = self._normalize_for_comparison(search_artist)
             db_title_norm = self._normalize_for_comparison(db_track.title)
             db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
-            
+
             # Debug logging for Unicode normalization
             if search_title != search_title_norm or search_artist != search_artist_norm or \
                db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
                 logger.debug("Unicode normalization:")
                 logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
                 logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
-            
-            # Direct similarity with Unicode normalization
-            title_similarity = self._string_similarity(search_title_norm, db_title_norm)
 
-            # Also try with cleaned versions (removing parentheses, brackets, etc.)
-            clean_search_title = self._clean_track_title_for_comparison(search_title)
-            clean_db_title = self._clean_track_title_for_comparison(db_track.title)
-            clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
-            
-            # Use the best title similarity (direct or cleaned)
-            best_title_similarity = max(title_similarity, clean_title_similarity)
+            best_title_similarity, title_passed = self._score_title_similarity(search_title, db_track)
+            if not title_passed:
+                return best_title_similarity
 
-            # Length ratio penalty: if the DB title is significantly longer/shorter than the
-            # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
-            # SequenceMatcher gives high scores when the shorter string is fully contained
-            # in the longer one, which causes false positives for prefix/suffix matches.
-            len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
-            len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
-            if len_search > 0 and len_db > 0:
-                len_ratio = min(len_search, len_db) / max(len_search, len_db)
-                if len_ratio < 0.7:
-                    # Titles differ in length by more than 30% — penalize heavily
-                    best_title_similarity *= len_ratio
+            artist_similarity = self._score_artist_similarity(search_artist, db_track)
 
-            # #808: a parenthetical qualifier that merely RESTATES the release
-            # context is album context, not a version difference. Wishlist
-            # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
-            # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
-            # the qualifier appears in the album title, yet the length-ratio
-            # penalty above crushed the pair to ~0.17 and wishlist cleanup
-            # never recognised the owned edition. Strip qualifiers confirmed
-            # by the db album title (or by the other title) and score that
-            # variant with its OWN length guard — genuine version markers
-            # ('(Live)' on a studio album) appear in no context, keep their
-            # qualifier, and keep their penalty.
-            db_album_norm = self._normalize_for_comparison(
-                getattr(db_track, 'album_title', '') or '')
-            from core.text.title_match import strip_redundant_context_qualifiers
-            ctx_search = strip_redundant_context_qualifiers(
-                search_title_norm, db_album_norm, db_title_norm)
-            ctx_db = strip_redundant_context_qualifiers(
-                db_title_norm, db_album_norm, search_title_norm)
-            if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
-                ctx_sim = self._string_similarity(ctx_search, ctx_db)
-                ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
-                if ctx_ratio < 0.7:
-                    ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
-                best_title_similarity = max(best_title_similarity, ctx_sim)
-
-            # #825: a bracketed qualifier that is a SUBTITLE — not a version
-            # marker and not numeric — is the same song. 'Llamando a la tierra
-            # (Serenade From the Stars)' vs the library's bare 'Llamando a la
-            # tierra': the subtitle restates nothing (so #808 keeps it) and the
-            # length penalty crushed the pair to ~0.14 — sync re-added it to
-            # the wishlist forever and cleanup (same matcher) never removed it.
-            # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
-            # are kept by the helper, so their mismatch penalty still stands.
-            from core.text.title_match import strip_subtitle_qualifiers
-            sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
-            sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
-            if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
-                sub_sim = self._string_similarity(sub_search, sub_db)
-                sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
-                if sub_ratio < 0.7:
-                    sub_sim *= sub_ratio  # stripped forms still length-guarded
-                best_title_similarity = max(best_title_similarity, sub_sim)
-
-            # Word-level guard: SequenceMatcher's char ratio over-credits
-            # different songs that share a long substring or only a stopword
-            # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
-            # vs "Around the World" = 0.62). Since a same-artist comparison
-            # always scores artist = 1.0, the title is the only discriminator,
-            # so a bad-but-moderate title score gets carried over the threshold
-            # (#769). Reject pairs that aren't near-identical AND share no
-            # significant word — the real track is then reported missing.
-            from core.text.title_match import titles_plausibly_same
-            if not titles_plausibly_same(
-                clean_search_title or search_title_norm,
-                clean_db_title or db_title_norm,
-                best_title_similarity,
-            ):
-                return best_title_similarity * 0.5  # below any threshold
-
-            # Require minimum title similarity to prevent a perfect artist match from
-            # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
-            if best_title_similarity < 0.6:
-                return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
-
-            # the artist is scored only once the title has cleared its floor:
-            # below 0.6 the result is title-only, and almost every candidate in a
-            # pool is a different song by the same artist
-            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
-
-            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
-            # often differs from the per-track artist (e.g. Vaiana OST is filed under
-            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
-            # Jackson). Score against tracks.track_artist too and take the better
-            # match so playlist sync can find these.
-            #
-            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
-            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
-            # delimiters and score each piece independently. Without this, a
-            # discography completion check for Artist2 would miss a track stored
-            # in the library under Artist1's album with a "feat. Artist2" credit.
-            db_track_artist = getattr(db_track, 'track_artist', None)
-            if db_track_artist:
-                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
-                # Whole-string similarity first as the floor.
-                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
-                # Then split on multi-artist delimiters and score each piece —
-                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
-                # "x" between names all show up here in real-world tags.
-                pieces = re.split(
-                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
-                    db_track_artist_norm,
-                    flags=re.IGNORECASE,
-                )
-                for piece in pieces:
-                    piece = piece.strip()
-                    if not piece:
-                        continue
-                    piece_sim = self._string_similarity(search_artist_norm, piece)
-                    if piece_sim > track_artist_sim:
-                        track_artist_sim = piece_sim
-                artist_similarity = max(artist_similarity, track_artist_sim)
-            
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
@@ -13806,11 +14018,11 @@ class MusicDatabase:
                 confidence *= 0.3  # Reduce confidence by 70%
 
             return confidence
-            
+
         except Exception as e:
             logger.error(f"Error calculating track confidence: {e}")
             return 0.0
-    
+
     def _clean_track_title_for_comparison(self, title: str) -> str:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         return MusicDatabase._clean_track_title_cached(title)
@@ -18188,6 +18400,67 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding similar artist: {e}")
             return False
+
+    def replace_similar_artists(self, source_artist_id: str, similars: List[Dict[str, Any]],
+                                profile_id: int = 1,
+                                source_provider: Optional[str] = None) -> int:
+        """swap one artist's similar artists for a fresh fetch, in one go.
+
+        the upsert only ever added. a name a better match no longer produces
+        (Colde stored for Cold) stayed forever, and every refetch bumped
+        occurrence_count, which the reader sums. the hero's rotation history
+        (last_featured) carries over by name.
+
+        each entry takes add_or_update_similar_artist's kwargs. returns how
+        many rows went in; an empty list leaves the old set alone."""
+        from core.context_sentinels import is_context_sentinel
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return 0
+        rows = [s for s in similars or [] if s.get('similar_artist_name')]
+        if not rows:
+            return 0
+        provider = (str(source_provider).strip().lower() or None) if source_provider else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT similar_artist_name, last_featured FROM similar_artists
+                    WHERE profile_id = ? AND source_artist_id = ? AND last_featured IS NOT NULL
+                """, (profile_id, source_artist_id))
+                featured = {(r[0] or '').casefold(): r[1] for r in cursor.fetchall()}
+                cursor.execute(
+                    "DELETE FROM similar_artists WHERE profile_id = ? AND source_artist_id = ?",
+                    (profile_id, source_artist_id))
+                stored = 0
+                for row in rows:
+                    name = row['similar_artist_name']
+                    genres = row.get('genres')
+                    image_url = row.get('image_url')
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
+                         similarity_rank, occurrence_count, last_updated, profile_id,
+                         image_url, genres, popularity, metadata_updated_at, source_provider,
+                         last_featured)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?,
+                                CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP END, ?, ?)
+                        ON CONFLICT(profile_id, source_artist_id, similar_artist_name) DO NOTHING
+                    """, (source_artist_id, row.get('similar_artist_spotify_id'),
+                          row.get('similar_artist_itunes_id'), row.get('similar_artist_deezer_id'),
+                          row.get('similar_artist_musicbrainz_id'), name,
+                          row.get('similarity_rank', 1), profile_id, image_url,
+                          json.dumps(genres) if genres else None, row.get('popularity', 0) or 0,
+                          image_url, provider, featured.get(name.casefold())))
+                    stored += max(cursor.rowcount, 0)
+                conn.commit()
+                return stored
+        except Exception as e:
+            logger.error(f"Error replacing similar artists: {e}")
+            return 0
 
     def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""
@@ -25199,8 +25472,12 @@ class MusicDatabase:
         profile_id: Optional[int] = None,
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
+        sync_mode: Optional[str] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
+
+        ``sync_mode`` None leaves it alone, '' clears it back to the global
+        mode, anything else is stored as given (the route validates it).
 
         Returns ``'ok'``, ``'not_found'``, ``'unknown_quality_profile'`` or
         ``'error'``.  Both fields are validated BEFORE anything is written and
@@ -25230,6 +25507,10 @@ class MusicDatabase:
                 if organize_by_playlist is not None:
                     assignments.append("organize_by_playlist=?")
                     params.append(1 if organize_by_playlist else 0)
+
+                if sync_mode is not None:
+                    assignments.append("sync_mode=?")
+                    params.append(sync_mode or None)
 
                 if not assignments:
                     return 'ok'

@@ -464,9 +464,22 @@ def run_service_test(service, test_config):
                     params={'q': 'beatles', 'limit': 1},
                     timeout=5,
                 )
-                if resp.ok and isinstance(resp.json(), dict):
+                if not (resp.ok and isinstance(resp.json(), dict)):
+                    return False, f"Deezer returned HTTP {resp.status_code}"
+                # the public api answering says nothing about the login that
+                # favorites and playlists ride on, so check that too when it's set.
+                # deezer answers a dead token with 200 and an error body.
+                token = config_manager.get('deezer.access_token', None)
+                if not token:
                     return True, "Deezer Public API reachable"
-                return False, f"Deezer returned HTTP {resp.status_code}"
+                if not wait_for_slot(max_wait_seconds=3.0):
+                    return True, "Deezer Public API reachable (login not checked, rate limited)"
+                me = requests.get('https://api.deezer.com/user/me',
+                                  params={'access_token': token}, timeout=5)
+                body = me.json() if me.ok else {}
+                if isinstance(body, dict) and body.get('id') and not body.get('error'):
+                    return True, f"Deezer connected as {body.get('name') or 'Deezer user'}"
+                return True, f"{WARNING_MARKER} Deezer public API works, but your Deezer login expired. Authenticate again."
             except Exception as e:
                 return False, f"Deezer connection error: {str(e)}"
         elif service == "jiosaavn":
@@ -513,6 +526,9 @@ def run_service_test(service, test_config):
                 return False, "Hydrabase not connected. Configure URL + API key and click Connect."
             except Exception as e:
                 return False, f"Hydrabase connection error: {str(e)}"
+        elif service == "concerts":
+            from core.concerts_client import check_keys
+            return check_keys()
         elif service == "musicbrainz":
             try:
                 from core.metadata.registry import get_musicbrainz_client

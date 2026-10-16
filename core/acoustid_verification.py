@@ -10,6 +10,7 @@ the file is flagged as incorrect.
 
 import re
 import threading
+import time
 from difflib import SequenceMatcher
 from typing import Optional, Dict, Any, Tuple, List
 from enum import Enum
@@ -66,6 +67,7 @@ from core.matching.audio_verification import (  # noqa: E402
     normalize as _normalize,
     similarity as _similarity,
     _alias_aware_artist_sim,
+    _recording_identity as _core_recording_identity,
     _find_best_title_artist_match as _core_find_best_title_artist_match,
     evaluate as _core_evaluate,
     Decision as _CoreDecision,
@@ -206,6 +208,247 @@ def _enrich_recordings_from_musicbrainz(
 
     logger.info(f"Enriched {enriched_count}/{min(len(recordings), MAX_MB_ENRICHMENT_LOOKUPS)} recordings from MusicBrainz")
     return recordings
+
+
+def _collect_recording_titles(data: Dict[str, Any],
+                              mbid: str) -> Tuple[List[str], List[str]]:
+    """The titles a MusicBrainz recording payload names for the recording,
+    as ``(release_titles, alias_titles)``.
+
+    ``release_titles``: the canonical title plus its track title on each
+    release in the payload — the strong identity evidence. ``alias_titles``:
+    the recording's own aliases — also official alternate names, but
+    crowd-sourced and weaker, so the decision core consults them second
+    and reports them as aliases, never as release listings. Each list is
+    deduped case-insensitively, payload order preserved.
+
+    A recording lookup (``inc=releases+media``) returns only this
+    recording's track per medium, and those track objects carry no
+    recording reference — but a payload shaped any other way (a
+    full-tracklist response, a third-party MusicBrainz mirror) can carry
+    sibling tracks, so a track that DOES name a different recording is
+    never collected: only tracks with no recording reference, or this
+    recording's own, count as its titles.
+
+    ``Search hint`` aliases are excluded: MusicBrainz marks common
+    misspellings and misattributions as search hints, and a title a
+    recording is commonly MISlabelled as is precisely the wrong-download
+    shape — it is not a name the recording is legitimately known by.
+    """
+    release_titles: List[str] = []
+    alias_titles: List[str] = []
+    seen = set()
+
+    def _add(titles: List[str], title: Any) -> None:
+        title = (title or '').strip() if isinstance(title, str) else ''
+        if title and title.lower() not in seen:
+            seen.add(title.lower())
+            titles.append(title)
+
+    _add(release_titles, data.get('title'))
+    for release in data.get('releases') or []:
+        if not isinstance(release, dict):
+            continue
+        for medium in release.get('media') or []:
+            if not isinstance(medium, dict):
+                continue
+            for track in medium.get('tracks') or []:
+                if not isinstance(track, dict):
+                    continue
+                track_rec = track.get('recording')
+                if isinstance(track_rec, dict):
+                    track_rec_id = track_rec.get('id')
+                elif isinstance(track_rec, str):
+                    track_rec_id = track_rec
+                else:
+                    track_rec_id = None
+                if track_rec_id and track_rec_id != mbid:
+                    continue
+                _add(release_titles, track.get('title'))
+    for alias in data.get('aliases') or []:
+        if isinstance(alias, dict):
+            if (alias.get('type') or '').strip().lower() == 'search hint':
+                continue
+            _add(alias_titles, alias.get('name'))
+    return release_titles, alias_titles
+
+
+# Alternate-title resolutions, per recording MBID: the RAW collected
+# titles plus when they were read. Raw, not filtered — which titles are
+# "alternate" depends on the canonical title of the recording dict at
+# hand, and the same MBID can be presented under different canonical
+# titles, so the canonical filter is applied per recording at attach
+# time, never baked into the cache.
+#
+# Both outcomes are cached: a positive resolution for a day, a negative
+# one (the recording has no other names — the ordinary case, and the one
+# a bulk scan would otherwise re-pay for on every file; also a genuine
+# MusicBrainz 404 for the MBID) for an hour. "Positive" is classified at
+# put time: the collected titles name MORE than the one canonical name
+# (the release list always contains the canonical title, so a bare
+# non-empty list cannot be the test). Transport failures are NOT cached:
+# a MusicBrainz outage must not suppress resolution after it ends.
+# Bounded at 512 entries, cleared wholesale when full — a pure
+# optimisation; correctness never depends on it, only cost does.
+_alternate_titles_cache: Dict[
+    str, Tuple[float, bool, List[str], List[str]]] = {}
+_alternate_titles_cache_lock = threading.Lock()
+_ALTERNATE_TITLES_CACHE_MAX = 512
+_ALTERNATE_TITLES_TTL_POSITIVE_S = 24 * 3600.0
+_ALTERNATE_TITLES_TTL_NEGATIVE_S = 3600.0
+
+
+def _alternate_titles_cache_get(
+    mbid: str,
+) -> Optional[Tuple[List[str], List[str]]]:
+    with _alternate_titles_cache_lock:
+        entry = _alternate_titles_cache.get(mbid)
+        if entry is None:
+            return None
+        stored_at, positive, release_titles, alias_titles = entry
+        ttl = (_ALTERNATE_TITLES_TTL_POSITIVE_S if positive
+               else _ALTERNATE_TITLES_TTL_NEGATIVE_S)
+        if time.monotonic() - stored_at > ttl:
+            del _alternate_titles_cache[mbid]
+            return None
+    return list(release_titles), list(alias_titles)
+
+
+def _alternate_titles_cache_put(
+    mbid: str, release_titles: List[str], alias_titles: List[str],
+) -> None:
+    positive = (len(release_titles) + len(alias_titles)) > 1
+    with _alternate_titles_cache_lock:
+        if (mbid not in _alternate_titles_cache
+                and len(_alternate_titles_cache) >= _ALTERNATE_TITLES_CACHE_MAX):
+            _alternate_titles_cache.clear()
+        _alternate_titles_cache[mbid] = (
+            time.monotonic(), positive,
+            list(release_titles), list(alias_titles))
+
+
+def _genuinely_different(titles: List[str], canonical_title: str) -> List[str]:
+    """The subset of ``titles`` that are genuinely different names from
+    the canonical title. "Different" is judged on the qualifier-preserving
+    recording identity, so a release's bare "Song" IS an alternate of a
+    canonical "Song (Instrumental)" (the core's version gates decide
+    whether that may identify anything), while a mere case variant of
+    the canonical title is not an alternate at all."""
+    canonical_identity = _core_recording_identity(canonical_title or '')
+    return [
+        t for t in titles
+        if _core_recording_identity(t) != canonical_identity
+    ]
+
+
+def _resolve_alternate_titles(
+    recordings: List[Dict[str, Any]],
+) -> bool:
+    """
+    Fill ``alternate_titles`` / ``alias_titles`` on recordings from
+    MusicBrainz (#1700).
+
+    AcoustID reports a recording under its canonical MusicBrainz title,
+    but the same recording appears under different track titles on
+    different releases — regional editions retitle it, and the expected
+    metadata usually follows ONE release's title. One
+    ``get_recording(inc=releases+media)`` call returns this recording's
+    track title on each release in the lookup response, plus the
+    recording's own aliases: the set of names this recording is
+    legitimately known by, keyed by its MusicBrainz ID. (A MusicBrainz
+    lookup links at most 25 releases, so for a compilation-heavy
+    recording the set can be a subset — a title on a release past the
+    cap simply stays unresolved and the original verdict stands.)
+
+    The lookup budget (``MAX_MB_ENRICHMENT_LOOKUPS`` distinct MBIDs,
+    shared in spirit with the title/artist enrichment — which may spend
+    its own budget earlier in the same verification) is spent on the
+    highest-scored candidates first: those are the only ones the
+    decision core's identity check can use. Every recording dict that
+    shares a resolved MBID gains the titles, not just the first copy —
+    the fingerprint's top-scored copy is the one that matters.
+
+    Best-effort like the alias resolution: any failure (no MB client,
+    network down, unknown MBID, malformed payload) leaves the recording
+    untouched and the caller keeps the verdict it already had. Returns
+    True when at least one recording gained a genuinely different
+    alternate or alias title.
+
+    Args:
+        recordings: List of recording dicts from fingerprint_and_lookup()
+
+    Returns:
+        True if any recording gained alternate titles, else False.
+    """
+    def _score(rec: Dict[str, Any]) -> float:
+        try:
+            return float(rec.get('score'))
+        except (TypeError, ValueError):
+            return -1.0
+
+    by_mbid: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in recordings:
+        mbid = rec.get('mbid')
+        if mbid and (not rec.get('alternate_titles')
+                     or not rec.get('alias_titles')):
+            by_mbid.setdefault(mbid, []).append(rec)
+    if not by_mbid:
+        return False
+    # Highest-scored occurrence decides an MBID's priority.
+    chosen = sorted(
+        by_mbid.items(),
+        key=lambda item: max(_score(r) for r in item[1]),
+        reverse=True,
+    )[:MAX_MB_ENRICHMENT_LOOKUPS]
+
+    mb = None
+    resolved_any = False
+
+    for mbid, recs in chosen:
+        collected = _alternate_titles_cache_get(mbid)
+        if collected is None:
+            if mb is None:
+                try:
+                    mb = _get_mb_client()
+                except Exception as e:
+                    logger.debug(
+                        f"Alternate-title resolution unavailable: {e}")
+                    return resolved_any
+            try:
+                # raise_on_error separates a genuine 404 (MusicBrainz
+                # does not know this MBID — a stable negative worth
+                # caching) from a transport failure (returns None only
+                # for the 404; anything else raises and stays uncached).
+                data = mb.get_recording(
+                    mbid, includes=['releases', 'media', 'aliases'],
+                    raise_on_error=True)
+                if not data:
+                    _alternate_titles_cache_put(mbid, [], [])
+                    continue
+                collected = _collect_recording_titles(data, mbid)
+            except Exception as e:
+                logger.debug(
+                    f"Failed to resolve alternate titles for {mbid}: {e}")
+                continue
+            _alternate_titles_cache_put(mbid, collected[0], collected[1])
+        release_titles, alias_titles = collected
+        for rec in recs:
+            alternates = _genuinely_different(
+                release_titles, rec.get('title') or '')
+            aliases = _genuinely_different(
+                alias_titles, rec.get('title') or '')
+            if alternates:
+                rec['alternate_titles'] = alternates
+                resolved_any = True
+            if aliases:
+                rec['alias_titles'] = aliases
+                resolved_any = True
+            if alternates or aliases:
+                logger.debug(
+                    f"Alternate titles for {mbid}: "
+                    f"releases={alternates} aliases={aliases}")
+
+    return resolved_any
 
 
 class AcoustIDVerification:
@@ -381,6 +624,44 @@ class AcoustIDVerification:
                 aliases_provider=_aliases_provider,
                 accept_version=_accept_version,
             )
+            if (outcome.decision == _CoreDecision.FAIL
+                    or (outcome.decision == _CoreDecision.SKIP
+                        and best_score >= 0.95)):
+                # Same recording, different release title (#1700): the
+                # decision just made rests on the recording's canonical
+                # MusicBrainz title, but the expected title may be the
+                # title this recording carries on another release (a
+                # regional edition's retitle scores 0% against the
+                # canonical title while naming the same recording).
+                # Resolve the recordings' alternate titles from
+                # MusicBrainz — keyed by the AcoustID recording IDs, one
+                # call per distinct MBID (capped, highest scores first) —
+                # and re-decide ONCE.
+                #
+                # The trigger is deliberately narrow, because resolution
+                # costs MusicBrainz calls on the non-PASS path: a FAIL is
+                # the harm being fixed (a correct file quarantined /
+                # flagged), and a SKIP is only worth the calls when the
+                # fingerprint is near-certain (>= 0.95) — the shape where
+                # identity evidence can actually change the outcome, and
+                # the one `require_verified` turns into a rejection. An
+                # ordinary ambiguous SKIP in a bulk scan of a foreign
+                # catalogue pays nothing. A direct PASS never reaches
+                # here at all, and a resolution failure keeps the
+                # original verdict.
+                try:
+                    if _resolve_alternate_titles(recordings):
+                        outcome = _core_evaluate(
+                            expected_track_name, expected_artist_name,
+                            recordings,
+                            fingerprint_score=best_score,
+                            aliases_provider=_aliases_provider,
+                            accept_version=_accept_version,
+                        )
+                except Exception as e:
+                    logger.debug(
+                        "Alternate-title resolution failed, keeping "
+                        f"original verdict: {e}")
             logger.info(
                 "Best match: '%s' by '%s' (title_sim=%.2f, artist_sim=%.2f) -> %s",
                 outcome.matched_title, outcome.matched_artist,

@@ -8,7 +8,7 @@ Endpoints (exact contract — the webui builder depends on it):
 - PUT    /api/video/subtitles/overrides/<kind>/<item_id>  {"languages": ["en","es"]}
          → {"ok": true, "languages": [...]}  (400 on bad kind / bad codes)
 - DELETE /api/video/subtitles/overrides/<kind>/<item_id> → {"ok": true}
-- GET    /api/video/subtitles/search/<kind>/<item_id>?lang=en  (kind: movie|episode)
+- GET    /api/video/subtitles/search/<kind>/<item_id>?lang=en[&forced=1]  (kind: movie|episode)
          → {"candidates": [{candidate_id, provider, title, score, hash_match,
                             download_count, language, hi, forced}]}  (score desc)
 - POST   /api/video/subtitles/manual-download
@@ -278,9 +278,13 @@ def register_routes(bp):
             _pref = _hi_forced_pref(get_setting)
         except Exception:  # noqa: BLE001
             _pref = "off"
-        query = SubtitleQuery(identity=dict(identity), language=lang,
+        # forced=1 searches forced (foreign-parts-only) subs; full and forced
+        # never mix. manual=True keeps hi and plain side by side — the user
+        # is the one choosing.
+        forced = str(request.args.get("forced") or "").strip().lower() in ("1", "true", "yes")
+        query = SubtitleQuery(identity=dict(identity), language=lang, forced=forced,
                               filename=filename, moviehash=moviehash,
-                              file_path=file_path, hi_forced_pref=_pref)
+                              file_path=file_path, hi_forced_pref=_pref, manual=True)
         from core.video.subtitles import parse_provider_order
         order = parse_provider_order(settings.get("subtitle_provider_order"))
         try:
@@ -396,42 +400,3 @@ def register_routes(bp):
                               candidate_title=c["title"], score=c["score"],
                               hi=c["hi"], forced=c["forced"])
         return jsonify({"ok": True, "path": path})
-
-    @bp.route("/subtitles/backfill", methods=["POST"])
-    def subtitles_backfill():
-        """Start a library backfill sweep: create wanted rows for library
-        videos missing subtitles, so the worker picks them up. The sweep runs
-        on a daemon thread, paced at the worker's batch cap — 202 means
-        started, 409 means one is already running."""
-        from . import get_video_db
-        from core.video.subtitles import worker as worker_mod
-        db = get_video_db()
-
-        def _db_provider():
-            return db
-
-        # The backfill only makes sense with subtitles enabled — creating
-        # wanted rows while the master toggle is off would queue work the
-        # worker will never pick up.
-        try:
-            from core.video import organization as _org
-            if not _org.load(db).get("download_subtitles"):
-                return jsonify({"error": "subtitle downloads are disabled"}), 400
-        except Exception:  # noqa: BLE001 - settings unreadable → let it start
-            pass
-        try:
-            ok, reason = worker_mod.start_backfill(_db_provider)
-        except Exception:  # noqa: BLE001
-            logger.exception("subtitle backfill start failed")
-            return jsonify({"error": "could not start backfill"}), 500
-        if not ok:
-            return jsonify({"error": reason}), 409
-        return jsonify({"ok": True, "started": True}), 202
-
-    @bp.route("/subtitles/backfill/status", methods=["GET"])
-    def subtitles_backfill_status():
-        from core.video.subtitles import worker as worker_mod
-        try:
-            return jsonify(worker_mod.backfill_status())
-        except Exception:  # noqa: BLE001 - status is best-effort
-            return jsonify({"state": "unknown"}), 500

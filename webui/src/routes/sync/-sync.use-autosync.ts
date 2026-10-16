@@ -245,7 +245,12 @@ export function useAutoSync({ open, now = () => Date.now(), runPipeline }: UseAu
     trigger: { trigger_type: string; trigger_config: unknown },
     existingId: number | string | undefined,
   ) => {
-    const payload = autoSyncSchedulePayload(playlist, playlistId, trigger);
+    // read before the reload: dropOpposing may have just deleted the row
+    // that held it, a weekly->hourly swap still keeps its config (#1704)
+    const carry =
+      stateRef.current.playlistSchedules[String(playlistId)]?.action_config ??
+      stateRef.current.weeklySchedules[String(playlistId)]?.action_config;
+    const payload = autoSyncSchedulePayload(playlist, playlistId, trigger, carry);
     const res = existingId
       ? await updateAutomation(existingId, payload)
       : await createAutomation(payload);

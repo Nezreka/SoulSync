@@ -142,7 +142,8 @@ def test_cycle_downloads_and_marks_have(db, tmp_path, monkeypatch):
     fs = FakeFS()
     stats = worker.run_cycle(db, _settings(), fs)
     assert stats == {"attempted": 1, "downloaded": 1, "missed": 0, "skipped": 0,
-                     "upgraded": 0, "upgrade_checked": 0, "upgrade_skipped": 0}
+                     "upgraded": 0, "upgrade_checked": 0, "upgrade_skipped": 0,
+                     "requeued": 0}
     assert db.subtitle_have("download", dl_id, "en")
     assert fs.texts[os.path.join(str(tmp_path), "Movie.2024.1080p.WEB-GROUP.en.srt")] == "srt-data"
     assert db.subtitle_quota_used("scripted") == 1

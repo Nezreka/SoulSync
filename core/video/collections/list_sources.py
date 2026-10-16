@@ -363,6 +363,29 @@ def _fetch_mdblist(db, ref: Any) -> List[Dict[str, Any]]:
     return _community_cached(("mdblist", us), build)
 
 
+def check_mdblist_key(key: str) -> tuple:
+    """Settings test button. /user is the cheapest call that needs a key, and
+    mdblist answers a bad one with 403 and a "Invalid API key" body."""
+    import requests
+    if not key:
+        return False, "No MDBList API key set"
+    try:
+        r = requests.get("https://api.mdblist.com/user", params={"apikey": key}, timeout=10)
+    except Exception as e:   # noqa: BLE001
+        return False, f"MDBList unreachable: {e}"
+    if r.status_code in (401, 403):
+        return False, "MDBList rejected the API key"
+    if r.status_code == 429:
+        return False, "MDBList is rate limiting, try again shortly"
+    if not r.ok:
+        return False, f"MDBList returned {r.status_code}"
+    try:
+        user = (r.json() or {}).get("username")
+    except ValueError:
+        user = None
+    return True, f"MDBList connected as {user}" if user else "MDBList key works"
+
+
 def _fetch_list(eng, ref: Any) -> List[Dict[str, Any]]:
     # Lists get a higher page cap (500 items) than charts — a public TMDB list
     # is a complete membership, not a ranking to sample.

@@ -80,6 +80,33 @@ export function artMapMeasureResize(
 }
 
 /**
+ * How a RESIZE re-measures in the STACKED phone layout (Oct 13 fold, M-11).
+ *
+ * On phones the content row becomes a column: the genre sidebar is a
+ * full-width strip ABOVE the canvas, not a column beside it. The row-layout
+ * resize above then subtracts the sidebar's full-strip width from the canvas
+ * width — at 390px that is max(120, 390 − 390) = 120px, so a mobile URL-bar
+ * collapse (which fires window resize) shrank the live canvas to a 120px
+ * strip. In the stacked layout the sidebar costs HEIGHT, not width: the
+ * canvas takes the full container width and what is left under the toolbar
+ * and the strip. Both axes keep the 120px floor.
+ */
+export function artMapMeasureResizeStacked(
+  containerWidth: number,
+  containerHeight: number,
+  sidebarHeight: number,
+  toolbarHeight: number | null,
+): ArtMapMeasurement {
+  return {
+    width: Math.max(120, containerWidth),
+    height: Math.max(
+      120,
+      containerHeight - (toolbarHeight ?? ARTMAP_TOOLBAR_FALLBACK) - sidebarHeight,
+    ),
+  };
+}
+
+/**
  * Point the map at a canvas and size it (8290-8294).
  *
  * The backing store is devicePixelRatio times the CSS size, and the context is

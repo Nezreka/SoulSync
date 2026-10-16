@@ -55,11 +55,12 @@ def test_map_payload_unknown_source_or_no_id():
 # --------------------------------------------------------------------------
 
 def _capture_store():
+    """a replace_similar_artists stand-in: every row it was handed, keyed."""
     calls = []
 
-    def store(**kwargs):
-        calls.append(kwargs)
-        return True
+    def store(source_artist_id, rows, profile_id=1):
+        calls.extend(dict(r, source_artist_id=source_artist_id, profile_id=profile_id) for r in rows)
+        return len(rows)
     return store, calls
 
 
@@ -131,16 +132,32 @@ def test_process_artist_skips_similars_without_a_storable_source_id():
     assert calls[0]['similar_artist_spotify_id'] == 'sp1'
 
 
-def test_process_artist_skips_unstorable_but_counts_real():
-    # A store() that fails for one row shouldn't abort the rest.
-    calls = []
+def test_process_artist_hands_the_whole_set_over_at_once():
+    # one replace per artist: the fresh set swaps the old one whole, so a
+    # wrong match an older fetch made does not survive next to it
+    batches = []
 
-    def store(**kwargs):
-        calls.append(kwargs)
-        return kwargs['similar_artist_name'] != 'B'  # B fails to store
+    def store(source_artist_id, rows, profile_id=1):
+        batches.append([r['similar_artist_name'] for r in rows])
+        return len(rows)
     payload = {'success': True, 'similar_artists': [
         {'name': 'B', 'id': '1', 'source': 'spotify'},
         {'name': 'C', 'id': '2', 'source': 'spotify'},
     ]}
     status, count, _ = w.process_artist('S', 'A', lambda n, l: payload, store)
-    assert status == 'matched' and count == 1 and len(calls) == 2
+    assert status == 'matched' and count == 2 and batches == [['B', 'C']]
+
+
+def test_process_artist_leaves_the_old_set_when_nothing_is_storable():
+    store, calls = _capture_store()
+    payload = {'success': True, 'similar_artists': [{'name': 'D', 'id': 'dg', 'source': 'discogs'}]}
+    status, count, _ = w.process_artist('S', 'A', lambda n, l: payload, store)
+    assert status == 'not_found' and count == 0 and calls == []
+
+
+def test_process_artist_store_failure_is_a_retriable_error():
+    def store(source_artist_id, rows, profile_id=1):
+        raise RuntimeError('database is locked')
+    payload = {'success': True, 'similar_artists': [{'name': 'B', 'id': '1', 'source': 'spotify'}]}
+    status, count, detail = w.process_artist('S', 'A', lambda n, l: payload, store)
+    assert status == 'error' and count == 0 and 'locked' in detail

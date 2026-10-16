@@ -182,6 +182,7 @@ function MirroredCardMenu({
   onClear,
   onDelete,
   onToggleOrganize,
+  onSetSyncMode,
   onCopyToMine,
 }: {
   row: MirroredPlaylistRow;
@@ -196,6 +197,8 @@ function MirroredCardMenu({
   onClear: () => void;
   onDelete: () => void;
   onToggleOrganize: (enabled: boolean) => void;
+  /** '' = back to the global mode */
+  onSetSyncMode: (mode: string) => void;
   /** a mirror only: an editable copy in My Playlists */
   onCopyToMine?: () => void;
 }) {
@@ -272,6 +275,29 @@ function MirroredCardMenu({
           <span dangerouslySetInnerHTML={profileMarkup} />
         </div>
       ) : null}
+      {/* #1704: append-only for a mirror you add to on the server, while
+          the global mode keeps doing the rest */}
+      <div
+        className="pl-menu-field"
+        onClick={(e) => {
+          e.stopPropagation();
+        }}
+      >
+        <span className="pl-menu-heading">Sync mode</span>
+        <select
+          aria-label="Sync mode"
+          value={row.sync_mode ?? ''}
+          onChange={(e) => {
+            onSetSyncMode(e.target.value);
+            onClose();
+          }}
+        >
+          <option value="">Use global setting</option>
+          <option value="reconcile">Reconcile (match the source)</option>
+          <option value="append">Append only (never remove tracks)</option>
+          <option value="replace">Replace (delete and recreate)</option>
+        </select>
+      </div>
       <div className="pl-menu-sep" />
       {item('Rename', onRename)}
       {!isUserPlaylist(row) && onCopyToMine && item('Copy to My Playlists', onCopyToMine)}
@@ -699,6 +725,25 @@ export function MirroredTab({
           enabled
             ? `"${row.name ?? 'Playlist'}" downloads into its own folder`
             : `"${row.name ?? 'Playlist'}" downloads into the library root`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      }
+    },
+    [load],
+  );
+  const setSyncMode = useCallback(
+    async (row: MirroredPlaylistRow, mode: string) => {
+      try {
+        const res = await patchMirroredPreferences(row.id, { sync_mode: mode || null });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          mode
+            ? `"${row.display_name || row.name || 'Playlist'}" now syncs in ${mode} mode`
+            : `"${row.display_name || row.name || 'Playlist'}" follows the global sync mode`,
           'success',
         );
         await load();
@@ -1328,6 +1373,7 @@ export function MirroredTab({
           onClear={() => void onClear(menu.row)}
           onDelete={() => void onDelete(menu.row)}
           onToggleOrganize={(enabled) => void setOrganize(menu.row, enabled)}
+          onSetSyncMode={(mode) => void setSyncMode(menu.row, mode)}
           onCopyToMine={() => void copyToMine(menu.row.id)}
         />
       )}

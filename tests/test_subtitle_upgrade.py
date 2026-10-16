@@ -88,7 +88,8 @@ class FakeFS:
         self.texts = {}
 
     def list_dir(self, folder):
-        return []
+        # the real folder: 'have' rows are re-checked against what's on disk
+        return os.listdir(folder) if os.path.isdir(folder) else []
 
     def write_text(self, path, content):
         self.texts[path] = content
@@ -102,9 +103,18 @@ def _settings(**kw):
     return s
 
 
+def _put_sidecar(video_path, lang="en"):
+    """'have' is re-checked against disk, so a have row needs its file."""
+    if video_path and os.path.exists(video_path):
+        with open(os.path.splitext(video_path)[0] + ".%s.srt" % lang, "w",
+                  encoding="utf-8") as f:
+            f.write("1\n00:00:01,000 --> 00:00:02,000\nold\n")
+
+
 def _have_row(db, dl_id, score, user_set=False):
     db.subtitle_want("download", dl_id, "en", user_set=user_set)
     db.subtitle_mark("download", dl_id, "en", "have")
+    _put_sidecar((db.get_video_download(dl_id) or {}).get("dest_path"))
     db.subtitle_log_fetch("download", dl_id, "en", "downloaded",
                           provider="scripted", candidate_title="old", score=score)
 
@@ -153,7 +163,7 @@ def test_upgrade_happens_on_sufficient_delta(db, tmp_path, monkeypatch):
     provider = ScriptedProvider([_cand("new")], {"new": "new-srt"})
     _patch(monkeypatch, provider, {"new": 90.0})      # 90 >= 60 + 15
     stats = worker.run_upgrade_cycle(db, _settings())
-    assert stats == {"checked": 1, "upgraded": 1, "skipped": 0}
+    assert stats == {"checked": 1, "upgraded": 1, "skipped": 0, "requeued": 0}
     with open(_sidecar(tmp_path)) as f:
         assert f.read() == "new-srt"                  # sidecar replaced
     assert db.subtitle_have("download", dl_id, "en")  # still 'have'
@@ -198,8 +208,8 @@ def test_user_set_rows_never_touched(db, tmp_path, monkeypatch):
     provider = ScriptedProvider([_cand("new")], {"new": "new-srt"})
     _patch(monkeypatch, provider, {"new": 90.0})
     stats = worker.run_upgrade_cycle(db, _settings())
-    assert stats == {"checked": 0, "upgraded": 0, "skipped": 0}
-    assert provider.searches == 0                     # not even evaluated
+    assert stats == {"checked": 0, "upgraded": 0, "skipped": 0, "requeued": 0}
+    assert provider.searches == 0                     # verified on disk, never searched
 
 
 def test_unknown_current_score_skipped(db, tmp_path, monkeypatch):
@@ -207,6 +217,7 @@ def test_unknown_current_score_skipped(db, tmp_path, monkeypatch):
     dl_id = _dl(db, dest)
     db.subtitle_want("download", dl_id, "en")
     db.subtitle_mark("download", dl_id, "en", "have")
+    _put_sidecar(dest)
     # no fetch history at all → can't prove the candidate is better
     provider = ScriptedProvider([_cand("new")], {"new": "new-srt"})
     _patch(monkeypatch, provider, {"new": 90.0})
@@ -237,7 +248,7 @@ def test_upgrade_cycle_runs_inside_worker_cycle(db, tmp_path, monkeypatch):
 
     class FakeFS:
         def list_dir(self, folder):
-            return []
+            return os.listdir(folder)
 
         def write_text(self, path, content):
             with open(path, "w", encoding="utf-8") as f:
@@ -294,7 +305,7 @@ def test_upgrade_deletes_residue_have_row(db, monkeypatch):
     provider = ScriptedProvider([_cand("new")], {"new": "new-srt"})
     _patch(monkeypatch, provider, {"new": 90.0})
     stats = worker.run_upgrade_cycle(db, _settings())
-    assert stats == {"checked": 0, "upgraded": 0, "skipped": 1}
+    assert stats == {"checked": 0, "upgraded": 0, "skipped": 1, "requeued": 0}
     assert provider.searches == 0                      # no quota burned
     assert db.subtitle_get_for_video("movie", 42) == []
 
@@ -392,6 +403,7 @@ def test_upgrade_rekeys_before_orphan_delete_when_history_has_file(db, tmp_path,
                                    "media_id": "222", "media_source": "tmdb",
                                    "search_ctx": "{}"})
     db.update_video_download(dl_id, dest_path=abs_path)
+    _put_sidecar(abs_path)
     db.subtitle_want("download", dl_id, "en")
     db.subtitle_mark("download", dl_id, "en", "have")
     db.subtitle_log_fetch("download", dl_id, "en", "downloaded",
@@ -409,7 +421,10 @@ def test_upgrade_rekeys_before_orphan_delete_when_history_has_file(db, tmp_path,
     assert db.subtitle_get_for_video("download", dl_id) == []
     rows = db.subtitle_get_for_video("episode", ep_id)
     assert [(r["language"], r["status"]) for r in rows] == [("en", "have")]
-    assert provider.searches == 0  # no baseline under the new key → skipped
+    # history follows the re-key, so the baseline survives and the row is
+    # still evaluated for upgrades under its library key
+    assert db.subtitle_latest_download_score("episode", ep_id, "en") == 60.0
+    assert provider.searches == 1
 
 
 def test_upgrade_still_deletes_true_orphans(db, monkeypatch):

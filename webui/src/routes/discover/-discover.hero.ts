@@ -9,6 +9,7 @@
  * reimplementation of them.
  */
 
+import type { RecommendedArtist } from './-discover.recommended';
 import type { DiscoverHeroArtist } from './-discover.types';
 
 /** Slideshow interval. `setInterval(..., 8000)` — loadDiscoverHero:442. */
@@ -234,4 +235,21 @@ export function heroIds(artist: DiscoverHeroArtist): Record<string, string> {
   if (artist.itunes_artist_id) ids.itunes = artist.itunes_artist_id;
   if (artist.musicbrainz_artist_id) ids.musicbrainz = artist.musicbrainz_artist_id;
   return ids;
+}
+
+/** the see-all modal's title when the hero opened it. */
+export const HERO_PICKS_TITLE = 'Picked for you';
+
+/**
+ * the hero's own rotation as the see-all modal's cards. "See all picks" was
+ * opening the Artists You'll Like list, a different set from the one the hero
+ * just showed.
+ */
+export function heroPicksForModal(artists: DiscoverHeroArtist[]): RecommendedArtist[] {
+  return artists.map((a) => ({
+    ...a,
+    artist_id: heroArtistId(a) ?? undefined,
+    spotify_artist_id: a.spotify_artist_id ?? undefined,
+    itunes_artist_id: a.itunes_artist_id ?? undefined,
+  }));
 }

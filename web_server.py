@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.4"
+_SOULSYNC_BASE_VERSION = "3.5.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -156,6 +156,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -3508,17 +3509,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def _m3u_entry_path(path):
-    """Final transforms for one m3u entry line: the prefix hot-swap
-    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
-    playback-machine path out) and the '#' comment-guard (#1072). Shared
-    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
-    just feeds it the configured mapping. Empty settings = '#'-guard only."""
-    from core.library.m3u_export import finalize_m3u_entry
-    return finalize_m3u_entry(
+def _m3u_entry_path(path, m3u_dir=None):
+    """One m3u entry line from a library file path: relative to ``m3u_dir``
+    when m3u_export.relative_paths is on and the file is being written there,
+    else the base path prepend + prefix hot-swap (wolf39us). the '#'
+    comment-guard (#1072) applies either way. Shared logic lives in
+    core.library.m3u_export.m3u_entry_line; this just feeds it the settings."""
+    from core.library.m3u_export import m3u_entry_line
+    relative = bool(m3u_dir) and bool(config_manager.get('m3u_export.relative_paths', False))
+    return m3u_entry_line(
         path,
+        entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
         rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
         rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+        relative_to=m3u_dir if relative else '',
     )
 
 
@@ -3538,8 +3542,8 @@ def _regenerate_batch_m3u(batch, tracks):
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
 
         # Resolve file paths from library DB
         from collections import defaultdict
@@ -3584,7 +3588,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
+                path = _m3u_entry_path(fp, m3u_folder)
                 lines.append(path)
                 found += 1
             else:
@@ -3595,8 +3599,6 @@ def _regenerate_batch_m3u(batch, tracks):
             return  # Don't overwrite with an all-missing M3U
 
         m3u_content = '\n'.join(lines)
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
         os.makedirs(m3u_folder, exist_ok=True)
         safe_fn = _sanitize_filename(playlist_name)
         m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
@@ -3691,9 +3693,6 @@ def generate_playlist_m3u():
         if save_to_disk and not force and not config_manager.get('m3u_export.enabled', False):
             return jsonify({"success": True, "skipped": True, "reason": "m3u_export disabled"})
 
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
-
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
@@ -3753,6 +3752,17 @@ def generate_playlist_m3u():
             )
             file_path_map[idx] = matched_path
 
+        # where it will be saved, worked out up front so entries can be
+        # relative to it. a content-only request has no folder: absolute.
+        will_save = save_to_disk and (force or config_manager.get('m3u_export.enabled', False))
+        m3u_folder = None
+        if will_save:
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
+
         # --- build M3U content ---
         import datetime as _dt
         found_count = 0
@@ -3774,7 +3784,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
+                entry = _m3u_entry_path(file_path, m3u_folder)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -3794,12 +3804,7 @@ def generate_playlist_m3u():
 
         # --- optionally save to disk ---
         saved_path = None
-        if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year,
-                                              sample_track_path=next(
-                                                  (p for p in file_path_map.values() if p), None))
+        if will_save:
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -14979,10 +14984,14 @@ def _apply_path_template(template: str, context: dict) -> str:
         # Only splits when we have multiple distinct artist objects (Spotify provides these)
         # Avoids string splitting which breaks names like "Tyler, the Creator" or "Simon & Garfunkel"
         artists_list = context.get('_artists_list')
-        if artists_list and len(artists_list) > 1:
-            # Multiple artist objects (Spotify) — use first
-            first = artists_list[0]
-            album_artist_value = first.get('name', first) if isinstance(first, dict) else str(first)
+        # same rule as core/imports/paths.py: a lone listed name counts when
+        # the album artist is that name plus collaborators
+        _raw_album_artist = str(context.get('albumartist') or context.get('artist') or album_artist_value)
+        primary = first_listed_artist(_raw_album_artist, artists_list)
+        if not primary and context.get('_track_artists_list'):
+            primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
+        if primary:
+            album_artist_value = primary
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
@@ -19106,6 +19115,37 @@ def mlm_delete(match_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/playlists/<playlist_id>/ownership-preview', methods=['POST'])
+def playlist_ownership_preview(playlist_id):
+    """which of these tracks are already in the library, before Begin Analysis.
+
+    the same answer the analysis gives, read-only, so the album modal opens
+    with found/missing filled in instead of 'pending'.
+    """
+    data = request.get_json(silent=True) or {}
+    tracks = data.get('tracks') or []
+    if not isinstance(tracks, list) or not tracks:
+        return jsonify({"success": False, "error": "No tracks provided"}), 400
+    try:
+        from core.downloads.master import preview_ownership
+        from database.music_database import MusicDatabase
+        is_album = bool(data.get('is_album_download', False))
+        results = preview_ownership(
+            MusicDatabase(), tracks,
+            album_context=data.get('album_context'),
+            artist_context=data.get('artist_context'),
+            is_album=is_album,
+            profile_id=get_current_profile_id() or 1,
+            source=_downloads_history.detect_sync_source(playlist_id),
+            active_server=config_manager.get_active_media_server(),
+            allow_duplicates=config_manager.get('wishlist.allow_duplicate_tracks', True),
+        )
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        logger.error(f"[Ownership Preview] {playlist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):
     """
@@ -19510,7 +19550,7 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
         # authoritative profile change must re-run the sync even when the track
         # list is byte-identical (P1-03).
         for key in ('matched_tracks', 'total_tracks', 'discovered_tracks', 'tracks_hash',
-                    'mirror_tracks_hash', 'quality_profile_id'):
+                    'mirror_tracks_hash', 'quality_profile_id', 'sync_mode'):
             if key in kwargs:
                 status[key] = kwargs[key]
         sync_statuses[playlist_id] = status

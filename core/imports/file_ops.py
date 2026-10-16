@@ -324,6 +324,85 @@ def cleanup_empty_directories(download_path, moved_file_path):
         logger.error(f"An error occurred during directory cleanup: {e}")
 
 
+# what a ripped/downloaded release carries next to its music. a folder holding
+# only these (and no audio) is finished with; anything else in it is the
+# user's and keeps the folder.
+_STAGING_SIDECAR_EXTS = {
+    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+    '.cue', '.log', '.nfo', '.txt', '.m3u', '.m3u8', '.sfv', '.md5',
+    '.accurip', '.ffp', '.st5', '.lrc', '.json', '.ini', '.db',
+}
+_STAGING_AUDIO_EXTS = {
+    '.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma',
+    '.aiff', '.aif', '.ape', '.alac', '.wv', '.dsf', '.dff',
+}
+
+
+def _only_sidecars_left(folder: str) -> bool:
+    for _root, _dirs, files in os.walk(folder):
+        for name in files:
+            ext = os.path.splitext(name)[1].lower()
+            if ext in _STAGING_AUDIO_EXTS or ext not in _STAGING_SIDECAR_EXTS:
+                if not name.startswith('.'):
+                    return False
+    return True
+
+
+def clear_finished_staging(staging_root: str, files: Iterable[str]) -> List[str]:
+    """delete staged files an import is done with, then every folder they
+    leave with no music in it, up to (never including) the staging root.
+
+    for "clear finished folders from staging": the dragged-in Artist/Album
+    folder goes once every track in it was imported or found already in the
+    library. a folder still holding audio, or anything that isn't release
+    clutter (cover art, cue, log, nfo...), stays. returns what was removed.
+    """
+    removed: List[str] = []
+    if not staging_root:
+        return removed
+    root = os.path.normpath(os.path.realpath(staging_root))
+    protected = {os.path.normpath(os.path.realpath(p)) for p in protected_root_dirs()}
+    protected.add(root)
+
+    def _inside(path: str) -> bool:
+        try:
+            return os.path.commonpath([root, path]) == root and path != root
+        except ValueError:  # another drive
+            return False
+
+    folders = set()
+    for f in files or []:
+        if not f:
+            continue
+        path = os.path.normpath(os.path.realpath(f))
+        if not _inside(path):
+            logger.warning("clear_finished_staging: refusing %s (outside staging)", path)
+            continue
+        folders.add(os.path.dirname(path))
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed.append(path)
+            except OSError as e:
+                logger.warning("clear_finished_staging: could not remove %s: %s", path, e)
+
+    # deepest first, so an Album folder goes before its Artist folder is judged
+    for folder in sorted(folders, key=len, reverse=True):
+        current = folder
+        while _inside(current) and current not in protected and os.path.isdir(current):
+            if not _only_sidecars_left(current):
+                break
+            try:
+                shutil.rmtree(current)
+                removed.append(current)
+                logger.info("cleared finished staging folder: %s", current)
+            except OSError as e:
+                logger.warning("clear_finished_staging: could not remove %s: %s", current, e)
+                break
+            current = os.path.dirname(current)
+    return removed
+
+
 def estimate_bitrate_kbps(*, size_bytes=None, duration_seconds=None, duration_ms=None, file_path=None):
     """Effective kbps from file size and duration.
 

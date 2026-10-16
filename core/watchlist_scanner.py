@@ -3442,38 +3442,25 @@ class WatchlistScanner:
                 source_artist_id, derived_provider = watchlist_source_identity(watchlist_artist)
                 source_provider = source_provider or derived_provider
 
-            # Store each similar artist in database
-            stored_count = 0
-            for rank, similar_artist in enumerate(similar_artists, 1):
-                try:
-                    # similar_artist has 'name', provider IDs, 'image_url', 'genres', 'popularity'
-                    success = self.database.add_or_update_similar_artist(
-                        source_artist_id=source_artist_id,
-                        similar_artist_name=similar_artist['name'],
-                        similar_artist_spotify_id=similar_artist.get('spotify_id'),
-                        similar_artist_itunes_id=similar_artist.get('itunes_id'),
-                        similarity_rank=rank,
-                        profile_id=profile_id,
-                        image_url=similar_artist.get('image_url'),
-                        genres=similar_artist.get('genres'),
-                        popularity=similar_artist.get('popularity', 0),
-                        similar_artist_deezer_id=similar_artist.get('deezer_id'),
-                        similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
-                        source_provider=source_provider,
-                    )
-
-                    if success:
-                        stored_count += 1
-                        ids = ', '.join(
-                            f"{k}: {similar_artist.get(v)}"
-                            for k, v in [('Spotify', 'spotify_id'), ('iTunes', 'itunes_id'), ('Deezer', 'deezer_id'), ('MB', 'musicbrainz_id')]
-                            if similar_artist.get(v)
-                        )
-                        logger.debug(f"  #{rank}: {similar_artist['name']} ({ids})")
-
-                except Exception as e:
-                    logger.warning(f"Error storing similar artist {similar_artist.get('name', 'Unknown')}: {e}")
-                    continue
+            # the fresh set replaces the old one whole: an upsert kept every
+            # wrong match an older fetch ever made
+            rows = [
+                dict(
+                    similar_artist_name=similar_artist['name'],
+                    similar_artist_spotify_id=similar_artist.get('spotify_id'),
+                    similar_artist_itunes_id=similar_artist.get('itunes_id'),
+                    similar_artist_deezer_id=similar_artist.get('deezer_id'),
+                    similar_artist_musicbrainz_id=similar_artist.get('musicbrainz_id'),
+                    similarity_rank=rank,
+                    image_url=similar_artist.get('image_url'),
+                    genres=similar_artist.get('genres'),
+                    popularity=similar_artist.get('popularity', 0),
+                )
+                for rank, similar_artist in enumerate(similar_artists, 1)
+                if similar_artist.get('name')
+            ]
+            stored_count = self.database.replace_similar_artists(
+                source_artist_id, rows, profile_id=profile_id, source_provider=source_provider)
 
             logger.info(f"Stored {stored_count}/{len(similar_artists)} similar artists for {watchlist_artist.artist_name}")
             return True
@@ -3926,7 +3913,7 @@ class WatchlistScanner:
             import traceback
             traceback.print_exc()
 
-    def update_discovery_pool_incremental(self, profile_id: int = 1):
+    def update_discovery_pool_incremental(self, profile_id: int = 1, force: bool = False):
         """
         Lightweight incremental update for discovery pool - runs every 6 hours.
 
@@ -3934,15 +3921,23 @@ class WatchlistScanner:
         - Much faster than full populate_discovery_pool (only checks watchlist, not similar artists)
         - Only fetches latest 5 releases per artist
         - Only adds tracks from releases in last 7 days
-        - Respects 6-hour cooldown to avoid over-polling
+        - Respects 6-hour cooldown to avoid over-polling (unless forced)
+
+        ``force=True`` bypasses the cooldown: a manual run (an automation's
+        Run Now press, #1719) is the user explicitly asking for a refresh
+        right now — e.g. so changed discovery settings take effect — so
+        skipping it as "recently updated" defeats the press. Scheduled and
+        event-triggered runs keep the cooldown.
         """
         try:
             from datetime import datetime, timedelta
 
             # Check if we should run (prevents over-polling Spotify)
-            if not self.database.should_populate_discovery_pool(hours_threshold=6, profile_id=profile_id):
+            if not force and not self.database.should_populate_discovery_pool(hours_threshold=6, profile_id=profile_id):
                 logger.info("Discovery pool was updated recently (< 6 hours ago). Skipping incremental update.")
                 return
+            if force:
+                logger.info("Forced incremental discovery pool update — bypassing the 6-hour cooldown.")
 
             logger.info("Starting incremental discovery pool update (watchlist artists only)...")
 

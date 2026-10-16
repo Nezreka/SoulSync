@@ -27,6 +27,8 @@ entirely.
 """
 
 import errno
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -351,6 +353,7 @@ def _resolve_better_edition(album_data, source_ids, file_tracks, primary_source)
 def _resolve_source(
     album_data: dict, primary_source: str, strict_source: bool = False,
     *, file_tracks: Optional[List[dict]] = None, on_better_edition=None,
+    resolved: Optional[dict] = None,
 ):
     """Walk the configured source priority looking for the first source
     we have an ID for AND that returns a usable tracklist.
@@ -366,9 +369,23 @@ def _resolve_source(
     alternate-edition search (#767-2). ``on_better_edition(source, album_id,
     score)`` is invoked to persist the pin when a better edition is chosen.
 
+    ``resolved``, when given, is filled with ``{'source', 'album_id'}`` of the
+    release that answered, or ``{'unavailable': True}`` when the release the
+    album was placed with (#1701) didn't answer this time.
+
     Returns ``(source_name, album_meta, tracks_list)`` or ``(None, None, None)``.
     """
+    if resolved is None:
+        resolved = {}
     source_ids = _extract_source_ids(album_data)
+
+    def _fetch(source, album_id):
+        api_album = get_album_for_source(source, album_id)
+        items = _normalize_album_tracks(get_album_tracks_for_source(source, album_id))
+        if items and api_album:
+            resolved.update(source=source, album_id=str(album_id))
+            return source, api_album, items
+        return None
 
     # #765: if a canonical release was pinned for this album (best-fit to the
     # user's actual files), prefer it — so reorganize agrees with Track Number
@@ -376,18 +393,35 @@ def _resolve_source(
     # on the album row carrying a canonical, and skipped when the user explicitly
     # picked a source in the modal (strict_source) — their choice wins. Falls
     # through to the priority walk if the canonical fetch fails.
+    #
+    # #1701: once reorganize has placed the album, the release it used wins over
+    # an AUTO pin set later, and a failed lookup of it skips the album instead
+    # of walking on to another source. otherwise a pin written after the move,
+    # or one rate-limited scan, renames the whole album again. a LOCKED pin is
+    # the user picking a version, so it still comes first.
     if not strict_source:
         c_source = album_data.get('canonical_source')
         c_id = album_data.get('canonical_album_id')
-        if c_source and c_id:
+        c_locked = bool(album_data.get('canonical_locked'))
+        p_source = album_data.get('reorganize_source')
+        p_id = album_data.get('reorganize_album_id')
+        attempts = []
+        if c_source and c_id and c_locked:
+            attempts.append(('canonical', c_source, c_id))
+        if p_source and p_id:
+            attempts.append(('placed', p_source, p_id))
+        if c_source and c_id and not c_locked:
+            attempts.append(('canonical', c_source, c_id))
+        for kind, a_source, a_id in attempts:
             try:
-                api_album = get_album_for_source(c_source, c_id)
-                api_tracks = get_album_tracks_for_source(c_source, c_id)
-                items = _normalize_album_tracks(api_tracks)
-                if items and api_album:
-                    return c_source, api_album, items
+                hit = _fetch(a_source, a_id)
+                if hit:
+                    return hit
             except Exception as e:
-                logger.warning(f"[Reorganize] canonical {c_source} lookup raised: {e}")
+                logger.warning(f"[Reorganize] {kind} {a_source} lookup raised: {e}")
+            if kind == 'placed':
+                resolved['unavailable'] = True
+                return None, None, None
 
     if strict_source:
         sources_to_try = [primary_source] if primary_source else []
@@ -409,6 +443,7 @@ def _resolve_source(
         if not items or not api_album:
             continue
         walk_source, walk_album, walk_items = source, api_album, items
+        resolved.update(source=source, album_id=str(sid))
         break
 
     # #767-2: the walk takes the first source we have an ID for, but that ID can
@@ -424,6 +459,7 @@ def _resolve_source(
             )
             if better is not None:
                 b_source, b_id, b_album, b_items, b_score = better
+                resolved.update(source=b_source, album_id=str(b_id))
                 if on_better_edition:
                     try:
                         on_better_edition(b_source, b_id, b_score)
@@ -1164,10 +1200,24 @@ def plan_album_reorganize(
         {'duration_ms': t.get('duration') or 0, 'title': t.get('title') or ''}
         for t in tracks
     ]
+    resolved: dict = {}
     source, api_album, api_tracks = _resolve_source(
         album_data, primary_source, strict_source=strict_source,
         file_tracks=file_tracks, on_better_edition=on_better_edition,
+        resolved=resolved,
     )
+    if not source and resolved.get('unavailable'):
+        reason = (
+            f"{album_data.get('reorganize_source')} didn't answer for the release this "
+            "album was placed with, skipped so it isn't renamed from another source"
+        )
+        return {
+            'status': 'source_unavailable', 'source': None, 'api_album': None,
+            'total_discs': 1,
+            'items': [{
+                'track': t, 'api_track': None, 'matched': False, 'reason': reason,
+            } for t in tracks],
+        }
     if not source:
         reason = _unresolvable_reason(album_data, primary_source, strict_source)
         return {
@@ -1252,6 +1302,7 @@ def plan_album_reorganize(
     return _with_release_disambiguation({
         'status': 'planned',
         'source': source,
+        'source_album_id': resolved.get('album_id'),
         'api_album': api_album,
         'total_discs': total_discs,
         'items': items,
@@ -1599,7 +1650,11 @@ def preview_album_reorganize(
         'artist': artist_name,
         'transfer_dir': transfer_dir,
         'source': plan['source'],
+        'source_album_id': plan.get('source_album_id'),
     }
+
+    if plan['status'] == 'source_unavailable':
+        return {'success': False, 'status': 'source_unavailable', **common, 'tracks': []}
 
     if plan['status'] == 'no_source_id':
         return {
@@ -2261,6 +2316,10 @@ def reorganize_album(
         resolve_file_path_fn=resolve_file_path_fn,
         on_better_edition=_persist_canonical,
     )
+    if plan['status'] == 'source_unavailable':
+        summary['status'] = 'source_unavailable'
+        summary['errors'].append({'error': plan['items'][0]['reason']})
+        return summary
     if plan['status'] == 'no_source_id':
         summary['status'] = 'no_source_id'
         summary['source'] = plan.get('source')  # 'tags' or None
@@ -2452,6 +2511,8 @@ def reorganize_album(
         if plan.get('record_type') == 'compilation' and str(album_data.get('record_type') or '').strip().lower() != 'compilation':
             _persist_compilation_record_type(db, album_id)
 
+    if metadata_source == 'api' and _run_placed_everything(summary, stop_check):
+        mark_album_placed(db, album_id, source, plan.get('source_album_id'))
     return summary
 
 
@@ -2652,7 +2713,92 @@ def reorganize_album_rename_only(
     if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
         _persist_compilation_record_type(db, album_id)
 
+    if (metadata_source == 'api' and _run_placed_everything(summary, stop_check)
+            and not any(t.get('collision') for t in tracks)):
+        mark_album_placed(db, album_id, preview.get('source'), preview.get('source_album_id'))
     return summary
+
+
+def naming_fingerprint() -> str:
+    """Short hash of every setting that decides where reorganize puts a file.
+
+    stored with the placement (#1701) so a scan can tell "the user changed their
+    naming" (re-check the album) from "soulsync's naming code changed" (leave the
+    placed album alone)."""
+    try:
+        from core.settings import config_manager
+        get = config_manager.get
+    except Exception:
+        def get(_key, default=None):
+            return default
+    keys = (
+        'file_organization', 'soulseek.transfer_path', 'library.music_paths',
+        'library.reorganize_preserve_casing',
+        'metadata_enhancement.tags.feat_in_title',
+    )
+    blob = json.dumps({k: get(k, None) for k in keys}, sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:16]
+
+
+def _run_placed_everything(summary: dict, stop_check) -> bool:
+    """True when an apply run finished without a failure or a stop, so the album
+    sits where its plan says."""
+    if summary.get('status') != 'completed' or summary.get('failed'):
+        return False
+    try:
+        return not (stop_check and stop_check())
+    except Exception:
+        return False
+
+
+def mark_album_placed(db, album_id, source, source_album_id, fingerprint=None) -> bool:
+    """Remember the release + naming the album now sits under (#1701), and close
+    the album's pending "would move" findings, which describe a move that's done.
+
+    the next scan resolves this same release and skips the album until the naming
+    settings change, so findings stop coming back after every pin or upgrade."""
+    if not source or not source_album_id or source == 'tags':
+        return False
+    fingerprint = fingerprint or naming_fingerprint()
+    conn = None
+    try:
+        conn = db._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE albums SET reorganize_source = ?, reorganize_album_id = ?, "
+            "reorganize_fp = ? WHERE id = ?",
+            (source, str(source_album_id), fingerprint, str(album_id)),
+        )
+        placed = cursor.rowcount > 0
+        cursor.execute(
+            "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
+            "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE job_id = 'library_reorganize' AND finding_type = 'path_mismatch' "
+            "AND status = 'pending' AND entity_type = 'track' "
+            "AND entity_id IN (SELECT CAST(id AS TEXT) FROM tracks WHERE album_id = ?)",
+            (str(album_id),),
+        )
+        conn.commit()
+        return placed
+    except Exception as e:
+        logger.warning("[Reorganize] couldn't record placement of album %s: %s", album_id, e)
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def album_placement_settled(album_row: dict, fingerprint: str) -> bool:
+    """True when the album was placed under the current naming settings and the
+    user hasn't locked it to a different release since (#1701)."""
+    p_source = album_row.get('reorganize_source')
+    p_id = album_row.get('reorganize_album_id')
+    if not p_source or not p_id or album_row.get('reorganize_fp') != fingerprint:
+        return False
+    if album_row.get('canonical_locked'):
+        if (album_row.get('canonical_source'), str(album_row.get('canonical_album_id') or '')) != (p_source, str(p_id)):
+            return False
+    return True
 
 
 def _find_artist_dir(dest_path: str, transfer_dir: str) -> Optional[str]:

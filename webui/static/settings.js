@@ -734,6 +734,30 @@ const SERVICE_GLYPHS = {
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
 };
 
+// Grouped by what each service does for you, same headings as the download
+// chain. Order inside a group is the order here, not page order. A service not
+// listed lands in "Other" so a new one can never vanish from the grid.
+const SERVICE_GROUPS = {
+    music: [
+        { label: 'Metadata', hint: 'artists, albums and tracks',
+          ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
+        { label: 'Scrobbling', hint: 'listening history and recommendations',
+          ids: ['lastfm', 'listenbrainz'] },
+        { label: 'Extras', hint: 'lyrics, concerts and fingerprint checks',
+          ids: ['genius', 'concerts', 'acoustid'] },
+    ],
+    video: [
+        { label: 'Metadata', hint: 'movies, shows and episodes',
+          ids: ['tmdb', 'tvdb', 'nokey'] },
+        { label: 'Ratings & lists', hint: 'scores and list collections',
+          ids: ['omdb', 'trakt', 'mdblist'] },
+        { label: 'Subtitles', hint: 'found and downloaded for your library',
+          ids: ['opensubtitles', 'subdl', 'subsource'] },
+        { label: 'Artwork & extras', hint: 'posters, fanart and trailers',
+          ids: ['fanart', 'ytextras'] },
+    ],
+};
+
 // Follow the side you are standing on, exactly like the download chain does.
 // Defaulting to music meant a video user landed on a grid of Spotify and Tidal
 // tiles with their own TMDB key nowhere in sight.
@@ -821,7 +845,7 @@ function buildServiceTiles() {
         return;
     }
     const attr = SERVICE_KINDS[_svcKind].attr;
-    grid.innerHTML = '<div class="svc-tile-row">' + frames.map(frame => {
+    const tile = (frame) => {
         const id = frame.getAttribute(attr);
         const m = _svcMeta(frame);
         const set = _svcConfigured(frame);
@@ -850,7 +874,21 @@ function buildServiceTiles() {
              + `<span class="svc-tile-art">${art}</span>`
              + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
              + chip + '</button>';
-    }).join('') + '</div>';
+    };
+
+    const byId = new Map(frames.map(f => [f.getAttribute(attr), f]));
+    const groups = (SERVICE_GROUPS[_svcKind] || []).map(g => ({
+        ...g, frames: g.ids.map(id => byId.get(id)).filter(Boolean),
+    }));
+    const listed = new Set(groups.flatMap(g => g.ids));
+    groups.push({ label: 'Other', hint: '', frames: frames.filter(f => !listed.has(f.getAttribute(attr))) });
+
+    grid.innerHTML = groups.filter(g => g.frames.length).map(g =>
+        `<div class="src-group"><div class="src-group-head">`
+        + `<span class="src-group-label">${g.label}</span>`
+        + `<span class="src-group-count">${g.frames.length}</span>`
+        + (g.hint ? `<span class="src-group-hint">${g.hint}</span>` : '')
+        + `</div><div class="svc-tile-row">${g.frames.map(tile).join('')}</div></div>`).join('');
 }
 window.buildServiceTiles = buildServiceTiles;
 
@@ -3453,6 +3491,8 @@ async function loadSettingsData() {
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
+        const _m3uRelEl = document.getElementById('m3u-relative-paths');
+        if (_m3uRelEl) _m3uRelEl.checked = settings.m3u_export?.relative_paths === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
         document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
         document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
@@ -6683,6 +6723,7 @@ async function saveSettings(quiet = false) {
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
+            relative_paths: _cfgBool('m3u-relative-paths'),
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
             rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
@@ -6870,8 +6911,10 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            // Use backend's message which contains dynamic source name
-            showToast(result.message || `${service} connection successful`, 'success');
+            // Use backend's message which contains dynamic source name. a pass
+            // can still carry a warning (leading \u26a0), which shouldn't read as green
+            const warned = String(result.message || '').trim().startsWith('\u26a0');
+            showToast(result.message || `${service} connection successful`, warned ? 'warning' : 'success');
 
             // Load music libraries after successful connection
             if (service === 'plex') {
@@ -6887,6 +6930,40 @@ async function testConnection(service) {
     } catch (error) {
         console.error(`Error testing ${service} connection:`, error);
         showToast(`Failed to test ${service} connection`, 'error', 'gs-connecting');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+// the deezer card holds two logins: the oauth app (favorites, playlists) and an
+// ARL (playlists + downloads). testConnection('deezer') covers the public api and
+// the oauth token; the ARL has its own check, so run both and say what each found.
+async function testDeezerConnection() {
+    let arl = document.getElementById('deezer-connection-arl')?.value || '';
+    if (!arl.trim()) return testConnection('deezer');
+    // an untouched field holds the redaction mask; empty means "test the saved one" (#870)
+    if (arl === REDACTED_SECRET_SENTINEL) arl = '';
+    try {
+        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+            clearTimeout(settingsAutoSaveTimer);
+            settingsAutoSaveTimer = null;
+            if (typeof saveSettings === 'function') await saveSettings(true);
+        }
+        showLoadingOverlay('Testing Deezer connection...');
+        const post = (url, body) => fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json()).catch(() => ({ success: false, error: 'request failed' }));
+        const [api, arlRes] = await Promise.all([
+            post(API.testConnection, { service: 'deezer' }),
+            post('/api/deezer-download/test', { arl }),
+        ]);
+        const apiMsg = api.success ? (api.message || 'Deezer reachable') : `Deezer failed: ${api.error}`;
+        const arlMsg = arlRes.success
+            ? `ARL: ${arlRes.user || 'Unknown'} (${arlRes.tier || 'Free'})`
+            : `ARL failed: ${arlRes.error || 'rejected'}`;
+        const ok = api.success && arlRes.success;
+        const warned = String(api.message || '').trim().startsWith('\u26a0');
+        showToast(`${apiMsg} · ${arlMsg}`, !ok ? 'error' : (warned ? 'warning' : 'success'), ok ? undefined : 'gs-connecting');
     } finally {
         hideLoadingOverlay();
     }

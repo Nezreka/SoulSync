@@ -83,6 +83,7 @@ FINDING_TYPE_META = {
     'missing_lyrics':           {'label': 'Missing Lyrics', 'verb': 'Apply Lyrics'},
     'missing_replaygain':       {'label': 'Missing ReplayGain', 'verb': 'Apply RG'},
     'replaygain_retag':         {'label': 'ReplayGain Retag', 'verb': 'Apply RG'},
+    'untagged_download':        {'label': 'Untagged Downloads', 'verb': 'Write Tags'},
     'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
     'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
     'metadata_gap':             {'label': 'Metadata Gaps', 'verb': 'Auto-Fill'},
@@ -158,6 +159,7 @@ JOB_CATEGORIES = {
     'replaygain_filler': 'Audio quality',
     # What is written on and about the tracks.
     'library_retag': 'Tags & metadata',
+    'untagged_downloads': 'Tags & metadata',
     'track_number_repair': 'Tags & metadata',
     'album_tag_consistency': 'Tags & metadata',
     'mbid_mismatch_detector': 'Tags & metadata',
@@ -1077,6 +1079,13 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+        # the worker itself was stopped (master switch off, shutdown) while the
+        # job ran. every job's check_stop() sees that flag and returns what it
+        # has, so the run reads as finished unless it is marked here, once,
+        # instead of in each job. not 'cancelled': nobody stopped this job.
+        if run_status == 'completed' and self.should_stop:
+            run_status = 'stopped'
+            run_error = 'Repair worker stopped before the job finished'
         # the job quit on its own before the end. not a crash and not done:
         # say so, with the job's reason, instead of a clean 'completed'
         if run_status == 'completed' and getattr(result, 'stopped_early', ''):
@@ -2155,6 +2164,7 @@ class RepairWorker:
             'missing_lyrics': self._fix_missing_lyrics,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
+            'untagged_download': self._fix_untagged_download,
             'empty_folder': self._fix_empty_folder,
             'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
@@ -3611,10 +3621,21 @@ class RepairWorker:
         # Resolve container/host path mismatches, keep only files that exist.
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
         resolved = []
+        folder_there = False
         for p in track_paths:
             rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
             if os.path.isfile(rp):
                 resolved.append(rp)
+            elif os.path.isdir(os.path.dirname(rp)):
+                folder_there = True
+
+        if not resolved and folder_there:
+            # #1701: the album's folder is right here but its files aren't, so
+            # they moved after the scan. calling that a success wrote nothing to
+            # disk and hid it, same folder rule as retire_vanished_findings.
+            return {'success': False, 'stale': True,
+                    'error': "Cover saved to the library, but the album's files moved "
+                             "since the scan so none were written. The next scan picks it up"}
 
         if not resolved:
             # Media-server-only album (no local files): DB thumbnail is all we can set.
@@ -3751,6 +3772,43 @@ class RepairWorker:
             return {'success': False, 'error': 'Could not write ReplayGain tags'}
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
+
+    def _fix_untagged_download(self, entity_type, entity_id, file_path, details):
+        """write title/artist/album back from the download record. only the
+        fields the file is missing, so a tag fixed by hand since the scan stays."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        from core.repair_jobs.untagged_downloads import missing_core_fields
+        from core.tag_writer import read_file_tags, write_tags_to_file
+        current = read_file_tags(resolved)
+        missing = missing_core_fields(current)
+        if not missing:
+            return {'success': True, 'action': 'already_tagged',
+                    'message': 'File already has its title, artist and album'}
+        data = {}
+        if 'title' in missing and details.get('track_title'):
+            data['title'] = details['track_title']
+        if 'artist' in missing and details.get('artist'):
+            data['artist_name'] = details['artist']
+        if 'album' in missing and details.get('album_title'):
+            data['album_title'] = details['album_title']
+        if not current.get('track_number') and details.get('track_number'):
+            data['track_number'] = details['track_number']
+        if not data:
+            return {'success': False, 'error': 'The download record has nothing to write'}
+        result = write_tags_to_file(resolved, data, embed_cover=False)
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error') or 'Could not write tags'}
+        written = result.get('written_fields') or []
+        return {'success': True, 'action': 'wrote_tags',
+                'message': f"Wrote {', '.join(written)}"}
 
     def _fix_empty_folder(self, entity_type, entity_id, file_path, details):
         """Apply an empty-folder finding: re-check the folder is still empty/junk-

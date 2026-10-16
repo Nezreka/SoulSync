@@ -469,9 +469,22 @@ def transcribe_to_srt(name: Any, file_path: str, language: str | None = None) ->
     # A local dir (never a bare name — that would auto-download from HF).
     model = WhisperModel(str(model_path.parent), device="cpu",
                          compute_type="int8")
-    lang = str(language or "").strip().lower() or None
-    segments, _info = model.transcribe(str(file_path), language=lang,
-                                       beam_size=5)
+    # whisper writes what it hears. forcing language="es" on english audio
+    # doesn't translate, it spends minutes producing junk labeled .es.srt.
+    # so detect first (info is ready before the lazy segments run): transcribe
+    # when the audio is the wanted language, translate when english is wanted
+    # (whisper only translates into english), otherwise it's a miss.
+    want = (str(language or "").strip().lower() or "en").split("-")[0]
+    segments, info = model.transcribe(str(file_path), beam_size=5)
+    heard = str(getattr(info, "language", "") or "").lower()
+    if heard != want:
+        if want != "en":
+            logger.info("whisper: %s audio is %r, can't make %r subtitles",
+                        file_path, heard, want)
+            del model
+            return None
+        segments, _info = model.transcribe(str(file_path), task="translate",
+                                           language=heard or None, beam_size=5)
     text = segments_to_srt(segments)
     # faster-whisper frees GPU/CPU buffers with the model; drop our ref too.
     del model
@@ -588,6 +601,10 @@ class WhisperProvider(SubtitleProvider):
     def search(self, query: SubtitleQuery) -> list[SubtitleCandidate]:
         if not self._model:
             return []
+        if getattr(query, "forced", False):
+            # a transcript is every spoken line. it can never be a forced
+            # (foreign-parts-only) track.
+            return []
         file_path = getattr(query, "file_path", None)
         if not file_path or not os.path.isfile(str(file_path)):
             # No media, no transcription. (The chain always passes file_path
@@ -597,8 +614,8 @@ class WhisperProvider(SubtitleProvider):
         return [SubtitleCandidate(
             provider_id=self.id,
             language=lang,
-            hi=bool(getattr(query, "hi", False)),
-            forced=bool(getattr(query, "forced", False)),
+            hi=False,  # no sound cues in a transcript
+            forced=False,
             title="Local transcription (whisper %s)" % self._model,
             download_ref={"file_path": str(file_path),
                           "language": lang,

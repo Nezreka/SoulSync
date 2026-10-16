@@ -691,14 +691,24 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                         db, video_kind, video_id, settings)
                 except subtitles.SubtitleLookupError:
                     langs = subtitles.parse_langs((settings or {}).get("subtitle_langs"))
-                for lang in langs:
-                    db.subtitle_want(video_kind, video_id, lang)
-                rows = db.subtitle_get_for_video(video_kind, video_id)
+                variants = subtitles.wanted_variants(langs, settings)
+                for lang, v_hi, v_forced in variants:
+                    db.subtitle_want(video_kind, video_id, lang, hi=v_hi, forced=v_forced)
+                # only the shapes wanted NOW: residue rows from an older
+                # language list (or forced rows after the toggle went off)
+                # are the worker's to clean up, never fetched here.
+                wanted_keys = {(str(lang).lower(), bool(h), bool(f))
+                               for lang, h, f in variants}
+                rows = [r for r in db.subtitle_get_for_video(video_kind, video_id)
+                        if (str(r.get("language") or "").lower(), bool(r.get("hi")),
+                            bool(r.get("forced"))) in wanted_keys]
         else:
             # kind=None never touches the DB (no override branch runs), so
             # this can't raise SubtitleLookupError — global list, directly.
-            for lang in subtitles.effective_subtitle_languages(db, None, None, settings):
-                rows.append({"language": lang, "hi": 0, "forced": 0})
+            for lang, v_hi, v_forced in subtitles.wanted_variants(
+                    subtitles.effective_subtitle_languages(db, None, None, settings),
+                    settings):
+                rows.append({"language": lang, "hi": int(v_hi), "forced": int(v_forced)})
 
         provider_order = _subtitle_provider_order(db)
         # Blob-first, top-level fallback: Phase 2 tuning knobs (subtitle_min_score,
@@ -714,16 +724,24 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
         # row stays 'wanted' with attempts untouched so Phase 2 retries it
         # once a key is added. Computed once — config can't change mid-loop.
         tried_any = _any_provider_configured(provider_order, get_setting)
+        from core.video.subtitles.worker import _hi_forced_pref
+        hi_forced_pref = _hi_forced_pref(get_setting)
         folder = os.path.dirname(str(dest_path or ""))
         try:
-            existing = {str(n).lower() for n in (fs.list_dir(folder) or [])}
+            listing = [str(n) for n in (fs.list_dir(folder) or [])]
         except Exception:  # noqa: BLE001
-            existing = set()
+            listing = []
         if not dest_path:
             # No file, no fetch: without a path the query would run blind
             # (threshold skipped) and a sidecar would land in the process CWD.
             # The wanted rows stay for the worker to retry once a path exists.
             return
+        # what's already there, bazarr rules: any labeled or detected
+        # sidecar (.en.srt, .eng.sdh.srt, an unlabeled movie.srt) and the
+        # file's own embedded tracks. probed once per file.
+        from core.video.subtitles import existing as existing_subs
+        have_tracks = existing_subs.existing_tracks(str(dest_path), get_setting,
+                                                    names=listing)
         # Hash once per file, not once per language (two 64KB reads).
         filename = os.path.basename(str(dest_path or "")) or None
         moviehash = None
@@ -745,8 +763,8 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
             hi = bool(row.get("hi"))
             forced = bool(row.get("forced"))
             name = subtitles.srt_name(dest_path, lang, hi=hi, forced=forced)
-            if name.lower() in existing:
-                # Already on disk (e.g. carried over with the file on import) —
+            if existing_subs.covered(have_tracks, lang, hi=hi, forced=forced):
+                # Already there (carried over with the file, or embedded) —
                 # truthfully 'have', no fetch needed (and no fetch ran, so no
                 # attempt is recorded — attempts measures fetches).
                 if key is not None:
@@ -777,15 +795,20 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
             # providers instead; the hook's miss below leaves the row
             # 'wanted' (attempts untouched) when only deferred providers are
             # configured, so the worker picks it up without backoff delay.
-            text, pid, _candidate, _score = fetch_subtitle_detailed(
+            text, pid, candidate, score = fetch_subtitle_detailed(
                 SubtitleQuery(identity=dict(identity), language=lang, hi=hi, forced=forced,
                               filename=filename, moviehash=moviehash,
-                              file_path=str(dest_path)),
+                              file_path=str(dest_path), hi_forced_pref=hi_forced_pref),
                 provider_order, get_setting, on_download=_bump,
                 skip_background=True)
             if not text:
                 if key is not None and tried_any:
                     db.subtitle_mark(video_kind, video_id, lang, "failed", hi=hi, forced=forced)
+                    db.subtitle_log_fetch(video_kind, video_id, lang,
+                                          "below_threshold" if (score or 0) > 0 else "miss",
+                                          provider="", hi=hi, forced=forced,
+                                          candidate_title=getattr(candidate, "title", None),
+                                          score=score)
                 # nothing configured → the row stays 'wanted', attempts
                 # untouched (no phantom attempts for keyless setups)
                 continue
@@ -800,6 +823,12 @@ def write_subtitles_for(db, dl, dest_path, settings, fs):
                 continue
             if key is not None:
                 db.subtitle_mark(video_kind, video_id, lang, "have", hi=hi, forced=forced)
+                # the upgrade loop's baseline: without a scored history row
+                # it skips the subtitle forever (never upgrades blind).
+                db.subtitle_log_fetch(video_kind, video_id, lang, "downloaded",
+                                      provider=str(pid or ""),
+                                      candidate_title=getattr(candidate, "title", None),
+                                      score=score, hi=hi, forced=forced)
                 # Just evaluated: the fetch picked the best available candidate,
                 # so the Phase 3 upgrade loop must not re-search this row right
                 # away — start its re-check cooldown now.

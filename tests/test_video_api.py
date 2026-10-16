@@ -597,6 +597,46 @@ def test_enrichment_endpoints(tmp_path):
         eng_mod._engine = None
 
 
+def test_enrichment_test_endpoint_backfill_workers(tmp_path, monkeypatch):
+    # backfill workers (fanart, opensubtitles) have no .client; the test button
+    # used to 500 with AttributeError for them.
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    import core.video.enrichment.engine as eng_mod
+    import core.video.enrichment.backfill as bf
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+
+    class FakeClient:
+        enabled = True
+        def match(self, *a, **k): return None
+        def test(self): return (True, "ok")
+
+    calls = []
+    def fake_get(url, params=None, headers=None, **k):
+        calls.append(url)
+        return {"data": []}
+    monkeypatch.setattr(bf, "_http_get_json", fake_get)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("fanart_api_key", "fk")
+    db.set_setting("opensubtitles_api_key", "ok")
+    videoapi._video_db = db
+    eng_mod._engine = VideoEnrichmentEngine(db, {"tmdb": FakeClient()})
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        for svc in ("fanart", "opensubtitles"):
+            res = client.post("/api/video/enrichment/%s/test" % svc).get_json()
+            assert res["success"] is True, (svc, res)
+        assert any("fanart.tv" in u for u in calls)
+        assert any("opensubtitles.com" in u for u in calls)
+        assert client.post("/api/video/enrichment/tmdb/test").get_json()["success"] is True
+    finally:
+        videoapi._video_db = None
+        eng_mod._engine = None
+
+
 def test_enrichment_config_save_load(tmp_path, monkeypatch):
     import api.video as videoapi
     from database.video_database import VideoDatabase

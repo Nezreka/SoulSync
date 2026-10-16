@@ -781,3 +781,75 @@ def test_settings_ui_has_whisper_section():
     for fn in ("loadWhisperStatus", "renderWhisperStatus",
                "startWhisperDownload", "whisper_enabled", "whisper_model"):
         assert fn in js, fn
+
+
+# ── language guard (oct 14 review) ───────────────────────────────────────────
+def _fake_faster_whisper(monkeypatch, tmp_path, heard):
+    import sys
+    import types
+    from core.video.subtitles.providers import whisper as wm
+    calls = []
+
+    class Seg:
+        def __init__(self, text):
+            self.start, self.end, self.text = 0.0, 1.0, text
+
+    class Info:
+        language = heard
+
+    class FakeModel:
+        def __init__(self, *a, **k):
+            pass
+
+        def transcribe(self, path, **kw):
+            calls.append(kw)
+            task = kw.get("task", "transcribe")
+            return iter([Seg("%s:%s" % (task, kw.get("language")))]), Info()
+
+    mod = types.ModuleType("faster_whisper")
+    mod.WhisperModel = FakeModel
+    monkeypatch.setitem(sys.modules, "faster_whisper", mod)
+    monkeypatch.setattr(wm, "transcription_engine", lambda: "faster-whisper")
+    wm.set_models_dir_override(tmp_path)
+    (tmp_path / "tiny").mkdir()
+    (tmp_path / "tiny" / "model.bin").write_bytes(b"x")
+    return wm, calls
+
+
+def test_transcribe_same_language_transcribes(monkeypatch, tmp_path):
+    wm, calls = _fake_faster_whisper(monkeypatch, tmp_path, "en")
+    try:
+        out = wm.transcribe_to_srt("tiny", str(tmp_path / "v.mkv"), "en")
+    finally:
+        wm.set_models_dir_override(None)
+    assert "transcribe:None" in out and len(calls) == 1
+
+
+def test_transcribe_foreign_audio_translates_into_english(monkeypatch, tmp_path):
+    wm, calls = _fake_faster_whisper(monkeypatch, tmp_path, "ja")
+    try:
+        out = wm.transcribe_to_srt("tiny", str(tmp_path / "v.mkv"), "en")
+    finally:
+        wm.set_models_dir_override(None)
+    assert "translate:ja" in out
+
+
+def test_transcribe_never_fakes_a_non_english_target(monkeypatch, tmp_path):
+    # english audio, spanish wanted: whisper can't translate into spanish, so
+    # this must be a miss, not minutes of junk labeled .es.srt
+    wm, calls = _fake_faster_whisper(monkeypatch, tmp_path, "en")
+    try:
+        out = wm.transcribe_to_srt("tiny", str(tmp_path / "v.mkv"), "es")
+    finally:
+        wm.set_models_dir_override(None)
+    assert out is None
+    assert all(c.get("task") != "translate" for c in calls)
+
+
+def test_transcribe_regional_code_matches_base_language(monkeypatch, tmp_path):
+    wm, _calls = _fake_faster_whisper(monkeypatch, tmp_path, "pt")
+    try:
+        out = wm.transcribe_to_srt("tiny", str(tmp_path / "v.mkv"), "pt-br")
+    finally:
+        wm.set_models_dir_override(None)
+    assert out and "transcribe" in out

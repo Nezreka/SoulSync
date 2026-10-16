@@ -615,6 +615,16 @@ def test_update_and_save_sync_status_called(patched_db):
     assert kwargs.get('tracks_hash')  # md5 hash present
 
 
+def test_sync_status_remembers_the_mode(patched_db):
+    """#1704: the next scheduled run compares against the mode this one ran in."""
+    save_calls = []
+    svc = _FakeSyncService(media_client=_FakeMediaClient())
+    deps = _build_deps(sync_service=svc,
+                       update_and_save_sync_status=lambda *a, **kw: save_calls.append(kw))
+    ds.run_sync_task('pSS', 'PSS', [_track(track_id='abc')], deps=deps, sync_mode='append')
+    assert save_calls[0].get('sync_mode') == 'append'
+
+
 # ---------------------------------------------------------------------------
 # Post-sync automation follow-up
 # ---------------------------------------------------------------------------

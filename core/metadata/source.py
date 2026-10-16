@@ -25,6 +25,7 @@ from core.imports.context import (
     is_real_provider_album_id,
     normalize_import_context,
 )
+from core.imports.collab_artist import first_listed_artist, listed_primary_of
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
@@ -325,6 +326,51 @@ def _cached_mb_artist_details(mb_service, artist_mbid: str) -> Optional[Dict[str
     return detail
 
 
+def _isrc_tag_value(audio) -> Optional[str]:
+    """The ISRC out of an already-parsed mutagen file object, or None."""
+    for key in ("TSRC", "ISRC", "isrc", "WM/ISRC", "----:com.apple.iTunes:ISRC"):
+        try:
+            value = audio.get(key)
+        except Exception:  # noqa: BLE001, S112 — one bad frame says nothing about the others
+            continue
+        if not value:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = value[0] if value else None
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "ignore")
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _audio_file_probes(audio_file):
+    """(isrc, duration_ms) for the MusicBrainz pass from ONE parse.
+
+    `_process_musicbrainz_source` needs both values for the same file;
+    parsing it twice (once per probe) doubled the mutagen I/O on every
+    post-processed download. Same fail-soft contract as the individual
+    probes: (None, None) when anything is unknown or unreadable.
+    """
+    if not audio_file:
+        return None, None
+    try:
+        symbols = get_mutagen_symbols()
+        if not symbols:
+            return None, None
+        audio = symbols.File(str(audio_file))
+        if audio is None:
+            return None, None
+        duration_ms = None
+        length = getattr(getattr(audio, "info", None), "length", None)
+        if length and float(length) > 0:
+            duration_ms = int(float(length) * 1000)
+        return _isrc_tag_value(audio), duration_ms
+    except Exception:  # noqa: BLE001, S110 — probe failure means 'unknown', never a reject
+        return None, None
+
+
 def _audio_file_duration_ms(audio_file) -> Optional[int]:
     """Best-effort duration (ms) of the downloaded file for the MusicBrainz
     recording match (#1509 duration gate). None when unknown — the gate
@@ -372,10 +418,34 @@ def _process_musicbrainz_source(pp: dict, metadata: dict, cfg, runtime, track_ti
 
     details = {}
     searched_recording = None
+    # #1705: the track's ISRC, from wherever this pipeline already knows
+    # it. The downloaded file's own embedded tag is probed FIRST: it
+    # describes these exact bytes, while source metadata describes the
+    # listing the download claimed to be — when the two disagree (a
+    # radio-edit ISRC on an album-version listing), the file is the one
+    # being matched. The remaining sources, in order: the download's
+    # source metadata, then the pp ISRC slots seeded from the download's
+    # cached metadata before the source loop (tidal/hifi; the deezer /
+    # qobuz slots are also read for custom post-process orders that run
+    # those sources before musicbrainz — in the default order they are
+    # still empty here). Nothing is probed when a release is pinned:
+    # the recording lookup is skipped entirely then, and a mutagen
+    # parse spent on a value nobody reads is waste.
+    track_isrc = None
+    file_duration_ms = None
+    if not pinned_release:
+        file_isrc, file_duration_ms = _audio_file_probes(audio_file)
+        track_isrc = (
+            file_isrc
+            or metadata.get("isrc")
+            or pp.get("tidal_isrc") or pp.get("hifi_isrc")
+            or pp.get("deezer_isrc") or pp.get("qobuz_isrc")
+        )
     result = None if pinned_release else _call_source_lookup(
         "MusicBrainz recording", mb_service.match_recording, track_title, artist_name,
         artist_mbid=pp.get("artist_mbid"),
-        duration_ms=_audio_file_duration_ms(audio_file))
+        duration_ms=file_duration_ms,
+        isrc=track_isrc)
     if result and result.get("mbid"):
         pp["recording_mbid"] = result["mbid"]
         searched_recording = result["mbid"]
@@ -1424,6 +1494,8 @@ def _track_own_provider_album(
 
     for src, src_name in ((sp_album, "spotify"), (os_album, "search")):
         v = src.get("id")
+        if isinstance(v, int) and not isinstance(v, bool) and v:
+            v = str(v)
         if isinstance(v, str) and v.strip():
             album_id = v.strip()
             id_source = src_name
@@ -1630,8 +1702,9 @@ def _album_identity_disagrees(own_album: Dict[str, Any], album_ctx: Any) -> bool
         return False
     own = own_album or {}
 
-    own_id = (own.get("id") or "").strip()
-    ctx_id = (album_ctx.get("id") or "").strip()
+    # deezer/mirror payloads carry the album id as an int
+    own_id = str(own.get("id") or "").strip()
+    ctx_id = str(album_ctx.get("id") or "").strip()
     own_real = is_real_provider_album_id(own_id)
     ctx_real = is_real_provider_album_id(ctx_id)
 
@@ -1741,7 +1814,7 @@ def evaluate_batch_album_distrust(original_search, track_info, album_ctx, explic
     # disagreement there is a nuance like #1607, not poison), and a Various
     # Artists credit is a genuine multi-artist compilation — both stay
     # trusted. Empty ground truth never fires.
-    _ctx_album_id = (album_ctx.get("id") or "").strip()
+    _ctx_album_id = str(album_ctx.get("id") or "").strip()
     _ctx_artist_norm = (own_album_artist or "").strip().casefold()
     _ctx_artist_untrusted = (
         bool(track_own_artists)
@@ -1861,6 +1934,15 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
         logger.info("Metadata: Using album info clean name: '%s'", metadata["title"])
     else:
         logger.warning("Metadata: Using original title as fallback: '%s'", metadata["title"])
+
+    # the matched track's isrc, for the musicbrainz exact-id rung (#1705).
+    # spotify keeps it under external_ids, deezer/tidal/itunes at the top.
+    for _isrc_src in (track_info, original_search):
+        _ext = _isrc_src.get("external_ids")
+        _isrc = _isrc_src.get("isrc") or (_ext.get("isrc") if isinstance(_ext, dict) else None)
+        if _isrc:
+            metadata["isrc"] = str(_isrc).strip()
+            break
 
     # Resolve canonical artists list. Soulseek matched-download contexts
     # only carry `original_search.artist` (singular string) — the full
@@ -2038,9 +2120,15 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:
         context_artists = album_artists_for_collab or original_search.get("artists") or track_info_ctx.get("artists") or []
-        if len(context_artists) > 1:
-            first = context_artists[0]
-            raw_album_artist = first.get("name", first) if isinstance(first, dict) else str(first)
+        primary = first_listed_artist(raw_album_artist, context_artists)
+        if not primary:
+            # the album list can be the combined name itself while the track
+            # names the primary on its own
+            _track_artists = original_search.get("artists") or track_info_ctx.get("artists") or []
+            if _track_artists:
+                primary = listed_primary_of(raw_album_artist, _track_artists[0])
+        if primary:
+            raw_album_artist = primary
         elif len(context_artists) == 1 and ("," in raw_album_artist or " & " in raw_album_artist):
             artist_id = str(artist_dict.get("id", ""))
             if source == "itunes" and artist_id.isdigit():
