@@ -5,7 +5,14 @@
  * module is pinned differentially in -sync.autosync.test.ts.
  */
 
+import {
+  humanizeType as autoSyncHumanizeType,
+  parseServerTime as autoSyncParseUTC,
+} from '@/features/automations/format';
+
 import { isLiveBeatportRef } from './-beatport.lists';
+
+export { autoSyncHumanizeType, autoSyncParseUTC };
 
 /* ── Constants (auto-sync.js 12, 106-110) ─────────────────────────────────── */
 
@@ -825,16 +832,6 @@ export function autoSyncBuildLanes(
 }
 
 /**
- * stats-automations.js 4260-4264, reached from auto-sync.js 1863/2002 as a
- * cross-file global. A bare timestamp is UTC, so it gets a 'Z' appended; one
- * that already carries an offset is parsed as-is.
- */
-export function autoSyncParseUTC(ts: string): number {
-  if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts).getTime();
-  return new Date(`${ts}Z`).getTime();
-}
-
-/**
  * 1999-2011. 'next in 12m' / '3h' / '2d', or 'due now' once the moment has
  * passed. `now` is a parameter rather than a `Date.now()` call so the label is
  * testable without faking the clock.
@@ -1036,21 +1033,6 @@ export function autoSyncPipelineLatestLog(state: PipelineState | null | undefine
 }
 
 /* ── The read-only Automations panel (1185-1198, 1883-1918) ─────────────── */
-
-/**
- * stats-automations.js 4144-4152. 'deep_scan_library' → 'Deep Scan Library'.
- * The video/music prefix is stripped first.
- */
-export function autoSyncHumanizeType(type: string | null | undefined): string {
-  return (
-    String(type || '')
-      .replace(/^(video|music)_/, '')
-      .split('_')
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ') || 'Unknown'
-  );
-}
 
 const TRIGGER_LABELS: Record<string, string> = {
   app_started: 'App Started',
