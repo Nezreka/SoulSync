@@ -99,6 +99,7 @@ import {
   startLibraryV2AlbumReplayGain,
   startLibraryV2Import,
   startLibraryV2ScopedSearch,
+  startLibraryV2ArtistServerSync,
   startLibraryV2UpgradeScan,
   unlinkLibraryV2ArtistAlias,
   unlinkLibraryV2Duplicate,
@@ -144,12 +145,14 @@ import {
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
+import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
+import { ArtistMissingDownload } from './artist-missing-download';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -5751,6 +5754,7 @@ function ArtistToolsMenu({
   onPhoto,
   onManageTracks,
   onUpdateDiscography,
+  onServerSync,
   onDelete,
   discographyBusy,
 }: {
@@ -5764,6 +5768,7 @@ function ArtistToolsMenu({
   onPhoto: () => void;
   onManageTracks: () => void;
   onUpdateDiscography: () => void;
+  onServerSync?: () => void;
   onDelete: () => void;
   discographyBusy: boolean;
 }) {
@@ -5839,6 +5844,7 @@ function ArtistToolsMenu({
           {item('Preview Retag', 'edit', onRetag)}
           {item('Preview Rename / Organize', 'organize', onReorganizeAll)}
           {item('Manual Import', 'download', onManualImport)}
+          {onServerSync ? item('Sync from media server', 'refresh', onServerSync) : null}
           <div className={styles.toolMenuHeading}>Metadata</div>
           {item('Edit Metadata', 'edit', onEditMetadata)}
           {item('Change Photo', 'cover', onPhoto)}
@@ -6653,10 +6659,12 @@ function CatalogueArtistHero({
   artist,
   onPickImage,
   headerToggle,
+  downloadAction,
 }: {
   artist: LibraryV2ArtistDetail;
   onPickImage: () => void;
   headerToggle: ReactNode;
+  downloadAction: ReactNode;
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   const providerIds = artist.provider_ids ?? {};
@@ -6717,6 +6725,7 @@ function CatalogueArtistHero({
           >
             📻 Artist Radio
           </button>
+          {downloadAction}
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
         </>
       }
@@ -6888,6 +6897,55 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
     }
   }
 
+  async function syncFromMediaServer() {
+    if (!canWish || searchBusy) return;
+    await runBannerTask(async ({ sequence }) => {
+      publishBanner(sequence, { tone: 'busy', text: 'Syncing artist from media server…' });
+      try {
+        const jobId = await startLibraryV2ArtistServerSync(artistId);
+        const state = await awaitBulkJobState(queryClient, jobId);
+        if (state.error) throw new Error(state.error);
+        const result = syncResultMessage((state.result ?? {}) as Record<string, unknown>);
+        publishBanner(sequence, {
+          tone: result.tone === 'warning' ? 'err' : 'ok',
+          text: result.message,
+        });
+        await invalidateLibraryV2(queryClient);
+      } catch (error) {
+        publishBanner(sequence, {
+          tone: 'err',
+          text: mutationErrorMessage(error, 'Media-server sync failed'),
+        });
+      }
+    });
+  }
+
+  async function downloadMissing(albumIds: number[]) {
+    if (!canWish || searchBusy) return;
+    await runBannerTask(async ({ sequence }) => {
+      publishBanner(sequence, { tone: 'busy', text: 'Searching selected missing releases…' });
+      try {
+        const jobId = await startLibraryV2ScopedSearch('artists', artistId, {
+          mode: 'missing',
+          album_ids: albumIds,
+        });
+        const state = await awaitBulkJobState(queryClient, jobId);
+        const stats = state.result as { searching?: number; dispatch_error?: string } | null;
+        if (state.error || stats?.dispatch_error)
+          throw new Error(state.error || stats?.dispatch_error);
+        publishBanner(sequence, {
+          tone: 'ok',
+          text: `Search started for ${stats?.searching ?? 0} missing tracks.`,
+        });
+      } catch (error) {
+        publishBanner(sequence, {
+          tone: 'err',
+          text: mutationErrorMessage(error, 'Download failed'),
+        });
+      }
+    });
+  }
+
   /** ldp-05: one switch, in both header shapes. Compact stays the default;
    *  arriving from a search result preselects the rich hero. */
   const headerToggle = (
@@ -6908,6 +6966,15 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       }
     />
   );
+
+  const downloadAction = artist ? (
+    <ArtistMissingDownload
+      artistName={artist.name}
+      albums={[...artist.albums, ...(artist.eps ?? []), ...artist.singles]}
+      disabled={!canWish || searchBusy}
+      onDownload={(ids) => void downloadMissing(ids)}
+    />
+  ) : null;
 
   return (
     <div className={styles.page}>
@@ -6976,6 +7043,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   onPhoto={() => setShowArtPicker(true)}
                   onManageTracks={() => setShowManageTracks(true)}
                   onUpdateDiscography={() => void updateDiscography()}
+                  onServerSync={
+                    artist.media_server_sources?.length
+                      ? () => void syncFromMediaServer()
+                      : undefined
+                  }
                   discographyBusy={discographyBusy}
                   onDelete={() =>
                     setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
@@ -6998,6 +7070,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               artist={artist}
               onPickImage={() => setShowArtPicker(true)}
               headerToggle={headerToggle}
+              downloadAction={downloadAction}
             />
           ) : (
             <header className={styles.detailHeader}>
@@ -7019,6 +7092,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                     {artist.name}
                   </h1>
                   {headerToggle}
+                  {downloadAction}
                 </div>
                 <p className={styles.subtitle}>
                   {artist.album_count} albums · {artist.single_count} singles

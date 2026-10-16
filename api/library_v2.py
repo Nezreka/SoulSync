@@ -253,6 +253,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                integrity_report_runner:
                                    Optional[Callable[..., Dict[str, Any]]] = None,
                                repair_worker_getter: Optional[Callable[[], Any]] = None,
+                               sync_tracks_to_server_fn=None,
+                               media_server_engine_getter=None,
                                ) -> None:
     """Attach the Library v2 routes to ``app``.
 
@@ -2401,6 +2403,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if not result["fetched"]:
             return _fail(result["error"] or "Fetch failed")
         return jsonify({"success": True, **result})
+
+    from api.library2_artist_tools import register_artist_tool_routes
+    register_artist_tool_routes(
+        _route, get_database=get_database, config_manager=config_manager,
+        registry=_job_registry, profile=_intent_profile, hidden=_hidden_from_caller,
+        sync_tracks_to_server=sync_tracks_to_server_fn,
+        media_server_engine_getter=media_server_engine_getter,
+    )
 
     # -- reorganize (docs §50, bridges onto the legacy planner/queue) ---------
 
@@ -4657,6 +4667,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         table = _MONITOR_TABLES.get(entity)
         if not table:
             return _fail("Unknown entity")
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or body.get('mode', 'automatic') not in ('automatic', 'missing'):
+            return _fail('Invalid search mode')
+        missing_only = body.get('mode') == 'missing'
+        selected_albums = body.get('album_ids')
+        if missing_only and (entity.rstrip('s') not in ('artist', 'album') or
+                (selected_albums is not None and (not isinstance(selected_albums, list) or
+                 not selected_albums or any(type(a) is not int or a <= 0 for a in selected_albums)))):
+            return _fail('Select valid artist/album releases')
         db = get_database()
         with closing(db._get_connection()) as conn:
             if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
@@ -4665,7 +4684,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         active_profile = _intent_profile()
         try:
             # one search per entity AND library: Kim's is not the house's (#1199)
-            job = _job_registry.start(f"search:{entity}:{eid}"
+            job = _job_registry.start(f"search:{entity}:{eid}" + (':missing' if missing_only else '')
                                       + (f":{active_profile}" if active_profile != 1 else ""))
         except JobAlreadyRunning as exc:
             return jsonify({
@@ -4684,9 +4703,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     recompute_wanted_for_entity,
                     track_wanted_states,
                 )
-                recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
-                conn.commit()
-                track_ids = entity_track_ids(conn, entity, eid)
+                if missing_only:
+                    from core.library2.missing_download import selected_track_ids
+                    track_ids = selected_track_ids(db, conn, config_manager, entity, eid, selected_albums)
+                else:
+                    recompute_wanted_for_entity(conn, entity, eid, profile_id=active_profile)
+                    conn.commit()
+                    track_ids = entity_track_ids(conn, entity, eid)
                 _job_registry.update(job_id, total=len(track_ids))
 
                 from core.library2.wishlist_mirror import (
@@ -4694,7 +4717,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     track_direct_download_payload,
                     track_wishlist_payload,
                 )
-                direct_track_search = entity in ("track", "tracks")
+                direct_track_search = entity in ("track", "tracks") or missing_only
                 if direct_track_search:
                     # One-shot intent: never mutate persistent monitoring or
                     # Wishlist state just to feed the shared worker.
@@ -4706,13 +4729,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     )
 
                 states = track_wanted_states(conn, track_ids, profile_id=active_profile) \
-                    if track_ids else {}
+                    if track_ids and not direct_track_search else {}
                 search_ids: List[str] = []
                 direct_payloads: List[Dict[str, Any]] = []
                 for track_id in track_ids:
                     if direct_track_search:
                         direct_payload = track_direct_download_payload(conn, track_id)
-                        if direct_payload:
+                        if direct_payload and (not missing_only or not direct_payload.get('source_info', {}).get('upgrade_check')):
                             direct_payloads.append(direct_payload)
                         continue
                     if not states.get(track_id):
@@ -4730,6 +4753,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     else scoped_wishlist_search_dispatcher
                 )
                 dispatch_input = direct_payloads if direct_track_search else search_ids
+                # Payload construction can mint stable provider-less IDs. The
+                # pipeline reads them through its own connection and may write
+                # queue state, so publish them and release SQLite's writer first.
+                conn.commit()
                 if dispatch_input and dispatcher:
                     batch_payload = dispatcher(dispatch_input, active_profile) or {}
                     if batch_payload.get("success"):
@@ -5307,8 +5334,6 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # committed already.  Mark the import complete and let artwork
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
-                from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
-                schedule_unmapped_artist_reconcile(config_manager)
                 _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)

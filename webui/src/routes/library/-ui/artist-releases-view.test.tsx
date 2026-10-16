@@ -75,6 +75,46 @@ function renderArtist(entry: string) {
 
 /** ldp-03/ldp-04/ldp-05 on an artist that IS in the catalogue. */
 describe('Library V2 artist detail — All Releases views', () => {
+  it('keeps media-server sync in Tools and reports its background result', async () => {
+    const sync = vi.fn();
+    server.use(
+      http.post('/api/library/v2/artists/1/sync', () => {
+        sync();
+        return HttpResponse.json({ success: true, job_id: 'artist-sync-1' });
+      }),
+      http.get('/api/library/v2/jobs/status', () =>
+        HttpResponse.json({
+          running: false,
+          result: { artist_name: 'Portishead', new_tracks: 2 },
+          error: null,
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1');
+    fireEvent.click(await screen.findByRole('button', { name: 'Tools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sync from media server' }));
+    await waitFor(() => expect(sync).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('Portishead: +2 tracks')).toBeInTheDocument();
+  });
+
+  it('downloads selected missing releases without enabling monitoring', async () => {
+    let requestBody: unknown;
+    server.use(
+      http.post('/api/library/v2/artists/1/search', async ({ request }) => {
+        requestBody = await request.json();
+        return HttpResponse.json({ success: true, job_id: 'missing-1' });
+      }),
+      http.get('/api/library/v2/jobs/status', () =>
+        HttpResponse.json({ running: false, result: { searching: 10 }, error: null }),
+      ),
+    );
+    renderArtist('/library?artist=1&view=discovery&immersive=true');
+    fireEvent.click(await screen.findByRole('button', { name: 'Download missing' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Dummy/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download selected' }));
+    await waitFor(() => expect(requestBody).toEqual({ mode: 'missing', album_ids: [2] }));
+  });
+
   beforeEach(() => {
     window.SoulSyncWebShellBridge = createShellBridge();
     server.use(

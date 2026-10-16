@@ -78,6 +78,9 @@ def test_bootstrap_repairs_stale_imported_path_before_marking_done(
                         lambda *_a, **_k: None)
     monkeypatch.setattr("core.library2.tag_cache.precache_tag_cache",
                         lambda *_a, **_k: None)
+    # This test repairs a file path. Provider identity resolution has separate
+    # coverage and must not make this transaction test depend on the network.
+    monkeypatch.setattr("core.library2.native_enrich.default_artist_resolver", lambda _name: None)
 
     def post_import(progress):
         from core.library2.post_import import run_post_import_precache
@@ -233,6 +236,16 @@ def test_try_claim_concurrent_race_has_exactly_one_winner(legacy_db):
 
     assert sum(bool(value) for value in results) == 1
     assert len(results) == 8
+
+
+def test_source_snapshot_initializes_an_existing_empty_revision_table(legacy_db):
+    # DDL can be visible before an adjacent INSERT on another connection. A
+    # concurrent snapshot must finish initializing that row, never read None.
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute('CREATE TABLE lib2_legacy_source_revision '
+                     '(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL)')
+        conn.commit()
+    assert lib2_bootstrap.source_row_count(lib2_bootstrap.source_watermark(legacy_db)) == 6
 
 
 def test_empty_fresh_install_is_immediately_converged(legacy_db):

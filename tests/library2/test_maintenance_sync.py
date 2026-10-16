@@ -809,11 +809,14 @@ def test_acoustid_scanner_persists_native_verification_for_v2_only_file(
 
 
 def test_acoustid_scanner_flags_v2_only_mismatch_with_subject(
-    legacy_db, tmp_path,
+    legacy_db, tmp_path, monkeypatch,
 ):
     from types import SimpleNamespace
 
     from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
+
+    monkeypatch.setattr('core.acoustid_verification._resolve_expected_artist_aliases',
+                        lambda _name: [])
 
     _import(legacy_db)
     audio = tmp_path / "acoustid-wrong.flac"

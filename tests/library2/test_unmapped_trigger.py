@@ -165,7 +165,7 @@ def test_scheduling_never_raises_into_the_import_pipeline():
 
 
 @pytest.mark.parametrize('result,expected', [
-    ({'success': True}, ['reconcile', 'workers']),
+    ({'success': True}, ['workers']),
     ({'skipped': 'already_done'}, ['reconcile', 'workers']),
     ({'skipped': 'empty_source'}, ['workers']),
 ])
@@ -179,7 +179,7 @@ def test_autostart_reconciles_completed_migrations_without_waiting_for_new_impor
     monkeypatch.setattr(bootstrap, 'run_deferred_backfills', lambda *a, **k: None)
     monkeypatch.setattr(bootstrap, 'run_bootstrap_if_needed', lambda *a, **k: result)
     monkeypatch.setattr(file_delete, 'reconcile_incomplete_deletes', lambda *a, **k: 0)
-    monkeypatch.setattr(UT, 'schedule_unmapped_artist_reconcile', lambda *a: calls.append('reconcile'))
+    monkeypatch.setattr('core.library2.post_import.prepare_imported_artists', lambda *a: calls.append('reconcile'))
     monkeypatch.setattr(migration_gate, 'start_deferred_workers', lambda *a: calls.append('workers'))
     web_server._autostart_library_v2_bootstrap_import()
     assert calls == expected

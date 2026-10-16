@@ -2412,9 +2412,15 @@ def test_import_completes_while_artwork_continues_in_background(api, monkeypatch
 
     client, _db, _ids = api
     scheduled = []
-    from core.library2 import bootstrap, unmapped_trigger
+    prepared = []
+    from core.library2 import bootstrap, unmapped_trigger, post_import
     monkeypatch.setattr(unmapped_trigger, 'schedule_unmapped_artist_reconcile',
                         lambda *_: scheduled.append(bootstrap.get_state(_db)['status']))
+    def prepare_artists(database, _config, *, progress=None):
+        prepared.append(bootstrap.get_state(database)['status'])
+        if progress:
+            progress('artists', 1, 1)
+    monkeypatch.setattr(post_import, 'prepare_imported_artists', prepare_artists)
     artwork_started = threading.Event()
     release_artwork = threading.Event()
 
@@ -2463,7 +2469,8 @@ def test_import_completes_while_artwork_continues_in_background(api, monkeypatch
         assert state is not None
         assert state["running"] is False
         assert state["stage"] == "done"
-        assert scheduled == ['done']
+        assert prepared == ['running']
+        assert scheduled == []  # preparation must finish before the barrier opens
         assert state["stats"] == {"artists": 1, "albums": 3, "tracks": 3}
         assert state["artwork_cache"]["running"] is True
         assert state["artwork_cache"]["current"] == 1

@@ -1264,8 +1264,18 @@ def test_anchor_walk_never_holds_a_write_transaction_across_a_provider_call(impo
 # --- MusicBrainz decides its own identity ----------------------------------
 
 
+@pytest.fixture
+def identity_provider_io(monkeypatch):
+    """Identity tests do not fetch a real artist's biography or artwork."""
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_descriptive_metadata',
+                        lambda *a, **kw: None)
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_artwork_url',
+                        lambda *a, **kw: None)
+    monkeypatch.setattr(NE, 'default_artwork_fetcher', lambda *a, **kw: None)
+
+
 def test_musicbrainz_artist_enrichment_asks_match_artist_not_the_name_gate(
-    imported_conn, monkeypatch,
+    imported_conn, monkeypatch, identity_provider_io,
 ):
     """The Enrich button could not reach a cross-script artist at all.
 
@@ -1306,7 +1316,7 @@ def test_musicbrainz_artist_enrichment_asks_match_artist_not_the_name_gate(
 
 
 def test_musicbrainz_artist_enrichment_falls_through_when_no_match(
-    imported_conn, monkeypatch,
+    imported_conn, monkeypatch, identity_provider_io,
 ):
     """No answer from `match_artist` is not a reason to skip the generic path."""
     aid = _insert_native_artist(imported_conn, "Some Artist")
@@ -1328,7 +1338,7 @@ def test_musicbrainz_artist_enrichment_falls_through_when_no_match(
     assert result["provider_id"] == "MB-FROM-SEARCH"
 
 
-def test_musicbrainz_album_enrichment_is_untouched(imported_conn, monkeypatch):
+def test_musicbrainz_album_enrichment_is_untouched(imported_conn, monkeypatch, identity_provider_io):
     """Only artists have a `match_artist`; albums keep the generic path."""
     monkeypatch.setattr(
         "core.musicbrainz_service.get_musicbrainz_service",

@@ -12,8 +12,8 @@ the normal case: the migration runs by itself) ended up with rows but none of
 this. Both callers share this module so "the button" and "the automatic
 migration" cannot drift apart again.
 
-Every stage is best effort: the catalogue is already committed, and a provider
-being unreachable must never turn a successful migration into a failed one.
+Presentation caches are best effort. Artist identity preparation precedes them;
+if that stage cannot run, the migration barrier must remain in place.
 """
 
 from __future__ import annotations
@@ -28,14 +28,52 @@ logger = get_logger("library2.post_import")
 ProgressCb = Optional[Callable[..., None]]
 
 
+class ArtistPreparationError(RuntimeError):
+    """Identity preparation failed; do not release the migration barrier."""
+
+
+def prepare_imported_artists(database, config_manager=None, *, progress=None):
+    """Resolve/split credits synchronously before releasing enrichment workers."""
+    try:
+        return _prepare_imported_artists(database, config_manager, progress=progress)
+    except Exception as exc:
+        raise ArtistPreparationError(str(exc)) from exc
+
+
+def _prepare_imported_artists(database, config_manager=None, *, progress=None):
+    from core.library2.native_enrich import reconcile_unmapped_native_artists
+    from core.library2.unmapped_trigger import DEFAULT_COOLDOWN_HOURS
+    from core.library2.worker_queue import invalidate_pending_cache
+
+    cooldown = (config_manager.get('library_v2.unmapped_reconcile.cooldown_hours',
+                                   DEFAULT_COOLDOWN_HOURS)
+                if config_manager is not None and hasattr(config_manager, 'get')
+                else DEFAULT_COOLDOWN_HOURS)
+    with closing(database._get_connection()) as conn:
+        def report(current, total):
+            conn.commit()
+            if progress:
+                progress('artists', current, total)
+        if progress:
+            progress('artists', 0, 0)
+        stats = reconcile_unmapped_native_artists(conn, progress=report,
+                                                  cooldown_hours=cooldown)
+        conn.commit()
+    invalidate_pending_cache()
+    logger.info('Pre-enrichment artist reconciliation: %s', stats)
+    return stats
+
+
 def run_post_import_precache(database: Any, config_manager: Any, *,
                              progress: ProgressCb = None) -> Dict[str, str]:
-    """Resolve tracklists, then read file tags. Never raises.
+    """Prepare artist identities, resolve tracklists, then read file tags.
 
     Returns one status per stage (``"ok"`` or the error text) so a caller can
     log or surface what did not complete.
     """
     results: Dict[str, str] = {}
+    prepare_imported_artists(database, config_manager, progress=progress)
+    results['artists'] = 'ok'
 
     def _stage(name: str, run: Callable[[], Any]) -> None:
         if progress:
@@ -74,4 +112,4 @@ def run_post_import_precache(database: Any, config_manager: Any, *,
     return results
 
 
-__all__ = ["run_post_import_precache"]
+__all__ = ["run_post_import_precache", "prepare_imported_artists", "ArtistPreparationError"]

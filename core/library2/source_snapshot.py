@@ -15,10 +15,19 @@ SOURCE_TABLES = ("artists", "albums", "tracks")
 def ensure_source_revision(conn) -> None:
     objects = {row[0] for row in conn.execute(
         "SELECT name FROM sqlite_master WHERE type IN ('table','trigger')")}
-    if "lib2_legacy_source_revision" not in objects:
-        conn.execute("CREATE TABLE lib2_legacy_source_revision "
-                     "(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL)")
-        conn.execute("INSERT INTO lib2_legacy_source_revision VALUES(1,0)")
+    triggers = {f'trg_lib2_source_{table}_{action.lower()}'
+                for table in SOURCE_TABLES if table in objects
+                for action in ('INSERT', 'UPDATE', 'DELETE')}
+    if ('lib2_legacy_source_revision' in objects and triggers <= objects
+            and conn.execute('SELECT 1 FROM lib2_legacy_source_revision WHERE id=1').fetchone()):
+        return
+    # Publish the table, seed row and observers in one transaction. Concurrent
+    # claimants otherwise see a table whose seed INSERT has not committed yet.
+    if not conn.in_transaction:
+        conn.execute('BEGIN IMMEDIATE')
+    conn.execute("CREATE TABLE IF NOT EXISTS lib2_legacy_source_revision "
+                 "(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL)")
+    conn.execute("INSERT OR IGNORE INTO lib2_legacy_source_revision VALUES(1,0)")
     for table in SOURCE_TABLES:
         if table not in objects:
             continue
@@ -26,7 +35,7 @@ def ensure_source_revision(conn) -> None:
             name = f"trg_lib2_source_{table}_{action.lower()}"
             if name not in objects:
                 conn.execute(
-                    f"CREATE TRIGGER {name} AFTER {action} ON {table} BEGIN "
+                    f"CREATE TRIGGER IF NOT EXISTS {name} AFTER {action} ON {table} BEGIN "
                     "UPDATE lib2_legacy_source_revision SET revision=revision+1 WHERE id=1; END")
 
 

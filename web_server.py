@@ -9970,32 +9970,6 @@ def _build_library_tag_db_data(track_data, album_genres=None):
     return db_data
 
 
-_write_tags_batch_state = {
-    'status': 'idle',  # idle | running | done
-    'total': 0,
-    'processed': 0,
-    'written': 0,
-    'skipped': 0,       # #1052 — files already matching the DB, not rewritten
-    'failed': 0,
-    'current_track': '',
-    'errors': [],
-    'sync_phase': None,  # None | 'syncing' | 'done'
-    'sync_server': None,
-    'sync_synced': 0,
-    'sync_failed': 0,
-}
-_write_tags_batch_lock = threading.Lock()
-
-
-@app.route('/api/library/tracks/write-tags-batch/status', methods=['GET'])
-def get_write_tags_batch_status():
-    """Poll the status of a running batch tag write."""
-    with _write_tags_batch_lock:
-        state = dict(_write_tags_batch_state)
-        state['errors'] = list(_write_tags_batch_state['errors'])  # snapshot to avoid mutation during serialize
-        return jsonify(state)
-
-
 # ── Reconcile embedded provider IDs (gap-fill DB from file tags) ──
 #
 # Files that SoulSync (or MusicBrainz Picard) already tagged carry Spotify /
@@ -10162,59 +10136,6 @@ def get_reconcile_embedded_ids_status():
     """Poll the status of the embedded-ID reconcile job."""
     with _reconcile_ids_lock:
         return jsonify(dict(_reconcile_ids_state))
-
-
-# ── ReplayGain Analysis endpoints ──
-
-from core.replaygain import (
-    analyze_track as _rg_analyze_track,
-    write_replaygain_tags as _rg_write_tags,
-    is_ffmpeg_available as _rg_ffmpeg_available,
-    get_target_lufs as _rg_get_target_lufs,
-)
-
-# State machine for album-level ReplayGain jobs
-_rg_album_state = {
-    'status': 'idle',   # idle | running | done
-    'album_id': None,
-    'total': 0,
-    'processed': 0,
-    'analyzed': 0,
-    'failed': 0,
-    'current_track': '',
-    'errors': [],
-}
-_rg_album_lock = threading.Lock()
-
-# State machine for selected-tracks batch ReplayGain jobs
-_rg_batch_state = {
-    'status': 'idle',
-    'total': 0,
-    'processed': 0,
-    'analyzed': 0,
-    'failed': 0,
-    'current_track': '',
-    'errors': [],
-}
-_rg_batch_lock = threading.Lock()
-
-
-@app.route('/api/library/album/<int:album_id>/analyze-replaygain/status', methods=['GET'])
-def get_album_replaygain_status(album_id):
-    """Poll the status of a running album ReplayGain job."""
-    with _rg_album_lock:
-        state = dict(_rg_album_state)
-        state['errors'] = list(_rg_album_state['errors'])
-    return jsonify(state)
-
-
-@app.route('/api/library/tracks/analyze-replaygain-batch/status', methods=['GET'])
-def get_tracks_replaygain_batch_status():
-    """Poll the status of a running batch ReplayGain job."""
-    with _rg_batch_lock:
-        state = dict(_rg_batch_state)
-        state['errors'] = list(_rg_batch_state['errors'])
-    return jsonify(state)
 
 
 # ── Reorganize Album Files endpoints ──
@@ -20278,11 +20199,13 @@ def _autostart_library_v2_bootstrap_import():
                 database, config_manager.get, post_import=_post_import,
             )
             if lib2_bootstrap.should_stop_autostart(result):
-                if result.get("success") or result.get("skipped") == "already_done":
-                    # The migration is committed; heal combined/unmapped artist
-                    # credits in the existing independent, debounced worker.
-                    from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
-                    schedule_unmapped_artist_reconcile(config_manager)
+                if result.get("skipped") == "already_done":
+                    # Older completed migrations need the same preparation.
+                    # A timer here released workers before the split happened.
+                    from core.library2.post_import import prepare_imported_artists
+                    from core.library2.migration_gate import migration_activity
+                    with migration_activity():
+                        prepare_imported_artists(database, config_manager)
                 from core.library2.migration_gate import start_deferred_workers
                 start_deferred_workers(database)
                 return
@@ -23730,6 +23653,8 @@ _register_library_v2_routes(
         _run_persistent_acquisition_reconciliation
     ),
     integrity_report_runner=_run_library_v2_integrity_report,
+    sync_tracks_to_server_fn=_sync_tracks_to_server,
+    media_server_engine_getter=lambda: media_server_engine,
 )
 
 # Clients-tab music matches waiting on their download: resume following them at

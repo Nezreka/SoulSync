@@ -1245,30 +1245,15 @@ def _pending_unmapped_artists(
     sql += "ORDER BY id"
     rows = conn.execute(sql, params).fetchall()
 
-    catalog_providers = {
-        "spotify",
-        "musicbrainz",
-        "deezer",
-        "itunes",
-        "tidal",
-        "qobuz",
-        "amazon",
-        "jiosaavn",
-        "bandcamp",
-    }
+    from core.library2.artist_credit_gate import CATALOG_PROVIDERS
+    from core.library2.provider_ids import parse_external_ids
 
     pending = []
     for r in rows:
         row_dict = dict(r)
-        ext_ids = {}
-        if row_dict.get("external_ids"):
-            try:
-                ext_ids = json.loads(row_dict["external_ids"])
-            except (json.JSONDecodeError, TypeError):
-                ext_ids = {}
-
+        ext_ids = parse_external_ids(row_dict.get('external_ids'))
         # If they are matched on any catalog provider, they are not pending.
-        has_catalog_id = any(p in ext_ids for p in catalog_providers)
+        has_catalog_id = any(p in ext_ids for p in CATALOG_PROVIDERS)
         if not has_catalog_id:
             pending.append(row_dict)
 

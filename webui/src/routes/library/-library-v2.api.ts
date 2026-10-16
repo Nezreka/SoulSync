@@ -1440,19 +1440,30 @@ export async function startLibraryV2UpgradeScan(): Promise<string> {
   return payload.job_id;
 }
 
+/** Pull this artist's mapped media-server contributions through the shared scanner. */
+export async function startLibraryV2ArtistServerSync(id: number): Promise<string> {
+  const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
+    apiClient.post(`library/v2/artists/${id}/sync`, { json: {}, throwHttpErrors: false }),
+  );
+  if (!payload.job_id) throw new Error(payload.error || 'Media-server sync failed');
+  return payload.job_id;
+}
+
 /** Lidarr-style scoped Automatic Search (deep-dive C1): searches missing
  *  tracks AND, if the quality profile allows it, upgrades — for exactly this
  *  artist/album/track, never the whole wishlist. Replaces the client-side
  *  best-pick heuristic (A4) and the mislabeled album-row global search (A3).
  *  Returns a job id to poll via fetchLibraryV2JobStatus; the job's `result`
- *  carries `{checked, queued, searching, batch_id}`. */
+ *  carries `{checked, queued, searching, batch_id}`. `mode: missing` instead
+ *  selects one-off missing downloads without changing monitoring. */
 export async function startLibraryV2ScopedSearch(
   entity: 'artists' | 'albums' | 'tracks',
   id: number,
+  options: { mode?: 'missing'; album_ids?: number[] } = {},
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/search`, {
-      json: {},
+      json: options,
       throwHttpErrors: false,
     }),
   );

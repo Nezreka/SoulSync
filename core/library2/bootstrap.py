@@ -346,9 +346,9 @@ def try_claim(database: Any, *, stale_after_seconds: int = STALE_AFTER_SECONDS,
     checkpoints it writes can later be checked against the source they were
     taken from. It is computed here when the caller has not already done so.
     """
-    conn = database._get_connection()
     if watermark is None:
         watermark = source_watermark(database)
+    conn = database._get_connection()
     try:
         cursor = conn.cursor()
         ensure_bootstrap_schema(cursor)
@@ -852,6 +852,10 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             try:
                 post_import(_progress)
             except Exception as exc:  # noqa: BLE001
+                from core.library2.post_import import ArtistPreparationError
+                if isinstance(exc, ArtistPreparationError):
+                    mark_failed(database, owner_token, str(exc))
+                    return {"success": False, "error": str(exc)}
                 logger.warning("Library v2 post-import precache failed: %s", exc)
     finally:
         keepalive.stop()

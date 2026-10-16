@@ -227,6 +227,67 @@ def test_direct_dispatcher_receives_transient_payload_and_profile(tmp_path):
     assert db.wishlist_adds == []
 
 
+def test_artist_download_missing_is_one_off_and_keeps_monitoring_unchanged(tmp_path):
+    calls = []
+    def dispatch(tracks, profile_id):
+        calls.extend(tracks)
+        return {'success': True, 'batch_id': 'missing-download'}
+    client, db, ids = _build_api(tmp_path, direct_dispatcher=dispatch)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE lib2_tracks SET monitored=0')
+        conn.commit()
+    response = client.post(f"/api/library/v2/artists/{ids['artist']}/search",
+                           json={'mode': 'missing', 'album_ids': [ids['ep']]})
+    assert response.status_code == 200
+    state = _await_job(client, response.get_json()['job_id'])
+    assert state['error'] is None
+    assert [t['source_info']['lib2_track_id'] for t in calls] == [ids['ep_track']]
+    assert db.wishlist_adds == []
+    with db._get_connection() as conn:
+        assert not conn.execute('SELECT 1 FROM lib2_tracks WHERE monitored=1').fetchone()
+        assert not conn.execute('SELECT 1 FROM lib2_monitor_rules').fetchone()
+
+
+def test_artist_download_missing_skips_owned_tracks_and_rejects_foreign_releases(tmp_path):
+    calls = []
+    client, db, ids = _build_api(tmp_path, direct_dispatcher=lambda tracks, _profile:
+                               calls.extend(tracks) or {'success': True})
+    response = client.post(f"/api/library/v2/artists/{ids['artist']}/search",
+                           json={'mode': 'missing'})
+    state = _await_job(client, response.get_json()['job_id'])
+    assert state['error'] is None
+    assert state['result']['checked'] == 2
+    assert [t['source_info']['lib2_track_id'] for t in calls] == [ids['ep_track']]
+    calls.clear()
+    response = client.post(f"/api/library/v2/artists/{ids['artist']}/search",
+                           json={'mode': 'missing', 'album_ids': [999]})
+    state = _await_job(client, response.get_json()['job_id'])
+    assert 'belonging' in state['error']
+    assert calls == []
+    assert db.wishlist_adds == []
+
+
+def test_missing_download_persists_providerless_identity_before_dispatch(tmp_path):
+    seen = []
+    def dispatch(tracks, _profile):
+        with db._get_connection() as conn:
+            stable_id = conn.execute('SELECT stable_id FROM lib2_tracks WHERE id=?',
+                                     (ids['ep_track'],)).fetchone()[0]
+        assert stable_id, 'the pipeline must be able to resolve the committed identity'
+        assert tracks[0]['id'] == f'lib2-track:{stable_id}'
+        seen.extend(tracks)
+        return {'success': True}
+    client, db, ids = _build_api(tmp_path, direct_dispatcher=dispatch)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE lib2_tracks SET spotify_id=NULL WHERE id=?', (ids['ep_track'],))
+        conn.commit()
+    response = client.post(f"/api/library/v2/artists/{ids['artist']}/search",
+                           json={'mode': 'missing', 'album_ids': [ids['ep']]})
+    state = _await_job(client, response.get_json()['job_id'])
+    assert state['error'] is None
+    assert len(seen) == 1
+
+
 def test_dispatcher_failure_is_surfaced_not_silently_swallowed(tmp_path):
     """docs §69.3: a failed dispatch (e.g. the download executor rejected the
     submission) must not look like a successful "search started" — the UI
