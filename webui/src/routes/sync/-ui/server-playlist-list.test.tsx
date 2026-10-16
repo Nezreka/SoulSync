@@ -6,6 +6,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { useLayoutEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -403,6 +404,31 @@ describe('ServerDisambigModal — direct (185-223)', () => {
     },
     { id: 10, name: 'Road Trip', source: 'navidrome', track_count: 0 },
   ];
+
+  it('accepts Escape as soon as the overlay is visible', () => {
+    function CloseImmediately() {
+      const [open, setOpen] = useState(true);
+      // Match a key arriving after the overlay commits, before passive effects.
+      useLayoutEffect(() => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      }, []);
+      return open ? (
+        <ServerDisambigModal
+          playlistName="Road Trip"
+          candidates={CANDIDATES}
+          now={NOW}
+          onClose={() => setOpen(false)}
+          onPick={vi.fn()}
+        />
+      ) : (
+        <p>Selection closed</p>
+      );
+    }
+
+    render(<CloseImmediately />);
+    expect(screen.getByText('Selection closed')).toBeInTheDocument();
+    expect(document.querySelector('#server-disambig-overlay')).toBeNull();
+  });
 
   it('uses ITS icon table, with the clipboard for anything unlisted (193, 196)', () => {
     render(

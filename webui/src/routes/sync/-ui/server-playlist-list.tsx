@@ -13,7 +13,7 @@
 
 import type { CSSProperties, ReactElement } from 'react';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import type {
   MirroredMatch,
@@ -571,8 +571,9 @@ export function ServerDisambigModal({
   onPick: (candidate: MirroredMatch) => void;
 }) {
   // 221-222 parks the handler on window._disambigEsc and removes it in
-  // closeServerDisambig; an effect is the same teardown without the global.
-  useEffect(() => {
+  // closeServerDisambig. Register before paint so an immediately pressed
+  // Escape isn't lost while the visible overlay waits for passive effects.
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
     };
