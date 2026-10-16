@@ -52,6 +52,8 @@ class SyncDeps:
     process_wishlist_automatically: Callable[..., Any] | None = None
     run_playlist_organize_download: Callable[..., Any] | None = None
     is_wishlist_actually_processing: Callable[[], bool] | None = None
+    # Drops a playlist's stored smart-skip fingerprint after a failed sync.
+    invalidate_sync_fingerprint: Callable[[str], None] | None = None
 
 
 def _post_sync_automation_followup(
@@ -823,10 +825,13 @@ def run_sync_task(
             )
 
         if sync_errors:
-            # Nothing reached the server, so no "synced" event, and no saved
-            # sync status: that status is the smart-skip fingerprint, and a
-            # fully matched playlist whose write failed would otherwise be
-            # skipped as "unchanged" on every later run.
+            # Nothing reached the server, so no "synced" event and no new sync
+            # status. The status is the smart-skip fingerprint: saving this
+            # run's would skip a fully matched playlist as "unchanged" on
+            # every later run, and so would keeping the one from the last
+            # good run. Drop it, so the next run retries the write.
+            if deps.invalidate_sync_fingerprint:
+                deps.invalidate_sync_fingerprint(playlist_id)
             return
 
         # Emit playlist_synced event for automation engine
