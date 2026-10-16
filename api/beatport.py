@@ -1531,6 +1531,20 @@ def get_beatport_list():
     return jsonify({"success": True, **chart_data(listed)})
 
 
+@bp.route('/api/beatport/snapshot', methods=['POST'])
+def save_beatport_snapshot():
+    """freeze a beatport list as it is today, as a dated mirrored playlist."""
+    from core.beatport.playlist import save_snapshot
+    from core.profile_context import get_current_profile_id
+    from database.music_database import get_database
+
+    ref = (request.get_json(silent=True) or {}).get('ref', '')
+    saved = save_snapshot(get_database(), ref, get_current_profile_id())
+    if not saved:
+        return jsonify({"success": False, "error": "Couldn't take a snapshot of that list"}), 400
+    return jsonify({"success": True, **saved})
+
+
 @bp.route('/api/beatport/top-100', methods=['GET'])
 def get_beatport_top_100():
     """Get Beatport Top 100 tracks"""

@@ -145,3 +145,37 @@ export const beatportRefs = {
     list: 'top-10' | 'hype-10' | 'top-100' | 'hype-100',
   ) => `genre:${genre.slug}:${genre.id}:${list}`,
 };
+
+/**
+ * a ref beatport keeps changing (the top 10s and 100s, a genre's lists, a
+ * chart): the lists worth snapshotting. a release never changes, and an old
+ * random chart hash isn't a ref at all.
+ */
+const LIVE_REF =
+  /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
+
+export function isLiveBeatportRef(ref: string | null | undefined): boolean {
+  return LIVE_REF.test(String(ref ?? '').toLowerCase());
+}
+
+export interface BeatportSnapshotResult {
+  success?: boolean;
+  error?: string;
+  playlist_id?: number;
+  name?: string;
+  track_count?: number;
+}
+
+/** POST /api/beatport/snapshot: freeze the list as it is today. */
+export async function saveBeatportSnapshot(ref: string): Promise<BeatportSnapshotResult> {
+  const response = await fetch('/api/beatport/snapshot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ref }),
+  });
+  try {
+    return (await response.json()) as BeatportSnapshotResult;
+  } catch {
+    return { success: false, error: `Snapshot failed (${response.status})` };
+  }
+}

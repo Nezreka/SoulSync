@@ -60,6 +60,7 @@ import {
   skippedNoteText,
 } from '../-sync.modal-core';
 import { syncPercent } from '../-sync.state';
+import { BeatportSnapshotButton } from './beatport-snapshot-button';
 import { OrganizeToggle } from './organize-toggle';
 
 declare global {
@@ -577,6 +578,7 @@ export function DiscoveryModal(props: DiscoveryModalProps) {
             </div>
           </div>
           <div className="modal-footer-right">
+            {config.id === 'beatport' && <BeatportSnapshotButton chartRef={state.sourceId} />}
             <button type="button" className="modal-btn modal-btn-secondary" onClick={onClose}>
               🏠 Close
             </button>

@@ -110,3 +110,25 @@ def ref_from_url(url: object) -> Optional[BeatportRef]:
 
 def genre_ref(slug: str, genre_id: object, list_kind: str) -> Optional[BeatportRef]:
     return parse_ref(f"genre:{slug}:{genre_id}:{list_kind}")
+
+
+# a dated snapshot of a list: the list's ref, an '@', the day it was taken.
+# it's a frozen mirror. it never refreshes (that's the point of it) but it can
+# still be identified, synced and downloaded like any playlist.
+_SNAPSHOT_RE = re.compile(r'^(.+)@(\d{4}-\d{2}-\d{2})$')
+
+
+def snapshot_id(ref: object, day: str) -> Optional[str]:
+    parsed = ref if isinstance(ref, BeatportRef) else parse_ref(ref)
+    if parsed is None or not re.match(r'^\d{4}-\d{2}-\d{2}$', str(day or '')):
+        return None
+    return f"{parsed}@{day}"
+
+
+def parse_snapshot(text: object):
+    """(BeatportRef, day) for a snapshot id, or None."""
+    m = _SNAPSHOT_RE.match(str(text or '').strip())
+    if not m:
+        return None
+    ref = parse_ref(m.group(1))
+    return (ref, m.group(2)) if ref else None

@@ -113,3 +113,40 @@ def mirror_chart(db: Any, ref: str, chart: Dict[str, Any], profile_id: int) -> O
     except Exception as e:  # noqa: BLE001 - a failed mirror must not stop discovery
         logger.warning("could not mirror beatport list %s: %s", ref, e)
         return None
+
+
+def save_snapshot(db: Any, ref: str, profile_id: int, today: Optional[str] = None,
+                  fetch=None) -> Optional[Dict[str, Any]]:
+    """freeze a beatport list as it is today: a dated mirror ("Hype Top 10 ·
+    2026-10-16") that never refreshes, next to the live one that does. taking
+    it twice on one day updates that day's copy. returns {playlist_id, name,
+    track_count} or None when the ref is junk or beatport didn't answer."""
+    import datetime as _dt
+    from core.beatport.refs import parse_ref, snapshot_id
+
+    parsed = parse_ref(ref)
+    if parsed is None:
+        return None
+    day = today or _dt.date.today().isoformat()
+    if fetch is None:
+        from core.beatport.fetch import fetch_list
+        listed = fetch_list(parsed, use_cache=False)
+    else:
+        listed = fetch(str(parsed))
+    if not listed or not listed.get('tracks'):
+        return None
+    chart = chart_data(listed)
+    name = f"{chart['name']} · {day}"
+    playlist_id = db.mirror_playlist(
+        source=SOURCE,
+        source_playlist_id=snapshot_id(parsed, day),
+        name=name,
+        tracks=[mirror_track(t) for t in chart['tracks']],
+        profile_id=profile_id,
+        description=f"{parsed.url} (snapshot {day})",
+        owner=chart.get('creator') or 'Beatport',
+        image_url=chart.get('image') or '',
+    )
+    if playlist_id is None:
+        return None
+    return {'playlist_id': playlist_id, 'name': name, 'track_count': len(chart['tracks'])}

@@ -26,6 +26,13 @@ from core.playlists.sources.base import (
 )
 
 
+def is_snapshot_mirror(playlist: Any) -> bool:
+    """a dated, frozen copy of a beatport list (core.beatport.refs.parse_snapshot)."""
+    from core.beatport.refs import parse_snapshot
+    return (isinstance(playlist, dict) and playlist.get('source') == SOURCE_BEATPORT
+            and parse_snapshot(playlist.get('source_playlist_id')) is not None)
+
+
 def is_refreshable_mirror(playlist: Any) -> bool:
     """true for a beatport mirror whose id is a live list. the refresh, the
     pipeline and the pipeline run button all ask this."""

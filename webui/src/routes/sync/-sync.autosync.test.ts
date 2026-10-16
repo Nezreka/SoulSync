@@ -1662,6 +1662,14 @@ describe('autoSyncPipelineCoversPlaylist (#1289)', () => {
         source_playlist_id: 'genre:trance-main-floor:7:hype-10',
       }),
     ).toBe(true);
+    // a dated snapshot never refreshes but the pipeline still identifies,
+    // syncs and downloads it; it can't be scheduled (it never changes)
+    const snap = { source: 'beatport', source_playlist_id: 'hype-10@2026-10-16' };
+    expect(autoSyncPipelineCoversPlaylist(snap)).toBe(true);
+    expect(autoSyncCanSchedulePlaylist(snap)).toBe(false);
+    expect(
+      autoSyncPipelineCoversPlaylist({ source: 'beatport', source_playlist_id: 'junk@2026-10-16' }),
+    ).toBe(false);
     expect(autoSyncPipelineCoversPlaylist({ source: 'youtube' })).toBe(true);
     expect(autoSyncPipelineCoversPlaylist({ source: 'spotify' })).toBe(true);
     expect(autoSyncPipelineCoversPlaylist({ source: 'lastfm' })).toBe(true);

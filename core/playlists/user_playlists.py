@@ -72,9 +72,12 @@ def pipeline_runs(playlist) -> bool:
     if source in PIPELINE_SKIPPED_SOURCES:
         return False
     if source == 'beatport':
-        from core.playlists.sources.beatport import is_refreshable_mirror
-        return is_refreshable_mirror(playlist)
+        # a live list, or a dated snapshot you chose to keep: it never
+        # refreshes, but identify / sync / download are why you took it
+        from core.playlists.sources.beatport import is_refreshable_mirror, is_snapshot_mirror
+        return is_refreshable_mirror(playlist) or is_snapshot_mirror(playlist)
     return True
+
 
 MAX_NAME_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 1000

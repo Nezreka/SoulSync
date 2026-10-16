@@ -273,6 +273,15 @@ export function beatportMirrorRefreshes(playlist: MirroredRow | null | undefined
   return BEATPORT_LIVE_REF.test(String(playlist?.source_playlist_id ?? '').toLowerCase());
 }
 
+/** a dated snapshot of a beatport list: '<ref>@2026-10-16'. frozen, never refreshes. */
+export function beatportMirrorIsSnapshot(playlist: MirroredRow | null | undefined): boolean {
+  const id = String(playlist?.source_playlist_id ?? '').toLowerCase();
+  const at = id.lastIndexOf('@');
+  if (at < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(id.slice(at + 1))) return false;
+  const ref = id.slice(0, at);
+  return BEATPORT_LIVE_REF.test(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
+}
+
 /**
  * file has no external refresh hook, nor does a beatport mirror that isn't a
  * live list; lastfm radios are seed-specific snapshots that never change
@@ -289,16 +298,19 @@ export function autoSyncCanSchedulePlaylist(playlist: MirroredRow | null | undef
 /**
  * Whether an all-playlists pipeline actually processes this playlist.
  * Mirrors the backend filter (user_playlists.pipeline_runs): file is skipped,
- * and so is a beatport mirror that isn't a live list. NOTE: lastfm is NOT
- * excluded here — the backend processes it, even though
- * autoSyncCanSchedulePlaylist won't let you schedule it directly.
+ * and so is a beatport mirror that is neither a live list nor a dated snapshot.
+ * NOTE: lastfm and snapshots are NOT excluded here — the backend processes
+ * them, even though autoSyncCanSchedulePlaylist won't let you schedule them.
  */
 export function autoSyncPipelineCoversPlaylist(
   playlist: { source?: string | null; source_playlist_id?: string | number } | null | undefined,
 ): boolean {
   if (!playlist) return false;
   const src = playlist.source || '';
-  if (src === 'beatport') return beatportMirrorRefreshes(playlist as MirroredRow);
+  if (src === 'beatport') {
+    const row = playlist as MirroredRow;
+    return beatportMirrorRefreshes(row) || beatportMirrorIsSnapshot(row);
+  }
   return src !== 'file';
 }
 
