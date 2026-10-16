@@ -322,6 +322,24 @@ def _record_library_membership(tracks_json, match_details) -> None:
     except Exception as e:  # noqa: BLE001 - never fail a completed sync over bookkeeping
         logger.warning(f"Failed to record library membership: {e}")
 
+def _fingerprint_sync_id(playlist_id, resync_entry_id):
+    """The sync id a scheduled run reads this playlist's fingerprint under.
+
+    A re-sync from history runs as ``resync_<entry>_<ts>``, but the scheduled
+    run checks the playlist's own id (``auto_mirror_<id>``), recorded on the
+    history entry. Falls back to ``playlist_id`` when that can't be read."""
+    if not resync_entry_id:
+        return playlist_id
+    try:
+        from database.music_database import MusicDatabase
+        entry = MusicDatabase().get_sync_history_entry(resync_entry_id)
+        if entry and entry.get('playlist_id'):
+            return str(entry['playlist_id'])
+    except Exception as e:  # noqa: BLE001 - bookkeeping must never fail a sync
+        logger.debug("resync fingerprint lookup failed: %s", e)
+    return playlist_id
+
+
 def _sync_is_user_playlist(playlist_id, profile_id) -> bool:
     """True when the synced mirror is a user-made playlist (source 'soulsync').
 
@@ -831,7 +849,8 @@ def run_sync_task(
             # every later run, and so would keeping the one from the last
             # good run. Drop it, so the next run retries the write.
             if deps.invalidate_sync_fingerprint:
-                deps.invalidate_sync_fingerprint(playlist_id)
+                deps.invalidate_sync_fingerprint(
+                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
             return
 
         # Emit playlist_synced event for automation engine

@@ -369,6 +369,22 @@ def test_failed_playlist_write_is_an_error_that_keeps_its_counts(patched_db):
     assert invalidated == ['pW']
 
 
+def test_failed_resync_drops_the_playlists_own_fingerprint(patched_db, monkeypatch):
+    """A re-sync from history runs as resync_<entry>_<ts>, but the scheduled
+    run reads the fingerprint under the playlist's own id: that one goes."""
+    monkeypatch.setattr(patched_db, 'get_sync_history_entry',
+                        lambda entry_id: {'playlist_id': 'auto_mirror_1', 'batch_id': 'b'},
+                        raising=False)
+    invalidated = []
+    result = _FakeSyncResult(errors=['Navidrome playlist write failed'])
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, invalidate_sync_fingerprint=invalidated.append)
+
+    ds.run_sync_task('resync_42_1234', 'Liked Songs', [_track()], deps=deps)
+
+    assert invalidated == ['auto_mirror_1']
+
+
 def test_unmatched_tracks_summary_added_to_state(patched_db):
     """match_details with not_found entries → unmatched_tracks summary on result_dict."""
     states = {}

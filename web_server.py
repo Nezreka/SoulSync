@@ -19571,13 +19571,11 @@ def _invalidate_sync_fingerprint(playlist_id):
     again, indefinitely. The rest of the status (last_synced, snapshot) still
     describes that last good write and stays.
     """
+    from core.sync.sync_fingerprint import clear_fingerprint
     try:
         sync_statuses = _load_sync_status_file()
-        status = sync_statuses.get(playlist_id)
-        if not status:
+        if not clear_fingerprint(sync_statuses, playlist_id):
             return
-        for key in ('tracks_hash', 'mirror_tracks_hash', 'matched_tracks'):
-            status.pop(key, None)
         _save_sync_status_file(sync_statuses)
         logger.info(f"Cleared smart-skip fingerprint for playlist {playlist_id} after a failed sync")
     except Exception as e:
