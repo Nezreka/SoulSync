@@ -46,6 +46,7 @@ import {
   repairJobDot,
   repairJobMeta,
   repairSettingInput,
+  repairSettingText,
 } from '../-tools.core';
 import { sparklinePoints } from '../-tools.groups';
 import {
@@ -72,20 +73,6 @@ function isDryRunOff(value: unknown): boolean {
   if (typeof value === 'boolean') return !value;
   if (typeof value === 'string') return value.toLowerCase() === 'false';
   return false;
-}
-
-/**
- * A setting value as input text. Settings are primitives in practice, but the
- * payload is typed `unknown` because the backend is free to add a shape — and
- * `String({})` would silently render "[object Object]" into an input the user
- * could then save back.
- */
-function settingText(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return '';
 }
 
 // ── Cadence editor ───────────────────────────────────────────────────────────
@@ -333,12 +320,12 @@ function JobSettings({
                 className="repair-setting-input"
                 data-job={job.job_id}
                 data-key={key}
-                value={settingText(current)}
+                value={repairSettingText(current)}
                 disabled={key === 'dry_run' && confirmPending}
                 onChange={(event) => {
                   const target = event.target;
                   void handleSettingChange(key, target.value, () => {
-                    target.value = settingText(values[key]);
+                    target.value = repairSettingText(values[key]);
                   });
                 }}
               >
@@ -369,7 +356,7 @@ function JobSettings({
                 className="repair-setting-input"
                 data-job={job.job_id}
                 data-key={key}
-                value={settingText(current)}
+                value={repairSettingText(current)}
                 step="0.01"
                 // A setting that is CURRENTLY negative gets no floor — some
                 // thresholds are legitimately below zero and a min of 0 would
@@ -388,7 +375,7 @@ function JobSettings({
                 className="repair-setting-input"
                 data-job={job.job_id}
                 data-key={key}
-                value={settingText(current)}
+                value={repairSettingText(current)}
                 onChange={(event) =>
                   setValues((previous) => ({ ...previous, [key]: event.target.value }))
                 }

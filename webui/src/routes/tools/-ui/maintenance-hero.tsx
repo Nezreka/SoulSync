@@ -39,7 +39,12 @@ import {
   fetchRepairStatus,
   toggleRepairMaster,
 } from '../-tools.api';
-import { isRepairJobDryRun, linkedJobId, prettifyRepairSettingKey } from '../-tools.core';
+import {
+  isRepairJobDryRun,
+  linkedJobId,
+  prettifyRepairSettingKey,
+  repairSettingText,
+} from '../-tools.core';
 import { useRepairProgressEvent, useRepairStatusEvent } from '../-tools.events';
 import { takeFindingsFocus } from '../-tools.findings-focus';
 import { FindingsSurface } from './findings-surface';
@@ -58,20 +63,6 @@ function jumpToSection(anchor: string) {
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
-}
-
-/**
- * A setting value as input text. Settings are primitives in practice, but the
- * payload is typed `unknown` because the backend is free to add a shape — and
- * `String({})` would silently render "[object Object]" into an input the user
- * could then save back.
- */
-function settingText(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return '';
 }
 
 // ── Job help overlay ─────────────────────────────────────────────────────────
@@ -164,7 +155,7 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
               <div className="repair-help-setting" key={key}>
                 <span className="repair-help-setting-key">{prettifyRepairSettingKey(key)}</span>
                 <span className="repair-help-setting-val">
-                  {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : settingText(value)}
+                  {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : repairSettingText(value)}
                 </span>
               </div>
             ))}
