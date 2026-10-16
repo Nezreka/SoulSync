@@ -216,6 +216,13 @@ export function ArtistImagePickerModal({
       fitContent
       footer={
         <div className={styles.modalActions}>
+          <a
+            className={styles.btnGhost}
+            href={`/api/library/v2/artwork/artist/${artistId}`}
+            download={`${artistName}.jpg`}
+          >
+            Download current photo
+          </a>
           <button
             type="button"
             className={styles.btnGhost}

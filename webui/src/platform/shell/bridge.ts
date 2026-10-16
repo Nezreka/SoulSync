@@ -139,26 +139,16 @@ export function bindWindowWebRouter(router: AnyRouter) {
         if (qs) href = `${href}?${qs}` as `/${string}`;
       }
       if (pageId === 'artist-detail' && options?.artistId) {
-        const source = options.artistSource ? String(options.artistSource) : 'library';
-        href =
-          `/artist-detail/${encodeURIComponent(source)}/${encodeURIComponent(String(options.artistId))}` as `/${string}`;
-        // Some sources (Bandcamp) have no numeric-ID lookup API — the name
-        // has to travel with the URL or the route has nothing to resolve
-        // against on mount.
-        const artistParams = new URLSearchParams();
-        if (options.artistName) {
-          artistParams.set('name', String(options.artistName));
+        const source = String(options.artistSource || 'library').toLowerCase();
+        const artistParams = new URLSearchParams({ view: 'discovery', immersive: 'true' });
+        if (source === 'library' && /^\d+$/.test(String(options.artistId))) {
+          artistParams.set('artist', String(options.artistId));
+        } else {
+          artistParams.set('discover', `${source}:${options.artistId}`);
+          if (options.artistName) artistParams.set('discoverName', String(options.artistName));
         }
-        // ?album= names the album to open on arrival (the library's album
-        // grid). Without it the deep link silently degrades to the plain
-        // artist page.
-        if (options.focusAlbumId) {
-          artistParams.set('album', String(options.focusAlbumId));
-        }
-        const artistQuery = artistParams.toString();
-        if (artistQuery) {
-          href = `${href}?${artistQuery}` as `/${string}`;
-        }
+        if (options.focusAlbumId) artistParams.set('album', String(options.focusAlbumId));
+        href = `/library?${artistParams}` as `/${string}`;
       }
       if (pageId === 'label-detail' && options?.labelId) {
         href = `/label-detail/${encodeURIComponent(String(options.labelId))}` as `/${string}`;

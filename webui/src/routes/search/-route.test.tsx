@@ -477,16 +477,16 @@ describe('where a result card points', () => {
     const faces = document.querySelectorAll('#enh-spotify-artists-section a');
     expect(faces[0].textContent).toContain('Owned Artist');
     expect(faces[0].getAttribute('href')).toBe(
-      '/library?artist=7&releases=all&releaseView=cards&header=rich',
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
     expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
       'href',
-      '/library?artist=7&releases=all&releaseView=cards&header=rich',
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
-      '/artist-detail/spotify/sp1?name=Found%20Artist',
+      '/library?view=discovery&immersive=true&discover=spotify%3Asp1&discoverName=Found+Artist',
     );
   });
 
@@ -509,10 +509,10 @@ describe('where a result card points', () => {
 
     await screen.findAllByText('Idless Artist', undefined, { timeout: 3000 });
     const faces = document.querySelectorAll('#enh-spotify-artists-section a');
-    expect(faces[0].getAttribute('href')).toBe('/artist-detail/library/42');
+    expect(faces[0].getAttribute('href')).toBe('/library?view=discovery&immersive=true&artist=42');
     expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
       'href',
-      '/artist-detail/library/42',
+      '/library?view=discovery&immersive=true&artist=42',
     );
   });
 

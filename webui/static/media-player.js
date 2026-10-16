@@ -1283,7 +1283,7 @@ function onAudioEnded() {
     }
 
     // Radio mode: auto-fetch similar tracks when queue is exhausted
-    if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+    if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
         npFetchRadioTracks();
     }
 }
@@ -1751,6 +1751,11 @@ function npQueueHasNext() {
         : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all');
 }
 
+// Radio endpoints read the native catalogue; player `id` can be a server id.
+function npRadioTrackId(track) {
+    return track && (track.lib2_track_id || track.id) || null;
+}
+
 function npEnsureCurrentTrackInQueue() {
     if (!currentTrack || !currentTrack.is_library || npQueue.length > 0) return;
     npQueue.push({
@@ -1762,6 +1767,11 @@ function npEnsureCurrentTrackInQueue() {
         is_library: true,
         image_url: currentTrack.image_url,
         id: currentTrack.id,
+        lib2_track_id: currentTrack.lib2_track_id || null,
+        lib2_album_id: currentTrack.lib2_album_id || null,
+        lib2_artist_id: currentTrack.lib2_artist_id || null,
+        server_track_id: currentTrack.server_track_id || null,
+        legacy_track_id: currentTrack.legacy_track_id || null,
         artist_id: currentTrack.artist_id,
         album_id: currentTrack.album_id,
         bitrate: currentTrack.bitrate,
@@ -1788,7 +1798,7 @@ function npSetRadioMode(enabled, options = {}) {
         // (non-library) track has none, so promising auto-queue would be a
         // lie. Mode stays armed either way: it engages on the next library
         // track that plays.
-        if (npRadioMode && currentTrack && !currentTrack.id) {
+        if (npRadioMode && currentTrack && !npRadioTrackId(currentTrack)) {
             showToast('Radio armed - it kicks in when a library track plays', 'info');
         } else {
             showToast(npRadioMode ? 'Radio mode on - similar tracks will auto-queue' : 'Radio mode off', 'success');
@@ -1801,7 +1811,7 @@ function npSetRadioMode(enabled, options = {}) {
     } else if (/radio/i.test(npPlayContext)) {
         npSetPlayContext('');
     }
-    if (npRadioMode && fetchIfNeeded && currentTrack && currentTrack.id && !npLoadingQueueItem && !npQueueHasNext()) {
+    if (npRadioMode && fetchIfNeeded && npRadioTrackId(currentTrack) && !npLoadingQueueItem && !npQueueHasNext()) {
         npEnsureCurrentTrackInQueue();
         npFetchRadioTracks();
     }
@@ -2170,8 +2180,9 @@ function updateNpTrackInfo() {
         }
 
         // Track recently played for radio mode
-        if (currentTrack.id && !npRecentlyPlayedIds.includes(currentTrack.id)) {
-            npRecentlyPlayedIds.push(currentTrack.id);
+        const radioTrackId = npRadioTrackId(currentTrack);
+        if (radioTrackId && !npRecentlyPlayedIds.includes(radioTrackId)) {
+            npRecentlyPlayedIds.push(radioTrackId);
             if (npRecentlyPlayedIds.length > 50) npRecentlyPlayedIds.shift();
         }
     } else {
@@ -2715,7 +2726,7 @@ function playNextInQueue() {
     if (npQueue.length === 0) {
         // Radio with an empty queue (e.g. cleared mid-session): a skip should
         // re-seed from the current track, not go dead.
-        if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+        if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
             npEnsureCurrentTrackInQueue();
             npFetchRadioTracks(true);
         }
@@ -2741,7 +2752,7 @@ function playNextInQueue() {
             // Radio mode: a skip at the tail of the fetched batch used to do
             // nothing (more tracks only arrived when the song ENDED naturally)
             // — fetch the next batch now and advance as soon as it lands.
-            if (npRadioMode && currentTrack && currentTrack.id && !npLoadingQueueItem) {
+            if (npRadioMode && npRadioTrackId(currentTrack) && !npLoadingQueueItem) {
                 npFetchRadioTracks(true);
             }
             return;
@@ -2894,6 +2905,7 @@ async function playQueueItem(index, options = {}) {
                 // queued v2 play without play-log attribution and with a dead
                 // "Go to artist"; playLibraryTrack has threaded them all along.
                 lib2_track_id: track.lib2_track_id || null,
+                lib2_album_id: track.lib2_album_id || null,
                 legacy_track_id: track.legacy_track_id || null,
                 server_track_id: track.server_track_id || null,
                 artist_id: track.artist_id,
@@ -3287,7 +3299,7 @@ function npFireSleepTimer() {
 function updateNpPrevNextButtons() {
     const canPrev = npQueueIndex > 0 || (audioPlayer && audioPlayer.currentTime > 3);
     // Radio keeps next alive at the batch tail — a skip there fetches more.
-    const radioCanFetch = npRadioMode && currentTrack && currentTrack.id;
+    const radioCanFetch = npRadioMode && npRadioTrackId(currentTrack);
     const canNext = (npQueue.length > 0 && (npShuffleOn ? npQueue.length > 1 : (npQueueIndex < npQueue.length - 1 || npRepeatMode === 'all')))
         || Boolean(radioCanFetch);
 
@@ -3845,7 +3857,12 @@ function npMapRadioTrack(t) {
         filename: t.file_path,
         is_library: true,
         image_url: t.image_url || null,
-        id: t.id,
+        id: t.server_track_id || t.legacy_track_id || null,
+        lib2_track_id: t.lib2_track_id || t.id,
+        lib2_album_id: t.lib2_album_id || t.album_id,
+        lib2_artist_id: t.lib2_artist_id || t.artist_id,
+        server_track_id: t.server_track_id || null,
+        legacy_track_id: t.legacy_track_id || null,
         artist_id: t.artist_id,
         album_id: t.album_id,
         bitrate: t.bitrate,
@@ -3922,11 +3939,12 @@ async function npFetchRadioTracks(forceAdvance = false) {
     // forceAdvance: a manual skip at the tail of the fetched batch (next
     // button / 'n' key) — the user asked for the next track, so advance as
     // soon as the new batch lands even though something is still playing.
-    if (!currentTrack || !currentTrack.id) return;
+    const trackId = npRadioTrackId(currentTrack);
+    if (!trackId) return;
     try {
         npLoadingQueueItem = true;
         const excludeIds = npRecentlyPlayedIds.join(',');
-        const resp = await fetch(`/api/library/radio?track_id=${currentTrack.id}&limit=50&exclude=${encodeURIComponent(excludeIds)}`);
+        const resp = await fetch(`/api/library/radio?track_id=${encodeURIComponent(trackId)}&limit=50&exclude=${encodeURIComponent(excludeIds)}`);
         if (!resp.ok) {
             console.warn('Radio endpoint returned', resp.status);
             npLoadingQueueItem = false;

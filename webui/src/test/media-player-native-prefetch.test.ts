@@ -6,6 +6,7 @@ import { extractFunction } from './vanilla-extract';
 
 const source = readFileSync(resolve(process.cwd(), 'static/media-player.js'), 'utf8');
 const functions = [
+  'npFindQueuePreview',
   'npQueueIdentity',
   'npPrepareQueueTrack',
   'npPrepareQueueTracks',
@@ -143,7 +144,11 @@ describe('real native queue player functions', () => {
     );
     await vi.runAllTimersAsync();
     expect(h.audio.play).toHaveBeenCalledOnce();
-    expect(h.fetch.mock.calls.map((call) => call[0])).toEqual(['/api/library/play']);
+    expect(h.fetch.mock.calls.map((call) => call[0])).toEqual([
+      '/api/enhanced-search/stream-track',
+      '/api/library/play',
+    ]);
+    expect(JSON.parse(h.fetch.mock.calls[0]?.[1]?.body ?? '{}').preview_only).toBe(true);
   });
 
   it('uses the existing prefetch then plays the returned path with typed native identity', async () => {

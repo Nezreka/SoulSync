@@ -145,6 +145,10 @@ declare global {
     ) => Promise<boolean | void> | boolean | void;
     /** media-player.js — seedless Library Radio: queues a ranked-random batch
      *  from the whole library and arms radio mode for refills. */
+    npSetRadioMode?: (
+      enabled: boolean,
+      options: { toast: boolean; fetchIfNeeded: boolean },
+    ) => void;
     startLibraryRadio?: () => void | Promise<void>;
     /** media-player.js — the track the player has loaded (title, artist,
      *  album, image_url, artist_id...), or null. */

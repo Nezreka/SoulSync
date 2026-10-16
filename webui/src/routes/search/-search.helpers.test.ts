@@ -390,17 +390,21 @@ describe('detail paths', () => {
    * nothing at all.
    */
   it('puts the SOURCE segment in an artist path', () => {
-    expect(artistDetailPath('sp1', 'spotify')).toBe('/artist-detail/spotify/sp1');
+    expect(artistDetailPath('sp1', 'spotify')).toBe(
+      '/library?view=discovery&immersive=true&discover=spotify%3Asp1',
+    );
     // Three segments. Two is not a shorter version of this — it is unroutable.
-    expect(artistDetailPath('sp1', 'spotify').split('/').filter(Boolean)).toHaveLength(3);
+    expect(
+      new URL(artistDetailPath('sp1', 'spotify'), 'http://localhost').searchParams.get('discover'),
+    ).toBe('spotify:sp1');
   });
 
   it('files a library artist under the literal "library"', () => {
     // A library artist has no metadata source, and the slot cannot be empty.
-    expect(artistDetailPath(42)).toBe('/artist-detail/library/42');
-    expect(artistDetailPath(42, null)).toBe('/artist-detail/library/42');
-    expect(artistDetailPath(42, '')).toBe('/artist-detail/library/42');
-    expect(artistDetailPath(42, '   ')).toBe('/artist-detail/library/42');
+    expect(artistDetailPath(42)).toBe('/library?view=discovery&immersive=true&artist=42');
+    expect(artistDetailPath(42, null)).toBe('/library?view=discovery&immersive=true&artist=42');
+    expect(artistDetailPath(42, '')).toBe('/library?view=discovery&immersive=true&artist=42');
+    expect(artistDetailPath(42, '   ')).toBe('/library?view=discovery&immersive=true&artist=42');
   });
 
   /**
@@ -415,33 +419,45 @@ describe('detail paths', () => {
     // deep link fell back to the in-library defaults, so the same artist looked
     // different depending on whether v2 had mapped it.
     expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe(
-      '/library?artist=7&releases=all&releaseView=cards&header=rich',
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
   });
 
   it('falls back to artist detail when v2 has not mapped the artist', () => {
     // No v2 id means no v2 row — routing there would open an artist that does
     // not exist. Both an absent and an explicitly null id take the fallback.
-    expect(inLibraryArtistPath({ id: 42 })).toBe('/artist-detail/library/42');
-    expect(inLibraryArtistPath({ id: 42, library_v2_id: null })).toBe('/artist-detail/library/42');
+    expect(inLibraryArtistPath({ id: 42 })).toBe(
+      '/library?view=discovery&immersive=true&artist=42',
+    );
+    expect(inLibraryArtistPath({ id: 42, library_v2_id: null })).toBe(
+      '/library?view=discovery&immersive=true&artist=42',
+    );
   });
 
   it('lowercases the source, as _normalizeArtistDetailSource does', () => {
-    expect(artistDetailPath('x', 'Deezer')).toBe('/artist-detail/deezer/x');
+    expect(artistDetailPath('x', 'Deezer')).toBe(
+      '/library?view=discovery&immersive=true&discover=deezer%3Ax',
+    );
   });
 
   it('carries the name for sources with no id lookup', () => {
     // Bandcamp cannot resolve by id at all; on a cold load the name is all
     // there is to go on.
     expect(artistDetailPath('abc', 'bandcamp', 'Aphex Twin')).toBe(
-      '/artist-detail/bandcamp/abc?name=Aphex%20Twin',
+      '/library?view=discovery&immersive=true&discover=bandcamp%3Aabc&discoverName=Aphex+Twin',
     );
-    expect(artistDetailPath('abc', 'bandcamp')).toBe('/artist-detail/bandcamp/abc');
+    expect(artistDetailPath('abc', 'bandcamp')).toBe(
+      '/library?view=discovery&immersive=true&discover=bandcamp%3Aabc',
+    );
   });
 
   it('encodes ids and names that would otherwise break the path', () => {
-    expect(artistDetailPath('a/b', 'spotify')).toBe('/artist-detail/spotify/a%2Fb');
-    expect(artistDetailPath('1', 'spotify', 'AC/DC')).toBe('/artist-detail/spotify/1?name=AC%2FDC');
+    expect(artistDetailPath('a/b', 'spotify')).toBe(
+      '/library?view=discovery&immersive=true&discover=spotify%3Aa%2Fb',
+    );
+    expect(artistDetailPath('1', 'spotify', 'AC/DC')).toBe(
+      '/library?view=discovery&immersive=true&discover=spotify%3A1&discoverName=AC%2FDC',
+    );
   });
 
   it('builds a label path with its optional name', () => {

@@ -7,10 +7,8 @@ import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-/** ldp-01/ldp-02: an artist the catalogue has never heard of opens on
- *  upstream's artist page, from provider data alone, without writing anything.
- *  Library v2 adds the release bookmark; a click on a release opens the shared
- *  download dialog, as it does in search. */
+/** Unknown artists browse provider data inside Library. The original artist
+ * components and shared track dialog stay reusable, with native monitoring. */
 function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -118,7 +116,7 @@ describe('an artist the catalogue does not hold', () => {
   });
 
   it('monitors a release from the bookmark on its card', async () => {
-    renderAt(ARTIST_URL);
+    const { router } = renderAt(ARTIST_URL);
     await screen.findByText('Music Has the Right to Children');
 
     fireEvent.click(screen.getByRole('button', { name: 'Start monitoring' }));
@@ -135,6 +133,14 @@ describe('an artist the catalogue does not hold', () => {
       track_count: 1,
     });
     expect(await screen.findByRole('button', { name: 'Monitored' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'My Library' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({
+        artist: 55,
+        releases: 'library',
+        immersive: false,
+      }),
+    );
     // The bookmark is not a click on the card.
     expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
     expect(materializeCalls).toHaveLength(0);
@@ -155,19 +161,20 @@ describe('an artist the catalogue does not hold', () => {
     expect(materializeCalls).toHaveLength(0);
   });
 
-  it('sends an artist the catalogue already holds to Library v2', async () => {
+  it('opens a known artist in native Discovery', async () => {
     resolveResponse = 42;
     const { router } = renderAt(ARTIST_URL);
-
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({
         artist: 42,
+        view: 'discovery',
+        header: 'rich',
         releases: 'all',
         releaseView: 'cards',
-        header: 'rich',
       }),
     );
     expect(router.state.location.pathname).toBe('/library');
+    expect(materializeCalls).toHaveLength(0);
   });
 
   it('still answers the old Library v2 discovery links, album ones included', async () => {
@@ -176,8 +183,11 @@ describe('an artist the catalogue does not hold', () => {
         '&discoverAlbum=%22spotify%3Aa1%22',
     );
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
-    expect(router.state.location.search).toMatchObject({ name: 'Boards of Canada' });
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({
+      discover: 'spotify:sp-1',
+      discoverName: 'Boards of Canada',
+    });
     expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
   });
 });

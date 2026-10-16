@@ -3,6 +3,8 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import {
+  LIBRARY_V2_QUERY_KEY,
+  resolveLibraryV2DiscoveryArtist,
   libraryV2AlbumQueryOptions,
   libraryV2AlbumsQueryOptions,
   libraryV2ArtistQueryOptions,
@@ -15,21 +17,48 @@ import { LibraryV2Page } from './-ui/library-v2-page';
 
 export const Route = createFileRoute('/library')({
   validateSearch: libraryV2SearchSchema,
-  beforeLoad: ({ context, search }) => {
+  beforeLoad: async ({ context, search }) => {
     guardPageAccess(context.shell.bridge, 'library');
-    // An artist the catalogue does not hold opens on the artist-detail page.
-    // `discover=<source>:<id>` is what that used to be here, and it still
-    // arrives from bookmarks and history. Split on the FIRST colon: provider
-    // ids can contain one.
+    // Resolve provider-qualified identities without materializing catalogue rows.
     const discover = search.discover ?? '';
     const split = discover.indexOf(':');
     if (split > 0 && !search.artist && !search.album) {
-      throw redirect({
-        to: '/artist-detail/$source/$id',
-        params: { source: discover.slice(0, split), id: discover.slice(split + 1) },
-        search: { name: search.discoverName ?? '' },
-        replace: true,
-      });
+      const source = discover.slice(0, split);
+      const providerId = discover.slice(split + 1);
+      const known = await context.queryClient
+        .fetchQuery({
+          queryKey: [
+            ...LIBRARY_V2_QUERY_KEY,
+            'discovery-resolve',
+            source,
+            providerId,
+            search.discoverName,
+          ],
+          queryFn: () =>
+            resolveLibraryV2DiscoveryArtist({
+              source,
+              providerId,
+              name: search.discoverName ?? '',
+            }),
+        })
+        .catch(() => null);
+      if (!known && source === 'library')
+        throw redirect({ to: '/library', search: {}, replace: true });
+      if (known)
+        throw redirect({
+          to: '/library',
+          search: {
+            ...search,
+            artist: known,
+            discover: undefined,
+            discoverName: undefined,
+            view: 'discovery',
+            header: 'rich',
+            releases: 'all',
+            releaseView: 'cards',
+          },
+          replace: true,
+        });
     }
   },
   loaderDeps: ({ search }) => ({

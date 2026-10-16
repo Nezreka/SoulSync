@@ -95,7 +95,6 @@ const STATS_CHART_CURSOR = {
   fill: 'rgba(var(--accent-rgb), 0.12)',
 } as const;
 
-const ARTIST_DETAIL_SOURCE = 'library' as const;
 const STATS_DETAIL_QUERY_KEY = ['stats-listening-events'] as const;
 
 export function StatsPage() {
@@ -1167,8 +1166,8 @@ function ArtistDetailLink({
 
   return (
     <Link
-      to="/artist-detail/$source/$id"
-      params={{ source: ARTIST_DETAIL_SOURCE, id: String(artistId) }}
+      to="/library"
+      search={{ artist: Number(artistId), view: 'discovery', immersive: true }}
       {...linkProps}
     >
       {children}

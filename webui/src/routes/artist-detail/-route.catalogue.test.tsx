@@ -7,13 +7,8 @@ import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-/**
- * Which page an artist URL opens on this branch.
- *
- * Library v2 owns every artist the catalogue knows; upstream's artist page is
- * kept, unchanged, for the ones it does not. The route decides before either
- * renders, with a read-only lookup.
- */
+/** Legacy artist URLs enter Library Discovery through a read-only qualified
+ * lookup. The original components remain available for provider-only browsing. */
 function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -101,7 +96,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(lookups[0]?.searchParams.get('source')).toBe('library');
     expect(lookups[0]?.searchParams.get('provider_id')).toBe('abc-guid');
     // An owned artist opened from inside the app keeps the Library v2 shape.
-    expect(router.state.location.search).not.toHaveProperty('header', 'rich');
+    expect(router.state.location.search).toMatchObject({ view: 'discovery', header: 'rich' });
   });
 
   it('sends a media-server id the catalogue does not know to the library, not a dead page', async () => {
@@ -122,6 +117,7 @@ describe('artist-detail route on a Library v2 catalogue', () => {
         releases: 'all',
         releaseView: 'cards',
         header: 'rich',
+        immersive: true,
       }),
     );
     expect(lookups[0]?.searchParams.get('source')).toBe('deezer');
@@ -129,11 +125,15 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(detailRequests).toHaveLength(0);
   });
 
-  it("opens any other provider artist on upstream's page", async () => {
+  it('opens any other provider artist in Library Discovery', async () => {
     const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
 
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
+    expect(router.state.location.pathname).toBe('/library');
+    expect(router.state.location.search).toMatchObject({
+      discover: 'deezer:2481',
+      view: 'discovery',
+    });
     expect(detailRequests[0]?.searchParams.get('source')).toBe('deezer');
     expect(detailRequests[0]?.searchParams.get('name')).toBe('Aphex Twin');
   });

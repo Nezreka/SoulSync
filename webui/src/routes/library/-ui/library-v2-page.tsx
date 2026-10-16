@@ -1,6 +1,10 @@
 import { Tooltip } from '@base-ui/react/tooltip';
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { getRouteApi, useNavigate as useRouterNavigate } from '@tanstack/react-router';
+import {
+  getRouteApi,
+  useNavigate as useRouterNavigate,
+  type UseNavigateResult,
+} from '@tanstack/react-router';
 import {
   type InputHTMLAttributes,
   type PointerEvent as ReactPointerEvent,
@@ -20,6 +24,7 @@ import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
+import { playLibraryV2ArtistRadio } from '../-artist-radio';
 import { bitrateKbps, formatBitrate } from '../-bitrate';
 import {
   analyzeLibraryV2TrackReplayGain,
@@ -139,10 +144,14 @@ import {
   type LibraryV2WantedRow,
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
+import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
+import { ProviderArtistDetailPage } from '../../artist-detail/-ui/artist-detail-page';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
+import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
+import { ArtistPageLibraryProvider } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -539,7 +548,7 @@ function QualityDisplay({ file }: { file: LibraryV2Track['file'] | null | undefi
 
 // --- shared building blocks --------------------------------------------------
 
-function useNavigate() {
+function useNavigate(): UseNavigateResult<'/library'> {
   return useRouterNavigate({ from: '/library' });
 }
 
@@ -4436,6 +4445,8 @@ export function LibraryV2Page() {
           <AlbumDetailView albumId={search.album} />
         ) : search.artist ? (
           <ArtistDetailView artistId={search.artist} />
+        ) : search.discover?.includes(':') ? (
+          <ProviderDiscoveryArtist identity={search.discover} name={search.discoverName ?? ''} />
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
         ) : search.section === 'albums' ? (
@@ -4445,6 +4456,65 @@ export function LibraryV2Page() {
         )}
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
+  );
+}
+
+/** Unknown provider artists remain read-only until a monitoring action. */
+function ProviderDiscoveryArtist({ identity, name }: { identity: string; name: string }) {
+  const navigate = useNavigate();
+  const [materialized, setMaterialized] = useState<{ identity: string; id: number } | null>(null);
+  const artistId = materialized?.identity === identity ? materialized.id : null;
+  const split = identity.indexOf(':');
+  const source = identity.slice(0, split);
+  const id = identity.slice(split + 1);
+  return (
+    <ArtistPageLibraryProvider
+      source={source}
+      id={id}
+      name={name}
+      onMonitored={(nativeId) => setMaterialized({ identity, id: nativeId })}
+    >
+      <ProviderArtistDetailPage
+        source={source}
+        id={id}
+        name={name}
+        page="library"
+        navigation={
+          <div className={styles.releasesBar}>
+            <div className={styles.releasesToggle}>
+              <button
+                type="button"
+                disabled={!artistId}
+                title={
+                  artistId
+                    ? 'Open My Library'
+                    : 'Monitor a release to add this artist to My Library'
+                }
+                onClick={() =>
+                  artistId &&
+                  void navigate({
+                    search: (p) => ({
+                      ...p,
+                      artist: artistId,
+                      discover: undefined,
+                      discoverName: undefined,
+                      releases: 'library',
+                      artistView: 'releases',
+                      immersive: false,
+                    }),
+                  })
+                }
+              >
+                My Library
+              </button>
+              <button type="button" className={styles.viewActive} aria-pressed>
+                Discovery
+              </button>
+            </div>
+          </div>
+        }
+      />
+    </ArtistPageLibraryProvider>
   );
 }
 
@@ -6715,6 +6785,13 @@ function CatalogueArtistHero({
       actions={
         <>
           <ArtistPlayButton artistId={artist.id} artistName={artist.name} />
+          <button
+            type="button"
+            className="library-artist-radio-btn"
+            onClick={() => void playLibraryV2ArtistRadio(artist.id, artist.name)}
+          >
+            📻 Artist Radio
+          </button>
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
         </>
       }
@@ -6733,6 +6810,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // like every other Library V2 view setting.
   const releaseView = search.releaseView;
   const headerMode = search.header;
+  const immersive = search.immersive && releasesMode === 'all';
   const { filters, setFilters } = useDiscographyFilters();
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const artistProviderIds = artistQuery.data?.provider_ids ?? {};
@@ -6743,6 +6821,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const queueStatusQuery = useQuery(libraryV2QueueStatusQueryOptions('artists', artistId));
   useRefreshLibraryWhenQueueDrains(Object.keys(queueStatusQuery.data?.tracks ?? {}).length);
   const artist = artistQuery.data;
+  useEffect(() => {
+    if (releasesMode !== 'all' || !artist?.name) return;
+    window.loadSimilarArtists?.(artist.name);
+    return () => window.cancelSimilarArtistsLoad?.();
+  }, [artist?.name, releasesMode]);
   const [discographyBusy, setDiscographyBusy] = useState(false);
   const [modalAction, setModalAction] = useState<{
     action: string;
@@ -6813,7 +6896,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   }
 
   function setReleasesMode(mode: 'library' | 'all') {
-    void navigate({ search: (p) => ({ ...p, releases: mode, artistView: 'releases' }) });
+    void navigate({
+      search: (p) => ({
+        ...p,
+        releases: mode,
+        artistView: 'releases',
+        immersive: mode === 'library' ? false : p.immersive,
+      }),
+    });
   }
 
   /** ldp-04: the filter bar governs `All Releases` in BOTH render modes, so
@@ -6912,62 +7002,64 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
         <div className={styles.loading}>Loading…</div>
       ) : (
         <>
-          <div className={styles.pageToolbar}>
-            <div className={styles.toolbarGroup}>
-              <ArtistRefreshButton artistId={artistId} />
-              <ActionButton
-                icon="automatic"
-                label="Automatic Search"
-                requiresWish
-                title="Search missing/upgradable tracks for this artist"
-                // dd28-16: a double click double-POSTed; the server answered
-                // 409 (job already running) and the client rendered that as
-                // "Search failed" over a search that was in fact running.
-                busy={searchBusy}
-                onClick={() => handleAction('Automatic Search')}
-              />
-              <ActionButton
-                icon="interactive"
-                label="Interactive Search"
-                requiresWish
-                title="Manually select from search results across all configured sources"
-                onClick={() => handleAction('Interactive Search')}
-              />
+          {!immersive ? (
+            <div className={styles.pageToolbar}>
+              <div className={styles.toolbarGroup}>
+                <ArtistRefreshButton artistId={artistId} />
+                <ActionButton
+                  icon="automatic"
+                  label="Automatic Search"
+                  requiresWish
+                  title="Search missing/upgradable tracks for this artist"
+                  // dd28-16: a double click double-POSTed; the server answered
+                  // 409 (job already running) and the client rendered that as
+                  // "Search failed" over a search that was in fact running.
+                  busy={searchBusy}
+                  onClick={() => handleAction('Automatic Search')}
+                />
+                <ActionButton
+                  icon="interactive"
+                  label="Interactive Search"
+                  requiresWish
+                  title="Manually select from search results across all configured sources"
+                  onClick={() => handleAction('Interactive Search')}
+                />
+              </div>
+              <div className={styles.toolbarGroup}>
+                <ActionButton
+                  icon="history"
+                  label="History"
+                  title="Recent activity for this artist"
+                  requiresWrite={false}
+                  onClick={() => setShowHistory(true)}
+                />
+                <ActionButton
+                  icon="settings"
+                  label="Artist Settings"
+                  title="Quality profile, monitoring and future releases"
+                  onClick={() => setShowArtistSettings(true)}
+                />
+                <ArtistToolsMenu
+                  artistId={artistId}
+                  artistName={artistName}
+                  onRetag={() =>
+                    setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
+                  }
+                  onReorganizeAll={() => setShowReorganizeAll(true)}
+                  onMaintenance={() => setShowMaintenance(true)}
+                  onManualImport={() => void navigate({ to: '/import' })}
+                  onEditMetadata={() => setShowEditArtist(true)}
+                  onPhoto={() => setShowArtPicker(true)}
+                  onManageTracks={() => setShowManageTracks(true)}
+                  onUpdateDiscography={() => void updateDiscography()}
+                  discographyBusy={discographyBusy}
+                  onDelete={() =>
+                    setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
+                  }
+                />
+              </div>
             </div>
-            <div className={styles.toolbarGroup}>
-              <ActionButton
-                icon="history"
-                label="History"
-                title="Recent activity for this artist"
-                requiresWrite={false}
-                onClick={() => setShowHistory(true)}
-              />
-              <ActionButton
-                icon="settings"
-                label="Artist Settings"
-                title="Quality profile, monitoring and future releases"
-                onClick={() => setShowArtistSettings(true)}
-              />
-              <ArtistToolsMenu
-                artistId={artistId}
-                artistName={artistName}
-                onRetag={() =>
-                  setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
-                }
-                onReorganizeAll={() => setShowReorganizeAll(true)}
-                onMaintenance={() => setShowMaintenance(true)}
-                onManualImport={() => void navigate({ to: '/import' })}
-                onEditMetadata={() => setShowEditArtist(true)}
-                onPhoto={() => setShowArtPicker(true)}
-                onManageTracks={() => setShowManageTracks(true)}
-                onUpdateDiscography={() => void updateDiscography()}
-                discographyBusy={discographyBusy}
-                onDelete={() =>
-                  setDeleteTarget({ entity: 'artists', id: artistId, title: artist.name })
-                }
-              />
-            </div>
-          </div>
+          ) : null}
 
           {grabBanner ? (
             <div className={`${styles.grabBanner} ${styles[`grab_${grabBanner.tone}`]}`}>
@@ -7049,33 +7141,25 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <div className={styles.releasesToggle}>
               <button
                 type="button"
-                className={!showVideos && releasesMode === 'library' ? styles.viewActive : ''}
-                aria-pressed={!showVideos && releasesMode === 'library'}
+                className={releasesMode === 'library' ? styles.viewActive : ''}
+                aria-pressed={releasesMode === 'library'}
                 onClick={() => setReleasesMode('library')}
               >
                 My Library
               </button>
               <button
                 type="button"
-                className={!showVideos && releasesMode === 'all' ? styles.viewActive : ''}
-                aria-pressed={!showVideos && releasesMode === 'all'}
+                className={releasesMode === 'all' ? styles.viewActive : ''}
+                aria-pressed={releasesMode === 'all'}
                 onClick={() => setReleasesMode('all')}
               >
-                All Releases
+                Discovery
                 {artist.discography_count > 0 ? (
                   <span className={styles.sectionCount}>{artist.discography_count}</span>
                 ) : null}
               </button>
-              <button
-                type="button"
-                className={showVideos ? styles.viewActive : ''}
-                aria-pressed={showVideos}
-                onClick={() => void navigate({ search: (p) => ({ ...p, artistView: 'videos' }) })}
-              >
-                Music Videos
-              </button>
             </div>
-            {!showVideos && releasesMode === 'all' ? (
+            {releasesMode === 'all' ? (
               <div className={styles.releasesToggle}>
                 <button
                   type="button"
@@ -7102,15 +7186,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               </div>
             ) : null}
             <span className={styles.releasesHint}>
-              {showVideos
-                ? 'Videos from YouTube. Saved videos are managed in the Video section.'
-                : releasesMode === 'all'
-                  ? 'Full discography from the metadata provider — monitor a release to add it to Wanted.'
-                  : 'Releases in your library (plus monitored ones).'}
+              {releasesMode === 'all'
+                ? 'Full discography from the metadata provider — monitor a release to add it to Wanted.'
+                : 'Releases in your library (plus monitored ones).'}
             </span>
           </div>
 
-          {!showVideos && releasesMode === 'all' ? (
+          {releasesMode === 'all' ? (
             <DiscographyFilterBar
               state={filters}
               onChange={setFilters}
@@ -7120,11 +7202,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
 
-          {showVideos ? (
-            <div className={styles.musicVideosPanel}>
-              <ArtistVideosSection artistName={artist.name} standalone />
-            </div>
-          ) : releasesMode === 'all' && releaseView === 'cards' ? (
+          {releasesMode === 'all' && releaseView === 'cards' ? (
             <DiscographySections>
               {(
                 [
@@ -7211,6 +7289,27 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               />
             </>
           )}
+          {releasesMode === 'all' ? (
+            <>
+              <div className={styles.musicVideosPanel}>
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  aria-expanded={showVideos}
+                  onClick={() =>
+                    void navigate({
+                      search: (p) => ({ ...p, artistView: showVideos ? 'releases' : 'videos' }),
+                    })
+                  }
+                >
+                  Music Videos
+                </button>
+                {showVideos ? <ArtistVideosSection artistName={artist.name} standalone /> : null}
+              </div>
+              <AppearsOnSection artistId={artist.id} artistName={artist.name} />
+              <SimilarArtistsSection />
+            </>
+          ) : null}
           <ConcertsSection
             artistName={artist.name}
             mbid={String(artist.provider_ids?.musicbrainz ?? '')}

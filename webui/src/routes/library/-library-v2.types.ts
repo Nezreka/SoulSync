@@ -29,7 +29,7 @@ const coercedString = z.preprocess(
   z.string(),
 );
 
-export const libraryV2SearchSchema = z.object({
+const libraryV2SearchObject = z.object({
   section: z.enum(['artists', 'albums', 'wanted']).default('artists').catch('artists'),
   // Same trap as `discover`/`discoverName` below, and it bit here too: a filter
   // of "123" or "702" arrives as a NUMBER, a bare z.string() rejects it and
@@ -38,28 +38,38 @@ export const libraryV2SearchSchema = z.object({
   q: coercedString.default('').catch(''),
   sort: z.enum(LIBRARY_V2_SORTS).default('name').catch('name'),
   albumSort: z.enum(LIBRARY_V2_ALBUM_SORTS).default('title').catch('title'),
-  view: z.enum(['table', 'cards']).default('cards').catch('cards'),
+  view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),
   artist: z.coerce.number().int().positive().optional().catch(undefined),
   album: z.coerce.number().int().positive().optional().catch(undefined),
   /** Artist detail: release collection or on-demand music videos. */
   artistView: z.enum(['releases', 'videos']).default('releases').catch('releases'),
+  /** External entry hides management tools until the user chooses My Library. */
+  immersive: z.boolean().default(false).catch(false),
   /** Show owned releases or the full provider discography. */
-  releases: z.enum(['library', 'all']).default('library').catch('library'),
+  releases: z.enum(['library', 'all']).optional().catch(undefined),
   wantedKind: z.enum(LIBRARY_V2_WANTED_KINDS).default('missing').catch('missing'),
-  /** `<source>:<provider id>` of an artist without a catalogue row: what the
-   *  old discovery links carried. Only read to send them on to the artist
-   *  page (route.tsx), which shows such an artist now. */
+  /** Qualified provider identity for read-only browsing before a native row exists. */
   discover: coercedString.optional().catch(undefined),
   /** The artist's display name — some sources (Bandcamp) have no id lookup at
    *  all, so the name has to travel in the URL. */
   discoverName: coercedString.optional().catch(undefined),
   /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
-  releaseView: z.enum(['table', 'cards']).default('table').catch('table'),
+  releaseView: z.enum(['table', 'cards']).optional().catch(undefined),
   /** ldp-05: compact V2 artist header vs. the rich legacy hero. */
-  header: z.enum(['compact', 'rich']).default('compact').catch('compact'),
+  header: z.enum(['compact', 'rich']).optional().catch(undefined),
 });
+
+/** Discovery is an entry intent; explicit display choices remain authoritative. */
+export const libraryV2SearchSchema = libraryV2SearchObject.transform((value) => ({
+  ...value,
+  header: value.header ?? (value.view === 'discovery' ? ('rich' as const) : ('compact' as const)),
+  releases:
+    value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
+  releaseView:
+    value.releaseView ?? (value.view === 'discovery' ? ('cards' as const) : ('table' as const)),
+}));
 
 export type LibraryV2Search = z.infer<typeof libraryV2SearchSchema>;
 

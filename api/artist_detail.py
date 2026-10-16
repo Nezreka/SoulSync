@@ -2353,3 +2353,11 @@ def check_artist_discography_completion_stream(artist_id):
             'Access-Control-Allow-Headers': 'Cache-Control'
         }
     )
+
+
+@bp.route('/api/artist/<int:artist_id>/appears-on', methods=['GET'])
+def get_artist_appears_on(artist_id):
+    from contextlib import closing
+    from core.library2.artist_page import appears_on_payload
+    with closing(get_database()._get_connection()) as conn:
+        return jsonify(appears_on_payload(conn, artist_id))

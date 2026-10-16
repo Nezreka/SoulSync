@@ -486,18 +486,10 @@ export function splitTitleExtra(title: string): { main: string; extra: string } 
   return { main: title, extra: '' };
 }
 
-/**
- * Where an artist card points, mirroring buildArtistDetailPath (init.js:2964).
- *
- * The SOURCE SEGMENT is not optional. `/artist-detail/<source>/<id>` is what
- * parseArtistDetailPath splits on, and it rejects anything with fewer than three
- * segments outright — so a path without it resolves to nothing at all. An artist
- * from the library has no metadata source, and the literal 'library' is what
- * fills the slot (_normalizeArtistDetailSource, init.js:2959).
- *
- * `name` rides along because some sources have no id lookup at all (Bandcamp):
- * on a cold page load the name is the only thing left to resolve against.
- */
+/** Artist results enter Library Discovery with a qualified provider identity.
+ * Unknown artists are browsed without catalogue writes. The route resolves a
+ * provider id separately from native ids; names travel for name-only providers.
+ * The immersive entry flag is cleared when the user chooses My Library. */
 export function artistDetailPath(
   artistId: string | number,
   source?: string | null,
@@ -507,8 +499,14 @@ export function artistDetailPath(
     String(source ?? '')
       .trim()
       .toLowerCase() || 'library';
-  const path = `/artist-detail/${encodeURIComponent(normalized)}/${encodeURIComponent(String(artistId))}`;
-  return name ? `${path}?name=${encodeURIComponent(name)}` : path;
+  const params = new URLSearchParams({ view: 'discovery', immersive: 'true' });
+  if (normalized === 'library' && /^\d+$/.test(String(artistId))) {
+    params.set('artist', String(artistId));
+  } else {
+    params.set('discover', `${normalized}:${artistId}`);
+    if (name) params.set('discoverName', name);
+  }
+  return `/library?${params}`;
 }
 
 /**
@@ -531,7 +529,7 @@ export function inLibraryArtistPath(artist: {
       // (My Library / table / compact), so the same artist looked different
       // depending on whether v2 had mapped it yet.
       `/library?artist=${encodeURIComponent(String(artist.library_v2_id))}` +
-        `&releases=all&releaseView=cards&header=rich`
+        `&releases=all&releaseView=cards&header=rich&immersive=true`
     : artistDetailPath(artist.id ?? '');
 }
 

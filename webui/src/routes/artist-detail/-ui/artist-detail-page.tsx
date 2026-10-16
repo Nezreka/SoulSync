@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
@@ -60,12 +60,30 @@ import { SimilarArtistsSection } from './similar-artists-section';
 const BUCKETS: DiscographyBucket[] = ['albums', 'eps', 'singles'];
 
 export function ArtistDetailPage() {
-  useReactPageShell('artist-detail');
+  const { source, id } = Route.useParams();
+  const { name, album } = Route.useSearch();
+  return <ProviderArtistDetailPage source={source} id={id} name={name} focusAlbumId={album} />;
+}
+
+export function ProviderArtistDetailPage({
+  source,
+  id,
+  name,
+  focusAlbumId,
+  page = 'artist-detail',
+  navigation,
+}: {
+  source: string;
+  id: string;
+  name: string;
+  focusAlbumId?: string;
+  page?: 'artist-detail' | 'library';
+  navigation?: ReactNode;
+}) {
+  useReactPageShell(page);
 
   // Deliberately NOT profile-scoped: /api/artist-detail is not, and the
   // vanilla never keyed this page on a profile either.
-  const { source, id } = Route.useParams();
-  const { name, album: focusAlbumId } = Route.useSearch();
 
   const query = useQuery(artistDetailQueryOptions(source, id, name));
 
@@ -130,7 +148,8 @@ export function ArtistDetailPage() {
    * hidden behind it.
    */
   const profile = useProfile();
-  const canEnhance = showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
+  const canEnhance =
+    page !== 'library' && showsEnhancedToggle(Boolean(profile?.isAdmin), sourceOnly);
   // Two ways to land here in the library view whatever was saved: an issue's
   // "edit details", and ?album= from the library's album grid. Both name an
   // album you OWN, and only this view lists those. Both are one-visit
@@ -489,6 +508,7 @@ export function ArtistDetailPage() {
         editionSuperseded={gapFill.editionSuperseded}
       />
 
+      {navigation}
       <div className="artist-detail-content">
         <div className="artist-detail-main" id="artist-detail-main">
           <DiscographyFilters

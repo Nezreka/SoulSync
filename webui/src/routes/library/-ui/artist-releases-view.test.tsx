@@ -152,6 +152,22 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
   });
 
+  it('uses the existing rich header for immersive arrivals and restores tools after My Library', async () => {
+    const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
+    await screen.findByRole('heading', { name: 'Portishead' });
+    expect(router.state.location.search).toMatchObject({ header: 'rich', releaseView: 'cards' });
+    expect(screen.queryByRole('button', { name: 'Artist Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Automatic Search' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Table View' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'My Library' }));
+    await screen.findByRole('button', { name: 'Artist Settings' });
+    expect(router.state.location.search).toMatchObject({ immersive: false, releases: 'library' });
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    await screen.findByRole('button', { name: 'Table View' });
+    expect(screen.getByRole('button', { name: 'Artist Settings' })).toBeInTheDocument();
+    expect(router.state.location.search).toMatchObject({ immersive: false });
+  });
+
   it('loads music videos only when opened and preserves the release view', async () => {
     const searches = vi.fn();
     server.use(
@@ -172,8 +188,8 @@ describe('Library V2 artist detail — All Releases views', () => {
       releases: 'all',
       releaseView: 'cards',
     });
-    expect(screen.queryByRole('button', { name: 'Discover View' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /All Releases/ }));
+    expect(screen.getByRole('button', { name: 'Discover View' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Music Videos$/ }));
     await screen.findByRole('button', { name: 'Discover View' });
     expect(router.state.location.search).toMatchObject({
       artistView: 'releases',
@@ -187,7 +203,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(screen.queryByRole('button', { name: 'Discover View' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /All Releases/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
 
     const legacy = await screen.findByRole('button', { name: 'Discover View' });
     fireEvent.click(legacy);

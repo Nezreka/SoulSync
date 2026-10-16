@@ -96,7 +96,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg',
+      href: '/library?view=discovery&immersive=true&discover=spotify%3A2YZyLoL8N0Wb9xBt1NhZWg',
       replace: false,
     });
   });
@@ -113,7 +113,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/bandcamp/3957198221?name=Radiohead',
+      href: '/library?view=discovery&immersive=true&discover=bandcamp%3A3957198221&discoverName=Radiohead',
       replace: false,
     });
   });
@@ -130,7 +130,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/library/570658?album=123',
+      href: '/library?view=discovery&immersive=true&artist=570658&album=123',
       replace: false,
     });
   });
@@ -148,7 +148,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/bandcamp/3957198221?name=Radiohead&album=123',
+      href: '/library?view=discovery&immersive=true&discover=bandcamp%3A3957198221&discoverName=Radiohead&album=123',
       replace: false,
     });
   });
@@ -164,7 +164,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/library/42',
+      href: '/library?view=discovery&immersive=true&artist=42',
       replace: true,
     });
   });
