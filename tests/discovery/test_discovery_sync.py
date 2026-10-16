@@ -22,6 +22,7 @@ class _FakeSyncResult:
     total_tracks: int = 6
     wishlist_added_count: int = 0
     match_details: list = None
+    errors: list = None
 
     def __post_init__(self):
         if self.match_details is None:
@@ -340,6 +341,26 @@ def test_successful_sync_marks_state_finished(patched_db):
 
     assert states['pOK']['status'] == 'finished'
     assert states['pOK']['progress']['matched_tracks'] == 10
+
+
+def test_failed_playlist_write_is_an_error_that_keeps_its_counts(patched_db):
+    """The matching ran but the server write was refused (Navidrome mid-scan):
+    the run is an error, history keeps the real match count instead of 0, and
+    no sync status is saved, so the next run cannot smart-skip as unchanged."""
+    states = {}
+    saved_status = []
+    result = _FakeSyncResult(matched_tracks=2652, total_tracks=3230, synced_tracks=0,
+                             failed_tracks=578, errors=['Navidrome playlist write failed'])
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, sync_states=states,
+                       update_and_save_sync_status=lambda *a, **kw: saved_status.append(kw))
+
+    ds.run_sync_task('pW', 'PW', [_track()], deps=deps)
+
+    assert states['pW']['status'] == 'error'
+    assert 'write failed' in states['pW']['error']
+    assert patched_db.completion_calls[0][1:] == (2652, 0, 578)
+    assert saved_status == []
 
 
 def test_unmatched_tracks_summary_added_to_state(patched_db):

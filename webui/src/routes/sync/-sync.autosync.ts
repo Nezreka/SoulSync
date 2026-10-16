@@ -1419,6 +1419,8 @@ export function autoSyncHistoryResultPills(
       ['Synced', result.tracks_synced],
       ['Skipped', result.sync_skipped],
       ['Wishlisted', result.wishlist_queued],
+      // only when something failed: "Sync errors 0" on every clean run is noise
+      ['Sync errors', Number(result.sync_errors) > 0 ? result.sync_errors : undefined],
     ] as [string, unknown][]
   )
     .filter(([, v]) => v !== undefined && v !== null && v !== '')

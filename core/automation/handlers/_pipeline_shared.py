@@ -54,7 +54,7 @@ def run_sync_and_wishlist(
       thread to complete + read the matched_tracks count).
 
     Returns ``{'synced': int, 'skipped': int, 'errors': int,
-    'wishlist_queued': int}`` so the caller can stitch it into its
+    'error_messages': [str], 'wishlist_queued': int}`` so the caller can stitch it into its
     final status.
     """
     deps.update_progress(
@@ -68,6 +68,7 @@ def run_sync_and_wishlist(
     total_synced = 0
     total_skipped = 0
     sync_errors = 0
+    error_messages: List[str] = []
     sync_states = deps.get_sync_states()
     n_playlists = max(1, len(playlists))
     progress_span = max(1, progress_end - progress_start - 1)
@@ -99,6 +100,7 @@ def run_sync_and_wishlist(
             final_status = ss.get('status')
             if timed_out:
                 sync_errors += 1
+                error_messages.append(f'"{pl_name}": timed out after {_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS}s')
                 deps.update_progress(
                     automation_id,
                     log_line=f'Sync timed out "{pl_name}" after {_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS}s',
@@ -108,6 +110,7 @@ def run_sync_and_wishlist(
             if final_status in ('error', 'failed'):
                 sync_errors += 1
                 reason = ss.get('error') or ss.get('reason') or 'background sync failed'
+                error_messages.append(f'"{pl_name}": {reason}')
                 deps.update_progress(
                     automation_id,
                     log_line=f'Sync error "{pl_name}": {reason}',
@@ -134,6 +137,7 @@ def run_sync_and_wishlist(
             )
         elif sync_status == 'error':
             sync_errors += 1
+            error_messages.append(f'"{pl_name}": {sync_result.get("reason", "unknown")}')
             deps.update_progress(
                 automation_id,
                 log_line=f'Sync error "{pl_name}": {sync_result.get("reason", "unknown")}',
@@ -196,6 +200,7 @@ def run_sync_and_wishlist(
         'synced': total_synced,
         'skipped': total_skipped,
         'errors': sync_errors,
+        'error_messages': error_messages,
         'wishlist_queued': wishlist_queued,
         'organize_downloads_started': organize_started,
     }
