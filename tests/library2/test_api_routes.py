@@ -2411,6 +2411,10 @@ def test_import_completes_while_artwork_continues_in_background(api, monkeypatch
     from core.library2 import artwork, completeness, importer, tag_cache
 
     client, _db, _ids = api
+    scheduled = []
+    from core.library2 import bootstrap, unmapped_trigger
+    monkeypatch.setattr(unmapped_trigger, 'schedule_unmapped_artist_reconcile',
+                        lambda *_: scheduled.append(bootstrap.get_state(_db)['status']))
     artwork_started = threading.Event()
     release_artwork = threading.Event()
 
@@ -2459,6 +2463,7 @@ def test_import_completes_while_artwork_continues_in_background(api, monkeypatch
         assert state is not None
         assert state["running"] is False
         assert state["stage"] == "done"
+        assert scheduled == ['done']
         assert state["stats"] == {"artists": 1, "albums": 3, "tracks": 3}
         assert state["artwork_cache"]["running"] is True
         assert state["artwork_cache"]["current"] == 1

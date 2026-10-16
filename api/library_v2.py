@@ -5307,6 +5307,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # committed already.  Mark the import complete and let artwork
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
+                from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
+                schedule_unmapped_artist_reconcile(config_manager)
                 _start_artwork_cache(get_database, config_manager)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)

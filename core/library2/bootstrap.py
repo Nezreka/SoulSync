@@ -275,15 +275,20 @@ def get_state(database: Any) -> Dict[str, Any]:
     """Read the persisted bootstrap status. Safe to call before any claim."""
     with closing(database._get_connection()) as conn:
         cursor = conn.cursor()
-        ensure_bootstrap_schema(cursor)
-        conn.commit()
-        cursor.execute(
-            "SELECT status, attempts, stage, current_count, total_count, "
-            "last_error, started_at, finished_at, heartbeat_at, source_watermark, "
-            "resume_stage, resume_rowid, resume_run_id, resume_watermark "
-            "FROM lib2_bootstrap_state WHERE id = 1"
-        )
-        row = cursor.fetchone()
+        # Status polling also runs inside file-publish rollback paths. A second
+        # connection must remain read-only while the publisher holds a write
+        # lock. Schema creation belongs to startup/claim, never a reader.
+        exists = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_bootstrap_state'"
+        ).fetchone()
+        row = None
+        if exists:
+            columns = {r[1] for r in cursor.execute("PRAGMA table_info(lib2_bootstrap_state)")}
+            fields = ("status", "attempts", "stage", "current_count", "total_count",
+                      "last_error", "started_at", "finished_at", "heartbeat_at", "source_watermark",
+                      "resume_stage", "resume_rowid", "resume_run_id", "resume_watermark")
+            projection = ", ".join(name if name in columns else f"NULL AS {name}" for name in fields)
+            row = cursor.execute(f"SELECT {projection} FROM lib2_bootstrap_state WHERE id=1").fetchone()
     if row is None:
         return {
             "status": "pending", "attempts": 0, "stage": None,

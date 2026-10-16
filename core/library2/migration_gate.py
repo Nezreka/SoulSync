@@ -103,7 +103,7 @@ def migration_required(database: Any) -> bool:
     """True from upgrade detection through the final committed import step."""
     try:
         from core.library2.bootstrap import (
-            bootstrap_is_active, get_state, source_row_count, source_watermark,
+            bootstrap_is_active, get_state,
         )
         if local_migration_active() or bootstrap_is_active(database):
             return True
@@ -111,7 +111,15 @@ def migration_required(database: Any) -> bool:
         # Legacy is immutable after cutover. Once imported, runtime never polls it.
         if state.get("status") == "done":
             return False
-        return source_row_count(source_watermark(database)) > 0
+        # Only presence matters here. The checkpoint watermark installs
+        # mutation observers and commits; it is a writer, unsuitable inside
+        # another connection's publish/rollback transaction.
+        from contextlib import closing
+        from core.library2.source_snapshot import SOURCE_TABLES
+        with closing(database._get_connection()) as conn:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            return any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone() is not None
+                       for table in SOURCE_TABLES if table in tables)
     except Exception as exc:  # half-known upgrade state must never admit writers
         logger.warning("Could not verify Library v2 upgrade state: %s", exc)
         return True

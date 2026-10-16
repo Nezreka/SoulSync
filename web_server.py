@@ -2962,8 +2962,11 @@ atexit.register(cleanup_monitor)
 # FIRST, before any other shutdown handler emits its "Shutting down"
 # log line into a stream pytest already closed.
 atexit.register(_atexit_silence_shutdown_logger_errors)
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+# Production boot may run in the startup worker. Gunicorn owns signals there;
+# Python only allows direct-run registration from the main thread.
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
 def _update_task_status(task_id, new_status):
     """Helper to update task status and timestamp for timeout tracking"""
@@ -20275,6 +20278,11 @@ def _autostart_library_v2_bootstrap_import():
                 database, config_manager.get, post_import=_post_import,
             )
             if lib2_bootstrap.should_stop_autostart(result):
+                if result.get("success") or result.get("skipped") == "already_done":
+                    # The migration is committed; heal combined/unmapped artist
+                    # credits in the existing independent, debounced worker.
+                    from core.library2.unmapped_trigger import schedule_unmapped_artist_reconcile
+                    schedule_unmapped_artist_reconcile(config_manager)
                 from core.library2.migration_gate import start_deferred_workers
                 start_deferred_workers(database)
                 return

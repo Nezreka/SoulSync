@@ -9,6 +9,8 @@ Finding 2 so a permanently unresolvable name is not re-asked at every trigger.
 
 import threading
 
+import pytest
+
 import core.library2.unmapped_trigger as UT
 
 
@@ -160,3 +162,24 @@ def test_scheduling_never_raises_into_the_import_pipeline():
     # The hook sits in the post-import side effects; it must never be able to
     # fail an import that already landed on disk.
     assert UT.schedule_unmapped_artist_reconcile(_Exploding()) is False
+
+
+@pytest.mark.parametrize('result,expected', [
+    ({'success': True}, ['reconcile', 'workers']),
+    ({'skipped': 'already_done'}, ['reconcile', 'workers']),
+    ({'skipped': 'empty_source'}, ['workers']),
+])
+def test_autostart_reconciles_completed_migrations_without_waiting_for_new_import(monkeypatch, result, expected):
+    import web_server
+    from core.library2 import bootstrap, file_delete, migration_gate
+    calls = []
+    database = object()
+    monkeypatch.setattr(web_server, 'get_database', lambda: database)
+    monkeypatch.setattr(bootstrap, 'reclaim_abandoned_claim', lambda *a, **k: None)
+    monkeypatch.setattr(bootstrap, 'run_deferred_backfills', lambda *a, **k: None)
+    monkeypatch.setattr(bootstrap, 'run_bootstrap_if_needed', lambda *a, **k: result)
+    monkeypatch.setattr(file_delete, 'reconcile_incomplete_deletes', lambda *a, **k: 0)
+    monkeypatch.setattr(UT, 'schedule_unmapped_artist_reconcile', lambda *a: calls.append('reconcile'))
+    monkeypatch.setattr(migration_gate, 'start_deferred_workers', lambda *a: calls.append('workers'))
+    web_server._autostart_library_v2_bootstrap_import()
+    assert calls == expected
