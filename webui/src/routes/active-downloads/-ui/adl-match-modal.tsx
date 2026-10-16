@@ -73,7 +73,7 @@ export interface Hit {
   ) => Promise<MatchOutcome>;
 }
 
-function initials(text: string): string {
+export function initials(text: string): string {
   return text
     .split(/\s+/)
     .filter((w) => /^[A-Za-z0-9]/.test(w))
