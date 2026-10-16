@@ -82,6 +82,9 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
         return f"ssd_{kind}_{variant}" if variant else f"ssd_{kind}"
 
     def _records(self, manager: Any) -> List[Any]:
+        # Deliberately NOT the track_count>0 filter list_playlists() uses:
+        # resolution must find empty playlists too, or a mirror of one
+        # could never be refreshed back to life.
         try:
             return manager.list_playlists(profile_id=self._profile_id_getter()) or []
         except Exception as exc:
@@ -113,8 +116,15 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
             return None
         records = self._records(manager)
         if row_id is not None:
-            return next((r for r in records if int(r.id) == row_id), None)
+            return next((r for r in records if self._record_id(r) == row_id), None)
         return next((r for r in records if self._synthetic_id(r) == sid), None)
+
+    @staticmethod
+    def _record_id(record: Any) -> Optional[int]:
+        try:
+            return int(record.id)
+        except (TypeError, ValueError, AttributeError):
+            return None
 
     def _parse_synthetic(self, manager: Any, playlist_id: str) -> Optional[Tuple[str, str]]:
         """Parse an ``ssd_…`` ID into ``(kind, variant)`` via the kind registry.
@@ -123,8 +133,19 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
         personalized row was deleted after the mirror was created): the
         manager's refresh re-creates the row via ``ensure_playlist``.
         Mirrors the frontend's parsing (``autoSyncEnrichDiscoveryRows``):
-        singletons match exactly, only variant kinds take a suffix, and the
-        longest kind wins so a shorter kind can't shadow a longer one.
+        singletons match exactly, only variant kinds take a suffix, the
+        longest kind wins so a shorter kind can't shadow a longer one, and
+        any non-empty suffix is accepted as the variant. One deliberate
+        divergence: a trailing underscore (empty variant) matches nothing
+        here, where the frontend tags variant '' and keeps the row.
+
+        The variant is NOT validated against the kind's variant resolver:
+        genre_playlist's resolver enumerates only parent genres while the
+        kind deliberately supports free-form variants created on demand,
+        so resolver-gating would make custom-genre mirrors unrefreshable.
+        A variant that produces nothing is handled by refresh_playlist's
+        empty-generation guard instead (it reads as a failed refresh, so
+        the mirror keeps its tracks).
         Returns None when the ID names no registered kind.
         """
         sid = str(playlist_id or '').strip()
@@ -150,34 +171,17 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
                 return (spec.kind, '')
             if getattr(spec, 'requires_variant', False) and rest.startswith(spec.kind + '_'):
                 variant = rest[len(spec.kind) + 1:]
-                if variant and self._variant_is_valid(manager, spec, variant):
+                if variant:
                     return (spec.kind, variant)
         return None
 
-    @staticmethod
-    def _variant_is_valid(manager: Any, spec: Any, variant: str) -> bool:
-        """Check a parsed variant against the kind's variant resolver.
-
-        Without this, a stale/garbled ID like ``ssd_daily_mix_99`` would
-        make refresh create a personalized row for a variant that doesn't
-        exist. Kinds without a resolver (or whose resolver fails or
-        returns nothing) can't be validated — accept, since the exact
-        record-match path above remains the primary resolution and this
-        fallback only runs when no row exists yet.
-        """
-        resolver = getattr(spec, 'variant_resolver', None)
-        if not callable(resolver):
-            return True
-        try:
-            valid = resolver(getattr(manager, 'deps', None))
-        except Exception:
-            return True
-        if not valid:
-            return True
-        return variant in [str(v) for v in valid]
-
     def get_playlist(self, playlist_id: str) -> Optional[PlaylistDetail]:
-        """``playlist_id`` is a personalized row ID or an ``ssd_…`` mirror ID."""
+        """``playlist_id`` is a personalized row ID or an ``ssd_…`` mirror ID.
+
+        Reads resolve against existing records only — there is no parse
+        fallback here by design (a read must never create a row). Only
+        ``refresh_playlist`` can resurrect a deleted personalized row.
+        """
         manager = self._manager()
         if manager is None:
             return None
@@ -236,8 +240,9 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
         detail = self.get_playlist(playlist_id)
         if via_fallback and (detail is None or not detail.tracks):
             # Fallback first generation produced nothing (generator failed
-            # or returned empty for a variant the resolver couldn't rule
-            # out). Returning a 0-track detail would let the caller REPLACE
+            # or returned empty — e.g. a variant that names nothing real,
+            # which parsing deliberately doesn't try to rule out).
+            # Returning a 0-track detail would let the caller REPLACE
             # the mirror's tracks with nothing — the manager preserved no
             # snapshot here because the row was just created. Report the
             # refresh as failed instead so the mirror keeps its tracks.

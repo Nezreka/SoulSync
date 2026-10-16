@@ -918,12 +918,65 @@ def test_soulsync_discovery_adapter_refresh_unregistered_synthetic_returns_none(
     assert manager.refresh_calls == []
 
 
-def test_soulsync_discovery_adapter_refresh_invalid_variant_returns_none():
-    # A variant the kind's resolver doesn't offer must not create a row.
-    manager = _GeneratingDiscoveryManager()
+def test_soulsync_discovery_adapter_fallback_unproducible_variant_returns_none():
+    # Parsing deliberately doesn't validate variants (free-form genre
+    # variants aren't enumerated by their resolver — see the free-form
+    # test below). A variant that produces nothing is stopped by the
+    # empty-generation guard instead: the refresh was attempted, the
+    # result is None, and no 0-track detail reaches the caller.
+    manager = _EmptyGeneratingManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="time_machine", requires_variant=True),
+    ])
     src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
     assert src.refresh_playlist("ssd_time_machine_99") is None
-    assert manager.refresh_calls == []
+    assert manager.refresh_calls == [("time_machine", "99", 1)]
+
+
+def test_soulsync_discovery_adapter_fallback_freeform_genre_variant_refreshes():
+    # genre_playlist's resolver enumerates only parent genres, but the
+    # kind supports free-form variants created on demand. The parse
+    # fallback must accept one the resolver doesn't list.
+    manager = _GeneratingDiscoveryManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="genre_playlist", requires_variant=True,
+                        variant_resolver=lambda deps: ["rock", "pop"]),
+    ])
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_genre_playlist_electronic_dance")
+    assert manager.refresh_calls == [("genre_playlist", "electronic_dance", 1)]
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+
+
+def test_soulsync_discovery_adapter_parse_longest_prefix_wins():
+    # With prefix-related kinds registered, the longest kind must claim
+    # the ID (frontend fixture pins the same for time vs time_machine).
+    manager = _GeneratingDiscoveryManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="time", requires_variant=True),
+        SimpleNamespace(kind="time_machine", requires_variant=True),
+    ])
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_time_machine_1990s")
+    assert manager.refresh_calls == [("time_machine", "1990s", 1)]
+    assert detail is not None
+
+
+def test_soulsync_discovery_adapter_synthetic_underscore_variant_exact_match():
+    # Variants containing underscores resolve by exact synthetic match,
+    # never by splitting, on both the get and refresh paths.
+    manager = _FakeDiscoveryManager()
+    manager._records = [_discovery_record(33, "genre_playlist", 1, "Genre — electronic_dance",
+                                          variant="electronic_dance")]
+    manager.get_playlist_tracks = lambda playlist_id: manager._tracks if playlist_id == 33 else []
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.get_playlist("ssd_genre_playlist_electronic_dance")
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+    detail = src.refresh_playlist("ssd_genre_playlist_electronic_dance")
+    assert manager.refresh_calls == [("genre_playlist", "electronic_dance", 1)]
+    assert detail is not None
 
 
 def test_soulsync_discovery_adapter_refresh_bare_variant_kind_returns_none():
