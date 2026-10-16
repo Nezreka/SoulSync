@@ -25,7 +25,8 @@ function sortByBatchPosition(rows: AdlDownload[]): AdlDownload[] {
 
 function PhaseIcon({ icon }: { icon: 'spinner' | 'check' | 'hourglass' | null }) {
   if (icon === 'spinner') return <span className="adl-spinner" style={{ marginRight: '4px' }} />;
-  if (icon === 'check') return <span style={{ color: '#22c55e', marginRight: '4px' }}>✓</span>;
+  if (icon === 'check')
+    return <span style={{ color: 'var(--success)', marginRight: '4px' }}>✓</span>;
   if (icon === 'hourglass') return <span style={{ marginRight: '4px', opacity: 0.6 }}>⏳</span>;
   return null;
 }
@@ -646,7 +647,9 @@ export function AdlRecentHistory({
               </div>
               <div className="adl-batch-history-stats">
                 {downloaded}/{total}
-                {failed > 0 ? <span style={{ color: '#ef4444' }}> {failed} failed</span> : null}
+                {failed > 0 ? (
+                  <span style={{ color: 'var(--danger)' }}> {failed} failed</span>
+                ) : null}
               </div>
               <div className="adl-batch-history-date">{historyAgo(entry.completed_at, now)}</div>
             </div>

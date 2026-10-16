@@ -12,6 +12,7 @@ import type { AutoSyncCardActions, AutoSyncSidebarBadge } from './autosync-share
 import {
   AutoSyncBoardIntro,
   AutoSyncLane,
+  AutoSyncPickMenu,
   AutoSyncScheduledCard,
   AutoSyncSidebar,
   AutoSyncSourceIcon,
@@ -413,5 +414,109 @@ describe('AutoSyncBoardIntro (826-834 / 950-960)', () => {
     // duplicate Refreshes on its own. The modal header owns the only one now.
     expect(container.querySelector('button')).toBeNull();
     expect(onRefresh).not.toHaveBeenCalled();
+  });
+});
+
+describe('tap-to-schedule (NEW — no vanilla counterpart)', () => {
+  const renderSidebar = (over: Partial<React.ComponentProps<typeof AutoSyncSidebar>> = {}) =>
+    render(
+      <AutoSyncSidebar
+        groups={[{ source: 'spotify', rows: [row()] }]}
+        unavailable={[]}
+        badgeFor={() => unscheduled}
+        filter=""
+        onFilterChange={vi.fn()}
+        expandedKinds={new Set()}
+        onToggleKind={vi.fn()}
+        {...over}
+      />,
+    );
+
+  it('sidebar cards are inert until a pick handler is supplied', () => {
+    const { container } = renderSidebar();
+    const card = container.querySelector('.auto-sync-playlist');
+    expect(card?.className).not.toContain('pickable');
+    expect(card?.getAttribute('role')).toBeNull();
+    fireEvent.click(card as HTMLElement);
+  });
+
+  it('a supplied pick handler makes the card a button and reports the tap', () => {
+    const onPickPlaylist = vi.fn();
+    const { container } = renderSidebar({ onPickPlaylist });
+    const card = container.querySelector('.auto-sync-playlist') as HTMLElement;
+    expect(card.className).toContain('pickable');
+    expect(card.getAttribute('role')).toBe('button');
+    fireEvent.click(card);
+    expect(onPickPlaylist).toHaveBeenCalledTimes(1);
+    expect(onPickPlaylist.mock.calls[0][1]).toMatchObject({ id: 1, name: 'Late Night' });
+    // Enter activates it too, for keyboards and switch control.
+    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(onPickPlaylist).toHaveBeenCalledTimes(2);
+  });
+
+  const renderMenu = (over: Partial<React.ComponentProps<typeof AutoSyncPickMenu>> = {}) =>
+    render(
+      <AutoSyncPickMenu
+        playlist={row()}
+        anchor={{ top: 100, left: 40 }}
+        onSchedule={vi.fn()}
+        onClose={vi.fn()}
+        {...over}
+      />,
+    );
+
+  it('the pick menu names the playlist and its current state', () => {
+    const { container } = renderMenu();
+    expect(container.querySelector('.auto-sync-pick-menu-name')?.textContent).toBe('Late Night');
+    expect(container.querySelector('.auto-sync-bulk-menu-title')?.textContent).toBe(
+      'Not scheduled',
+    );
+    expect(container.querySelector('.auto-sync-bulk-menu-unschedule')).toBeNull();
+  });
+
+  it('picking a bucket schedules it; the current bucket is marked', () => {
+    const onSchedule = vi.fn();
+    const onUnschedule = vi.fn();
+    const { container } = renderMenu({ currentHours: 4, onSchedule, onUnschedule });
+    expect(container.querySelector('.auto-sync-bulk-menu-title')?.textContent).toBe(
+      'Scheduled · every 4 hours',
+    );
+    const buckets = [...container.querySelectorAll('.auto-sync-bulk-menu-buckets button')];
+    expect(buckets.map((b) => b.textContent)).toContain('Every 4 hours');
+    expect(buckets.find((b) => b.textContent === 'Every 4 hours')?.className).toContain('current');
+    fireEvent.click(buckets.find((b) => b.textContent === 'Every 1 hour') as HTMLElement);
+    expect(onSchedule).toHaveBeenCalledWith(1);
+    // Unschedule exists only because a schedule does.
+    fireEvent.click(container.querySelector('.auto-sync-bulk-menu-unschedule') as HTMLElement);
+    expect(onUnschedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('the custom interval validates through the bulk parser', () => {
+    const onSchedule = vi.fn();
+    const { container } = renderMenu({ onSchedule });
+    fireEvent.click(container.querySelector('.auto-sync-bulk-menu-custom') as HTMLElement);
+    const input = container.querySelector('input[type="number"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.click(
+      [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Schedule',
+      ) as HTMLElement,
+    );
+    expect(onSchedule).not.toHaveBeenCalled();
+    expect(container.querySelector('.auto-sync-bulk-menu-error')?.textContent).toBeTruthy();
+    fireEvent.change(input, { target: { value: '36' } });
+    fireEvent.click(
+      [...container.querySelectorAll('button')].find(
+        (b) => b.textContent === 'Schedule',
+      ) as HTMLElement,
+    );
+    expect(onSchedule).toHaveBeenCalledWith(36);
+  });
+
+  it('Escape closes the menu without reaching the modal behind it', () => {
+    const onClose = vi.fn();
+    renderMenu({ onClose });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

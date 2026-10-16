@@ -20,7 +20,7 @@ with `tmp_path` fixtures.
 from __future__ import annotations
 
 import os
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
 import requests
 
@@ -55,6 +55,41 @@ def derive_artist_folder(album_folder: str) -> str:
     trimmed = album_folder.rstrip("/").rstrip("\\")
     parent = os.path.dirname(trimmed)
     return parent or ""
+
+
+def _folder_key(name: str) -> str:
+    """an artist or folder name reduced to letters and digits, accents folded.
+
+    path templates sanitize names (``AC/DC`` lands as ``AC_DC``), so only
+    the letters and digits are compared.
+    """
+    from core.text.normalize import normalize_for_comparison
+
+    return "".join(ch for ch in normalize_for_comparison(name or "") if ch.isalnum())
+
+
+def find_artist_folder(track_paths: Iterable[str], artist_name: str) -> str:
+    """the artist's own folder, found from their track files, or "" when there isn't one.
+
+    "two folders up from a track" is only the artist folder for
+    Artist/Album/track. a track loose in the library root put it one level
+    above the root, an Artist/track one at the library root, and artist.jpg
+    landed there for every artist in the library to pick up. so a folder
+    only counts when it is named after the artist. the parent is checked
+    before the track's own folder, so a self-titled album folder isn't
+    mistaken for the artist's.
+    """
+    want = _folder_key(artist_name)
+    if not want:
+        return ""
+    for path in track_paths:
+        if not path or not isinstance(path, str):
+            continue
+        here = os.path.dirname(path)
+        for folder in (derive_artist_folder(here), here):
+            if folder and _folder_key(os.path.basename(folder.rstrip("/\\"))) == want:
+                return folder
+    return ""
 
 
 def pick_artist_image_url(artist_obj) -> Optional[str]:
@@ -155,6 +190,7 @@ def write_artist_jpg(
 
 __all__ = [
     "derive_artist_folder",
+    "find_artist_folder",
     "pick_artist_image_url",
     "download_image_bytes",
     "write_artist_jpg",

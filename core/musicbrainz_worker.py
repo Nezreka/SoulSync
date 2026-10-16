@@ -188,17 +188,18 @@ class MusicBrainzWorker:
             if item and item.get('type') == 'track':
                 # Upstream (#1509, #1608): the track's own length gates the
                 # recording match, and the artist the track itself is credited
-                # to is asked before the album's (a soundtrack's singer).
+                # to is asked before the album's (a soundtrack's singer); #1705:
+                # its stored ISRC feeds the exact-identifier rung.
                 row = conn.execute(
                     "SELECT t.duration, "
                     "(SELECT ar.name FROM lib2_track_artists ta "
                     "   JOIN lib2_artists ar ON ar.id = ta.artist_id "
                     "  WHERE ta.track_id = t.id "
                     "  ORDER BY CASE WHEN ta.role = 'primary' THEN 0 ELSE 1 END, "
-                    "           ta.position, ta.artist_id LIMIT 1) "
+                    "           ta.position, ta.artist_id LIMIT 1), t.isrc "
                     "FROM lib2_tracks t WHERE t.id = ?", (item['id'],)).fetchone()
                 if row:
-                    item['duration'], item['track_artist'] = row[0], row[1]
+                    item['duration'], item['track_artist'], item['isrc'] = row[0], row[1], row[2]
             return item
 
         except Exception as e:
@@ -384,7 +385,11 @@ class MusicBrainzWorker:
                     result = self.mb_service.match_recording(
                         item_name, artist_name,
                         artist_mbid=artist_mbid,
-                        duration_ms=item.get('duration'))
+                        duration_ms=item.get('duration'),
+                        # #1705: the track's stored ISRC, when an earlier
+                        # source pass recorded one — the exact-identifier
+                        # rung inside match_recording.
+                        isrc=item.get('isrc'))
                     if result and result.get('mbid'):
                         break
                 if result and result.get('mbid'):

@@ -48,11 +48,14 @@ FROM python:3.11-slim
 # verifies the STREAMINFO MD5 — catches damage that still decodes; #1000).
 # rubberband-cli: sample studio renders saved chops with it. without it the
 # pitch/tempo falls back to librosa, which smears drum hits.
+# libarchive-tools: bsdtar, for the RAR/7z subtitle archives subsource still
+# serves (zip is read in python; without bsdtar a RAR is just a miss).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     ffmpeg \
     flac \
+    libarchive-tools \
     libchromaprint-tools \
     rubberband-cli \
     unzip \

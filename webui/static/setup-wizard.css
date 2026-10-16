@@ -40,9 +40,9 @@
 .setup-step-dot {
     width: 12px;
     height: 12px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.15);
-    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-circle);
+    background: var(--white-a15);
+    border: 2px solid var(--white-a20);
     transition: all 0.3s ease;
     cursor: default;
 }
@@ -62,7 +62,7 @@
 .setup-step-line {
     width: 32px;
     height: 2px;
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--white-a10);
     transition: background 0.3s ease;
 }
 
@@ -73,8 +73,8 @@
 /* ---- Card Container ---- */
 .setup-card {
     width: 100%;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--white-a04);
+    border: 1px solid var(--white-a08);
     border-radius: 20px;
     padding: 40px;
     backdrop-filter: blur(20px);
@@ -97,7 +97,7 @@
 
 .setup-card .setup-subtitle {
     font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--white-a50);
     text-align: center;
     margin-bottom: 28px;
     line-height: 1.5;
@@ -115,7 +115,7 @@
 
 .setup-welcome-tagline {
     font-size: 1.05rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-a60);
     text-align: center;
     margin-bottom: 32px;
 }
@@ -132,15 +132,15 @@
     align-items: center;
     gap: 12px;
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.03);
+    background: var(--white-a03);
     border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--white-a05);
 }
 
 .setup-feature-icon {
     width: 32px;
     height: 32px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: rgba(var(--accent-rgb), 0.15);
     display: flex;
     align-items: center;
@@ -151,7 +151,7 @@
 
 .setup-feature-text {
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--white-a80);
 }
 
 /* ---- Selection Cards (Metadata / Download Source) ---- */
@@ -165,8 +165,8 @@
 .setup-option-card {
     position: relative;
     padding: 18px 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 2px solid rgba(255, 255, 255, 0.08);
+    background: var(--white-a03);
+    border: 2px solid var(--white-a08);
     border-radius: 14px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -174,8 +174,8 @@
 }
 
 .setup-option-card:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
+    background: var(--white-a06);
+    border-color: var(--white-a15);
 }
 
 .setup-option-card.selected {
@@ -191,7 +191,7 @@
     right: 8px;
     width: 20px;
     height: 20px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' xmlns='http://www.w3.org/2000/svg'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
     background-size: 14px;
@@ -210,7 +210,7 @@
     display: inline-block;
     font-size: 0.7rem;
     padding: 2px 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: rgba(var(--accent-rgb), 0.2);
     color: rgb(var(--accent-light-rgb));
     margin-bottom: 6px;
@@ -218,7 +218,7 @@
 
 .setup-option-desc {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--white-a45);
     line-height: 1.4;
 }
 
@@ -227,9 +227,9 @@
     display: none;
     margin-top: 16px;
     padding: 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    background: var(--white-a03);
+    border: 1px solid var(--white-a08);
+    border-radius: var(--radius-lg);
     animation: setupCardIn 0.25s ease;
 }
 
@@ -247,15 +247,15 @@
 
 .setup-input-group label {
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--white-a50);
     font-weight: 500;
 }
 
 .setup-input {
     width: 100%;
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--white-a06);
+    border: 1px solid var(--white-a10);
     border-radius: 10px;
     color: #fff;
     font-size: 0.9rem;
@@ -268,14 +268,14 @@
 }
 
 .setup-input::placeholder {
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--white-a25);
 }
 
 .setup-test-btn {
     padding: 8px 16px;
     background: rgba(var(--accent-rgb), 0.15);
     border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     color: rgb(var(--accent-light-rgb));
     font-size: 0.82rem;
     font-weight: 500;
@@ -310,16 +310,16 @@
 
 .setup-server-card {
     padding: 14px 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 2px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    background: var(--white-a03);
+    border: 2px solid var(--white-a08);
+    border-radius: var(--radius-lg);
     cursor: pointer;
     text-align: center;
     transition: all 0.2s ease;
 }
 
 .setup-server-card:hover {
-    border-color: rgba(255, 255, 255, 0.15);
+    border-color: var(--white-a15);
 }
 
 .setup-server-card.selected {
@@ -342,9 +342,9 @@
 .setup-search-input {
     width: 100%;
     padding: 12px 16px 12px 42px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+    background: var(--white-a06);
+    border: 1px solid var(--white-a10);
+    border-radius: var(--radius-lg);
     color: #fff;
     font-size: 0.95rem;
     outline: none;
@@ -356,7 +356,7 @@
 }
 
 .setup-search-input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--white-a30);
 }
 
 .setup-search-icon {
@@ -364,7 +364,7 @@
     left: 14px;
     top: 50%;
     transform: translateY(-50%);
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--white-a30);
 }
 
 .setup-artist-results {
@@ -382,15 +382,15 @@
     align-items: center;
     gap: 12px;
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--white-a03);
+    border: 1px solid var(--white-a06);
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .setup-artist-row:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--white-a07);
 }
 
 .setup-artist-row.added {
@@ -401,9 +401,9 @@
 .setup-artist-img {
     width: 44px;
     height: 44px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     object-fit: cover;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--white-a08);
 }
 
 .setup-artist-info {
@@ -422,7 +422,7 @@
 
 .setup-artist-genre {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--white-a40);
 }
 
 /* Added artists chips */
@@ -472,15 +472,15 @@
     align-items: center;
     gap: 12px;
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--white-a03);
+    border: 1px solid var(--white-a06);
     border-radius: 10px;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
 .setup-track-row:hover {
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--white-a07);
 }
 
 .setup-track-row.downloading {
@@ -496,9 +496,9 @@
 .setup-track-art {
     width: 40px;
     height: 40px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     object-fit: cover;
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--white-a08);
 }
 
 .setup-track-info {
@@ -517,12 +517,12 @@
 
 .setup-track-artist {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--white-a40);
 }
 
 .setup-track-status {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--white-a40);
     min-width: 80px;
     text-align: right;
 }
@@ -536,7 +536,7 @@
     width: 72px;
     height: 72px;
     margin: 0 auto 20px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgba(var(--accent-rgb), 0.15);
     display: flex;
     align-items: center;
@@ -555,8 +555,8 @@
     gap: 8px;
     margin-bottom: 28px;
     padding: 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 12px;
+    background: var(--white-a03);
+    border-radius: var(--radius-lg);
 }
 
 .setup-summary-row {
@@ -566,7 +566,7 @@
 }
 
 .setup-summary-label {
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--white-a45);
 }
 
 .setup-summary-value {
@@ -604,13 +604,13 @@
 }
 
 .setup-btn-secondary {
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.7);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--white-a06);
+    color: var(--white-a70);
+    border: 1px solid var(--white-a10);
 }
 
 .setup-btn-secondary:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--white-a10);
     color: #fff;
 }
 
@@ -626,7 +626,7 @@
     text-align: center;
     margin-top: 16px;
     font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--white-a35);
     cursor: pointer;
     transition: color 0.2s ease;
     background: none;
@@ -634,7 +634,7 @@
 }
 
 .setup-skip-link:hover {
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-a60);
 }
 
 /* ---- Path Lock Row ---- */
@@ -655,10 +655,10 @@
 
 .setup-lock-btn {
     padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.6);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--white-a15);
+    background: var(--white-a06);
+    color: var(--white-a60);
     font-size: 0.8rem;
     font-weight: 500;
     cursor: pointer;
@@ -667,7 +667,7 @@
 }
 
 .setup-lock-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--white-a10);
     color: #fff;
 }
 
@@ -679,7 +679,7 @@
 /* ---- Artist check column ---- */
 .setup-artist-check {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.35);
+    color: var(--white-a35);
     white-space: nowrap;
     min-width: 70px;
     text-align: right;
@@ -698,12 +698,12 @@
     border-radius: 10px;
     margin-bottom: 16px;
     font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-a60);
     line-height: 1.55;
 }
 
 .setup-info-box strong {
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--white-a85);
     font-weight: 600;
 }
 
@@ -730,21 +730,21 @@
 
 .setup-tip-card {
     padding: 14px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: var(--white-a03);
+    border: 1px solid var(--white-a06);
     border-radius: 10px;
 }
 
 .setup-tip-title {
     font-size: 0.82rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.85);
+    color: var(--white-a85);
     margin-bottom: 6px;
 }
 
 .setup-tip-text {
     font-size: 0.78rem;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--white-a45);
     line-height: 1.5;
 }
 
@@ -753,9 +753,9 @@
     display: inline-block;
     width: 16px;
     height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
+    border: 2px solid var(--white-a20);
     border-top-color: rgb(var(--accent-rgb));
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     animation: setupSpin 0.6s linear infinite;
     margin-right: 6px;
     vertical-align: middle;
@@ -769,7 +769,7 @@
 @media (max-width: 600px) {
     .setup-card {
         padding: 24px 20px;
-        border-radius: 16px;
+        border-radius: var(--radius-xl);
     }
 
     .setup-option-grid {

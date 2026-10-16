@@ -246,6 +246,14 @@ def register_routes(bp):
             logger.exception("wishlist search-all failed")
             return jsonify({"success": False, "error": "Search failed to start"}), 500
 
+    @bp.route("/wishlist/search-stop", methods=["POST"])
+    def video_wishlist_search_stop():
+        """Cancel all's other half: stop running wishlist searches so they don't
+        keep grabbing after the download rows are cancelled."""
+        from core.video.wishlist_search import stop_all
+        stop_all()
+        return jsonify({"success": True})
+
     @bp.route("/wishlist/add", methods=["POST"])
     def video_wishlist_add():
         """Add a movie or a set of a show's episodes. Body is one of:

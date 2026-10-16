@@ -1,0 +1,369 @@
+/* ── Scrollbars: visible horizontal rails + general fading scrollbars ────────
+   Broque: horizontal scrollbars were barely visible and nothing signalled that
+   an area slides sideways. This sheet fixes that:
+
+   1. GLOBAL: any horizontal rail with NO custom scrollbar design gets a
+      visible thumb/track (section 1). Non-!important and low specificity,
+      so components with their own designs keep them.
+   2. TARGETED: the main rails' thin dim thumbs are bumped to visible
+      (section 2). Same specificity as the component rules, later in the
+      cascade (this sheet is linked last), so these win without !important.
+      Accent-tinted designs (.dash-rail, .discover-mixes-grid hover) are
+      deliberately untouched.
+   3. `.hscroll-fade` (plus the main card rails) gets an edge fade so it
+      reads that there is more content to the side (section 3).
+   4. GENERAL FADING (Thibs' PWA request, applied app-wide): the global
+      scrollbar design's thumbs rest dim, brighten while their scroller is
+      scrolling, and fade back ~1.2s after scrolling stops (section 4).
+      The `.is-scrolling` marker class is toggled by scrollbar-fade.js;
+      the fade itself is colour-only, so no scrollbar space is ever
+      reserved or released and nothing shifts layout.
+
+   What this sheet does NOT do, and why:
+   - No `height` on `::-webkit-scrollbar:horizontal`: the `:horizontal`
+     qualifier does not match the scrollbar pseudo-element itself in
+     Chromium (only thumb/track/button), so such a rule would be dead code.
+   - `scrollbar-width` / `scrollbar-color` are overridden only in section 2,
+     where three rails need `scrollbar-color` to beat their own property
+     rules (two of them `!important`). Chrome resolves those standard
+     properties before the legacy pseudo-elements, and setting
+     `scrollbar-color` triggers full custom-scrollbar rendering — but those
+     rails already set it, so nothing changes there. Every other rule wins
+     by cascade order with no `!important`, so a component can still
+     override intentionally.
+
+   Firefox: `scrollbar-width` / `scrollbar-color` can't target one axis, and
+   the app sets `color-scheme: dark`, so Firefox paints visible native dark
+   scrollbars. No Firefox changes.
+
+   Tokens only (no hardcoded colors) so the token-palettes work keeps applying.
+   `display: none` scrollbar rules elsewhere are unaffected — that is a
+   different property, so intentionally hidden scrollbars (chat guilds, chip
+   bars) stay hidden. Sections 1–3 are horizontal-scoped; section 4 lays
+   its rest/active colours over the global `*` design in style.css, under
+   every component design (see its header for the exact reach). */
+
+/* ── 1. Global: lift unstyled horizontal rails ─────────────────────────────
+   `:horizontal` matches thumb/track/button (verified). Specificity is
+   (0,1,2) — `html` type + `:horizontal` pseudo-class + pseudo-element —
+   so these rules outrank a plain (0,1,1) component thumb/track rule for
+   the horizontal background; designed rails keep their look via the
+   standard-rendering path (scrollbar-color) or stronger selectors, as
+   section 4's header lays out. (An earlier version of this comment said
+   (0,0,2) and that component rules win — both wrong, corrected.) */
+html ::-webkit-scrollbar-thumb:horizontal,
+html *::-webkit-scrollbar-thumb:horizontal {
+  background: var(--white-a25);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  min-width: 48px;
+}
+
+html ::-webkit-scrollbar-track:horizontal,
+html *::-webkit-scrollbar-track:horizontal {
+  background: var(--white-a05);
+  border-radius: var(--radius-pill);
+}
+
+/* ── 2. Targeted: visible thumbs on the main rails ────────────────────────
+   .discover-carousel / .discover-grid set `scrollbar-width: thin` and
+   `scrollbar-color`, which beat pseudo-element rules in Chrome — so the
+   color is lifted via the property itself (same specificity, later in the
+   cascade, !important beats !important). Size stays thin; the fade
+   (section 3) is the main affordance here.
+   .explorer-picker-scroll also sets scrollbar-*, so it gets the same
+   property treatment (its own rule isn't !important, so none needed here).
+   .vd-rail has no scrollbar-* properties, so plain pseudo-element rules
+   win by cascade order (no !important needed).
+   NOT touched: .dash-rail (accent thumb), .discover-mixes-grid (accent
+   hover) — intentional designs. */
+.discover-carousel,
+.discover-grid {
+  scrollbar-color: var(--white-a25) transparent !important;
+}
+
+.explorer-picker-scroll {
+  scrollbar-color: var(--white-a20) transparent;
+}
+
+.vd-rail::-webkit-scrollbar {
+  height: 10px;
+}
+
+.vd-rail::-webkit-scrollbar-thumb {
+  background: var(--white-a25);
+  border-radius: var(--radius-pill);
+}
+
+/* ── 3. Slide affordance: edge fade ───────────────────────────────────────
+   Applied to the main card rails via the :is() list, and opt-in anywhere
+   else with the .hscroll-fade utility class.
+
+   Two layers UNIONED (not intersected):
+     1. a horizontal fade on both edges, for the content;
+     2. a bottom strip kept fully opaque, so the scrollbar zone never fades.
+   Union (mask-composite: add / -webkit-mask-composite: source-over): a pixel
+   is visible if EITHER layer is opaque there. An intersect here would be
+   wrong — it would punch the scrollbar itself out of the mask.
+
+   Notes:
+   - each edge only fades when there's content hidden past it (the left fade
+     used to sit on the first card at scroll 0). a scroll-driven animation
+     ramps --hscroll-fade-l / -r over the first and last fade-size of the
+     scroll range. a rail that fits has no scroll timeline, so both stay 0.
+     browsers without animation-timeline fall back to a right-only fade.
+   - `.discover-grid` is deliberately NOT in the fade list: in the
+     "Your Albums" section it becomes a non-scrolling multi-row grid, where
+     a static fade would wrongly dim cards. */
+.hscroll-fade,
+:is(
+  .discover-carousel,
+  .discover-mixes-grid,
+  .dsc-video-rail-track,
+  .vd-rail,
+  .dash-rail,
+  .explorer-picker-scroll
+) {
+  --hscroll-fade-size: 32px;
+  --hscroll-fade-l: 0px;
+  --hscroll-fade-r: var(--hscroll-fade-size);
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 var(--hscroll-fade-l),
+      #000 calc(100% - var(--hscroll-fade-r)),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
+  -webkit-mask-composite: source-over;
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent,
+      #000 var(--hscroll-fade-l),
+      #000 calc(100% - var(--hscroll-fade-r)),
+      transparent
+    ),
+    linear-gradient(to bottom, transparent calc(100% - 16px), #000 calc(100% - 16px));
+  mask-composite: add;
+}
+
+/* registered so the animation interpolates them as lengths */
+@property --hscroll-fade-l {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --hscroll-fade-r {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes hscroll-fade-in-left {
+  from {
+    --hscroll-fade-l: 0px;
+  }
+  to {
+    --hscroll-fade-l: var(--hscroll-fade-size);
+  }
+}
+
+@keyframes hscroll-fade-out-right {
+  from {
+    --hscroll-fade-r: var(--hscroll-fade-size);
+  }
+  to {
+    --hscroll-fade-r: 0px;
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .hscroll-fade,
+  :is(
+    .discover-carousel,
+    .discover-mixes-grid,
+    .dsc-video-rail-track,
+    .vd-rail,
+    .dash-rail,
+    .explorer-picker-scroll
+  ) {
+    --hscroll-fade-r: 0px;
+    animation:
+      hscroll-fade-in-left linear both,
+      hscroll-fade-out-right linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0px var(--hscroll-fade-size),
+      calc(100% - var(--hscroll-fade-size)) 100%;
+  }
+}
+
+/* When keyboard-navigating a rail, drop the fade so focus rings stay fully
+   visible — focus scrolling parks cards flush at the edge, inside the fade
+   zone. */
+.hscroll-fade:focus-within,
+:is(
+  .discover-carousel,
+  .discover-mixes-grid,
+  .dsc-video-rail-track,
+  .vd-rail,
+  .dash-rail,
+  .explorer-picker-scroll
+):focus-within {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* Mobile: .discover-carousel wraps instead of scrolling (mobile.css), so
+   the edge fade would wrongly imply scrollability. */
+@media (max-width: 768px) {
+  .discover-carousel {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+/* The picker becomes a non-scrolling vertical grid on phones
+   (style.css @media max-width: 600px) — same treatment. */
+@media (max-width: 600px) {
+  .explorer-picker-scroll {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
+
+/* ── 4. General fading scrollbars ─────────────────────────────────────────
+   Thibs: "it would be neat to have a fading scroll bar on the PWA." Broque
+   asked for it as a general thing, so it applies app-wide, not just in the
+   installed PWA and not just to the page scroller.
+
+   The baseline this section builds on (both hostile reviews of this change
+   caught an earlier draft describing a baseline that does not exist):
+   style.css already carries a GLOBAL scrollbar design (`*::-webkit-scrollbar`
+   at style.css ~21620, under a misleading "playlist tracks list" comment):
+   width 12px, thumb white-a30 with a 2px white-a10 border, track white-a10,
+   hover white-a50. `*` adds no specificity, so all of those rules are
+   (0,0,1) — TIES with this section's rules, broken by sheet order
+   (scrollbars.css is linked after style.css). There is no "unstyled
+   scroller with a stock browser bar" in this app; there is the global `*`
+   design, and then component designs at (0,1,1)+ that beat this section
+   per-property in both states.
+
+   What this section deliberately changes, relative to that baseline:
+   - Resting thumb core a30 -> a10, on a track that goes a10 -> transparent:
+     the bar recedes to a faint floating thumb instead of a filled groove.
+     The track override also reaches DESIGNED scrollers that style their
+     thumb but leave the track to the global design (chat's .chat-scroll /
+     .chat-side-scroll are the named cases) — their tracks go transparent;
+     their thumb colours do not change. Resting a10 is dimmer than the old
+     a30 for vertical scrollers; that trade-off IS the commissioned fade
+     look, and resting never goes invisible (sections 1–3's signal stands).
+   - While a scroller is scrolling (`.is-scrolling`, toggled by
+     scrollbar-fade.js, dropped ~1.2s after the last scroll event), the
+     thumb core AND its border go to white-a40, so the whole thumb lifts
+     together instead of brightening inside a still-a10 edge. (The border
+     is translucent paint over the core, so the edge reads a step brighter
+     than the core in both states — that is the baseline design's own
+     compositing, at rest and today alike.) The 400ms transition returns
+     it to rest when the class drops.
+   - The both-axis corner goes transparent: with no corner rule anywhere it
+     paints solid white in Chromium (pre-existing, verified before/after
+     this section existed). One (0,0,1) rule retires it.
+
+   What this section does NOT change:
+   - Hover: there is no hover rule here. The existing global hover
+     (`*::-webkit-scrollbar-thumb:hover`, white-a50, (0,1,1)) outranks both
+     states below, so a thumb under the pointer is a50, scrolling or not —
+     today's behaviour, preserved on purpose.
+   - Sizes: no width/height anywhere in this section. The vertical width
+     was already 12px via the `*` rule; setting a height here would leak
+     into the many components that declare a width only (review finding).
+     Exception noted: the `*` width rule is also what makes Chromium paint
+     these legacy pseudos at all — colour-only scrollbar rules are
+     reported by getComputedStyle but never painted without a matching
+     size rule (verified in Chromium 139 on a page without style.css).
+   - Designed thumbs: every class/ID thumb rule is (0,1,1)+ and wins in
+     both states, so no designed thumb is recoloured. One honest leak:
+     the transition below applies to every thumb that does not set its
+     own transition (all but three component rules), so hover colour
+     changes on designed thumbs now ease over 400ms instead of snapping.
+     No designed colour changes — only its timing.
+   - Hidden bars: `display: none` pseudo rules are a different property at
+     higher specificity, and `scrollbar-width: none` elements render via
+     the standard path (below) — both stay hidden, verified by pixel test.
+   - Horizontal thumbs and tracks never fade: section 1's rules are
+     (0,1,2) and pin every horizontal thumb to its a25 rest (over its a05
+     track) in both states. The fade is a vertical-scrollbar behaviour;
+     only the corner rule reaches both-axis scrollers.
+
+   Who is immune, and why: an element whose computed `scrollbar-color` is
+   not `auto` renders its scrollbar via the standard path, which ignores
+   these pseudo-elements entirely. `scrollbar-color` INHERITS, so this
+   covers elements that set it (discover rails, several modal bodies) and
+   elements that inherit it (`.sidebar-scroll` scrolls the sidebar but
+   inherits `.sidebar`'s accent scrollbar-color — this section never
+   touches the real sidebar scroller). Elements setting `scrollbar-width`
+   take the standard path for that property too (verified: a
+   `scrollbar-width: none` scroller shows no bar under these rules).
+
+   Known limits, by platform:
+   - Firefox has no scrollbar pseudo-elements and `scrollbar-color` cannot
+     be transitioned, so Firefox keeps its existing global design.
+   - Mobile Chromium / iOS overlay scrollbars mostly ignore custom styling
+     and already fade natively, so on a phone this changes little; it
+     lands on desktop browsers and desktop-style PWA windows. That caveat
+     applies to Thibs' own Galaxy S24 too — the PR says so plainly.
+   - The equal-specificity ties above resolve by sheet order among the
+     static sheets; React CSS-module pseudo rules are class-based
+     (0,1,1), so the later-injected module bundle does not compete at
+     (0,0,1) today. */
+::-webkit-scrollbar-thumb {
+  background-color: var(--white-a10);
+  border-color: var(--white-a10);
+  transition:
+    background-color 0.4s ease,
+    border-color 0.4s ease;
+}
+
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background-color: transparent;
+}
+
+:where(.is-scrolling)::-webkit-scrollbar-thumb {
+  background-color: var(--white-a40);
+  border-color: var(--white-a40);
+}
+
+/* Reduced motion: no fade at all. For the general (global-`*`) population
+   the thumb is pinned to the pre-existing resting design (a30 core, a10
+   border) in both states, the global hover jump to a50 is neutralised by
+   an equal-specificity rule in this later sheet, and transition: none
+   also retires the hover-animation leak noted above — a scrollbar
+   brightening or dimming is exactly the motion this opts out of.
+   Designed thumbs (0,1,1)+ are out of this block's reach, as everywhere
+   in this section; they simply never receive the fade either, because
+   their colours win over the active state in the first place. */
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--white-a30);
+    border-color: var(--white-a10);
+    transition: none;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--white-a30);
+  }
+
+  :where(.is-scrolling)::-webkit-scrollbar-thumb {
+    background-color: var(--white-a30);
+    border-color: var(--white-a10);
+  }
+}

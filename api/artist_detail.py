@@ -502,8 +502,8 @@ def write_artist_image_to_disk(artist_id):
     """
     try:
         from core.library.artist_image import (
-            derive_artist_folder,
             download_image_bytes,
+            find_artist_folder,
             write_artist_jpg,
         )
         from core.metadata_service import get_artist_image_url as _get_artist_image_url
@@ -523,36 +523,22 @@ def write_artist_image_to_disk(artist_id):
         if artist_row is None:
             return jsonify({"success": False, "error": "Artist not found"}), 404
 
-        # Find a track file on disk so we can derive the artist folder.
-        # Walk albums in DB order; first one with a resolvable track wins.
         albums = db.get_albums_by_artist(artist_id)
         if not albums:
             return jsonify({"success": False,
                             "error": "No albums for this artist; cannot derive folder."}), 400
 
-        resolved_track_path = None
-        for album in albums:
-            tracks = db.get_tracks_by_album(album.id)
-            for tr in tracks:
-                if not getattr(tr, 'file_path', None):
-                    continue
-                candidate = _resolve_library_file_path(tr.file_path) or tr.file_path
-                if candidate and os.path.exists(candidate):
-                    resolved_track_path = candidate
-                    break
-            if resolved_track_path:
-                break
-
-        if not resolved_track_path:
+        track_paths = list(_artist_track_paths_on_disk(db, albums, limit=1))
+        if not track_paths:
             return jsonify({"success": False,
                             "error": "Could not locate any track file on disk to derive the artist folder. "
                                      "Configure Settings → Library → Music Paths to point at the library mount."}), 400
 
-        album_folder = os.path.dirname(resolved_track_path)
-        artist_folder = derive_artist_folder(album_folder)
+        artist_folder = find_artist_folder(
+            _artist_track_paths_on_disk(db, albums), getattr(artist_row, 'name', '') or '')
         if not artist_folder or not os.path.isdir(artist_folder):
             return jsonify({"success": False,
-                            "error": f"Resolved artist folder is invalid: {artist_folder!r}"}), 400
+                            "error": _NO_ARTIST_FOLDER}), 400
 
         # Pick the image URL. Explicit override (from request body)
         # wins so users can paste a specific photo URL. Otherwise
@@ -1440,6 +1426,30 @@ def get_artist_art_options(artist_id):
         return jsonify({"error": str(e)}), 500
 
 
+_NO_ARTIST_FOLDER = ("artist.jpg not written: no folder named after this artist "
+                     "holds their tracks")
+
+
+def _artist_track_paths_on_disk(db, albums, limit=None):
+    """the artist's track files that exist on this machine, lazily.
+
+    lazy so a caller that finds the folder on the first track never stats
+    the other few hundred over nfs.
+    """
+    found = 0
+    for album in albums or []:
+        for tr in (db.get_tracks_by_album(album.id) or []):
+            raw = getattr(tr, 'file_path', None)
+            if not raw:
+                continue
+            resolved = _resolve_library_file_path(raw) or raw
+            if resolved and os.path.exists(resolved):
+                yield resolved
+                found += 1
+                if limit is not None and found >= limit:
+                    return
+
+
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
@@ -1509,21 +1519,17 @@ def set_artist_art(artist_id):
 
         # 3. artist.jpg on disk (Navidrome's mechanism) + scan nudge.
         disk_written = False
+        disk_skipped = None
         try:
-            from core.library.artist_image import derive_artist_folder, write_artist_jpg
+            from core.library.artist_image import find_artist_folder, write_artist_jpg
             albums = db.get_albums_by_artist(artist_id) or []
-            artist_folder = None
-            for album in albums:
-                for tr in (db.get_tracks_by_album(album.id) or []):
-                    raw = getattr(tr, 'file_path', None)
-                    if not raw:
-                        continue
-                    resolved = _resolve_library_file_path(raw) or raw
-                    if resolved and os.path.exists(resolved):
-                        artist_folder = derive_artist_folder(os.path.dirname(resolved))
-                        break
-                if artist_folder:
-                    break
+            artist_folder = find_artist_folder(
+                _artist_track_paths_on_disk(db, albums), artist_name) if image_bytes else ''
+            # tracks on disk but no folder named after the artist: say so
+            # rather than plant artist.jpg somewhere every artist reads it
+            if image_bytes and not artist_folder and next(
+                    iter(_artist_track_paths_on_disk(db, albums, limit=1)), None):
+                disk_skipped = _NO_ARTIST_FOLDER
             if artist_folder and image_bytes:
                 ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
                 disk_written = bool(ok)
@@ -1546,7 +1552,8 @@ def set_artist_art(artist_id):
             _ART_OPTIONS_CACHE.pop(('artist', artist_id), None)
 
         return jsonify({"success": True, "artist_id": artist_id, "thumb_url": url,
-                        "server_updated": server_updated, "disk_written": disk_written})
+                        "server_updated": server_updated, "disk_written": disk_written,
+                        "disk_skipped": disk_skipped})
     except Exception as e:
         logger.error("[set-artist-art] failed for %s: %s", artist_id, e, exc_info=True)
         return jsonify({"error": str(e)}), 500
@@ -2001,10 +2008,16 @@ def download_discography(artist_id):
         # and an artist the user owns nothing of, was ~15-30s PER TRACK — every
         # title/artist variation fell through to a full-table fuzzy fallback).
         # Same batched path the discography backfill job + completion-stream use.
-        # Crucially we pass an empty list (not None) when nothing is owned, so the
-        # owns-nothing case still takes the fast in-memory path → instant.
+        # Crucially we pass an empty list (not None) when nothing is owned, and
+        # mark it exhaustive, so the owns-nothing case still takes the fast
+        # in-memory path → instant. A bare [] without the flag would now fall
+        # through to the legacy per-track SQL search (#1621).
         owned_candidate_tracks = []
         cand_albums = []
+        # True while the [] below is proven release-level emptiness; a failed
+        # pre-fetch is "no information", not "proven empty", so the except
+        # below clears it and the legacy path runs instead.
+        candidates_exhaustive = True
         try:
             cand_albums = db.get_candidate_albums_for_artist(
                 artist_name, server_source=active_server
@@ -2016,6 +2029,7 @@ def download_discography(artist_id):
         except Exception as _cand_err:
             logger.debug("Discography: candidate pre-fetch failed for %s: %s", artist_name, _cand_err)
             owned_candidate_tracks = []
+            candidates_exhaustive = False
 
         total_added = 0
         total_skipped = 0
@@ -2148,7 +2162,17 @@ def download_discography(artist_id):
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
                         if track_already_owned(db, track_name, hint_artist, album_name, active_server,
-                                               candidate_tracks=ownership_candidates):
+                                               candidate_tracks=ownership_candidates,
+                                               # [] here is release-level emptiness (no owned
+                                               # albums, or this release isn't in the library) —
+                                               # keep the fast in-memory miss instead of the
+                                               # legacy SQL path. This preserves the pre-#1621
+                                               # fast-miss exactly; do not copy this flag to
+                                               # call sites with a weaker emptiness proof.
+                                               # (candidates_exhaustive is False when the
+                                               # pre-fetch itself failed — "no information",
+                                               # not "proven empty".)
+                                               candidate_tracks_exhaustive=candidates_exhaustive):
                             skipped_owned += 1
                             continue
 

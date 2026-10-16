@@ -160,7 +160,12 @@ def run_mirrored_playlist_pipeline(
                 sync_one_fn=lambda pl: sync_one_fn(
                     {'playlist_id': str(pl['id']), '_automation_id': None,
                      'user_initiated': bool(config.get('user_initiated')),
-                     'skip_wishlist_add': bool(skip_wishlist)},
+                     # #1689: the resolved skip must also stop the sync
+                     # itself from wishlisting missing tracks as it goes;
+                     # the wishlist-phase skip alone left the adds running.
+                     'skip_wishlist_add': bool(skip_wishlist),
+                     # the pipeline's own mode (#1704), a mirror's own beats it
+                     'sync_mode': config.get('sync_mode') or None},
                     deps,
                 ),
                 sync_id_for_fn=lambda pl: f"auto_mirror_{pl['id']}",

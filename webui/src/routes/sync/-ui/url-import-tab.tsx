@@ -880,7 +880,10 @@ export function YouTubeTab({
                   <div className="playlist-card-name">Parsing YouTube playlist...</div>
                   <div className="playlist-card-info">
                     <span className="playlist-card-track-count">-- tracks</span>
-                    <span className="playlist-card-phase-text" style={{ color: '#999' }}>
+                    <span
+                      className="playlist-card-phase-text"
+                      style={{ color: 'var(--white-a60)' }}
+                    >
                       Loading...
                     </span>
                   </div>

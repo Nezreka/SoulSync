@@ -82,6 +82,8 @@ def register_routes(bp):
             # Backfill-worker keys (free, optional) + no-key toggles.
             "fanart_api_key": db.get_setting("fanart_api_key") or "",
             "opensubtitles_api_key": db.get_setting("opensubtitles_api_key") or "",
+            "subdl_api_key": db.get_setting("subdl_api_key") or "",
+            "subsource_api_key": db.get_setting("subsource_api_key") or "",
             "trakt_api_key": db.get_setting("trakt_api_key") or "",
             "mdblist_api_key": db.get_setting("mdblist_api_key") or "",
             "ryd_enabled": (db.get_setting("ryd_enabled") or "1") == "1",
@@ -123,6 +125,8 @@ def register_routes(bp):
         put_key("tvdb_api_key")
         put_key("fanart_api_key")
         put_key("opensubtitles_api_key")
+        put_key("subdl_api_key")
+        put_key("subsource_api_key")
         put_key("trakt_api_key")
         put_key("mdblist_api_key")
         # No-key worker on/off toggles (read live by the worker — no rebuild needed).
@@ -227,11 +231,32 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
+        if service == "mdblist":
+            # a list source, not a worker or a subtitle provider. same key the
+            # collection studio reads.
+            from core.video.collections.list_sources import check_mdblist_key
+            from . import get_video_db
+            ok, msg = check_mdblist_key(get_video_db().get_setting("mdblist_api_key") or "")
+            return jsonify({"success": ok, "message": msg, "error": None if ok else msg})
         w = engine().worker(service)
-        if not w:
-            return jsonify({"success": False, "error": "unknown service"}), 404
+        if w:
+            # matcher workers wrap a client; backfill workers (fanart,
+            # opensubtitles, trakt...) carry test() themselves.
+            run_test = (getattr(w, "client", None) or w).test
+        else:
+            # subtitle-only providers (subdl, subsource) aren't enrichment
+            # workers; their keys live top-level like the rest.
+            from core.video.subtitles.providers import get_providers
+            from . import get_video_db
+            provider = get_providers().get(service)
+            if provider is None:
+                return jsonify({"success": False, "error": "unknown service"}), 404
+            db = get_video_db()
+
+            def run_test():
+                return provider.test(lambda k, d=None: db.get_setting(k) or d)
         try:
-            ok, msg = w.client.test()
+            ok, msg = run_test()
             return jsonify({"success": bool(ok), "message": msg, "error": None if ok else msg})
         except Exception:
             logger.exception("video enrichment test failed for %s", service)

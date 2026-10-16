@@ -51,7 +51,9 @@ class Lib2DiscographyRefreshJob(RepairJob):
         "setting is 'all'; 'new' only accepts a dated release newer than the "
         "previously newest known release. Their tracklist is materialized "
         "and mirrored into the Wishlist, so the normal download pipeline "
-        "picks them up. Does nothing when the new library feature is off."
+        "picks them up. Does nothing when the new library feature is off.\n\n"
+        "A run that gets stopped (or a restart) picks up at the artist it "
+        "stopped on next time, then goes back to the top once it reaches the end."
     )
     icon = "refresh-cw"
     default_enabled = False
@@ -143,8 +145,23 @@ class Lib2DiscographyRefreshJob(RepairJob):
         mode = self._mode(context)
         discovered = 0
         mirrored = 0
-        for _i, artist_id in enumerate(artist_ids):
-            if context.check_stop() or context.wait_if_paused():
+        # upstream #1709/873401364: a stopped sweep resumes after the last
+        # artist it finished instead of re-fetching the same first artists,
+        # and says where it starts
+        start = self.resume_index(context, artist_ids)
+        if start:
+            logger.info("lib2 discography refresh: resuming at artist %d of %d", start + 1, total)
+            if context.report_progress:
+                context.report_progress(phase=f"Resuming at artist {start + 1} of {total}",
+                                        scanned=start, total=total)
+        finished = True
+        for index in range(start, total):
+            artist_id = artist_ids[index]
+            stopping = context.check_stop() or context.wait_if_paused()
+            if index > start and (stopping or (index - start) % 10 == 0):
+                self.save_checkpoint(context, artist_ids[index - 1])
+            if stopping:
+                finished = False
                 break
             try:
                 stats, artist_mirrored = refresh_artist_discography(
@@ -164,8 +181,10 @@ class Lib2DiscographyRefreshJob(RepairJob):
                 result.errors += 1
             result.scanned += 1
             if context.update_progress:
-                context.update_progress(result.scanned, total)
+                context.update_progress(index + 1, total)
 
+        if finished:
+            self.save_checkpoint(context, None)
         result.auto_fixed = discovered if mode == "automatic" else 0
         if total:
             logger.info("lib2 discography refresh (%s): %d artists re-expanded, "

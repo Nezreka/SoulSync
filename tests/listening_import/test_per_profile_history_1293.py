@@ -67,6 +67,8 @@ def _play(db, *, title, artist, played_at, owner=SHARED_OWNER, source="plex", tr
         "album": "Album",
         "played_at": played_at,
         "duration_ms": 180000,
+        # every source used here attests its plays (server / import)
+        "scrobble_eligible": 1,
     }], source, profile_id=owner)
 
 
@@ -100,7 +102,8 @@ def test_upgrade_moves_every_existing_play_and_alias_into_the_shared_pile(tmp_pa
             id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, title TEXT NOT NULL,
             artist TEXT, album TEXT, played_at TIMESTAMP NOT NULL, duration_ms INTEGER DEFAULT 0,
             server_source TEXT, db_track_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            scrobbled_lastfm INTEGER DEFAULT 0, scrobbled_listenbrainz INTEGER DEFAULT 0);
+            scrobbled_lastfm INTEGER DEFAULT 0, scrobbled_listenbrainz INTEGER DEFAULT 0,
+            scrobble_eligible INTEGER DEFAULT 0);
         CREATE UNIQUE INDEX idx_listening_dedup ON listening_history (track_id, played_at, server_source);
         INSERT INTO listening_history (track_id, title, artist, album, played_at, server_source)
             VALUES ('lb-1', 'Song', 'Artist', 'Album', '2026-09-01 10:00:00', 'listenbrainz');

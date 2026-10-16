@@ -150,10 +150,15 @@ _TRACK_BY_SERVER_ID = """
 """
 
 
-def resolve_tracks(tracks, songs, db):
+def resolve_tracks(tracks, songs, db, skipped=None):
+    """live navidrome tracks for these ids. an id we can't safely resolve is
+    left out and noted in ``skipped`` instead of sinking the whole write (#1715):
+    one deleted song used to block every other track on the playlist. nothing
+    resolving at all still raises."""
     from core.navidrome_client import NavidromeTrack
     paths = _by_path(songs)
     resolved = []
+    unresolved = []
     for track in tracks:
         sid = str(getattr(track, 'ratingKey', None) or getattr(track, 'id', None)
                   or (track.get('id', '') if isinstance(track, dict) else ''))
@@ -173,9 +178,14 @@ def resolve_tracks(tracks, songs, db):
                     (old['file_path'], sid))] if old.get('file_path') else []
             candidates = _rekey_candidates(same_file, old, paths, songs) if old else []
             if len(candidates) != 1 or not _same_recording(old, songs[candidates[0]]):
-                raise IdentityError(f'Cannot safely resolve Navidrome song {sid}; playlist left unchanged. Run a library scan.')
+                unresolved.append(sid)
+                continue
             sid = candidates[0]
         resolved.append(NavidromeTrack(songs[sid], None))
+    if unresolved and not resolved:
+        raise IdentityError(f'Cannot safely resolve Navidrome song {unresolved[0]}; playlist left unchanged. Run a library scan.')
+    if skipped is not None:
+        skipped.extend(unresolved)
     return resolved
 
 
@@ -312,8 +322,17 @@ def validated_playlist_write(method):
             # An unchanged/subset playlist already supplies live song evidence.
             # Only new or stale IDs require a complete catalogue read.
             songs = current if wanted <= current.keys() else read_inventory(client)
-            tracks = resolve_tracks(tracks, songs, get_database())
+            skipped = []
+            tracks = resolve_tracks(tracks, songs, get_database(), skipped)
             expected = {str(t.ratingKey) for t in tracks}
+            if skipped:
+                # a skipped id might be a song navidrome re-keyed, and the new
+                # key could be sitting in this playlist. a write that would drop
+                # anything already there waits until we can tell.
+                if method.__name__ != 'append_to_playlist' and set(current) - expected:
+                    raise IdentityError(f'Cannot safely resolve Navidrome song {skipped[0]}; playlist left unchanged. Run a library scan.')
+                logger.warning('Playlist %r: skipped %d track(s) navidrome no longer has (%s)',
+                               name, len(skipped), ', '.join(skipped[:5]))
             if method.__name__ == 'append_to_playlist':
                 expected.update(current)
             token = _active_write.set(client)

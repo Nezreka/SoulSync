@@ -473,6 +473,9 @@
         if (!b) return;
         b.textContent = n;
         b.classList.toggle('hidden', !n);
+        // nothing pending = no button
+        var nav = b.closest('.nav-button');
+        if (nav) nav.classList.toggle('nav-idle', !n);
     }
 
     function load() {
@@ -765,6 +768,7 @@
 
     function changed() {
         document.dispatchEvent(new CustomEvent('soulsync:video-requests-changed'));
+        pollBadge();   // a first request brings the nav back
     }
 
     // season 0 is the specials season — a real, requestable season. only a

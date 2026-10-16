@@ -135,6 +135,23 @@ def is_tracked_path(file_path, suffixes, *, min_depth=2):
     )
 
 
+def same_name_library_paths(db, file_path, limit=3):
+    """library tracks with this file's name. same name isn't proof it's the
+    same song, so a delete shows these and asks first."""
+    name = file_path.replace('\\', '/').split('/')[-1].lower()
+    conn = db._get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT path FROM lib2_track_files WHERE file_state = 'active'"
+            " AND path IS NOT NULL AND path LIKE ?",
+            ('%' + name,),
+        ).fetchall()
+    finally:
+        conn.close()
+    paths = [row[0] for row in rows if row[0].replace('\\', '/').split('/')[-1].lower() == name]
+    return paths[:limit]
+
+
 @register_job
 class OrphanFileDetectorJob(RepairJob):
     job_id = 'orphan_file_detector'

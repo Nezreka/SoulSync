@@ -144,6 +144,7 @@ def find_library_track_by_external_id(
     *,
     external_ids: Dict[str, str],
     server_source: Optional[str] = None,
+    library_scope: Any = None,
 ) -> Optional[Dict[str, Any]]:
     """Return an owned lib2 track whose any external ID matches, or ``None``.
 
@@ -152,6 +153,9 @@ def find_library_track_by_external_id(
     set, its recognition mapping is preferred. Ownership itself remains local
     and server-independent, so an offline or not-yet-scanned server cannot make
     an existing file look absent and trigger a duplicate download.
+
+    ``library_scope`` (a Library-v2 scope) limits the owned file to one
+    library; the default is any library, as before.
 
     Performance: every external_id column is indexed in the schema, so
     each OR clause hits an index. Limit 1 because we only need to know
@@ -174,13 +178,16 @@ def find_library_track_by_external_id(
 
     where_external = " OR ".join(clauses)
 
+    from core.library2.sql_util import ANY_OWNER, owner_clause
+    owner = owner_clause(ANY_OWNER if library_scope is None else library_scope,
+                         column="f.owner_profile_id")
     owned = ("EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id "
-             "AND COALESCE(f.file_state,'active')='active')")
+             f"AND COALESCE(f.file_state,'active')='active'{owner})")
     select = ("SELECT t.*, t.spotify_id AS spotify_track_id, "
               "json_extract(t.external_ids,'$.itunes') AS itunes_track_id, "
               "al.title AS album_title, "
               "(SELECT f.path FROM lib2_track_files f WHERE f.track_id=t.id "
-              "AND COALESCE(f.file_state,'active')='active' "
+              f"AND COALESCE(f.file_state,'active')='active'{owner} "
               "ORDER BY f.is_primary DESC, f.id LIMIT 1) AS file_path "
               "FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id ")
     if server_source:

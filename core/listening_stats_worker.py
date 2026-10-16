@@ -68,6 +68,9 @@ class ListeningStatsWorker:
 
         # Config
         self.poll_interval = 30 * 60  # 30 minutes default
+        # Outbound scrobbles flush on their own cadence, independent of the
+        # stats poll interval (and of the stats toggle entirely).
+        self.scrobble_interval = 5 * 60  # 5 minutes
 
         logger.info("Listening stats worker initialized")
 
@@ -127,31 +130,50 @@ class ListeningStatsWorker:
         if interruptible_sleep(self._stop_event, 10):
             return
 
+        # Stats polling and scrobble flushing keep independent due-times: the
+        # poll honors the user's configured interval, the flush runs every
+        # scrobble_interval, and the loop wakes for whichever comes first.
+        # Both start due immediately so a fresh start polls + flushes once.
+        next_poll_at = time.monotonic()
+        next_scrobble_at = time.monotonic()
+
         while not self.should_stop:
             try:
                 if self.paused:
                     interruptible_sleep(self._stop_event, 5)
                     continue
 
-                # Check if enabled
-                if not self.config_manager.get('listening_stats.enabled', True):
-                    interruptible_sleep(self._stop_event, 30)
-                    continue
+                now = time.monotonic()
 
-                # Update poll interval from config
-                self.poll_interval = self.config_manager.get('listening_stats.poll_interval', 30) * 60
+                # Media-server history polling. This is the ONLY thing the
+                # stats toggle gates.
+                stats_enabled = self.config_manager.get('listening_stats.enabled', True)
+                if stats_enabled:
+                    # Update poll interval from config
+                    self.poll_interval = self.config_manager.get('listening_stats.poll_interval', 30) * 60
+                    if now >= next_poll_at:
+                        self._poll()
+                        self.stats['polls_completed'] += 1
+                        self.stats['last_poll'] = time.strftime('%Y-%m-%d %H:%M:%S')
+                        self.current_item = None
+                        next_poll_at = now + self.poll_interval
 
-                self._poll()
-                self.stats['polls_completed'] += 1
-                self.stats['last_poll'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                self.current_item = None
+                # Outbound scrobbling runs regardless of the stats toggle.
+                # _scrobble_new_events self-gates on each service's own
+                # scrobble_enabled + credentials, so with nothing configured
+                # this is a cheap no-op.
+                if now >= next_scrobble_at:
+                    self.current_item = "Scrobbling to external services..."
+                    self._scrobble_new_events()
+                    self.current_item = None
+                    next_scrobble_at = now + self.scrobble_interval
 
-                # Sleep until next poll
-                for _ in range(int(self.poll_interval)):
-                    if self.should_stop:
-                        break
-                    if interruptible_sleep(self._stop_event, 1):
-                        break
+                # Sleep until the next due time. interruptible_sleep wakes
+                # promptly on stop; the loop re-evaluates pause/due-times.
+                wake_in = next_scrobble_at - now
+                if stats_enabled:
+                    wake_in = min(wake_in, next_poll_at - now)
+                interruptible_sleep(self._stop_event, max(0, wake_in))
 
             except Exception as e:
                 logger.error(f"Error in listening stats worker: {e}", exc_info=True)
@@ -261,6 +283,8 @@ class ListeningStatsWorker:
                     'server_account_id': account_id,
                     # db_track_id filled in below by a single batched lookup
                     'db_track_id': None,
+                    # the server attests its own plays: scrobble-eligible
+                    'scrobble_eligible': 1,
                 })
 
             # Batch-resolve track IDs for all events at once (was N+1 before).
@@ -333,11 +357,9 @@ class ListeningStatsWorker:
         except Exception as e:
             logger.warning(f"Curation signal sync failed for {active_server}: {e}")
 
-        # Step 3: Scrobble new events to ListenBrainz and Last.fm
-        self.current_item = "Scrobbling to external services..."
-        self._scrobble_new_events()
-
-        # Step 4: Pre-compute stats cache for all time ranges
+        # Step 3: Pre-compute stats cache for all time ranges
+        # (scrobbling moved out: it runs in _run() on its own cadence,
+        # independent of the stats toggle.)
         self.current_item = "Building stats cache..."
         self._build_stats_cache()
 
@@ -458,7 +480,13 @@ class ListeningStatsWorker:
         shared pile only. these are the admin's accounts, and a profile's own
         pile is someone else's listening (#1293). its listenbrainz rows are
         already marked scrobbled for listenbrainz but not last.fm, so without
-        the filter they'd go straight onto the admin's last.fm."""
+        the filter they'd go straight onto the admin's last.fm.
+
+        only scrobble_eligible rows go out: media-server and import rows are
+        eligible on insert (the source attests the play), while web-player
+        rows become eligible only once the player reports the Last.fm
+        threshold was reached. a 10s web-player log is a "play" for stats,
+        not a scrobble."""
         conn = None
         try:
             # ListenBrainz scrobbling
@@ -471,6 +499,7 @@ class ListeningStatsWorker:
                         SELECT id, title, artist, album, played_at
                         FROM listening_history
                         WHERE scrobbled_listenbrainz = 0
+                          AND scrobble_eligible = 1
                           AND {SHARED_SCOPE}
                         ORDER BY played_at ASC
                         LIMIT 500
@@ -518,6 +547,7 @@ class ListeningStatsWorker:
                         SELECT id, title, artist, album, played_at
                         FROM listening_history
                         WHERE scrobbled_lastfm = 0
+                          AND scrobble_eligible = 1
                           AND {SHARED_SCOPE}
                         ORDER BY played_at ASC
                         LIMIT 200

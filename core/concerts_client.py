@@ -343,3 +343,46 @@ def artist_concerts(artist_name: str, *, mbid: str = "", upcoming_limit: int = 1
             result["providers"]["setlistfm"]["error"] = slf["error"]
 
     return result
+
+
+# ── Settings test button ─────────────────────────────────────────────────────
+
+def _check_key(name: str, url: str, *, params: Dict[str, Any], headers: Dict[str, str],
+               rejected: int) -> tuple:
+    """One cheap request. A wrong key gets its own status from each provider
+    (401 for ticketmaster, 403 for setlist.fm), so that is the only status
+    that means "your key is bad". Anything else is the provider, not you."""
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=10)
+    except Exception as exc:   # noqa: BLE001 - a dead host is a failed test, not a crash
+        return False, f"{name} unreachable: {exc}"
+    if resp.status_code == rejected:
+        return False, f"{name} rejected the API key"
+    if resp.status_code == 429:
+        return False, f"{name} is rate limiting, try again shortly"
+    # setlist.fm answers a search with no hits as 404, which still proves the key
+    if resp.status_code >= 400 and resp.status_code != 404:
+        return False, f"{name} returned {resp.status_code}"
+    return True, f"{name} key works"
+
+
+def check_keys() -> tuple:
+    """Test whichever keys are set. Both are optional, so a bad one fails the
+    test but an empty one is just skipped."""
+    tm_key = _cfg("concerts.ticketmaster_api_key")
+    sl_key = _cfg("concerts.setlistfm_api_key")
+    if not tm_key and not sl_key:
+        return False, "No concert keys set. Add a Ticketmaster or Setlist.fm key."
+    results = []
+    if tm_key:
+        results.append(_check_key(
+            "Ticketmaster", f"{TICKETMASTER_API}/events.json",
+            params={"apikey": tm_key, "size": 1, "classificationName": "music"},
+            headers={"Accept": "application/json"}, rejected=401))
+    if sl_key:
+        results.append(_check_key(
+            "Setlist.fm", f"{SETLISTFM_API}/search/artists",
+            params={"artistName": "radiohead", "p": 1},
+            headers={"x-api-key": sl_key, "Accept": "application/json", "User-Agent": "SoulSync"},
+            rejected=403))
+    return all(ok for ok, _ in results), " · ".join(msg for _, msg in results)

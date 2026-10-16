@@ -8,12 +8,8 @@
   --bs-surface: #13141a;
   --bs-raised: #1a1c23;
   --bs-raised-2: #22242d;
-  --bs-line: rgba(255, 255, 255, 0.07);
-  --bs-line-strong: rgba(255, 255, 255, 0.12);
   --bs-text: #f3f4f8;
-  --bs-muted: #9b9dad;
   --bs-faint: #6b6d7c;
-  --bs-ok: #4ade80;
   --bs-mono: 'SF Mono', ui-monospace, 'Cascadia Code', Consolas, monospace;
 
   /* no display here. style.css hides .search-section and shows it as a flex
@@ -45,7 +41,7 @@
   gap: 4px;
   padding: 6px;
   background: var(--bs-surface);
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 14px;
   transition:
     border-color 0.15s ease,
@@ -84,8 +80,8 @@
 .sourceDot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  background: var(--bs-ok);
+  border-radius: var(--radius-circle);
+  background: var(--success);
   box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.15);
 }
 
@@ -118,8 +114,8 @@
   height: 16px;
   flex-shrink: 0;
   margin-right: 4px;
-  border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-circle);
+  border: 2px solid var(--white-a15);
   border-top-color: rgb(var(--accent-rgb));
   animation: spin 0.8s linear infinite;
 }
@@ -148,7 +144,7 @@
 
 .cancelButton {
   flex-shrink: 0;
-  border: 1px solid var(--bs-line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   padding: 8px 16px;
   font-size: 13.5px;
@@ -158,7 +154,7 @@
 }
 
 .status {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   padding-inline: 4px;
 }
@@ -174,7 +170,7 @@
 
 .count {
   margin-right: auto;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -186,7 +182,7 @@
 .segmented {
   display: inline-flex;
   padding: 3px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
 }
@@ -198,7 +194,7 @@
   padding: 5px 12px;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -214,11 +210,11 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
   font-size: 12.5px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
 }
 
 .menu b {
@@ -235,7 +231,7 @@
 }
 
 .menu:focus-within {
-  border-color: var(--bs-line-strong);
+  border-color: var(--line-strong);
 }
 
 .orderButton {
@@ -243,10 +239,10 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid var(--bs-line);
+  border: 1px solid var(--white-a07);
   border-radius: 10px;
   background: var(--bs-surface);
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
@@ -263,8 +259,8 @@
 /* ── results ──────────────────────────────────────────────────────────── */
 
 .list {
-  border: 1px solid var(--bs-line);
-  border-radius: 16px;
+  border: 1px solid var(--white-a07);
+  border-radius: var(--radius-xl);
   background: var(--bs-surface);
   overflow: hidden;
 }
@@ -272,7 +268,7 @@
 .empty {
   padding: 56px 24px;
   text-align: center;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 14px;
 }
 
@@ -287,7 +283,7 @@
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   transition: background 0.12s ease;
 }
 
@@ -303,8 +299,12 @@
   position: relative;
   width: 48px;
   height: 48px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
+  /* --art-light / --art-dark are set per release from artColors(seed). */
+  background:
+    radial-gradient(120% 90% at 20% 15%, var(--art-light), transparent 60%),
+    linear-gradient(145deg, var(--art-dark), #111218);
 }
 
 .art::after {
@@ -312,11 +312,11 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--white-a08);
 }
 
 .artAlbum {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .meta {
@@ -346,7 +346,7 @@
   margin-left: -6px;
   padding: 2px 4px 2px 2px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   font-size: 14.5px;
   font-weight: 600;
@@ -355,7 +355,7 @@
 }
 
 .expand:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-a04);
 }
 
 .chevron {
@@ -371,7 +371,7 @@
 }
 
 .sub {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
@@ -387,7 +387,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -399,8 +399,8 @@
 
 .badge {
   padding: 3px 7px;
-  border: 1px solid var(--bs-line-strong);
-  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
   font-family: var(--bs-mono);
   font-size: 11px;
   letter-spacing: 0.02em;
@@ -438,8 +438,8 @@
   align-items: center;
   gap: 7px;
   padding: 7px 14px;
-  border: 1px solid var(--bs-line-strong);
-  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
   background: var(--bs-raised);
   font-size: 13px;
   font-weight: 600;
@@ -464,7 +464,7 @@
 
 .tracks {
   padding: 4px 16px 10px 80px;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   background: rgba(0, 0, 0, 0.18);
 }
 
@@ -483,9 +483,9 @@
   align-items: center;
   gap: 12px;
   padding: 7px 0;
-  border-top: 1px solid var(--bs-line);
+  border-top: 1px solid var(--white-a07);
   font-size: 13px;
-  color: var(--bs-muted);
+  color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -509,13 +509,13 @@
 }
 
 .trackArtist {
-  color: var(--bs-muted);
+  color: var(--text-secondary);
 }
 
 .trackDownload {
   padding: 2px 6px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: none;
   font-size: 12px;
   font-weight: 600;

@@ -35,6 +35,7 @@
 import { useCallback, useRef, useState } from 'react';
 
 import type { SourceVerticalConfig } from '../-sync.sources';
+import type { SourceSkipped } from '../-sync.state';
 import type { UrlTabPlaylist } from '../-sync.url-tabs';
 import type { SourceVertical } from '../-sync.use-vertical';
 
@@ -148,6 +149,8 @@ function AccountVerticalTab({
               owner: p.owner as string | undefined,
               image_url: p.image_url as string | undefined,
               description: p.description as string | undefined,
+              // tidal says what it couldn't load; the rest never set it (#1613)
+              source_skipped: p.source_skipped as SourceSkipped | null | undefined,
             },
           ),
         ).catch(() => undefined);
@@ -166,6 +169,7 @@ function AccountVerticalTab({
           const tracks = Array.isArray(fullData.tracks) ? (fullData.tracks as unknown[]) : [];
           if (tracks.length > 0) {
             p.tracks = tracks;
+            if ('source_skipped' in fullData) p.source_skipped = fullData.source_skipped;
             setPlaylistTracks(String(p.id), tracks);
             mirror(p, tracks);
           }

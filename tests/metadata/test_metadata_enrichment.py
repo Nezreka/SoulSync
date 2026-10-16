@@ -183,7 +183,9 @@ def test_extract_source_metadata_keeps_neutral_fields_and_skips_itunes_fallback_
     assert metadata["source"] == "spotify"
     assert metadata["title"] == "Song One"
     assert metadata["artist"] == "Artist One"
-    assert metadata["album_artist"] == "Artist One & Artist Two"
+    # first listed: the combined name starts with the track's one listed
+    # artist, so that's the album artist, no itunes lookup needed
+    assert metadata["album_artist"] == "Artist One"
     assert metadata["album"] == "Album One"
     assert metadata["track_number"] == 3
     assert metadata["total_tracks"] == 12

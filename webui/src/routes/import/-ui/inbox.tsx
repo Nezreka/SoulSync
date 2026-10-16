@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import clsx from 'clsx';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button, Checkbox, Switch } from '@/components/form/form';
 import { Notice } from '@/components/primitives';
@@ -33,14 +33,19 @@ import {
   countInbox,
   describeFile,
   describeItemFiles,
+  describeImportOutcome,
   describeItemMatch,
+  everythingWasOwned,
   filterInboxItems,
+  importOutcomeLines,
   INBOX_STATUS_META,
   inboxActions,
+  type ImportOutcomeLine,
   itemSubtitle,
   methodLabel,
   secondsToNextScan,
   timeAgo,
+  TRACK_OUTCOME_META,
 } from '../-import.inbox';
 import styles from './import-page.module.css';
 import {
@@ -84,8 +89,90 @@ export function Inbox({
   const [focused, setFocused] = useState<string | null>(null);
 
   const payload = inbox.data;
-  const items = payload?.items ?? [];
-  const workerRunning = Boolean(payload?.worker?.running);
+
+  // #1671: a re-scan must not blank the page. While the server reads the
+  // folder again, the scanning reply carries only the history rows; keep
+  // showing the last complete list under a progress banner instead of
+  // dropping every count to zero until the scan lands.
+  const [snapshot, setSnapshot] = useState<ImportInboxPayload | null>(null);
+  useEffect(() => {
+    if (payload && !payload.scanning) setSnapshot(payload);
+  }, [payload]);
+  const scanning = Boolean(payload?.scanning);
+  // A snapshot only ever stands in for its own folder: after a staging-path
+  // change it would show the old folder's rows under the new path.
+  const snapshotForPath =
+    snapshot && payload && snapshot.staging_path === payload.staging_path ? snapshot : null;
+  const display: ImportInboxPayload | undefined = (() => {
+    if (!scanning || !payload || !snapshotForPath) return payload;
+    // Merge, never snapshot-wins: fresh rows cover the snapshot rows they
+    // describe (the worker may have finished an item since the snapshot),
+    // snapshot rows fill in the staging rows the scan cannot see yet.
+    // Identity is not just the row key: a folder's hash is content-derived,
+    // so the same history row can return under a new key after a file
+    // changes — history_id identifies it across the rehash. (Folder path is
+    // NOT identity: a settled history row and a new staged row can share a
+    // path while being different records.)
+    const fresh = payload.items ?? [];
+    const covered = (snap: ImportInboxItem) =>
+      fresh.some(
+        (item) =>
+          item.key === snap.key || (snap.history_id != null && item.history_id === snap.history_id),
+      );
+    const items = [...fresh, ...(snapshotForPath.items ?? []).filter((item) => !covered(item))];
+    const problems = [...(payload.problems ?? [])];
+    for (const problem of snapshotForPath.problems ?? []) {
+      if (!problems.some((p) => p.path === problem.path && p.error === problem.error)) {
+        problems.push(problem);
+      }
+    }
+    return { ...payload, items, summary: snapshotForPath.summary, problems };
+  })();
+
+  // #1671: the "import complete" notice the reporter asked for. It has to
+  // prove the worker did the work: files can leave the folder without being
+  // imported (deleted over the network, moved by hand, the staging path
+  // changed in settings), so an empty folder alone proves nothing. Arm when
+  // a batch is first seen staged, remembering the folder and how much the
+  // worker had already imported; fire only when the same folder later reads
+  // empty, nothing is live, the worker is idle, and its own imported count
+  // has moved past the arm point.
+  const toastArm = useRef<{ path: string | undefined; processed: number } | null>(null);
+  useEffect(() => {
+    if (!payload || payload.scanning) return;
+    const processed = payload.worker?.stats?.auto_processed;
+    if ((payload.summary?.files ?? 0) > 0) {
+      if (!toastArm.current || toastArm.current.path !== payload.staging_path) {
+        toastArm.current = { path: payload.staging_path, processed: processed ?? 0 };
+      }
+      return;
+    }
+    const arm = toastArm.current;
+    if (!arm) return;
+    if (arm.path !== payload.staging_path) {
+      toastArm.current = null;
+      return;
+    }
+    const live = (payload.items ?? []).some((item) =>
+      ['identifying', 'importing', 'queued'].includes(item.status),
+    );
+    if (live || (payload.worker?.available && payload.worker.current_status !== 'idle')) return;
+    if (processed != null && processed <= arm.processed) {
+      // The folder emptied with nothing live and the worker idle, but the
+      // worker imported no more than when the batch was first seen — the
+      // files left some other way, or the worker restarted and its counter
+      // reset. Either way this batch is over: disarm so the next batch arms
+      // against a fresh baseline instead of a stale one.
+      toastArm.current = null;
+      return;
+    }
+    if (processed == null) return;
+    toastArm.current = null;
+    window.showToast?.('Import complete — nothing left to import', 'success');
+  }, [payload]);
+
+  const items = display?.items ?? [];
+  const workerRunning = Boolean(display?.worker?.running);
   const visible = filterInboxItems(items, filter, workerRunning);
   const counts = countInbox(items, workerRunning);
 
@@ -105,8 +192,11 @@ export function Inbox({
 
   const approve = useMutation({
     mutationFn: async (ids: number[]) => {
-      for (const id of ids) await approveAutoImportResult(id);
-      return ids.length;
+      // one attempt per history row: a duplicated id would throw on its
+      // second approve ("not pending review") and strand the rest of the loop
+      const unique = [...new Set(ids)];
+      for (const id of unique) await approveAutoImportResult(id);
+      return unique.length;
     },
     onSuccess: (n) => {
       window.showToast?.(n === 1 ? 'Approved, importing' : `Approved ${n}, importing`, 'success');
@@ -117,8 +207,9 @@ export function Inbox({
   });
   const dismiss = useMutation({
     mutationFn: async (ids: number[]) => {
-      for (const id of ids) await rejectAutoImportResult(id);
-      return ids.length;
+      const unique = [...new Set(ids)];
+      for (const id of unique) await rejectAutoImportResult(id);
+      return unique.length;
     },
     onSuccess: (n) => {
       window.showToast?.(n === 1 ? 'Dismissed' : `Dismissed ${n}`, 'success');
@@ -269,17 +360,17 @@ export function Inbox({
 
   return (
     <>
-      <StatusStrip payload={payload} error={inbox.error} loading={inbox.isLoading} />
+      <StatusStrip payload={display} error={inbox.error} loading={inbox.isLoading} />
 
-      {payload?.problems?.length ? (
+      {display?.problems?.length ? (
         <Notice tone="warning" role="alert">
-          {payload.problems.length === 1 ? 'A folder' : `${payload.problems.length} folders`} in the
+          {display.problems.length === 1 ? 'A folder' : `${display.problems.length} folders`} in the
           import folder could not be read, so files inside will not appear:{' '}
-          {payload.problems
+          {display.problems
             .slice(0, 3)
             .map((problem) => `${problem.path} (${problem.error})`)
             .join('; ')}
-          {payload.problems.length > 3 ? '; …' : ''}. If this is a bind mount, check the folder's
+          {display.problems.length > 3 ? '; …' : ''}. If this is a bind mount, check the folder's
           owner against the container's PUID/PGID.
         </Notice>
       ) : null}
@@ -381,19 +472,28 @@ export function Inbox({
       </div>
 
       <UploadZone>
+        {scanning && items.length > 0 ? (
+          <div className={styles.scanBanner} role="status">
+            <span className={styles.liveDot} aria-hidden="true" />
+            Reading the import folder…
+            {payload?.progress && payload.progress.total > 0
+              ? ` ${payload.progress.scanned} of ${payload.progress.total} files`
+              : null}
+          </div>
+        ) : null}
         {inbox.error && !payload ? (
           <Notice tone="danger" role="alert">
             {getErrorMessage(inbox.error)}
           </Notice>
-        ) : payload?.scanning ? (
+        ) : scanning && items.length === 0 ? (
           <div className={styles.empty}>
             <div className={styles.emptyTitle}>Reading the import folder…</div>
-            {payload.progress && payload.progress.total > 0
+            {payload?.progress && payload.progress.total > 0
               ? `${payload.progress.scanned} of ${payload.progress.total} files`
               : null}
           </div>
         ) : !inbox.isLoading && visible.length === 0 ? (
-          <EmptyState filter={filter} total={counts.all} stagingPath={payload?.staging_path} />
+          <EmptyState filter={filter} total={counts.all} stagingPath={display?.staging_path} />
         ) : (
           <div className={styles.list} id="import-inbox-list">
             {visible.map((item) => (
@@ -456,6 +556,7 @@ function FilterPill({
       type="button"
       role="tab"
       aria-selected={active}
+      data-import-page-pill
       className={clsx(styles.pill, { [styles.active]: active })}
       onClick={onClick}
     >
@@ -522,7 +623,7 @@ function StatusStrip({
         <FolderIcon />
         {error && !payload
           ? `Import folder: ${getErrorMessage(error)}`
-          : loading
+          : loading || (payload?.scanning && !payload?.staging_path)
             ? 'Reading import folder…'
             : payload?.staging_path || 'Import folder not configured'}
       </span>
@@ -675,10 +776,17 @@ function InboxRow({
 }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
-  const meta = INBOX_STATUS_META[item.status];
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
+  const meta =
+    item.status === 'imported' && everythingWasOwned(item)
+      ? { label: 'Already in library', tone: 'neutral' as const, hint: 'Nothing new to import' }
+      : INBOX_STATUS_META[item.status];
   const actions = inboxActions(item);
   const percent = confidencePercent(item);
-  const matchLine = describeItemMatch(item);
+  const outcome = describeImportOutcome(item);
+  const outcomeLines = importOutcomeLines(item);
+  // once it ran, what it did says more than how many tracks matched
+  const matchLine = outcome || describeItemMatch(item);
   const when = timeAgo(item.processed_at || item.created_at);
   const method = methodLabel(item.identification_method);
   const isLive = item.status === 'importing' || item.status === 'identifying';
@@ -758,6 +866,16 @@ function InboxRow({
               onClick={() => setExpanded((open) => !open)}
             >
               {expanded ? 'Hide files' : `Show ${item.files.length === 1 ? 'file' : 'files'}`}
+            </button>
+          ) : null}
+          {outcomeLines.length > 0 ? (
+            <button
+              type="button"
+              className={styles.expandButton}
+              aria-expanded={outcomeOpen}
+              onClick={() => setOutcomeOpen((open) => !open)}
+            >
+              {outcomeOpen ? 'Hide what happened' : 'What happened'}
             </button>
           ) : null}
         </div>
@@ -842,6 +960,16 @@ function InboxRow({
         ) : null}
       </div>
 
+      {outcomeOpen && outcomeLines.length > 0 ? (
+        <div className={styles.rowDetail} data-testid="import-outcome">
+          <div className={styles.fileTable}>
+            {outcomeLines.map((line, index) => (
+              <OutcomeLine key={line.key} index={index} line={line} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {expanded && item.files.length > 0 ? (
         <div className={styles.rowDetail}>
           <div className={styles.fileTable}>
@@ -863,6 +991,25 @@ function InboxRow({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function OutcomeLine({ line, index }: { line: ImportOutcomeLine; index: number }) {
+  const meta = TRACK_OUTCOME_META[line.outcome];
+  return (
+    <>
+      <span className={styles.fileNum}>{line.number || index + 1}</span>
+      <span
+        className={styles.fileName}
+        title={line.why ? `${line.track}\n${line.why}` : line.track}
+      >
+        {line.track}
+        {line.why ? <small>{line.why}</small> : null}
+      </span>
+      <span className={clsx(styles.status, styles.outcomePill)} data-tone={meta?.tone ?? 'neutral'}>
+        {meta?.label ?? line.outcome}
+      </span>
+    </>
   );
 }
 

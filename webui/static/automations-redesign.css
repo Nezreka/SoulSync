@@ -17,18 +17,18 @@
 #automations-stats, .automations-stats {
     display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     padding: 14px 18px; margin-bottom: 18px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), var(--white-a02));
+    border: 1px solid var(--white-a07);
+    border-radius: var(--radius-xl);
     backdrop-filter: blur(12px);
 }
 .automations-stats .auto-stat {
     display: inline-flex; align-items: baseline; gap: 7px;
     padding: 7px 14px; border-radius: 10px;
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.06);
+    background: var(--white-a04);
+    border: 1px solid var(--white-a06);
     font-size: 12px; font-weight: 500; letter-spacing: .04em;
-    color: rgba(255,255,255,0.55); text-transform: uppercase;
+    color: var(--white-a55); text-transform: uppercase;
 }
 .automations-stats .auto-stat strong {
     font-size: 19px; font-weight: 700; letter-spacing: 0;
@@ -40,11 +40,11 @@
 .automations-stats .auto-master-toggle {
     order: 99; margin-left: auto;
     display: inline-flex; align-items: center; gap: 10px;
-    padding: 8px 16px; border-radius: 999px; cursor: pointer;
+    padding: 8px 16px; border-radius: var(--radius-pill); cursor: pointer;
     font-size: 12.5px; font-weight: 600; letter-spacing: .03em;
-    color: rgba(255,255,255,0.45);
-    background: rgba(255,255,255,0.04);
-    border: 1px solid rgba(255,255,255,0.09);
+    color: var(--white-a45);
+    background: var(--white-a04);
+    border: 1px solid var(--white-a09);
     transition: all .25s ease;
 }
 .automations-stats .auto-master-toggle.on {
@@ -55,13 +55,13 @@
 }
 .automations-stats .auto-master-toggle:hover { transform: translateY(-1px); }
 .automations-stats .auto-master-sw {
-    width: 34px; height: 18px; border-radius: 999px; position: relative;
-    background: rgba(255,255,255,0.12); transition: background .25s ease;
+    width: 34px; height: 18px; border-radius: var(--radius-pill); position: relative;
+    background: var(--white-a12); transition: background .25s ease;
 }
 .automations-stats .auto-master-toggle.on .auto-master-sw { background: rgba(34, 197, 94, 0.55); }
 .automations-stats .auto-master-sw::after {
     content: ''; position: absolute; top: 2px; left: 2px;
-    width: 14px; height: 14px; border-radius: 50%;
+    width: 14px; height: 14px; border-radius: var(--radius-circle);
     background: #fff; transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
     box-shadow: 0 1px 4px rgba(0,0,0,0.4);
 }
@@ -72,28 +72,28 @@
 .automations-section-header {
     display: flex; align-items: center; gap: 10px;
     padding: 6px 4px; cursor: pointer; user-select: none;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     transition: background .15s ease;
 }
 .automations-section-header:hover { background: rgba(255,255,255,0.025); }
 .automations-section-header .section-chevron {
-    font-size: 9px; color: rgba(255,255,255,0.35);
+    font-size: 9px; color: var(--white-a35);
     transition: transform .25s ease;
 }
 .automations-section.collapsed .automations-section-header .section-chevron { transform: rotate(-90deg); }
 .automations-section-header .section-label {
     font-size: 12.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
-    color: rgba(255,255,255,0.65);
+    color: var(--white-a65);
 }
 .automations-section-header .section-count {
-    font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: var(--radius-pill);
     background: rgba(var(--accent-rgb), 0.14);
     color: rgb(var(--accent-light-rgb));
     border: 1px solid rgba(var(--accent-rgb), 0.2);
 }
 .automations-section-header .section-line {
     flex: 1; height: 1px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.09), transparent);
+    background: linear-gradient(90deg, var(--white-a09), transparent);
 }
 .automations-section-header .section-actions { display: flex; gap: 4px; }
 .automations-section-header .section-action-btn {
@@ -102,7 +102,7 @@
     transition: all .15s ease;
 }
 .automations-section-header .section-action-btn:hover {
-    opacity: 1; background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08);
+    opacity: 1; background: var(--white-a06); border-color: var(--white-a08);
 }
 .automations-section-header .section-action-btn.section-action-danger:hover {
     background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3);
@@ -122,7 +122,7 @@
    drop-target on the section BODY, no-drop on protected sections) */
 .automations-section .automations-section-body.drop-target {
     outline: 2px dashed rgba(var(--accent-rgb), 0.5);
-    outline-offset: 6px; border-radius: 12px;
+    outline-offset: 6px; border-radius: var(--radius-lg);
     background: rgba(var(--accent-rgb), 0.03);
 }
 .automations-section.no-drop { opacity: .35; filter: saturate(.4); }
@@ -139,9 +139,9 @@
     min-width: 0;
     display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
     padding: 12px 14px 11px 17px;
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px;
+    background: var(--white-a03);
+    border: 1px solid var(--white-a06);
+    border-radius: var(--radius-lg);
     transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
     overflow: hidden;
 }
@@ -151,7 +151,7 @@
     background: linear-gradient(180deg, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.25));
     transition: background .3s ease, box-shadow .3s ease;
 }
-.automation-card.disabled::before { background: rgba(255,255,255,0.1); }
+.automation-card.disabled::before { background: var(--white-a10); }
 .automation-card.running::before {
     background: linear-gradient(180deg, rgb(var(--accent-light-rgb)), rgba(var(--accent-rgb), 0.4));
     box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.55);
@@ -214,14 +214,14 @@
 
 /* status orb — className is swapped wholesale by live updates; style all */
 .automation-card .automation-status {
-    width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0;
+    width: 9px; height: 9px; border-radius: var(--radius-circle); margin-top: 6px; flex-shrink: 0;
 }
 .automation-card .automation-status.enabled {
     background: rgb(74, 222, 128);
     box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
 }
 .automation-card .automation-status.disabled {
-    background: rgba(255,255,255,0.18); box-shadow: none;
+    background: var(--white-a18); box-shadow: none;
 }
 .automation-card .automation-status.running {
     background: rgb(var(--accent-light-rgb));
@@ -253,7 +253,7 @@
 .automation-card .flow-action,
 .automation-card .flow-notify,
 .automation-card .flow-delay {
-    font-size: 11px; font-weight: 550; padding: 3px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 550; padding: 3px 9px; border-radius: var(--radius-pill);
     border: none; white-space: nowrap; max-width: 260px;
     overflow: hidden; text-overflow: ellipsis;
 }
@@ -298,7 +298,7 @@
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
 /* Plain inline text — truncation is done in JS at a fixed length, so no
    layout-dependent trimming can misfire. Full facts in the hover tooltip. */
-.automation-card .auto-last-result { color: rgba(255,255,255,0.30); cursor: default; }
+.automation-card .auto-last-result { color: var(--white-a30); cursor: default; }
 /* A skip is neither success nor failure — the run did not happen, so it reads
    as an aside rather than as a result. */
 .automation-card .auto-last-result.skipped { color: rgba(255,255,255,0.22); font-style: italic; }
@@ -314,12 +314,12 @@
     width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
     border: none;
-    border-radius: 8px; color: rgba(255,255,255,0.65);
+    border-radius: var(--radius-md); color: var(--white-a65);
     cursor: pointer; font-size: 12px; line-height: 1;
     transition: background .15s ease, color .15s ease;
 }
 .automation-card .automation-actions button:hover {
-    background: rgba(255,255,255,0.08);
+    background: var(--white-a08);
     color: #fff;
 }
 .automation-card .automation-actions .automation-delete-btn:hover {
@@ -333,13 +333,13 @@
 }
 .automation-card .automation-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
 .automation-card .automation-toggle .toggle-slider {
-    position: absolute; inset: 0; border-radius: 999px;
-    background: rgba(255,255,255,0.12);
+    position: absolute; inset: 0; border-radius: var(--radius-pill);
+    background: var(--white-a12);
     transition: background .25s ease;
 }
 .automation-card .automation-toggle .toggle-slider::before {
     content: ''; position: absolute; top: 2.5px; left: 2.5px;
-    width: 15px; height: 15px; border-radius: 50%;
+    width: 15px; height: 15px; border-radius: var(--radius-circle);
     background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45);
     transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
 }
@@ -401,8 +401,8 @@
 }
 .automation-card.automation-tile .auto-tile-badge {
     flex-shrink: 0; border: none; cursor: pointer; font-family: inherit;
-    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
-    background: rgba(255,255,255,0.055); color: rgba(255,255,255,0.5);
+    font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill);
+    background: rgba(255,255,255,0.055); color: var(--white-a50);
     font-variant-numeric: tabular-nums;
     transition: background .15s ease, color .15s ease;
 }
@@ -429,8 +429,8 @@
 }
 .automation-card.automation-tile .auto-cadence-edit input,
 .automation-card.automation-tile .auto-cadence-edit select {
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--white-a06);
+    border: 1px solid var(--white-a12);
     border-radius: 7px; color: #fff;
     font-family: inherit; font-size: 11px; padding: 3px 6px;
 }
@@ -448,7 +448,7 @@
 .automation-card.automation-tile .auto-cadence-save:hover { background: rgba(var(--accent-rgb), 0.42); }
 .automation-card.automation-tile .auto-cadence-save:disabled { opacity: .5; cursor: default; }
 .automation-card.automation-tile .auto-cadence-cancel {
-    background: transparent; color: rgba(255,255,255,0.4);
+    background: transparent; color: var(--white-a40);
 }
 .automation-card.automation-tile .auto-cadence-cancel:hover { color: #fff; }
 
@@ -462,23 +462,23 @@
 .automation-card.automation-tile .auto-tile-next {
     font-size: 11.5px; font-weight: 600;
     font-variant-numeric: tabular-nums;
-    color: rgba(255,255,255,0.4);
+    color: var(--white-a40);
 }
 .automation-card.automation-tile .auto-tile-next.waiting { color: rgba(var(--accent-light-rgb), 0.9); }
 .automation-card.automation-tile .auto-tile-next.due { color: rgb(134, 239, 172); }
 .automation-card.automation-tile .auto-tile-next.running { color: rgb(var(--accent-light-rgb)); }
 .automation-card.automation-tile .auto-tile-next.paused { color: #f59e0b; }
 .automation-card.automation-tile .auto-tile-next.listening { color: rgba(134, 239, 172, 0.7); }
-.automation-card.automation-tile .auto-tile-next.off { color: rgba(255,255,255,0.25); }
+.automation-card.automation-tile .auto-tile-next.off { color: var(--white-a25); }
 .automation-card.automation-tile .auto-tile-next.unscheduled {
-    color: rgba(255,255,255,0.3); font-style: italic; font-weight: 500;
+    color: var(--white-a30); font-style: italic; font-weight: 500;
 }
 
 /* foot — what happened last time, and the controls */
 .automation-card.automation-tile .auto-tile-foot {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     margin-top: 10px; padding-top: 9px;
-    border-top: 1px solid rgba(255,255,255,0.05);
+    border-top: 1px solid var(--white-a05);
 }
 .automation-card.automation-tile .automation-meta { flex: 1; min-width: 0; line-height: 1.55; }
 /* The foot is a designated control strip, not a hover surface — the toggle in
@@ -486,7 +486,7 @@
 .automation-card.automation-tile .automation-actions { opacity: 1; flex-shrink: 0; }
 .automation-card.automation-tile .auto-tile-sep {
     width: 1px; height: 16px; margin: 0 2px;
-    background: rgba(255,255,255,0.10); flex-shrink: 0;
+    background: var(--white-a10); flex-shrink: 0;
 }
 
 /* ── Live progress panel (appended by JS as the card's last child) ──────── */
@@ -498,15 +498,15 @@
 }
 .automation-card .automation-output.visible {
     max-height: 300px; opacity: 1; margin-top: 10px;
-    border-top: 1px solid rgba(255,255,255,0.06);
+    border-top: 1px solid var(--white-a06);
     padding-top: 11px;
 }
 .automation-card .auto-progress-bar-wrap {
-    height: 4px; border-radius: 999px; overflow: hidden;
-    background: rgba(255,255,255,0.07); margin-bottom: 7px;
+    height: 4px; border-radius: var(--radius-pill); overflow: hidden;
+    background: var(--white-a07); margin-bottom: 7px;
 }
 .automation-card .auto-progress-bar {
-    height: 100%; border-radius: 999px;
+    height: 100%; border-radius: var(--radius-pill);
     background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), rgb(var(--accent-light-rgb)));
     box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
     transition: width .5s ease;
@@ -514,7 +514,7 @@
 }
 .automation-card .auto-progress-bar::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent 30%, rgba(255,255,255,0.35) 50%, transparent 70%);
+    background: linear-gradient(90deg, transparent 30%, var(--white-a35) 50%, transparent 70%);
     background-size: 200% 100%;
     animation: auto-bar-sheen 1.6s linear infinite;
 }
@@ -540,7 +540,7 @@
 .automation-card .automation-output.error .auto-progress-phase { color: rgb(252, 165, 165); }
 .automation-card .auto-progress-log {
     font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
-    font-size: 10.5px; line-height: 1.65; color: rgba(255,255,255,0.45);
+    font-size: 10.5px; line-height: 1.65; color: var(--white-a45);
     max-height: 110px; overflow-y: auto;
     padding: 7px 10px; border-radius: 9px;
     background: rgba(0,0,0,0.28);
@@ -566,7 +566,7 @@
     font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 7px;
 }
 .automations-empty .automations-empty-text {
-    font-size: 13px; color: rgba(255,255,255,0.45); margin-bottom: 22px;
+    font-size: 13px; color: var(--white-a45); margin-bottom: 22px;
     max-width: 380px; margin-left: auto; margin-right: auto; line-height: 1.6;
 }
 
@@ -589,23 +589,23 @@
     display: flex; gap: 6px; padding: 4px 0 10px; flex-wrap: wrap;
 }
 .automations-section .auto-hub-tab {
-    padding: 7px 15px; border-radius: 999px; cursor: pointer;
-    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
-    color: rgba(255,255,255,0.55); font-size: 12.5px; font-weight: 600; font-family: inherit;
+    padding: 7px 15px; border-radius: var(--radius-pill); cursor: pointer;
+    background: var(--white-a04); border: 1px solid var(--white-a08);
+    color: var(--white-a55); font-size: 12.5px; font-weight: 600; font-family: inherit;
     transition: all .18s ease;
 }
-.automations-section .auto-hub-tab:hover { color: #fff; border-color: rgba(255,255,255,0.16); }
+.automations-section .auto-hub-tab:hover { color: #fff; border-color: var(--white-a16); }
 .automations-section .auto-hub-tab.active {
     background: rgba(var(--accent-rgb), 0.14);
     border-color: rgba(var(--accent-rgb), 0.4);
     color: rgb(var(--accent-light-rgb));
 }
 .automations-section .auto-hub-filter-pill {
-    border-radius: 999px; font-size: 11.5px;
+    border-radius: var(--radius-pill); font-size: 11.5px;
     transition: all .15s ease;
 }
 .automations-section .auto-hub-badge {
-    border-radius: 999px; font-size: 10px; font-weight: 700;
+    border-radius: var(--radius-pill); font-size: 10px; font-weight: 700;
     letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px;
 }
 .automations-section .auto-hub-badge.beginner { background: rgba(34,197,94,.14); color: rgb(134,239,172); }
@@ -618,20 +618,20 @@
 .automations-builder-view .builder-header {
     display: flex; align-items: center; gap: 12px;
     padding: 14px 18px; margin-bottom: 0;
-    background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(180deg, rgba(255,255,255,0.045), var(--white-a02));
+    border: 1px solid var(--white-a07);
     border-radius: 16px 16px 0 0; border-bottom: none;
 }
 .automations-builder-view .builder-back-btn {
     width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    background: var(--white-a05); border: 1px solid var(--white-a09);
     color: #fff; font-size: 15px;
     transition: all .15s ease;
 }
-.automations-builder-view .builder-back-btn:hover { background: rgba(255,255,255,0.1); transform: translateX(-2px); }
+.automations-builder-view .builder-back-btn:hover { background: var(--white-a10); transform: translateX(-2px); }
 .automations-builder-view .builder-name-input {
     flex: 1; min-width: 160px;
-    background: transparent; border: none; border-bottom: 2px solid rgba(255,255,255,0.1);
+    background: transparent; border: none; border-bottom: 2px solid var(--white-a10);
     color: #fff; font-size: 17px; font-weight: 650; font-family: inherit;
     padding: 7px 4px; border-radius: 0;
     transition: border-color .2s ease;
@@ -641,20 +641,20 @@
 }
 .automations-builder-view .builder-group-input {
     width: 170px;
-    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 10px; color: rgba(255,255,255,0.8); font-size: 12.5px; font-family: inherit;
+    background: rgba(255,255,255,0.045); border: 1px solid var(--white-a08);
+    border-radius: 10px; color: var(--white-a80); font-size: 12.5px; font-family: inherit;
     padding: 8px 12px;
 }
 .automations-builder-view .builder-group-input:focus {
     outline: none; border-color: rgba(var(--accent-rgb), 0.5);
 }
 .automations-builder-view .btn-cancel {
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-    color: rgba(255,255,255,0.7); padding: 9px 16px; border-radius: 10px;
+    background: var(--white-a05); border: 1px solid var(--white-a10);
+    color: var(--white-a70); padding: 9px 16px; border-radius: 10px;
     font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
     transition: all .15s ease;
 }
-.automations-builder-view .btn-cancel:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.automations-builder-view .btn-cancel:hover { background: var(--white-a10); color: #fff; }
 .automations-builder-view .btn-save {
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
     border: 1px solid rgba(var(--accent-light-rgb), 0.4);
@@ -669,7 +669,7 @@
 
 .automations-builder-view .builder-content {
     display: flex; gap: 0; align-items: stretch;
-    border: 1px solid rgba(255,255,255,0.07); border-radius: 0 0 16px 16px;
+    border: 1px solid var(--white-a07); border-radius: 0 0 16px 16px;
     overflow: hidden; min-height: 520px;
 }
 
@@ -678,7 +678,7 @@
     width: 300px; flex-shrink: 0; overflow-y: auto; max-height: 72vh;
     padding: 16px 14px;
     background: rgba(255,255,255,0.025);
-    border-right: 1px solid rgba(255,255,255,0.06);
+    border-right: 1px solid var(--white-a06);
 }
 .automations-builder-view .sidebar-section { margin-bottom: 20px; }
 .automations-builder-view .sidebar-section-title {
@@ -689,8 +689,8 @@
 .automations-builder-view .block-item {
     display: flex; align-items: flex-start; gap: 10px; position: relative;
     padding: 10px 11px; margin-bottom: 7px; border-radius: 11px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-    border: 1px solid rgba(255,255,255,0.07);
+    background: linear-gradient(180deg, var(--white-a04), var(--white-a02));
+    border: 1px solid var(--white-a07);
     cursor: grab;
     transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
@@ -701,7 +701,7 @@
 }
 .automations-builder-view .block-item:active { cursor: grabbing; transform: scale(.985); }
 .automations-builder-view .block-item.coming-soon { opacity: .38; cursor: default; }
-.automations-builder-view .block-item.coming-soon:hover { transform: none; box-shadow: none; border-color: rgba(255,255,255,0.07); }
+.automations-builder-view .block-item.coming-soon:hover { transform: none; box-shadow: none; border-color: var(--white-a07); }
 .automations-builder-view .block-item-icon {
     width: 30px; height: 30px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -713,13 +713,13 @@
     font-size: 12.5px; font-weight: 620; color: #fff; margin-bottom: 2px;
 }
 .automations-builder-view .block-item-desc {
-    font-size: 10.5px; line-height: 1.45; color: rgba(255,255,255,0.4);
+    font-size: 10.5px; line-height: 1.45; color: var(--white-a40);
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .automations-builder-view .coming-soon-badge {
     position: absolute; top: 8px; right: 8px;
     font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-    padding: 2px 7px; border-radius: 999px;
+    padding: 2px 7px; border-radius: var(--radius-pill);
     background: rgba(234, 179, 8, 0.15); color: rgb(253, 224, 71);
 }
 .automations-builder-view .block-help-btn { opacity: .35; transition: opacity .15s ease; }
@@ -750,16 +750,16 @@
     box-shadow: 0 0 24px -6px rgba(var(--accent-rgb), 0.35), inset 0 0 20px rgba(var(--accent-rgb), 0.04);
 }
 .automations-builder-view .flow-slot.filled {
-    border: 1px solid rgba(255,255,255,0.09);
-    background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02));
+    border: 1px solid var(--white-a09);
+    background: linear-gradient(180deg, var(--white-a05), var(--white-a02));
 }
 .automations-builder-view .flow-slot-prompt {
-    font-size: 12.5px; color: rgba(255,255,255,0.35);
+    font-size: 12.5px; color: var(--white-a35);
 }
 .automations-builder-view .flow-slot-label {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 10.5px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
-    padding: 3px 11px; border-radius: 999px; margin-bottom: 8px;
+    padding: 3px 11px; border-radius: var(--radius-pill); margin-bottom: 8px;
 }
 .automations-builder-view .flow-slot-label.when {
     color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb), 0.12);
@@ -791,14 +791,14 @@
 }
 .automations-builder-view .placed-block-icon {
     width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; border-radius: 8px;
+    font-size: 13px; border-radius: var(--radius-md);
     background: rgba(var(--accent-rgb), 0.11); border: 1px solid rgba(var(--accent-rgb), 0.18);
 }
 .automations-builder-view .placed-block-label { font-size: 13.5px; font-weight: 650; color: #fff; flex: 1; }
 .automations-builder-view .placed-block-remove {
     width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
     background: transparent; border: 1px solid transparent;
-    color: rgba(255,255,255,0.35); font-size: 11px;
+    color: var(--white-a35); font-size: 11px;
     transition: all .15s ease;
 }
 .automations-builder-view .placed-block-remove:hover {
@@ -815,7 +815,7 @@
 }
 .automations-builder-view .placed-block-config .config-row:last-child { margin-bottom: 0; }
 .automations-builder-view .placed-block-config .config-row > label {
-    font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.55);
+    font-size: 11.5px; font-weight: 600; color: var(--white-a55);
     min-width: 52px;
 }
 .automations-builder-view .placed-block-config input[type="text"],
@@ -823,8 +823,8 @@
 .automations-builder-view .placed-block-config input[type="time"],
 .automations-builder-view .placed-block-config select,
 .automations-builder-view .placed-block-config textarea {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.09);
+    background: var(--white-a05);
+    border: 1px solid var(--white-a09);
     border-radius: 9px; color: #fff; font-size: 12.5px; font-family: inherit;
     padding: 7px 10px;
     transition: border-color .15s ease, box-shadow .15s ease;
@@ -839,9 +839,9 @@
 .automations-builder-view .placed-block-config textarea { width: 100%; min-height: 54px; resize: vertical; }
 .automations-builder-view .day-picker { display: flex; gap: 4px; flex-wrap: wrap; }
 .automations-builder-view .day-btn {
-    padding: 5px 10px; border-radius: 8px; cursor: pointer;
-    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.09);
-    color: rgba(255,255,255,0.5); font-size: 11.5px; font-weight: 600; font-family: inherit;
+    padding: 5px 10px; border-radius: var(--radius-md); cursor: pointer;
+    background: rgba(255,255,255,0.045); border: 1px solid var(--white-a09);
+    color: var(--white-a50); font-size: 11.5px; font-weight: 600; font-family: inherit;
     transition: all .15s ease;
 }
 .automations-builder-view .day-btn.active {
@@ -851,15 +851,15 @@
 }
 .automations-builder-view .condition-builder {
     margin-top: 6px; padding: 10px; border-radius: 10px;
-    background: rgba(0,0,0,0.16); border: 1px solid rgba(255,255,255,0.05);
+    background: rgba(0,0,0,0.16); border: 1px solid var(--white-a05);
 }
 .automations-builder-view .condition-row {
     display: flex; align-items: center; gap: 7px; margin-bottom: 7px; flex-wrap: wrap;
 }
 .automations-builder-view .remove-condition-btn {
-    width: 22px; height: 22px; border-radius: 6px; cursor: pointer;
+    width: 22px; height: 22px; border-radius: var(--radius-sm); cursor: pointer;
     background: transparent; border: 1px solid transparent;
-    color: rgba(255,255,255,0.3); font-size: 10px;
+    color: var(--white-a30); font-size: 10px;
     transition: all .15s ease;
 }
 .automations-builder-view .remove-condition-btn:hover {
@@ -873,7 +873,7 @@
     .automations-builder-view .builder-content { flex-direction: column; }
     .automations-builder-view .builder-sidebar {
         width: 100%; max-height: 240px;
-        border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06);
+        border-right: none; border-bottom: 1px solid var(--white-a06);
     }
 }
 @media (max-width: 560px) {
@@ -900,7 +900,7 @@
 /* ── Run-history modal ──────────────────────────────────────────────────── */
 .automation-history-modal {
     background: linear-gradient(180deg, rgba(30, 30, 46, 0.97), rgba(22, 22, 34, 0.97));
-    border: 1px solid rgba(255,255,255,0.09);
+    border: 1px solid var(--white-a09);
     border-radius: 18px;
     box-shadow: 0 24px 80px -20px rgba(0,0,0,0.8), 0 0 40px -20px rgba(var(--accent-rgb), 0.25);
     backdrop-filter: blur(20px);
@@ -910,16 +910,16 @@
 .automation-history-modal .history-modal-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 20px;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-    background: rgba(255,255,255,0.02);
+    border-bottom: 1px solid var(--white-a07);
+    background: var(--white-a02);
 }
 .automation-history-modal .history-modal-header h3 {
     margin: 0; font-size: 15px; font-weight: 700; color: #fff; letter-spacing: .01em;
 }
 .automation-history-modal .history-close-btn {
     width: 30px; height: 30px; border-radius: 9px; cursor: pointer;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
-    color: rgba(255,255,255,0.7); font-size: 16px; line-height: 1;
+    background: var(--white-a05); border: 1px solid var(--white-a09);
+    color: var(--white-a70); font-size: 16px; line-height: 1;
     transition: all .15s ease;
 }
 .automation-history-modal .history-close-btn:hover {
@@ -929,19 +929,19 @@
     overflow-y: auto; padding: 14px 16px;
 }
 .automation-history-modal .history-entry {
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 12px; margin-bottom: 9px; overflow: hidden;
+    border: 1px solid var(--white-a06);
+    border-radius: var(--radius-lg); margin-bottom: 9px; overflow: hidden;
     background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.012));
     transition: border-color .15s ease;
 }
-.automation-history-modal .history-entry:hover { border-color: rgba(255,255,255,0.12); }
+.automation-history-modal .history-entry:hover { border-color: var(--white-a12); }
 .automation-history-modal .history-entry-header {
     display: flex; align-items: center; gap: 10px;
     padding: 11px 13px; cursor: pointer; user-select: none;
 }
 .automation-history-modal .history-status-badge {
     font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-    padding: 3px 9px; border-radius: 999px;
+    padding: 3px 9px; border-radius: var(--radius-pill);
 }
 .automation-history-modal .history-status-badge.success {
     background: rgba(34, 197, 94, 0.13); color: rgb(134, 239, 172);
@@ -952,14 +952,14 @@
     border: 1px solid rgba(239, 68, 68, 0.3);
 }
 .automation-history-modal .history-time {
-    font-size: 12px; color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums;
+    font-size: 12px; color: var(--white-a55); font-variant-numeric: tabular-nums;
 }
 .automation-history-modal .history-duration {
-    font-size: 11px; color: rgba(255,255,255,0.35);
+    font-size: 11px; color: var(--white-a35);
     margin-left: auto; font-variant-numeric: tabular-nums;
 }
 .automation-history-modal .history-summary {
-    font-size: 11.5px; color: rgba(255,255,255,0.45); padding: 0 13px 10px;
+    font-size: 11.5px; color: var(--white-a45); padding: 0 13px 10px;
     display: flex; flex-wrap: wrap; gap: 5px 12px;
 }
 .automation-history-modal .history-log-section {
@@ -968,20 +968,20 @@
     font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 10.5px; line-height: 1.7; max-height: 180px; overflow-y: auto;
 }
-.automation-history-modal .history-log-line { color: rgba(255,255,255,0.5); }
+.automation-history-modal .history-log-line { color: var(--white-a50); }
 .automation-history-modal .history-log-line.history-log-success { color: rgb(134, 239, 172); }
 .automation-history-modal .history-log-line.history-log-warning { color: rgb(253, 224, 71); }
 .automation-history-modal .history-log-line.history-log-error { color: rgb(252, 165, 165); }
 .automation-history-modal .history-loading,
 .automation-history-modal .history-empty {
     text-align: center; padding: 36px 16px;
-    color: rgba(255,255,255,0.4); font-size: 13px;
+    color: var(--white-a40); font-size: 13px;
 }
 
 /* ── Group-assign dropdown ──────────────────────────────────────────────── */
 .auto-group-dropdown {
     background: linear-gradient(180deg, rgba(34, 34, 50, 0.98), rgba(24, 24, 38, 0.98));
-    border: 1px solid rgba(255,255,255,0.1);
+    border: 1px solid var(--white-a10);
     border-radius: 13px;
     box-shadow: 0 16px 48px -12px rgba(0,0,0,0.75);
     backdrop-filter: blur(16px);
@@ -991,7 +991,7 @@
     display: block; width: 100%; text-align: left;
     padding: 8px 12px; border-radius: 9px; cursor: pointer;
     background: transparent; border: none;
-    color: rgba(255,255,255,0.75); font-size: 12.5px; font-family: inherit;
+    color: var(--white-a75); font-size: 12.5px; font-family: inherit;
     transition: all .12s ease;
 }
 .auto-group-dropdown .auto-group-option:hover {
@@ -1001,15 +1001,15 @@
     background: rgba(var(--accent-rgb), 0.16);
     color: rgb(var(--accent-light-rgb)); font-weight: 600;
 }
-.auto-group-dropdown .auto-group-option.ungroup { color: rgba(255,255,255,0.45); }
+.auto-group-dropdown .auto-group-option.ungroup { color: var(--white-a45); }
 .auto-group-dropdown .auto-group-divider {
     height: 1px; margin: 5px 8px;
-    background: rgba(255,255,255,0.08);
+    background: var(--white-a08);
 }
 .auto-group-dropdown .auto-group-input {
     width: calc(100% - 12px); margin: 4px 6px 6px;
-    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px; color: #fff; font-size: 12px; font-family: inherit;
+    background: var(--white-a05); border: 1px solid var(--white-a10);
+    border-radius: var(--radius-md); color: #fff; font-size: 12px; font-family: inherit;
     padding: 7px 10px;
 }
 .auto-group-dropdown .auto-group-input:focus {
@@ -1042,7 +1042,7 @@
     --tile-glow: 148, 163, 184;
     position: relative;
     padding: 12px 14px 14px;
-    border: 1px solid rgba(255,255,255,0.05);
+    border: 1px solid var(--white-a05);
     border-radius: 14px;
     background:
         radial-gradient(90% 130% at 0% 0%, rgba(var(--tile-glow), 0.05), transparent 55%),
@@ -1077,8 +1077,8 @@
     width: 100%; box-sizing: border-box;
     padding: 8px 11px;
     border-radius: 9px;
-    border: 1px solid rgba(255,255,255,0.09);
-    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--white-a09);
+    background: var(--white-a05);
     color: #fff; font-size: 12.5px; font-family: inherit;
 }
 .builder-sidebar .block-search:focus {
@@ -1086,7 +1086,7 @@
     border-color: rgba(var(--accent-rgb), 0.5);
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.12);
 }
-.builder-sidebar .block-search::placeholder { color: rgba(255,255,255,0.3); }
+.builder-sidebar .block-search::placeholder { color: var(--white-a30); }
 
 .builder-sidebar .block-drawer { margin-bottom: 4px; }
 .builder-sidebar .block-drawer-head {
@@ -1096,25 +1096,25 @@
     background: transparent; color: inherit;
     cursor: pointer; text-align: left; font-family: inherit;
 }
-.builder-sidebar .block-drawer-head:hover { background: rgba(255,255,255,0.04); }
+.builder-sidebar .block-drawer-head:hover { background: var(--white-a04); }
 .builder-sidebar .block-drawer-chevron {
-    font-size: 8px; color: rgba(255,255,255,0.3);
+    font-size: 8px; color: var(--white-a30);
     transition: transform .2s ease;
 }
 .builder-sidebar .block-drawer.collapsed .block-drawer-chevron { transform: rotate(-90deg); }
 .builder-sidebar .block-drawer-name {
     flex: 1; font-size: 11px; font-weight: 700;
     letter-spacing: .08em; text-transform: uppercase;
-    color: rgba(255,255,255,0.5);
+    color: var(--white-a50);
 }
 .builder-sidebar .block-drawer-count {
     font-size: 10px; font-weight: 700;
-    padding: 1px 7px; border-radius: 999px;
-    background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.4);
+    padding: 1px 7px; border-radius: var(--radius-pill);
+    background: var(--white-a06);
+    color: var(--white-a40);
 }
 .builder-sidebar .block-drawer.collapsed .block-drawer-body { display: none; }
 .builder-sidebar .block-search-empty {
     padding: 14px 6px; font-size: 12px; font-style: italic;
-    color: rgba(255,255,255,0.3);
+    color: var(--white-a30);
 }

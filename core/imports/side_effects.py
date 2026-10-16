@@ -22,6 +22,7 @@ from core.imports.context import (
     get_import_track_info,
     normalize_import_context,
     get_library_source_id_columns,
+    is_real_provider_album_id,
 )
 from database.music_database import get_database
 from utils.logging_config import get_logger
@@ -605,7 +606,27 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         source_ids = get_import_source_ids(context)
         source_columns = get_library_source_id_columns(source)
 
+        # #1567 (round 4): when metadata extraction distrusted the batch album
+        # context, its year/track_count/art/release id are a stranger's and
+        # must not reach the library rows. extract_source_metadata stashes the
+        # verdict + the track's own provider album on this same context dict —
+        # read it here, never recomputed.
+        _album_ctx_distrusted = bool(context.get("_batch_album_distrusted"))
+        _own_provider_album = context.get("_track_own_provider_album")
+        if not isinstance(_own_provider_album, dict):
+            _own_provider_album = {}
+
         artist_name = extract_artist_name(artist_context) or get_import_clean_artist(context, default="")
+        if _album_ctx_distrusted:
+            # R4F1: the batch artist_context is a stranger's — the library
+            # artist/album identity must come from the track's own data, or
+            # the bogus batch album lands in the library DB as a real album.
+            _own_artist_names = context.get("_track_own_artist_display_names") or []
+            _own_artist_name = _own_artist_names[0] if _own_artist_names else ""
+            if _own_artist_name:
+                artist_name = _own_artist_name
+            else:
+                artist_name = get_import_clean_artist(context, default="")
         if not artist_name or artist_name in ("Unknown", "Unknown Artist"):
             return
 
@@ -615,21 +636,32 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # on one guitarist (sassmastawillis). When the album's own metadata says
         # various artists, the ALBUM goes there; the track keeps its real artist
         # through `track_artist` below, which exists for exactly this.
+        #
+        # R4F1: skipped when the batch album context is distrusted — its VA
+        # signal is the stranger's, not the track's. A genuinely VA own album
+        # is still grouped by name; enrichment sorts out the credit.
         from core.imports.compilation import compilation_album_artist
-        _va_artist = compilation_album_artist(album_ctx, artist_name)
-        if _va_artist:
-            logger.info(
-                "[Import] '%s' is a various-artists release — filing the album "
-                "under %s instead of %s (the track keeps its own artist)",
-                album_ctx.get("name", "") or "album", _va_artist, artist_name,
-            )
-            artist_name = _va_artist
+        if not _album_ctx_distrusted:
+            _va_artist = compilation_album_artist(album_ctx, artist_name)
+            if _va_artist:
+                logger.info(
+                    "[Import] '%s' is a various-artists release — filing the album "
+                    "under %s instead of %s (the track keeps its own artist)",
+                    album_ctx.get("name", "") or "album", _va_artist, artist_name,
+                )
+                artist_name = _va_artist
 
         album_name = ""
-        if album_info and isinstance(album_info, dict):
-            album_name = album_info.get("album_name", "")
-        if not album_name:
-            album_name = album_ctx.get("name", "") or original_search.get("album", "")
+        if _album_ctx_distrusted:
+            # R4F1: album_info['album_name'] and album_ctx['name'] are the
+            # stranger's in bundle flows — the track's own provider album
+            # name, or the track title as last resort (never the batch's).
+            album_name = _own_provider_album.get("name") or ""
+        else:
+            if album_info and isinstance(album_info, dict):
+                album_name = album_info.get("album_name", "")
+            if not album_name:
+                album_name = album_ctx.get("name", "") or original_search.get("album", "")
         if not album_name:
             album_name = track_info.get("name", "Unknown")
 
@@ -639,15 +671,19 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # by the enrichment sweep, so freshly imported releases were
         # kind-blind (and the single/album gates lenient-always) until the
         # workers ran. album_type is the fallback; '' stays unknown.
+        #
+        # NF-2: when the batch album context is distrusted, its record_type/
+        # album_type is the stranger's — leave unknown for the workers.
         _import_record_type = ""
-        if isinstance(album_info, dict):
-            _import_record_type = (
-                album_info.get("record_type") or album_info.get("album_type") or ""
-            )
-        if not _import_record_type:
-            _import_record_type = (
-                album_ctx.get("record_type") or album_ctx.get("album_type") or ""
-            )
+        if not _album_ctx_distrusted:
+            if isinstance(album_info, dict):
+                _import_record_type = (
+                    album_info.get("record_type") or album_info.get("album_type") or ""
+                )
+            if not _import_record_type:
+                _import_record_type = (
+                    album_ctx.get("record_type") or album_ctx.get("album_type") or ""
+                )
         _import_record_type = str(_import_record_type).strip().lower()
 
         track_name = get_import_clean_title(
@@ -662,22 +698,61 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         duration_ms = track_info.get("duration_ms", 0) or 0
 
         year = None
-        release_date = album_ctx.get("release_date", "")
+        if _album_ctx_distrusted:
+            # The batch context's date is a stranger's — use the track's own
+            # provider album date, or nothing (fill-only below + enrichment
+            # fill the gap; never the batch's year).
+            release_date = _own_provider_album.get("release_date") or ""
+        else:
+            release_date = album_ctx.get("release_date", "")
         if release_date and len(release_date) >= 4:
             try:
                 year = int(release_date[:4])
             except ValueError:
                 pass
 
-        image_url = album_ctx.get("image_url", "")
-        if not image_url:
-            images = album_ctx.get("images", [])
-            if images and isinstance(images, list) and len(images) > 0:
-                img = images[0]
-                image_url = img.get("url", "") if isinstance(img, dict) else str(img)
+        if _album_ctx_distrusted:
+            # Never take artwork from the poisoned batch — the track's own
+            # provider album art, or nothing. An empty value is a no-op for
+            # the fill-only writers below (never a clobber), and enrichment
+            # can still find per-track art later.
+            image_url = _own_provider_album.get("image_url") or ""
+        else:
+            image_url = album_ctx.get("image_url", "")
+            if not image_url:
+                images = album_ctx.get("images", [])
+                if images and isinstance(images, list) and len(images) > 0:
+                    img = images[0]
+                    image_url = img.get("url", "") if isinstance(img, dict) else str(img)
 
         artist_source_id = source_ids.get("artist_id", "")
-        album_source_id = source_ids.get("album_id", "")
+        if _album_ctx_distrusted:
+            # R4F1: the artist row is now the track's OWN artist (see above),
+            # so the batch artist's source id would mismatch the name — drop
+            # it and let enrichment fill the right one.
+            artist_source_id = ""
+        # R3F3: a provider-namespaced id column must only ever receive ids of
+        # that provider's family. The track's own album id can be cross-source
+        # (spotify_data attached to a Deezer download) — writing a Spotify id
+        # into albums.deezer_id makes the Deezer worker's honor_stored_match
+        # fail truthy and skips the name-search fallback forever.
+        _own_album_id_source = (
+            (_own_provider_album.get("id_source") or "").strip().lower()
+        )
+        _own_album_id_cross_source = bool(
+            _album_ctx_distrusted and _own_album_id_source == "spotify"
+        )
+        if _album_ctx_distrusted:
+            # A provider album id taken from the poisoned batch is a
+            # stranger's edition — the track's own provider album id when
+            # it's a real provider id, otherwise empty for enrichment to
+            # fill (never the batch's).
+            _own_album_id = _own_provider_album.get("id") or ""
+            album_source_id = (
+                _own_album_id if is_real_provider_album_id(_own_album_id) else ""
+            )
+        else:
+            album_source_id = source_ids.get("album_id", "")
         track_source_id = source_ids.get("track_id", "")
         for key in ("auto_import", "from_sync_modal", "explicit_artist", "explicit_album", ""):
             if artist_source_id == key:
@@ -687,7 +762,11 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             if track_source_id == key:
                 track_source_id = ""
 
-        genres = (artist_context or {}).get("genres", []) if isinstance(artist_context, dict) else []
+        genres = []
+        if not _album_ctx_distrusted:
+            # NF-1: the batch artist_context's genres are the stranger's —
+            # leave empty for enrichment when distrusted.
+            genres = (artist_context or {}).get("genres", []) if isinstance(artist_context, dict) else []
         if genres:
             from core.genre_filter import filter_genres as _filter_genres
 
@@ -719,15 +798,27 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         artist_id = _stable_soulsync_id(artist_name.lower().strip())
         album_id = _stable_soulsync_id(f"{artist_name}::{album_name}".lower().strip())
         track_id = _stable_soulsync_id(final_path)
-        total_tracks = album_ctx.get("total_tracks", 0) or 0
-        # Album total duration — auto-import passes the sum of every
-        # matched track's duration via `album.duration_ms`, mirroring
-        # what soulsync_client's deep scan computes. Falls back to
-        # the per-track duration for callers that don't provide an
-        # album total (legacy direct-download flow).
-        album_total_duration_ms = int(
-            album_ctx.get("duration_ms") or duration_ms or 0
-        )
+        if _album_ctx_distrusted:
+            # The batch context's track count is a stranger's album's — the
+            # track's own provider album count, or 0 (unknown) for the
+            # fill-only writers + enrichment to resolve.
+            total_tracks = _own_provider_album.get("total_tracks") or 0
+        else:
+            total_tracks = album_ctx.get("total_tracks", 0) or 0
+        if _album_ctx_distrusted:
+            # The batch's summed duration is a stranger's album total — use
+            # the track's own duration (the only duration this import
+            # actually knows); never the batch's sum.
+            album_total_duration_ms = int(duration_ms or 0)
+        else:
+            # Album total duration — auto-import passes the sum of every
+            # matched track's duration via `album.duration_ms`, mirroring
+            # what soulsync_client's deep scan computes. Falls back to
+            # the per-track duration for callers that don't provide an
+            # album total (legacy direct-download flow).
+            album_total_duration_ms = int(
+                album_ctx.get("duration_ms") or duration_ms or 0
+            )
 
         track_artist = None
         track_artists_list = track_info.get("artists", []) or original_search.get("artists", [])
@@ -782,10 +873,16 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # the import carries one, and never folds one release into another.
             from core.imports.album_grouping import find_existing_soulsync_album_id
             from core.metadata.musicbrainz_tags import selected_release_id
-            mb_release_id = (selected_release_id(album_ctx) or "").strip()
+            # #1567: a release id from a distrusted batch is a stranger's
+            # edition, so the per-track album_info id groups instead; a
+            # cross-source own album id (Spotify on a Deezer download) is
+            # filed, and grouped, under its own provider.
+            mb_release_id = (selected_release_id(
+                album_info if _album_ctx_distrusted else album_ctx) or "").strip()
+            album_id_source = "spotify" if _own_album_id_cross_source else source
             existing_album = find_existing_soulsync_album_id(
                 cursor, name_key_id=album_id, artist_id=catalogue_artist,
-                album_name=album_name, album_source_id=album_source_id, source=source,
+                album_name=album_name, album_source_id=album_source_id, source=album_id_source,
                 release_id=mb_release_id)
             album_server_id = str(album_id)
             if mb_release_id:
@@ -825,7 +922,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             from core.library2.release_kind import confirm_release_kind
             confirm_release_kind(cursor, catalogue_album, _import_record_type,
                                  known=album_ctx.get('_album_type_known') is not False)
-            _fill_external_id(cursor, "lib2_albums", catalogue_album, source, album_source_id)
+            _fill_external_id(cursor, "lib2_albums", catalogue_album, album_id_source, album_source_id)
             from core.library2.reorganize_plan import record_filed_release
             record_filed_release(cursor, catalogue_album, context)
             if mb_release_id:

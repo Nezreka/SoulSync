@@ -31,6 +31,28 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 DISC_FOLDER_RE = re.compile(r'^(?:disc|cd|disk)\s*(\d+)$', re.IGNORECASE)
 
 
+def _owner_breadcrumb(file_path: str, consume: bool = False):
+    """#1504: the owning user profile an AcoustID relocate left next to a
+    staged file, or None. ``consume`` deletes the breadcrumb after reading it
+    so a later staged file with the same basename can never pick up a stale
+    owner."""
+    sidecar = file_path + ".soulsync-owner.json"
+    try:
+        if not os.path.isfile(sidecar):
+            return None
+        with open(sidecar, encoding='utf-8') as handle:
+            owner = json.load(handle).get('owner_profile_id')
+    except Exception as exc:  # noqa: BLE001 - a bad crumb means no owner
+        logger.debug("owner breadcrumb read failed: %s", exc)
+        return None
+    if consume:
+        try:
+            os.remove(sidecar)
+        except OSError as exc:
+            logger.debug("owner breadcrumb cleanup failed: %s", exc)
+    return int(owner) if owner else None
+
+
 @dataclass
 class FolderCandidate:
     path: str
@@ -747,6 +769,8 @@ class AutoImportWorker:
                     msg = self._partial_import_message(match_result, process_errors)
                     self._emit_needs_attention(
                         candidate, 'partial', identification, msg, confidence)
+                elif success:
+                    self._clear_finished_folder(candidate)
             elif confidence >= 0.7:
                 status = 'pending_review'
                 self._bump_stat('pending_review')
@@ -786,6 +810,32 @@ class AutoImportWorker:
             # No stale "processing track 3/14" because the entry is
             # gone — the UI's polling read returns an empty array.
             self._unregister_active(candidate.folder_hash)
+
+    def _gate_quality_profile(self, profile_id) -> dict:
+        """the quality profile the library pre-check judges "the library copy
+        is fine" by: the one this import will be checked against. {} falls
+        back to the global replace setting, same as the pipeline."""
+        try:
+            from core.quality.selection import load_profile_by_id
+            profile = load_profile_by_id(profile_id)
+            return profile if isinstance(profile, dict) else {}
+        except Exception:
+            return {}
+
+    def _clear_finished_folder(self, candidate: 'FolderCandidate') -> None:
+        """opt-in (Import settings): once every track in a folder was imported
+        or found already in the library, take what's left of it out of
+        staging so it doesn't sit there being listed again."""
+        if not self._config_manager or not self._config_manager.get('import.clear_finished_from_staging', False):
+            return
+        try:
+            from core.imports.file_ops import clear_finished_staging
+            staging_root = self._resolve_staging_path() or self.staging_path
+            removed = clear_finished_staging(staging_root, list(candidate.audio_files or []))
+            if removed:
+                logger.info(f"[Auto-Import] Cleared {candidate.name} from staging ({len(removed)} item(s))")
+        except Exception as e:
+            logger.warning(f"[Auto-Import] Could not clear {candidate.name} from staging: {e}")
 
     def _partial_import_message(self, match_result: Dict,
                                 process_errors: List[str]) -> str:
@@ -1235,8 +1285,14 @@ class AutoImportWorker:
         if row is None or not row['match_data']:
             return False
         try:
-            leftovers = set(json.loads(row['match_data']).get('unmatched_files') or [])
-        except (ValueError, TypeError):
+            data = json.loads(row['match_data'])
+            leftovers = set(data.get('unmatched_files') or [])
+            # files the run left alone because the library already has them
+            leftovers.update(
+                m.get('file') for m in data.get('matches') or []
+                if isinstance(m, dict) and m.get('import_status') == 'skipped_owned' and m.get('file')
+            )
+        except (ValueError, TypeError, AttributeError):
             return False
         return bool(leftovers) and current <= leftovers
 
@@ -2111,6 +2167,18 @@ class AutoImportWorker:
                     seen_genres.add(key)
                     aggregated_genres.append(g)
 
+        # existing-library pre-check, the same gate the manual import page
+        # runs: a track already in the library (exact ISRC/MBID pairing, same
+        # release, the library copy is fine) is left alone instead of being
+        # retagged and run through the pipeline. fails open on any doubt.
+        from core.imports.library_check import (
+            DECISION_SKIP_OWNED,
+            DECISION_UPGRADE,
+            check_track_library_status,
+        )
+        gate_profile = self._gate_quality_profile(auto_import_profile_id)
+        skipped = 0
+
         for index, match in enumerate(all_matches, start=1):
             track = match['track']
             file_path = match['file']
@@ -2135,6 +2203,31 @@ class AutoImportWorker:
                 match['import_status'] = 'failed'
                 match['import_error'] = error
                 continue
+
+            try:
+                gate = check_track_library_status(
+                    self.database,
+                    track=track,
+                    staging_file_path=file_path,
+                    match_type=match.get('match_type'),
+                    confidence=match.get('confidence', 0) or 0,
+                    source_hint=source,
+                    album_name=album_name,
+                    quality_profile=gate_profile,
+                    # the USER profile the file is imported for (#1504
+                    # breadcrumb), so another library's copy never skips it
+                    profile_id=_owner_breadcrumb(file_path),
+                )
+            except Exception as e:
+                logger.debug("library pre-check failed, importing anyway: %s", e)
+                gate = {'decision': 'uncertain', 'reason': 'library check failed — imported'}
+            match['import_reason'] = gate.get('reason')
+            if gate.get('decision') == DECISION_SKIP_OWNED:
+                match['import_status'] = 'skipped_owned'
+                skipped += 1
+                logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
+                continue
+            is_upgrade = gate.get('decision') == DECISION_UPGRADE
 
             try:
                 # Build context matching the manual import format.
@@ -2261,24 +2354,9 @@ class AutoImportWorker:
                 # carry a sidecar with the owning user profile. Read it into
                 # the context as profile_id (the USER profile, not the quality
                 # profile above) so the import lands in the right library.
-                try:
-                    import json as _json
-                    _sidecar = file_path + ".soulsync-owner.json"
-                    if os.path.isfile(_sidecar):
-                        with open(_sidecar, encoding='utf-8') as _sf:
-                            _crumb = _json.load(_sf)
-                        _owner = _crumb.get('owner_profile_id')
-                        if _owner:
-                            context['profile_id'] = int(_owner)
-                        # #1504: delete the breadcrumb after reading it so a
-                        # later staged file with the same basename can never
-                        # pick up a stale owner.
-                        try:
-                            os.remove(_sidecar)
-                        except OSError as exc:
-                            logger.debug("owner breadcrumb cleanup failed: %s", exc)
-                except Exception as exc:
-                    logger.debug("owner breadcrumb read failed: %s", exc)
+                _owner = _owner_breadcrumb(file_path, consume=True)
+                if _owner:
+                    context['profile_id'] = _owner
 
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)
@@ -2291,7 +2369,7 @@ class AutoImportWorker:
                     raise RuntimeError('post-processing produced no final file')
 
                 processed += 1
-                match['import_status'] = 'completed'
+                match['import_status'] = 'upgraded' if is_upgrade else 'completed'
                 # Capture where the pipeline actually landed the file (#889 same-home
                 # guard) — the pipeline writes it back into the mutable context.
                 _landed = final_path
@@ -2352,9 +2430,19 @@ class AutoImportWorker:
         except Exception as e:
             logger.debug("could not stash reid final paths: %s", e)
 
-        if all_matches and processed == len(all_matches) and not errors:
+        # what the import decided, kept on the history row so it can be read
+        # after the fact: "12 imported · 47 already in library · 2 upgraded"
+        statuses = [m.get('import_status') for m in all_matches]
+        match_result['summary'] = {
+            'imported': statuses.count('completed'),
+            'upgraded': statuses.count('upgraded'),
+            'skipped_owned': skipped,
+            'failed': statuses.count('failed'),
+        }
+
+        if all_matches and processed + skipped == len(all_matches) and not errors:
             return 'completed', []
-        return ('partial' if processed else 'failed'), errors
+        return ('partial' if processed or skipped else 'failed'), errors
 
     # ── Database ──
 
@@ -2451,7 +2539,9 @@ class AutoImportWorker:
                              'file': os.path.basename(m['file']),
                              'confidence': m['confidence'],
                              'import_status': m.get('import_status'),
+                             'import_reason': m.get('import_reason'),
                              'import_error': m.get('import_error')} for m in match_data.get('matches', [])],
+                'summary': match_data.get('summary'),
                 'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),

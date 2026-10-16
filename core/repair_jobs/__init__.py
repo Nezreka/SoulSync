@@ -42,6 +42,8 @@ JOB_DATA_BASIS: dict[str, str] = {
     'quality_info_backfill': 'lib2',
     'quality_profile_audit': 'lib2',
     'expired_download_cleaner': 'filesystem',
+    # Reads the download history and each file's own tags (upstream eeb0167f3).
+    'untagged_downloads': 'filesystem',
     'library_reorganize': 'lib2',
     'genre_cleanup': 'lib2',
     'genre_enrichment': 'lib2',
@@ -112,6 +114,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'quality_info_backfill': frozenset({'metadata'}),
     'quality_profile_audit': frozenset({'observe', 'metadata', 'wanted'}),
     'expired_download_cleaner': frozenset({'delete', 'wanted'}),
+    # Writes only the missing title/artist/album tags back from the record.
+    'untagged_downloads': frozenset({'observe', 'tags'}),
     'library_reorganize': frozenset({'observe', 'path'}),
     # Rewrites artists.genres / albums.genres to the kept (whitelisted) list.
     'genre_cleanup': frozenset({'observe', 'metadata'}),
@@ -280,6 +284,7 @@ _JOB_MODULES = [
     'core.repair_jobs.artist_nfo_backfill',
     'core.repair_jobs.album_release_year_repair',
     'core.repair_jobs.unknown_artist_recovery',
+    'core.repair_jobs.untagged_downloads',
 ]
 
 

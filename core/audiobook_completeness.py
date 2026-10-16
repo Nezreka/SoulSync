@@ -109,6 +109,92 @@ def collect_audio(folder: Path) -> List[Path]:
     )
 
 
+# Tag names that can name the narrator, by container. TCOM and TXXX:NARRATOR
+# are ID3 (plus likely case variants of the TXXX description — ID3 key
+# lookups are case-sensitive), \xa9wrt is MP4, the NARRATOR/COMPOSER keys are
+# what Vorbis comments and other rippers use, and the ----:com.apple.iTunes
+# freeform atoms are where m4b-tool, tone and Audiobookshelf write it in
+# MP4. TPE1 is the artist slot: it SHOULD be the author, but a large share
+# of rippers put the narrator there instead, so it is read as a weak hint
+# only — safe because tags can only ever confirm the edition's narration,
+# never contradict it (see narration_confidence). These are the same names
+# SoulSync writes itself when it tags a finished book
+# (core/audiobook_post_processor.py).
+_NARRATOR_TAG_NAMES = (
+    "TCOM", "TXXX:NARRATOR", "TXXX:narrator", "TXXX:Narrator", "\xa9wrt",
+    "----:com.apple.iTunes:NARRATOR", "----:com.apple.iTunes:narrator",
+    "NARRATOR", "narrator", "COMPOSER", "composer", "TPE1",
+)
+
+# How many files get their tags read when identifying the narration. The tags
+# are almost always uniform across a release; sampling keeps a 200-chapter
+# book from paying 200 tag parses for one answer.
+_TAG_SAMPLE_LIMIT = 5
+
+# The floor applied when the narration cannot be identified. A complete
+# unabridged reading of the same text varies only by speaking rate — roughly
+# 130-180 wpm, so the slowest plausible complete narration is still ~0.7x
+# the fastest — while sample packs and grossly truncated downloads sit far
+# below. 0.6 lets every plausible alternate narration through and still
+# catches the egregious cases; it is a plausibility check, not a measurement.
+UNKNOWN_NARRATION_TOLERANCE = 0.6
+
+
+def _extract_tag_strings(value: Any) -> List[str]:
+    """Every narrator-ish string a tag value carries.
+
+    ID3 frames expose ``.text`` (a list); MP4/Vorbis tags are plain dicts of
+    lists. Taking all of them matters for co-narrated books: first-only
+    would drop "Kate Reading" from ["Michael Kramer", "Kate Reading"] and
+    miss the edition's narrator. ID3v2.4 multi-value frames stringify with
+    embedded null bytes, so each item is split on ``\\x00`` too — otherwise
+    the raw bytes leak into the name and into user-facing reasons.
+    """
+    if value is None:
+        return []
+    if hasattr(value, "text"):
+        value = value.text
+    items = value if isinstance(value, (list, tuple)) else [value]
+    results: List[str] = []
+    for item in items:
+        if isinstance(item, bytes):
+            item = item.decode("utf-8", errors="replace")
+        for part in str(item or "").split("\x00"):
+            cleaned = part.strip()
+            if cleaned and cleaned not in results:
+                results.append(cleaned)
+    return results
+
+
+def narrator_from_file_tags(files: Sequence[Path]) -> List[str]:
+    """Distinct narrator names found in the embedded tags of the given files.
+
+    Reads at most ``_TAG_SAMPLE_LIMIT`` files. Finding nothing is a normal
+    outcome, not an error: most rips tag nothing at all.
+    """
+    found: List[str] = []
+    try:
+        from mutagen import File as MutagenFile
+    except Exception:                                       # noqa: BLE001
+        return found
+    for path in list(files)[:_TAG_SAMPLE_LIMIT]:
+        try:
+            audio = MutagenFile(str(path), easy=False)
+            tags = getattr(audio, "tags", None) or {}
+            get = getattr(tags, "get", None)
+            for name in _NARRATOR_TAG_NAMES:
+                try:
+                    raw = get(name) if get else None
+                except Exception:                           # noqa: BLE001
+                    raw = None
+                for text in _extract_tag_strings(raw):
+                    if text not in found:
+                        found.append(text)
+        except Exception:                                   # noqa: BLE001
+            continue
+    return found
+
+
 def assess(
     folder: str,
     expected_minutes: Optional[int],
@@ -245,6 +331,86 @@ def assess(
 
     result["complete"] = True
     result["reason"] = f"{int(measured_minutes)} of {expected} minutes present"
+    return result
+
+
+def narration_confidence(
+    source_path: str,
+    release_title: Optional[str],
+    book: Dict[str, Any],
+) -> Dict[str, Any]:
+    """How sure are we that the download is the catalogue edition's narration?
+
+    Returns ``{"confidence", "detected_narrator", "reason"}`` where confidence
+    is "match", "different" or "unknown".
+
+    The edition's runtime describes ONE reading of the book. Measuring a
+    download against it is only honest when the download is that reading: a
+    different complete narration has its own runtime, and an unidentified one
+    has no runtime we can check against. "unknown" is the common case and is
+    NOT a failure — most releases never name a narrator — it just means the
+    edition's runtime cannot be used as the gate.
+
+    The two signals are asymmetric on purpose. The release title is advertised
+    at grab time and already filtered by the search's narrator matching, so it
+    may declare "different". File tags are ripper-written and notoriously
+    sloppy — copy-pasted across releases, the author sitting in the narrator
+    slot — so they may only CONFIRM the edition's narration ("match") and
+    never contradict it. Letting a mis-tagged file declare "different" would
+    let a truncated download of the edition's own reading sail through, which
+    is worse than holding it.
+
+    The asymmetry is not a claim that "match" from tags is always trustworthy:
+    a different reading whose tags were copy-pasted from the edition's own rip
+    still reads as "match" and gets the hard gate — the original false hold
+    persists for that case. That is no worse than the old code (which held it
+    too); the asymmetry only removes the new, worse failure mode.
+    """
+    from core.audiobook_release_search import (
+        narrator_in_release,
+        narrator_verdict,
+        same_person,
+    )
+
+    wanted = [str(n) for n in (book.get("narrator_names") or []) if str(n).strip()]
+    result: Dict[str, Any] = {
+        "confidence": "unknown",
+        "detected_narrator": "",
+        "reason": "no narrator could be identified for the download",
+    }
+    if not wanted:
+        result["reason"] = "the catalogue edition names no narrator"
+        return result
+
+    # The release title first, then the folder it downloaded as: the title
+    # does not always say what the download turns out to be. Checked
+    # separately — concatenating them would let a folder name bleed into a
+    # narrator name captured from the title.
+    for text in (release_title or "", Path(source_path).name):
+        verdict = narrator_verdict(text, wanted)
+        if verdict == "match":
+            result["confidence"] = "match"
+            result["reason"] = "the download names the edition's narrator"
+            return result
+        if verdict == "mismatch":
+            named = narrator_in_release(text)
+            result["confidence"] = "different"
+            result["detected_narrator"] = named
+            result["reason"] = (
+                f"the download names {named}, not the edition's narrator"
+            )
+            return result
+
+    tagged = narrator_from_file_tags(collect_audio(Path(source_path)))
+    for name in tagged:
+        if any(same_person(name, one) for one in wanted):
+            result["confidence"] = "match"
+            result["reason"] = f"the files are tagged as narrated by {name}"
+            return result
+    # Anything else the tags say is "unknown", never "different" — see the
+    # docstring. A tag naming nobody we recognise (a cast sentinel like
+    # "Various", an author in the narrator slot, a sloppy copy-paste) is not
+    # evidence of a different reading.
     return result
 
 

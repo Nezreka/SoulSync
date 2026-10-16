@@ -158,7 +158,32 @@ function _maProfile(): { id: number; name: string; color: string; avatar: string
 
 // ── open / close ────────────────────────────────────────────────────────────
 
+/**
+ * Close the mobile nav drawer, if it is open (Oct 13 fold, M-04).
+ *
+ * The My Account button lives INSIDE the sidebar drawer, so the natural
+ * phone flow is drawer-first: drawer open → tap My Account → this modal.
+ * The drawer is z-10001 and this overlay z-10000, so without this the modal
+ * opened UNDER the still-open drawer — and the hamburger that closes the
+ * drawer is hidden while the modal is open, trapping the user. This mirrors
+ * init.js's closeMobileNav teardown exactly (that function is scoped inside
+ * initializeMobileNavigation and is not reachable from here).
+ */
+function _maCloseMobileNav(): void {
+  const sidebar = document.querySelector('.sidebar');
+  const hamburger = document.getElementById('hamburger-btn');
+  const overlay = document.getElementById('mobile-overlay');
+  if (!sidebar?.classList.contains('mobile-open')) return;
+  sidebar.classList.remove('mobile-open');
+  hamburger?.classList.remove('active');
+  hamburger?.setAttribute('aria-expanded', 'false');
+  hamburger?.setAttribute('aria-label', 'Open navigation');
+  overlay?.classList.remove('active');
+  document.body.classList.remove('mobile-nav-open');
+}
+
 export function openMyAccountsModal(): void {
+  _maCloseMobileNav();
   let overlay = document.getElementById('my-accounts-overlay');
   if (!overlay) {
     overlay = document.createElement('div');

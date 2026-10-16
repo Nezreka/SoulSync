@@ -292,6 +292,12 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_track ON lib2_track_files(track_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_hash ON lib2_track_files(content_hash)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_path ON lib2_track_files(path)",
+    # upstream 0ca4b0dc5: lookups ask `LOWER(title) = LOWER(?)` (playable check,
+    # exports, stats, history importers); LOWER() on the column skips a plain
+    # index, so each one read the whole table. Same rows match.
+    "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_title_lower ON lib2_tracks(LOWER(title))",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_title_lower ON lib2_albums(LOWER(title))",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name_lower ON lib2_artists(LOWER(name))",
     "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_status ON lib2_mirror_outbox(status)",
 )
 
@@ -1133,6 +1139,12 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_lib2_artists_ext_{service} "
                 f"ON lib2_artists({external_id_sql('external_ids', service)})")
+        # mirrored-playlist ownership matches a row's source id against the
+        # provider the playlist came from (upstream 4c738a0c0)
+        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes'):
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_lib2_tracks_ext_{service} "
+                f"ON lib2_tracks({external_id_sql('external_ids', service)})")
     except Exception as e:  # noqa: BLE001
         logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER

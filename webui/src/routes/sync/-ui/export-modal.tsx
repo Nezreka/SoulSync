@@ -128,10 +128,10 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
       }}
     >
       <div style={DIALOG}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
           Export playlist
         </div>
-        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: 'var(--white-a55)', marginBottom: 18 }}>
           {name} → ListenBrainz
         </div>
         {EXPORT_DESTINATIONS.map((dest, index) => {
@@ -152,11 +152,9 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
                 borderRadius: 12,
                 border: dest.primary
                   ? '1px solid rgba(var(--accent-rgb),0.35)'
-                  : '1px solid rgba(255,255,255,0.1)',
-                background: dest.primary
-                  ? 'rgba(var(--accent-rgb),0.12)'
-                  : 'rgba(255,255,255,0.04)',
-                color: '#fff',
+                  : '1px solid var(--white-a10)',
+                background: dest.primary ? 'rgba(var(--accent-rgb),0.12)' : 'var(--white-a04)',
+                color: 'var(--text-1)',
                 cursor: 'pointer',
                 opacity: gated ? 0.5 : undefined,
               }}
@@ -166,10 +164,10 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
               }}
             >
               <div style={{ fontWeight: 600 }}>{dest.title}</div>
-              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+              <div style={{ fontSize: 12, color: 'var(--white-a55)' }}>
                 {gated ? (
                   <>
-                    <span style={{ color: '#f59e0b' }}>Not connected</span> — set up{' '}
+                    <span style={{ color: 'var(--warning)' }}>Not connected</span> — set up{' '}
                     {exportServiceLabel(dest.mode)} in Settings → Connections first.
                   </>
                 ) : (
@@ -179,7 +177,7 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
             </button>
           );
         })}
-        <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,0.4)', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11.5, color: 'var(--white-a40)', lineHeight: 1.5 }}>
           Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID
           for those). Tracks without a match can&apos;t be included — you&apos;ll see how many made
           it. Renaming/re-syncing can reset play counts on the destination.
@@ -191,7 +189,7 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
             gap: 8,
             marginTop: 12,
             fontSize: 12,
-            color: 'rgba(255,255,255,0.6)',
+            color: 'var(--white-a60)',
             cursor: 'pointer',
           }}
         >
@@ -203,8 +201,8 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
             style={{ marginTop: 2, flexShrink: 0, accentColor: 'rgb(var(--accent-rgb))' }}
           />
           <span>
-            <b style={{ color: 'rgba(255,255,255,0.75)' }}>Match missing tracks</b> (Spotify/Deezer)
-            — search the service for tracks with no known ID. Slower, and only confident matches are
+            <b style={{ color: 'var(--white-a75)' }}>Match missing tracks</b> (Spotify/Deezer) —
+            search the service for tracks with no known ID. Slower, and only confident matches are
             added.
           </span>
         </label>
@@ -215,7 +213,7 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
             style={{
               background: 'none',
               border: 'none',
-              color: 'rgba(255,255,255,0.5)',
+              color: 'var(--white-a50)',
               cursor: 'pointer',
               fontSize: 13,
             }}

@@ -93,12 +93,18 @@ def _parse_match(raw: Any) -> Optional[Dict[str, Any]]:
             'file': os.path.basename(file_path) if file_path else '',
             'file_path': file_path,
             'confidence': float(m.get('confidence') or 0),
+            # what the import did with it, once it ran
+            'import_status': m.get('import_status') or None,
+            'import_reason': m.get('import_reason') or None,
+            'import_error': m.get('import_error') or None,
         })
+    summary = data.get('summary') if isinstance(data.get('summary'), dict) else None
     return {
         'matched_count': int(data.get('matched_count') or len([m for m in matches if m['file']])),
         'total_tracks': int(data.get('total_tracks') or 0),
         'matches': matches,
         'source': data.get('source') or None,
+        'summary': summary,
     }
 
 
@@ -176,7 +182,13 @@ def build_inbox(
             True,
         )
         match = _parse_match(hist.get('match_data')) if hist else None
-        rel = os.path.relpath(cand.path, staging_root) if staging_root else cand.path
+        try:
+            rel = os.path.relpath(cand.path, staging_root) if staging_root else cand.path
+        except ValueError:
+            # Windows: the candidate's path is on another drive/share than
+            # the staging root (a history path from before the folder moved
+            # mounts) — relpath has no answer there; the full path stands.
+            rel = cand.path
         if rel == '.':
             rel = ''
         rows.append({

@@ -570,3 +570,47 @@ def test_web_server_registers_the_routes():
     assert "@bp.route('/api/server-activity/stop', methods=['POST'])" in ws
     assert "@bp.route('/api/server-activity/stats')" in ws
     assert "is_admin" in ws.split("stop_server_activity_stream")[1][:400]   # admin-gated
+
+
+def test_a_working_connection_is_kept_past_a_minute(monkeypatch):
+    """the connection used to be rebuilt every 60 s, a plex round trip for
+    nothing."""
+    import core.server_activity as sa
+    import plexapi.server
+    sa.invalidate_plex_server_cache()
+    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
+    clock = [1000.0]
+    monkeypatch.setattr(sa.time, "time", lambda: clock[0])
+    built = []
+    monkeypatch.setattr(plexapi.server, "PlexServer", lambda *a, **k: built.append(1) or object())
+    try:
+        first = sa._plex_server()
+        for _ in range(30):
+            clock[0] += 61
+            assert sa._plex_server() is first
+        assert len(built) == 1
+    finally:
+        sa.invalidate_plex_server_cache()
+
+
+def test_a_failed_connection_backs_off_then_reconnects(monkeypatch):
+    import core.server_activity as sa
+    import plexapi.server
+    sa.invalidate_plex_server_cache()
+    monkeypatch.setattr(sa, "_plex_config", lambda db=None: {"base_url": "http://192.0.2.1:32400", "token": "abcdef123456"})
+    clock = [1000.0]
+    monkeypatch.setattr(sa.time, "time", lambda: clock[0])
+    built = []
+    monkeypatch.setattr(plexapi.server, "PlexServer", lambda *a, **k: built.append(object()) or built[-1])
+    try:
+        srv = sa._plex_server()
+        sa._mark_plex_unreachable(srv)
+        clock[0] += 30
+        assert sa._plex_server() is None          # backing off
+        assert len(built) == 1
+        clock[0] += 31
+        again = sa._plex_server()                 # past the minute: reconnect
+        assert again is not None and again is not srv
+        assert len(built) == 2
+    finally:
+        sa.invalidate_plex_server_cache()

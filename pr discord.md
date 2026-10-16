@@ -1,17 +1,15 @@
-**SoulSync 3.5.3 is out** :musical_note:
+**SoulSync 3.5.6 is out** :musical_note:
 
-My Playlists: make your own playlists and add any track from anywhere in the app, search, library, discover, the now playing view. They identify, sync to your server and download missing like mirrored playlists, and adding a song that's already there asks first, even when it's a remaster or radio edit.
+A quick follow-up to 3.5.5.
 
-The Clients tab can match & import downloads SoulSync didn't start, for music, audiobooks and video, including Soulseek folders. Cards got a redesign with one clear action each.
+Playlist sync stops grabbing the wrong song. The album fallback now needs the artist to match, so a same-titled song on a same-named album can't stand in for the real one. One song your server no longer has also stops blocking the whole playlist: it's skipped and everything else gets written (thanks @kevin2xk).
 
-Audiobooks: choose allowed formats and one file vs several, a failed download tries the next release right away, and Soulseek books survive slskd clearing finished chapters (thanks @curiousmoose24). You can also type your own release search, and the series strip shows what you own.
+Library reorganize resumes where it stopped instead of starting from the first album every run, and a stopped run keeps the moves it already planned (thanks @QT3496).
 
-BPM Backfill now fills BPM across the whole library, from Deezer or local analysis, and downloads get Deezer's BPM and ISRC tags. Sample Studio analyzes MP3 and M4A files without ffmpeg on PATH and lists your tracks before you search (thanks Specialmed).
+Auto-import runs the same library check as the import page, so staging drops skip what you already own. Each import in history says what it did, and a new opt-in Clear finished folders switch tidies staging once everything is in.
 
-Tidal playlists load every track: SoulSync asked for the US catalogue, so non-US accounts lost tracks. Duplicates and videos are counted too (#1613).
+The album modal shows found and missing tracks as soon as it opens.
 
-Deezer matching picks the right album for soundtracks and compilations and reaches the original song from more searches (thanks @cremonies). Deezer downloads keep their album artist and genre.
-
-Also: enrichment workers stop staying paused, a dead HiFi pool stops slowing every track, re-tag and release year repairs stop picking the wrong track or album, video episodes import like Sonarr judges them, API key fixes (thanks @splitsec2), and accent colours that never showed now do (thanks @Thundernerd).
+Run Now on the Update Discovery automation always refreshes instead of waiting out the 6 hour cooldown (thanks @mikedaf). YouTube imports onto NFS shares stop failing on file metadata the share refuses (thanks @hilburn).
 
 Full notes on GitHub.

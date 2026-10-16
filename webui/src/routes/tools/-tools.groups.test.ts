@@ -288,6 +288,7 @@ describe('the blurbs', () => {
     'missing_lyrics',
     'missing_replaygain',
     'replaygain_retag',
+    'untagged_download',
     'empty_folder',
     'expired_download',
     'metadata_gap',

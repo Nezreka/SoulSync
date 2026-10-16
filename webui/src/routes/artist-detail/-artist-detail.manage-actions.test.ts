@@ -186,6 +186,19 @@ describe('art pickers', () => {
     ).toBe('Artist photo updated (also updated: server, artist.jpg)');
   });
 
+  it('the artist apply toast says when artist.jpg was skipped', () => {
+    expect(
+      artistArtAppliedMessage({
+        success: true,
+        server_updated: true,
+        disk_skipped:
+          'artist.jpg not written: no folder named after this artist holds their tracks',
+      }),
+    ).toBe(
+      'Artist photo updated (also updated: server). artist.jpg not written: no folder named after this artist holds their tracks',
+    );
+  });
+
   it('the album apply toast does the same for the poster and cover.jpg', () => {
     expect(albumArtAppliedMessage({ success: true })).toBe('Cover art updated');
     expect(albumArtAppliedMessage({ success: true, cover_written: true })).toBe(

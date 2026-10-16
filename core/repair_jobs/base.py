@@ -517,3 +517,35 @@ class RepairJob(ABC):
     def get_config_key(self, setting: str) -> str:
         """Get the full config key path for a job setting."""
         return f"repair.jobs.{self.job_id}.{setting}"
+
+    # -- resume after a stop (upstream #1709/#1716) --------------------------
+    # A long library-wide pass saves the last item it finished under its own
+    # config key, resumes right after it, and clears it at the end. ``scan_key``
+    # names what the pass ran under (mode, naming...); a different one starts
+    # over, and so does a checkpoint item that is gone.
+
+    def resume_index(self, context: JobContext, ids: List[Any], scan_key: str = '') -> int:
+        try:
+            saved = (context.config_manager.get(self.get_config_key('scan_checkpoint'), None)
+                     if context.config_manager else None)
+        except Exception as exc:  # noqa: BLE001 - a broken store starts at the top
+            logger.warning("[%s] could not read checkpoint: %s", self.job_id, exc)
+            return 0
+        if not isinstance(saved, dict) or saved.get('scan') != scan_key:
+            return 0
+        keys = [str(i) for i in ids]
+        if str(saved.get('id')) in keys:
+            index = keys.index(str(saved.get('id'))) + 1
+            return index if index < len(keys) else 0
+        return 0
+
+    def save_checkpoint(self, context: JobContext, last_id: Any, scan_key: str = '') -> None:
+        """``last_id=None`` clears it: the pass reached the end."""
+        if not context.config_manager or not hasattr(context.config_manager, 'set'):
+            return
+        try:
+            context.config_manager.set(
+                self.get_config_key('scan_checkpoint'),
+                None if last_id is None else {'id': last_id, 'scan': scan_key})
+        except Exception as exc:  # noqa: BLE001 - losing it must not fail the scan
+            logger.warning("[%s] could not save checkpoint: %s", self.job_id, exc)

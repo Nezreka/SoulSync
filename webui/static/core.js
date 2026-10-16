@@ -810,6 +810,8 @@ function refreshMusicRequestsBadge() {
             const n = admin ? (d.pending || 0) : (d.updates || 0);
             badge.textContent = n > 99 ? '99+' : String(n);
             badge.classList.toggle('hidden', !n);
+            // nothing waiting on anyone = no button
+            if (nav) nav.classList.toggle('nav-idle', !(d.pending || d.updates));
         })
         .catch(() => { /* badge is best-effort */ });
 }

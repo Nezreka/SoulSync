@@ -67,6 +67,11 @@ export interface MirroredPlaylistRow {
    * It belongs with the playlist, not with its cadence.
    */
   organize_by_playlist?: boolean;
+  /**
+   * this playlist's own sync mode (#1704). null = the global Settings mode,
+   * so an append-only mirror can live next to a Daily Mix that reconciles.
+   */
+  sync_mode?: 'replace' | 'append' | 'reconcile' | null;
   updated_at?: string;
   mirrored_at?: string;
   pipeline_state?: {
@@ -137,6 +142,8 @@ export interface MirroredTrack {
   album_name?: string;
   duration_ms?: number;
   image_url?: string;
+  /** when it joined the playlist, for sort by date added */
+  added_at?: string | null;
 }
 
 /** Hero artwork: playlist cover → the first track that has art → none (1092). */

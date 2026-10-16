@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useAccessibleModal } from '@/components/dialog';
-import { CompactPlaylist } from '@/routes/discover/-ui/mix-modal';
+import { compactRows, mixCoverArt, mixMetaLine } from '@/routes/discover/-discover.mixes';
+import { CompactPlaylist, MixModalHeader, TrackListHead } from '@/routes/discover/-ui/mix-modal';
 import {
   fetchDeezerLinkPlaylist,
   fetchSpotifyPlaylistTracks,
@@ -149,11 +150,13 @@ export function PlaylistPreviewModal({
     [tracks, onPlayTrack],
   );
 
+  const rows = tracks ? compactRows(tracks) : [];
   const trackCountLabel = tracks
-    ? `${tracks.length} tracks`
+    ? mixMetaLine(rows)
     : playlist.track_count
       ? `${playlist.track_count} tracks`
       : '';
+  const source = playlist.source ? playlist.source.toUpperCase() : 'DEEZER';
 
   return (
     <div className="modal-overlay" id="mix-modal-overlay" onClick={onBackdropClick}>
@@ -164,20 +167,19 @@ export function PlaylistPreviewModal({
         aria-modal="true"
         aria-labelledby={titleId}
       >
-        <div className="mix-modal-header">
-          <div>
-            <div className="mix-modal-subtitle">
-              Playlist · {playlist.source ? playlist.source.toUpperCase() : 'DEEZER'}
-            </div>
-            <h2 className="mix-modal-title" id={titleId}>
-              {playlist.name}
-            </h2>
-            <div className="mix-modal-meta">
+        <MixModalHeader
+          titleId={titleId}
+          eyebrow={`Playlist · ${source}`}
+          title={playlist.name}
+          meta={
+            <>
               {playlist.creator ? `by ${playlist.creator} · ` : ''}
               {trackCountLabel}
-            </div>
-          </div>
-          <div className="mix-modal-actions">
+            </>
+          }
+          covers={playlist.image_url ? [playlist.image_url] : mixCoverArt(rows)}
+          onClose={onClose}
+          actions={
             <button
               type="button"
               className="btn btn--sm btn--primary"
@@ -187,11 +189,10 @@ export function PlaylistPreviewModal({
             >
               {mirroring ? 'Mirroring…' : mirrored ? 'Added ✓' : '+ Add to Playlists'}
             </button>
-            <button type="button" className="mix-modal-close" aria-label="Close" onClick={onClose}>
-              ✕
-            </button>
-          </div>
-        </div>
+          }
+        />
+
+        {rows.length > 0 && !loading && !error ? <TrackListHead /> : null}
 
         <div className="mix-modal-body" id="mix-modal-tracks">
           {loading ? (

@@ -210,6 +210,40 @@ def test_append_keeps_existing_tracks_and_deduplicates_recovered_id(monkeypatch)
     assert not writes
 
 
+# #1715: one song navidrome no longer has (deleted from review) blocked every
+# other track on the playlist, sync after sync.
+def test_a_dead_id_is_skipped_not_fatal():
+    skipped = []
+    songs = {'live': {'id': 'live', 'title': 'Song', 'path': '/live'}}
+    result = resolve_tracks([SimpleNamespace(ratingKey='live'), SimpleNamespace(ratingKey='gone')],
+                            songs, _old_db(), skipped)
+    assert [t.ratingKey for t in result] == ['live']
+    assert skipped == ['gone']
+
+
+def test_append_writes_the_good_tracks_past_a_dead_one(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['extra']
+    assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert current == ['extra', 'new']
+    assert len(writes) == 1
+
+
+def test_reconcile_with_a_dead_id_never_drops_what_is_there(monkeypatch):
+    # 'extra' could be the dead song under a new key, so nothing gets removed
+    client, current, writes = _server(monkeypatch)
+    assert not client.reconcile_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert not writes
+    assert current == ['new', 'extra']
+
+
+def test_reconcile_with_a_dead_id_goes_ahead_when_nothing_would_drop(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['new']
+    assert client.reconcile_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert current == ['new']
+
+
 def test_no_matches_cannot_empty_a_playlist(monkeypatch):
     client, current, writes = _server(monkeypatch)
     assert not client.reconcile_playlist('P', [])

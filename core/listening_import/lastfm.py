@@ -476,6 +476,9 @@ def normalize_lastfm_scrobble(track: Dict[str, Any]) -> Optional[Dict[str, Any]]
         "duration_ms": _int(track.get("duration"), 0),
         "server_source": SOURCE,
         "lib2_track_id": None,
+        # an attested Last.fm play: may be forwarded to ListenBrainz, just
+        # never back to Last.fm (dedup marks scrobbled_lastfm on insert).
+        "scrobble_eligible": 1,
     }
 
 

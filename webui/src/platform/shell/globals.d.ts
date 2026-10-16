@@ -229,6 +229,8 @@ declare global {
     _showMobileTrackActions?: (track: unknown, album: unknown) => void;
     /** media-player.js — the play queue. */
     addToQueue?: (payload: unknown) => void;
+    /** several at once, one toast; starts playing if nothing is. */
+    addTracksToQueue?: (payloads: unknown[]) => void;
     playNext?: (payload: unknown) => void;
     /**
      * shared-helpers.js — the download-missing modal. Called directly rather
@@ -660,6 +662,11 @@ declare global {
     SoulSyncVideo?: {
       openDetail?: (args: { kind: string; id: number | string; source?: string }) => void;
     };
+    /** video-side.js: flip the shell chrome music <-> video (does NOT navigate). */
+    _switchAppSide?: (side: 'music' | 'video', opts?: { force?: boolean }) => void;
+    /** unified downloads page: true while any video download is active.
+     *  video-wishlist.js's badge poll reads it (typeof-guarded). */
+    _vdpgAnyActive?: () => boolean;
     SoulSyncIssueDomain?: IssueDomainBridge;
     SoulSyncWorkflowActions?: {
       openDownloadMissingAlbum: (input: DownloadMissingAlbumWorkflowInput) => void | Promise<void>;
@@ -696,6 +703,8 @@ declare global {
         pageId: ShellPageId,
         options?: {
           replace?: boolean;
+          /** query params appended to the manifest path (e.g. ?media=video). */
+          query?: Record<string, string | number | boolean | null | undefined>;
           artistId?: string | number;
           artistSource?: string | null;
           artistName?: string;

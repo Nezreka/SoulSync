@@ -884,7 +884,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
               );
             })}
           </div>
-          <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: '11px', padding: '4px 0' }}>
+          <div style={{ color: 'var(--white-a30)', fontSize: '11px', padding: '4px 0' }}>
             Play to compare, click a version to keep it, or use &quot;Keep Best&quot; for
             auto-selection. Keep Best keeps a copy that&apos;s in a playlist.
           </div>
@@ -1073,6 +1073,15 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       pushIf(rows, d.artist, 'Artist');
       return <DetailGrid rows={rows} />;
 
+    case 'untagged_download':
+      pushIf(rows, d.track_title, 'Track');
+      pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.album_title, 'Album');
+      if (list<string>(d.missing).length)
+        rows.push(['Missing tags', list<string>(d.missing).join(', ')]);
+      pushIf(rows, d.file_path, 'File', 'path');
+      return <DetailGrid rows={rows} />;
+
     case 'empty_folder': {
       pushIf(rows, d.folder_path, 'Folder', 'path');
       const junk = list<string>(d.junk_files);
@@ -1185,7 +1194,7 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
           {generic.length ? (
             <DetailGrid rows={generic} />
           ) : (
-            <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '12px' }}>
+            <span style={{ color: 'var(--white-a30)', fontSize: '12px' }}>
               No additional details available
             </span>
           )}

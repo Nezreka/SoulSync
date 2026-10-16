@@ -202,6 +202,16 @@ class DatabaseUpdateWorker:
                 self.post_scan_hook(self)
             except Exception as e:
                 logger.warning(f"post-scan hook failed (non-fatal): {e}")
+        # a scan reshapes the library, so the planner's picture of it goes
+        # stale. it only ever got refreshed after a one-time backfill, so new
+        # indexes went unanalyzed and every title search walked the whole
+        # tracks table. sampled, ~80 ms on 300k tracks.
+        try:
+            db = getattr(self, 'database', None)
+            if db is not None and hasattr(db, 'refresh_planner_stats'):
+                db.refresh_planner_stats()
+        except Exception as e:
+            logger.warning(f"planner stats after scan failed (non-fatal): {e}")
         self._emit_signal('finished', *args)
 
 

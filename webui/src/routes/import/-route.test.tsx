@@ -328,6 +328,51 @@ describe('import route', () => {
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('import');
   });
 
+  it('a finished import says what it did with each track', async () => {
+    const outcome = (
+      track_name: string,
+      track_number: number,
+      import_status: 'completed' | 'skipped_owned',
+      import_reason: string,
+    ) => ({
+      track_name,
+      track_number,
+      file: `${track_number}.flac`,
+      file_path: `/music/Staging/Album/${track_number}.flac`,
+      confidence: 1,
+      import_status,
+      import_reason,
+    });
+    inbox = inboxPayload([
+      albumItem({
+        status: 'imported',
+        in_staging: false,
+        processed_at: '2026-10-15T08:00:00Z',
+        match: {
+          matched_count: 2,
+          total_tracks: 2,
+          matches: [
+            outcome('Hell Above', 2, 'skipped_owned', 'already in the library, copy is fine'),
+            outcome('King For A Day', 4, 'skipped_owned', 'already in the library, copy is fine'),
+          ],
+          summary: { imported: 0, upgraded: 0, skipped_owned: 2, failed: 0 },
+        },
+      }),
+    ]);
+    renderImportRoute(['/import?filter=history']);
+
+    const row = (await screen.findAllByTestId('import-inbox-row'))[0];
+    // nothing was imported, so the pill doesn't claim it was
+    expect(within(row).getByText('Already in library')).toBeInTheDocument();
+    expect(within(row).getByText('2 already in library')).toBeInTheDocument();
+    expect(within(row).queryByTestId('import-outcome')).toBeNull();
+
+    fireEvent.click(within(row).getByRole('button', { name: 'What happened' }));
+    const detail = within(row).getByTestId('import-outcome');
+    expect(within(detail).getByText('Hell Above')).toBeInTheDocument();
+    expect(within(detail).getAllByText('already in the library, copy is fine')).toHaveLength(2);
+  });
+
   it('singles lead with the title tag, not the filename (#1289)', async () => {
     renderImportRoute(['/import?filter=all']);
     // The single has title tag 'Loose Song' on files[0]; the backend falls back
@@ -383,6 +428,197 @@ describe('import route', () => {
     renderImportRoute();
     expect(await screen.findByText('Reading the import folder…')).toBeInTheDocument();
     expect(screen.getByText('120 of 6000 files')).toBeInTheDocument();
+    // #1671: a folder mid-scan is not an unconfigured folder
+    expect(screen.queryByText('Import folder not configured')).toBeNull();
+  });
+
+  it('keeps the path, the worker switch and history visible while scanning (#1671)', async () => {
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 181, total: 252 },
+      items: [
+        albumItem({
+          key: 'hash-3',
+          name: 'Old Album',
+          in_staging: false,
+          files: [],
+          status: 'imported',
+          history_id: 2,
+        }),
+      ],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'processing',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    renderImportRoute(['/import?filter=all']);
+    expect(await screen.findByText('Old Album')).toBeInTheDocument();
+    expect(screen.getByText('/music/Staging')).toBeInTheDocument();
+    expect(screen.queryByText('Import folder not configured')).toBeNull();
+    expect(screen.getByText(/181 of 252 files/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Auto-import')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /History/ })).toHaveTextContent('1');
+  });
+
+  it('a re-scan keeps the last complete list under the progress banner (#1671)', async () => {
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 5, total: 10 },
+      items: [],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/5 of 10 files/)).toBeInTheDocument();
+    expect(screen.getByText('Album A')).toBeInTheDocument();
+    expect(screen.getByText('/music/Staging')).toBeInTheDocument();
+    expect(screen.queryByText('Import folder not configured')).toBeNull();
+  });
+
+  it('a re-scan merges fresh rows over the snapshot instead of freezing it (#1671)', async () => {
+    const { queryClient } = renderImportRoute(['/import?filter=all']);
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 5, total: 10 },
+      items: [
+        albumItem({
+          key: 'hash-9',
+          name: 'Just Finished',
+          in_staging: false,
+          files: [],
+          status: 'imported',
+          history_id: 9,
+        }),
+      ],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    // finished during the scan: the fresh history row shows…
+    expect(await screen.findByText('Just Finished')).toBeInTheDocument();
+    // …and the staged row the scan cannot see yet survives from the snapshot
+    expect(screen.getByText('Album A')).toBeInTheDocument();
+  });
+
+  it('the scan merge never shows one folder twice when its hash moved (#1671)', async () => {
+    const { queryClient } = renderImportRoute(['/import?filter=all']);
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    // the folder's files changed, so the fresh scanning row carries the
+    // same history row under a NEW key; identity is history_id/path too
+    inbox = {
+      success: true,
+      scanning: true,
+      staging_path: '/music/Staging',
+      progress: { scanned: 5, total: 10 },
+      items: [albumItem({ key: 'hash-1-rehashed' })],
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'scanning',
+        last_scan_time: null,
+        stats: {},
+      },
+    };
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText(/5 of 10 files/)).toBeInTheDocument();
+    expect(screen.getAllByTestId('import-inbox-row')).toHaveLength(3);
+    expect(screen.getAllByText('Album A')).toHaveLength(1);
+  });
+
+  it('announces import complete when the worker empties the folder (#1671)', async () => {
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    expect(window.showToast).not.toHaveBeenCalled();
+    inbox = inboxPayload([], {
+      worker: {
+        available: true,
+        running: true,
+        paused: false,
+        current_status: 'idle',
+        last_scan_time: new Date().toISOString(),
+        stats: { auto_processed: 2 },
+      },
+    });
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Import complete — nothing left to import',
+        'success',
+      ),
+    );
+  });
+
+  it('does not announce import complete when the files just vanished (#1671)', async () => {
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    // the folder empties but the worker imported nothing (files deleted or
+    // moved by hand): no success claim the page cannot back up
+    inbox = inboxPayload([]);
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText('Nothing to import')).toBeInTheDocument();
+    expect(window.showToast).not.toHaveBeenCalled();
+  });
+
+  it('a worker restart cannot poison the completion baseline (#1671)', async () => {
+    const workerWith = (autoProcessed: number) => ({
+      available: true,
+      running: true,
+      paused: false,
+      current_status: 'idle' as const,
+      last_scan_time: new Date().toISOString(),
+      stats: { auto_processed: autoProcessed },
+    });
+    // the batch is first seen when the worker's counter is already at 100
+    inbox = inboxPayload([albumItem()], { worker: workerWith(100) });
+    const { queryClient } = renderImportRoute();
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    // the worker restarts (counter resets) and imports the batch: the count
+    // can never pass the stale baseline, so no announcement — but the arm
+    // must clear rather than poison every later batch
+    inbox = inboxPayload([albumItem()], { worker: workerWith(0) });
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    inbox = inboxPayload([], { worker: workerWith(1) });
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText('Nothing to import')).toBeInTheDocument();
+    expect(window.showToast).not.toHaveBeenCalled();
+    // the next batch arms against the fresh counter and announces normally
+    inbox = inboxPayload([albumItem()], { worker: workerWith(1) });
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    expect(await screen.findByText('Album A')).toBeInTheDocument();
+    inbox = inboxPayload([], { worker: workerWith(2) });
+    await queryClient.invalidateQueries({ queryKey: ['import', 'inbox'] });
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        'Import complete — nothing left to import',
+        'success',
+      ),
+    );
   });
 
   it('the filter lives in the url', async () => {

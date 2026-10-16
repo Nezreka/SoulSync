@@ -69,6 +69,21 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 3. Trigger a manual **Scan Library** from the **Tools page → Media Server Scan** card (Plex only).
 4. For Navidrome, changes are auto-detected — no scan needed.
 
+## PWA install not offered / Spotify needs HTTPS
+
+Both are browser/platform requirements, not SoulSync bugs:
+
+- **PWA install**: Chrome (and all browsers) only offer "Install app" over **HTTPS** (or localhost). If you access SoulSync via \`http://192.168.x.x:8008\`, the install prompt won't appear. SoulSync ships a valid manifest and service worker — the only blocker is the protocol.
+- **Spotify OAuth**: Spotify's developer dashboard now requires **HTTPS** redirect URIs. A local \`http://\` address won't be accepted.
+
+**Workaround**: Serve SoulSync over HTTPS with a reverse proxy. Tailscale works well:
+
+\`\`\`bash
+sudo docker exec tailscale tailscale serve --bg --https=443 http://127.0.0.1:8008/
+\`\`\`
+
+This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies both the PWA and Spotify requirements. You'll need to be on your tailnet (or have the tunnel active) to reach it.
+
 ## Metadata looks wrong
 
 - Open the artist in the [Enhanced Library Manager](#lib-enhanced) and check the service match chips — a wrong Spotify or MusicBrainz link poisons everything downstream.
@@ -80,6 +95,12 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
 2. Click **N runs** on the automation card to open its run-history modal.
 3. For signal chains, check that the upstream automation actually fired its signal — and remember the 10-second cooldown and 5-level depth limit.
 4. Look in \`app.log\` for the automation name around the expected fire time.
+
+## Spotify: redirect URI rejected (INVALID_CLIENT / mismatch)
+
+1. The **Redirect URI** in SoulSync Settings and the one in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) must match **exactly** — scheme, host, port, path, and trailing slash.
+2. Spotify only allows plain \`http://\` for loopback (\`http://127.0.0.1:8888/callback\` — \`localhost\` is rejected). Any other host — a NAS, a remote server, or Docker reached by hostname or LAN IP — must be **HTTPS**, served through a reverse proxy or Tailscale. See [Connecting services](#gs-connecting).
+3. Save the dashboard change, then click **Authenticate** in SoulSync again.
 `
         },
         {

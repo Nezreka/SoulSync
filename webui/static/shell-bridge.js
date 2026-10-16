@@ -420,7 +420,7 @@ window.addEventListener('popstate', syncActivePageFromLocation);
 document.addEventListener('click', _handleShellLinkClick, true);
 
 // Fire nav on pointerdown (fires on press, 100-200ms before click) for instant sidebar response.
-// navigateToPage's early-return guard (pageId === currentPage) prevents double-navigation on click.
+// The click-phase call is absorbed by navigateToPage's echo token, so this never double-navigates.
 //
 // MOUSE AND PEN ONLY. With a mouse, pressing is unambiguous: you don't scroll
 // by pressing, so acting on pointerdown is pure latency win. On touch it is the

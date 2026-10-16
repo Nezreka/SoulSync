@@ -28,11 +28,13 @@ import { useCallback, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
+import { addRecentPlayToPlaylist, queueRecentPlay } from '../-dash.card-actions';
 import { openArtistFromRail } from '../-dash.content';
 import { playsCaption, toRecentPlays } from '../-dash.listening';
 import { useLiveRefresh } from '../-dash.live-refresh';
 import { playTrackByMetadata } from '../../../features/playback/play-track';
 import { getShellBridge } from '../../../platform/shell/bridge';
+import { RailCardActions } from './rail-card-actions';
 
 // 25, not 12: this is the dashboard's whole view of what you have been
 // listening to, and a dozen rows runs out inside one album.
@@ -101,6 +103,14 @@ export function ListeningHistoryBand() {
             </div>
             <div className="ya-card-gradient" />
             {playsCaption(play) && <div className="dash-rail-caption">{playsCaption(play)}</div>}
+            <RailCardActions
+              label={play.title}
+              onPlay={() =>
+                playTrackByMetadata(getShellBridge(), play.title, play.artist, play.album)
+              }
+              onQueue={() => queueRecentPlay(play)}
+              onAddToPlaylist={(anchor) => addRecentPlayToPlaylist(play, anchor)}
+            />
             <div className="ya-card-info">
               <div className="ya-card-name">{play.title}</div>
               {play.artist ? (

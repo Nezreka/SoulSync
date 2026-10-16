@@ -416,6 +416,7 @@ def track_already_owned(
     server_source: Optional[str],
     confidence_threshold: float = 0.7,
     candidate_tracks: Optional[List[Any]] = None,
+    candidate_tracks_exhaustive: bool = False,
 ) -> bool:
     """Return True if the track is already in the user's library.
 
@@ -438,11 +439,13 @@ def track_already_owned(
     ``candidate_tracks`` (when not None) is the artist's library tracks,
     pre-fetched ONCE by the caller, so the check scores in-memory instead
     of firing per-track fuzzy SQL scans against the whole library. Pass an
-    empty list for an artist the user owns nothing of — it still routes
-    through the fast in-memory path (scores against zero candidates →
-    instant "not owned") rather than the slow per-track search. None
-    preserves the original per-track-SQL behaviour for callers that don't
-    pre-fetch.
+    empty list for an artist the user owns nothing of — WITH
+    ``candidate_tracks_exhaustive=True`` it still routes through the fast
+    in-memory path (scores against zero candidates → instant "not owned")
+    rather than the slow per-track search. A bare ``[]`` without the flag
+    means "no information" and falls through to the legacy SQL path
+    (#1621). None preserves the original per-track-SQL behaviour for
+    callers that don't pre-fetch.
 
     Returns False on any exception so a transient DB hiccup doesn't
     silently nuke a discography fetch — a redundant wishlist add is
@@ -457,8 +460,14 @@ def track_already_owned(
             server_source=server_source,
             album=album_name or None,
             candidate_tracks=candidate_tracks,
+            candidate_tracks_exhaustive=candidate_tracks_exhaustive,
         )
     except Exception:
+        # Fail-open is deliberate (a redundant wishlist add is cheaper than a
+        # missed track), but never silent: without this, any exception inside
+        # check_track_exists degrades to "not owned" with zero log signal.
+        logger.debug("track_already_owned check failed; treating as not owned",
+                     exc_info=True)
         return False
     return bool(match) and confidence >= confidence_threshold
 

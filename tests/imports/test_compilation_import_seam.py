@@ -126,3 +126,44 @@ def test_two_soundtracks_share_one_various_artists_row(imported):
     albums = {r[1] for r in rows}
     assert artists == {'Various Artists'}
     assert len(albums) == 2, 'two distinct soundtracks, one artist'
+
+
+def test_profile_one_import_writes_shared_owner_null(db, tmp_path, monkeypatch):
+    """Profile 1 is the shared library scope: imports must write
+    owner_profile_id=NULL, not 1, or the rows are invisible to every
+    shared-scope lookup (missing-tracks analysis, dashboard). (#1660)"""
+    import core.imports.side_effects as se
+
+    class _Cfg:
+        def get_active_media_server(self):
+            return 'soulsync'
+
+        def get(self, *a, **k):
+            return k.get('default') if k else (a[1] if len(a) > 1 else None)
+
+    monkeypatch.setattr(se, '_get_config_manager', lambda: _Cfg())
+    monkeypatch.setattr(se, 'get_database', lambda: db)
+
+    audio = tmp_path / 'profile1-test.flac'
+    audio.write_bytes(b'fLaC')
+    context = {
+        'source': 'spotify',
+        'profile_id': 1,
+        'artist': {'name': 'Katy Perry'},
+        'album': {'name': 'Teenage Dream', 'artists': [{'name': 'Katy Perry'}]},
+        'track_info': {
+            'name': 'Firework',
+            'artists': [{'name': 'Katy Perry'}],
+            'track_number': 1,
+            'duration_ms': 210000,
+        },
+        '_final_processed_path': str(audio),
+    }
+    se.record_soulsync_library_entry(
+        context, {'name': 'Katy Perry'}, {'album_name': 'Teenage Dream'})
+
+    with db._get_connection() as conn:
+        cur = conn.cursor()
+        for table in ('tracks', 'albums', 'artists'):
+            cur.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE owner_profile_id IS NOT NULL")
+            assert cur.fetchone()['n'] == 0, f"{table} has non-NULL owner_profile_id"

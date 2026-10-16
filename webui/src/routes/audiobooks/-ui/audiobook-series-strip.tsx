@@ -1,7 +1,9 @@
 import { Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
 
 import type { AudiobookItem } from '../-audiobooks.types';
 
+import { fetchFollowedAuthors, followWatchlist, unfollowAuthor } from '../-audiobooks.api';
 import styles from './audiobooks-page.module.css';
 
 interface AudiobookSeriesStripProps {
@@ -34,6 +36,22 @@ export function seriesOwnership(books: readonly AudiobookItem[]): Map<string, Se
 }
 
 /**
+ * The Audible ASIN of the series this strip is about.
+ *
+ * Not `books[0].series[0]`: a book can sit in several series (a saga and the
+ * sub-series inside it), and the first entry may be the parent. The entry whose
+ * title is the strip's own is the one that identifies it. Empty when no book
+ * carries an ASIN for it, and the scan then matches by name.
+ */
+export function seriesAsinFor(books: readonly AudiobookItem[], seriesTitle: string): string {
+  for (const book of books) {
+    const entry = book.series.find((s) => s.title === seriesTitle && s.asin);
+    if (entry?.asin) return entry.asin;
+  }
+  return '';
+}
+
+/**
  * The series in reading order, with the book you are looking at marked.
  *
  * Order comes from the sequence Audible prints, so half-numbered novellas land
@@ -46,6 +64,60 @@ export function AudiobookSeriesStrip({
   books,
   currentAsin,
 }: AudiobookSeriesStripProps) {
+  const seriesAsin = seriesAsinFor(books, seriesTitle);
+  const [watching, setWatching] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchFollowedAuthors().then((rows) => {
+      if (!cancelled) {
+        setWatching(rows.some((r) => r.role === 'series' && r.name === seriesTitle));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [seriesTitle]);
+
+  /**
+   * Following a series asks for the volumes that already exist as well as the
+   * next one: nobody follows a twenty-three book series to hear only about
+   * number twenty-four. Anything owned or already wanted is skipped by the scan.
+   */
+  const follow = async (backfill: boolean) => {
+    setBusy(true);
+    setNote('');
+    const result = await followWatchlist(seriesTitle, books[0]?.cover_url ?? '', {
+      role: 'series',
+      seriesAsin,
+      backfill,
+    });
+    setBusy(false);
+    if (!result.ok) {
+      setNote('Could not follow this series.');
+      return;
+    }
+    setWatching(true);
+    if (backfill) {
+      const n = result.wishlisted ?? 0;
+      setNote(
+        n > 0 ? `${n} ${n === 1 ? 'book' : 'books'} added to the wishlist.` : 'Nothing missing.',
+      );
+    }
+  };
+
+  const unfollow = async () => {
+    setBusy(true);
+    const ok = await unfollowAuthor(seriesTitle, 'series');
+    setBusy(false);
+    if (ok) {
+      setWatching(false);
+      setNote('');
+    }
+  };
+
   if (books.length <= 1) return null;
   const ownership = seriesOwnership(books);
   const ownedCount = books.filter((b) => b.owned).length;
@@ -59,6 +131,43 @@ export function AudiobookSeriesStrip({
             {books.length} book{books.length === 1 ? '' : 's'} in reading order
             {ownedCount > 0 ? ` · ${ownedCount} in your library` : ''}
           </p>
+        </div>
+        <div>
+          {watching ? (
+            <button
+              type="button"
+              className={`library-artist-watchlist-btn watching`}
+              disabled={busy}
+              onClick={() => void unfollow()}
+              title="Stop following this series"
+            >
+              <span className="watchlist-icon">👁️</span>
+              <span className="watchlist-text">{busy ? 'Updating…' : 'Following series'}</span>
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="library-artist-watchlist-btn"
+                disabled={busy}
+                onClick={() => void follow(true)}
+                title="Wishlist every book you are missing, and pick up new ones automatically"
+              >
+                <span className="watchlist-icon">👁️</span>
+                <span className="watchlist-text">{busy ? 'Updating…' : 'Follow series'}</span>
+              </button>{' '}
+              <button
+                type="button"
+                className="library-artist-watchlist-btn"
+                disabled={busy}
+                onClick={() => void follow(false)}
+                title="Only books published from today on"
+              >
+                <span className="watchlist-text">New books only</span>
+              </button>
+            </>
+          )}
+          {note && <p className={styles.railSubtitle}>{note}</p>}
         </div>
       </header>
 

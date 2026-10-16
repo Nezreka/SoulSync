@@ -6,8 +6,11 @@ import {
   countInbox,
   describeFile,
   describeItemFiles,
+  describeImportOutcome,
   describeItemMatch,
+  everythingWasOwned,
   filterInboxItems,
+  importOutcomeLines,
   inboxActions,
   secondsToNextScan,
   sortInbox,
@@ -166,5 +169,96 @@ describe('partial status (Bug 3)', () => {
     // row is history, never attention.
     expect(isAttention('partial', true)).toBe(false);
     expect(isAttention('partial', false)).toBe(false);
+  });
+});
+
+describe('what an import did', () => {
+  const line = (
+    track_name: string,
+    track_number: number,
+    import_status: 'completed' | 'upgraded' | 'skipped_owned' | 'failed' | null,
+    extra: Record<string, string> = {},
+  ) => ({
+    track_name,
+    track_number,
+    file: `${track_number}.flac`,
+    file_path: `/Staging/${track_number}.flac`,
+    confidence: 1,
+    import_status,
+    ...extra,
+  });
+
+  it('reads the summary the run stored', () => {
+    const row = item({
+      status: 'imported',
+      match: {
+        matched_count: 61,
+        total_tracks: 61,
+        matches: [],
+        summary: { imported: 12, upgraded: 2, skipped_owned: 47, failed: 0 },
+      },
+    });
+    expect(describeImportOutcome(row)).toBe('12 imported · 47 already in library · 2 upgraded');
+    expect(describeItemMatch(row)).toBe('61/61 tracks matched');
+  });
+
+  it('tallies the tracks of a row written before the summary existed', () => {
+    const row = item({
+      status: 'partial',
+      match: {
+        matched_count: 2,
+        total_tracks: 2,
+        matches: [line('A', 1, 'completed'), line('B', 2, 'failed')],
+      },
+    });
+    expect(describeImportOutcome(row)).toBe('1 imported · 1 failed');
+  });
+
+  it('says nothing before the import ran', () => {
+    const row = item({
+      status: 'needs_review',
+      match: { matched_count: 1, total_tracks: 1, matches: [line('A', 1, null)] },
+    });
+    expect(describeImportOutcome(row)).toBe('');
+    expect(importOutcomeLines(row)).toEqual([]);
+  });
+
+  it('knows an all-owned run imported nothing', () => {
+    const owned = item({
+      status: 'imported',
+      match: {
+        matched_count: 2,
+        total_tracks: 2,
+        matches: [line('A', 1, 'skipped_owned'), line('B', 2, 'skipped_owned')],
+      },
+    });
+    expect(everythingWasOwned(owned)).toBe(true);
+    const mixed = item({
+      status: 'imported',
+      match: {
+        matched_count: 2,
+        total_tracks: 2,
+        matches: [line('A', 1, 'skipped_owned'), line('B', 2, 'completed')],
+      },
+    });
+    expect(everythingWasOwned(mixed)).toBe(false);
+  });
+
+  it('lists each track with why, in track order, errors for failures', () => {
+    const row = item({
+      status: 'partial',
+      match: {
+        matched_count: 2,
+        total_tracks: 2,
+        matches: [
+          line('Second', 2, 'failed', { import_error: 'AcoustID mismatch' }),
+          line('First', 1, 'skipped_owned', { import_reason: 'already in the library' }),
+        ],
+      },
+    });
+    expect(importOutcomeLines(row).map((l) => [l.number, l.track, l.outcome, l.why])).toEqual([
+      ['1', 'First', 'skipped_owned', 'already in the library'],
+      ['2', 'Second', 'failed', 'AcoustID mismatch'],
+    ]);
   });
 });

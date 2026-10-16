@@ -60,14 +60,42 @@ def test_default_move_cross_device_failure_leaves_no_partial(tmp_path, monkeypat
     def boom_replace(a, b):
         raise OSError(_errno.EXDEV, "cross-device link")
     monkeypatch.setattr(ytd.os, "replace", boom_replace)
-    # make the copy blow up mid-write
-    monkeypatch.setattr(ytd.shutil, "copystat", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")))
+    # the copy comes up short, so the size check refuses it
+    real_getsize = os.path.getsize
+    monkeypatch.setattr(ytd.os.path, "getsize",
+                        lambda p: 1 if str(p).endswith(".part") else real_getsize(p))
 
     import pytest
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="short copy"):
         ytd._default_move(str(src), str(dest))
     assert src.exists()                          # source preserved on failure (safe to retry)
     assert not (dest.parent / "v.mp4.part").exists()   # partial cleaned up
+
+
+def test_default_move_cross_device_survives_a_share_that_refuses_metadata(tmp_path, monkeypatch):
+    # #1713: nfs refuses the nfs4 acl xattr with errno 524 after the data landed.
+    # the data copy is the import, mtime is a courtesy.
+    import errno as _errno
+    src = tmp_path / "stage" / "v.mp4"
+    src.parent.mkdir()
+    src.write_bytes(b"data")
+    dest = tmp_path / "lib" / "v.mp4"
+
+    real_replace = os.replace
+    def fake_replace(a, b):
+        if str(a).endswith(".part"):
+            return real_replace(a, b)
+        raise OSError(_errno.EXDEV, "cross-device link")
+    monkeypatch.setattr(ytd.os, "replace", fake_replace)
+
+    def refuse(*a, **k):
+        raise OSError(524, "Unknown error 524")
+    monkeypatch.setattr(ytd.shutil, "copystat", refuse)
+
+    ytd._default_move(str(src), str(dest))
+    assert dest.read_bytes() == b"data"
+    assert not src.exists()
+    assert not (dest.parent / "v.mp4.part").exists()
 
 
 # ── organising fields from the queue row ──────────────────────────────────────

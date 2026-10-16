@@ -6,6 +6,7 @@ import string
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from functools import lru_cache
@@ -54,6 +55,26 @@ def _as_datetime(value):
 _database_initialized_paths = set()
 _database_sidecar_warnings = set()
 _database_initialization_lock = threading.Lock()
+
+# sqlite planner statistics (upstream 5b982c555): rows ANALYZE samples per
+# index, and the table size below which an unanalyzed index does not matter.
+# same plans as a full ANALYZE on a 300k track library in 78 ms instead of
+# 1.9 s, so it can run after every scan without blocking writers.
+_PLANNER_ANALYSIS_LIMIT = 1000
+_PLANNER_STATS_MIN_ROWS = 1000
+_planner_stats_lock = threading.Lock()
+_planner_stats_threads = {}
+
+
+def _calling_functions(depth: int = 3) -> str:
+    """'caller <- its caller <- ...' from just above _get_connection."""
+    names = []
+    frame = sys._getframe(2)
+    while frame is not None and len(names) < depth:
+        names.append(frame.f_code.co_name)
+        frame = frame.f_back
+    return " <- ".join(names)
+
 
 # Characters stripped from the START of a name/title for alphabetical library
 # sorting, so '"Weird Al" Yankovic' sorts under W and '*NSYNC' under N instead
@@ -435,6 +456,11 @@ class WatchlistArtist:
     include_acoustic: bool = False
     include_compilations: bool = False
     include_instrumentals: bool = False
+    # When False (default), the watchlist scan only wishlists tracks credited
+    # to the monitored artist — tribute albums, soundtracks and compilations
+    # no longer flood the wishlist with other artists' tracks. When True,
+    # restores the old behaviour (every track on associated releases).
+    include_other_artists: bool = False
     lookback_days: Optional[int] = None  # Per-artist override; None = use global setting
     preferred_metadata_source: Optional[str] = None  # Per-artist override; None = use global setting
     # When False ("follow only"), the watchlist scan still discovers + surfaces new
@@ -549,6 +575,15 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
+# A mirrored row's source id is whichever provider the playlist came from
+# (upstream 4c738a0c0: deezer/tidal/qobuz/itunes count, not only spotify). Each
+# arm matches an index (lib2 schema: idx_lib2_tracks_ext_<service>), so the OR
+# stays a multi-index lookup instead of a catalogue scan per playlist row.
+_MIRRORED_ID_SERVICES = ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes')
+_MIRRORED_ID_MATCH = "(t.spotify_id = mpt.source_track_id OR " + " OR ".join(
+    f"TRIM(CAST(json_extract(t.external_ids,'$.{service}') AS TEXT)) = mpt.source_track_id"
+    for service in _MIRRORED_ID_SERVICES) + ")"
+
 # Preserve positive sync matches for aliases/collaborations. A current provider
 # ID with an active scoped file supersedes an old negative verdict after download.
 # Checked title-only rejections remain rejected; unchecked rows may use names.
@@ -556,8 +591,7 @@ _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
     WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
     WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' AND EXISTS (
         SELECT 1 FROM lib2_tracks t
-         WHERE (t.spotify_id = mpt.source_track_id
-                OR json_extract(t.external_ids, '$.spotify') = mpt.source_track_id)
+         WHERE """ + _MIRRORED_ID_MATCH + """
            AND EXISTS (
              SELECT 1 FROM lib2_track_files f
               WHERE f.track_id = t.id
@@ -570,10 +604,7 @@ _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
          WHERE (
            (mpt.source_track_id IS NOT NULL
             AND mpt.source_track_id != ''
-            AND COALESCE(
-                  NULLIF(t.spotify_id, ''),
-                  NULLIF(json_extract(t.external_ids, '$.spotify'), '')
-                ) = mpt.source_track_id)
+            AND """ + _MIRRORED_ID_MATCH + """)
            OR (t.title = mpt.track_name AND (
              EXISTS (
                SELECT 1 FROM lib2_track_artists ta
@@ -687,6 +718,7 @@ class MusicDatabase:
             # backoff before it could run a single query.
             self._initialize_database()
             _database_initialized_paths.add(db_key)
+        self._kick_planner_stats_thread()
     
     def _ensure_wal_mode(self):
         """put the database in wal mode, once per process. the mode lives in
@@ -753,10 +785,13 @@ class MusicDatabase:
                 # diagnostic: say so when an open is still slow.
                 _elapsed = time.perf_counter() - _t_open
                 if _elapsed > 0.2:
+                    # who was waiting. without it the log says something is
+                    # slow ~2,000 times a day and nothing about where.
                     logger.warning(
-                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s",
+                        "slow sqlite connect: %.0f ms total (connect %.0f ms, pragmas %.0f ms) for %s, from %s [%s]",
                         _elapsed * 1000, (_t_connected - _t_open) * 1000,
-                        (time.perf_counter() - _t_connected) * 1000, self.database_path)
+                        (time.perf_counter() - _t_connected) * 1000, self.database_path,
+                        _calling_functions(), threading.current_thread().name)
                 return connection
             except sqlite3.OperationalError as e:
                 last_error = e
@@ -1417,6 +1452,7 @@ class MusicDatabase:
             self._add_profile_support_v2(cursor)
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
+            self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
             self._add_profile_listenbrainz_support(cursor)
@@ -1576,7 +1612,10 @@ class MusicDatabase:
             self._add_mirrored_playlist_server_link_columns(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
             self._add_mirrored_playlist_custom_name_column(cursor)
+            self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
+            self._add_mirrored_playlist_source_skipped_column(cursor)
+            self._add_mirrored_playlist_track_added_at_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1991,6 +2030,7 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            self._requeue_similar_artists_rematch(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
@@ -2097,6 +2137,7 @@ class MusicDatabase:
         'sample_analysis_v1':        ('table', 'sample_analysis'),
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
+        'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
     }
 
     def _record_migration(self, cursor, name):
@@ -2678,6 +2719,18 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
 
+    def _add_mirrored_playlist_sync_mode_column(self, cursor):
+        """Per-playlist sync mode (#1704). null means use the global
+        playlist_sync.mode, so existing mirrors keep doing what they did."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'sync_mode' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN sync_mode TEXT DEFAULT NULL")
+                logger.info("Added sync_mode column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding sync_mode column to mirrored_playlists: {e}")
+
     def _add_mirrored_playlist_custom_name_column(self, cursor):
         """Add custom_name (a user alias) for a mirrored playlist.
 
@@ -2742,6 +2795,54 @@ class MusicDatabase:
                 logger.info("Added cover_tiles column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding cover_tiles column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_track_added_at_column(self, cursor):
+        """when each track joined the playlist, for "sort by date added".
+
+        every edit rewrites a playlist's track rows, so mirror_playlist carries
+        this across by source_track_id the same way it carries extra_data. NULL
+        for rows from before the column; they sort by position.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlist_tracks)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'added_at' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlist_tracks ADD COLUMN added_at TEXT DEFAULT NULL")
+                logger.info("Added added_at column to mirrored_playlist_tracks table")
+        except Exception as e:
+            logger.error(f"Error adding added_at column to mirrored_playlist_tracks: {e}")
+
+    def _add_mirrored_playlist_source_skipped_column(self, cursor):
+        """add source_skipped: what the source never handed over (#1613).
+
+        json like {"videos": 1, "unavailable": 29}, NULL when nothing was
+        skipped. tidal drops tracks outside the account's region before
+        the mirror sees them, so without this a 395 track playlist mirrors
+        as 365 and nothing says why.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'source_skipped' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN source_skipped TEXT DEFAULT NULL")
+                logger.info("Added source_skipped column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding source_skipped column to mirrored_playlists: {e}")
+
+    @staticmethod
+    def _source_skipped_json(skipped) -> Optional[str]:
+        """the stored form of a skipped-counts dict, None when nothing was skipped."""
+        if not isinstance(skipped, dict):
+            return None
+        clean = {}
+        for key in ('videos', 'unavailable'):
+            try:
+                n = int(skipped.get(key) or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n > 0:
+                clean[key] = n
+        return json.dumps(clean) if clean else None
 
     def _add_mirrored_playlist_quality_profile_column(self, cursor):
         """Add the native per-playlist Quality Profile assignment.
@@ -3769,7 +3870,8 @@ class MusicDatabase:
                 'include_remixes': ('INTEGER', '0'),        # 0 = False (exclude remixes by default)
                 'include_acoustic': ('INTEGER', '0'),       # 0 = False (exclude acoustic by default)
                 'include_compilations': ('INTEGER', '0'),   # 0 = False (exclude compilations by default)
-                'include_instrumentals': ('INTEGER', '0')   # 0 = False (exclude instrumentals by default)
+                'include_instrumentals': ('INTEGER', '0'),  # 0 = False (exclude instrumentals by default)
+                'include_other_artists': ('INTEGER', '0'),  # 0 = False (only the watched artist's tracks by default)
             }
 
             for column_name, (column_type, default_value) in columns_to_add.items():
@@ -3932,6 +4034,113 @@ class MusicDatabase:
                     cursor.rowcount)
         except Exception as e:
             logger.error(f"Error clearing deezer-as-itunes watchlist ids: {e}")
+
+    # Library v2 tables the matchers and readers query; ANALYZE them after a
+    # scan so the planner keeps picking the selective index (upstream 5b982c555).
+    _PLANNER_STATS_TABLES = ('lib2_tracks', 'lib2_artists', 'lib2_albums',
+                             'lib2_track_files', 'lib2_track_artists',
+                             'lib2_media_server_mappings')
+
+    def refresh_planner_stats(self, tables=None) -> None:
+        """ANALYZE the catalogue tables. without statistics sqlite guesses, and
+        an unanalyzed index is assumed to narrow an equality to ~10 rows, which
+        can turn indexed lookups into full scans. sampled, so cheap; run after
+        scans."""
+        try:
+            conn = self._get_connection()
+            try:
+                conn.execute(f"PRAGMA analysis_limit = {_PLANNER_ANALYSIS_LIMIT}")
+                for table in (tables or self._PLANNER_STATS_TABLES):
+                    conn.execute(f'ANALYZE "{table}"')
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"ANALYZE skipped: {e}")
+
+    @staticmethod
+    def _tables_missing_planner_stats(cursor) -> list:
+        """tables big enough to matter with an index sqlite has no statistics
+        for (an index added after the last ANALYZE looks like the best way to
+        find a row even when it leads with a column every row shares)."""
+        has_stat1 = cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'sqlite_stat1'").fetchone()
+        analyzed = set()
+        if has_stat1:
+            analyzed = {(t, i) for t, i in cursor.execute(
+                "SELECT tbl, idx FROM sqlite_stat1 WHERE idx IS NOT NULL")}
+        stale = []
+        tables = [r[0] for r in cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%' AND sql NOT LIKE 'CREATE VIRTUAL%'")]
+        for table in tables:
+            # a WITHOUT ROWID table's primary key stats are filed under the
+            # table's own name, not its sqlite_autoindex name
+            indexes = [table if r[3] == 'pk' and (table, table) in analyzed else r[1]
+                       for r in cursor.execute(f'PRAGMA index_list("{table}")')]
+            if not any((table, i) not in analyzed for i in indexes):
+                continue
+            big = cursor.execute(
+                f'SELECT 1 FROM "{table}" LIMIT 1 OFFSET {_PLANNER_STATS_MIN_ROWS - 1}').fetchone()
+            if big:
+                stale.append(table)
+        return stale
+
+    def _kick_planner_stats_thread(self):
+        """at boot, analyze whatever has an index without stats, off the boot
+        path. the thread only starts when there is work, so a fresh or test
+        database never starts one."""
+        try:
+            conn = self._get_connection()
+            try:
+                stale = self._tables_missing_planner_stats(conn.cursor())
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"planner stats check skipped: {e}")
+            return
+        if not stale:
+            return
+        key = str(self.database_path)
+        with _planner_stats_lock:
+            t = _planner_stats_threads.get(key)
+            if t is not None and t.is_alive():
+                return
+            t = threading.Thread(target=self.refresh_planner_stats, args=(stale,),
+                                 name="planner-stats", daemon=True)
+            _planner_stats_threads[key] = t
+        logger.info(f"planner stats: analyzing {len(stale)} table(s) with unanalyzed indexes: {', '.join(stale)}")
+        t.start()
+
+
+    def _requeue_similar_artists_rematch(self, cursor):
+        """one-time (upstream 640889c47): fetch every artist's similar artists
+        again. names used to resolve to the first search hit, so stored
+        similars hold namesakes. the worker never re-runs a matched artist and
+        the watchlist only refetches after 30 days, so requeue both: drop the
+        worker's recorded attempts and age the stored sets.
+        replace_similar_artists swaps each set as it lands; occurrence_count
+        goes back to one per row (every refetch had bumped it)."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_similar_artists_rematch_applied'")
+            if cursor.fetchone():
+                return
+            requeued = 0
+            if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='lib2_provider_attempts'").fetchone():
+                cursor.execute("DELETE FROM lib2_provider_attempts "
+                               "WHERE entity_type='artist' AND service='similar_artists'")
+                requeued = max(cursor.rowcount, 0)
+            if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                              "AND name='similar_artists'").fetchone():
+                cursor.execute("UPDATE similar_artists SET occurrence_count = 1, "
+                               "last_updated = datetime('now', '-60 days')")
+            cursor.execute("CREATE TABLE _similar_artists_rematch_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artists_rematch')
+            logger.info("similar artists rematch: requeued %s library artists", requeued)
+        except Exception as e:
+            logger.error(f"Error requeueing similar artists rematch: {e}")
+
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
         try:
@@ -3953,6 +4162,21 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding columns to similar_artists: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _fix_profile_one_owner_rows(self, cursor):
+        """Repair rows stamped owner_profile_id=1 by the pre-#1660 import bug.
+
+        Profile 1 is the shared library scope (owner_profile_id IS NULL), but
+        record_soulsync_library_entry used to write owner_profile_id=1 for
+        profile-1 downloads. Those rows were invisible to every shared-scope
+        lookup. This is idempotent: only touches rows that still have the
+        bad value.
+        """
+        try:
+            for table in ("tracks", "albums", "artists"):
+                cursor.execute(f"UPDATE {table} SET owner_profile_id = NULL WHERE owner_profile_id = 1")
+        except Exception as e:
+            logger.debug(f"Profile-1 owner repair skipped: {e}")
 
     def _fix_watchlist_spotify_id_nullable(self, cursor):
         """
@@ -4002,6 +4226,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -4034,6 +4259,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -4052,7 +4278,7 @@ class MusicDatabase:
                             'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                             'include_albums', 'include_eps', 'include_singles', 'include_live',
                             'include_remixes', 'include_acoustic', 'include_compilations',
-                            'include_instrumentals', 'lookback_days',
+                            'include_instrumentals', 'include_other_artists', 'lookback_days',
                             'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
                             'musicbrainz_artist_id', 'amazon_artist_id',
                             'preferred_metadata_source', 'auto_download', 'profile_id']
@@ -4330,6 +4556,7 @@ class MusicDatabase:
                             include_acoustic INTEGER DEFAULT 0,
                             include_compilations INTEGER DEFAULT 0,
                             include_instrumentals INTEGER DEFAULT 0,
+                            include_other_artists INTEGER DEFAULT 0,
                             lookback_days INTEGER DEFAULT NULL,
                             itunes_artist_id TEXT,
                             deezer_artist_id TEXT,
@@ -4349,7 +4576,7 @@ class MusicDatabase:
                                 'last_scan_timestamp', 'created_at', 'updated_at', 'image_url',
                                 'include_albums', 'include_eps', 'include_singles', 'include_live',
                                 'include_remixes', 'include_acoustic', 'include_compilations',
-                                'include_instrumentals', 'lookback_days',
+                                'include_instrumentals', 'include_other_artists', 'lookback_days',
                                 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id',
                                 'musicbrainz_artist_id', 'amazon_artist_id',
                             'preferred_metadata_source', 'auto_download', 'profile_id']
@@ -5851,6 +6078,24 @@ class MusicDatabase:
                 cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobbled_listenbrainz INTEGER DEFAULT 0")
                 logger.info("Added scrobbled_listenbrainz column to listening_history")
 
+            # Whether a play may be scrobbled to Last.fm / ListenBrainz.
+            # A media server attests its own plays, so its history is
+            # eligible. Web-player rows start at 0: a 10s log is a "play" for
+            # SoulSync's own stats, but only becomes a scrobble once the
+            # player reports the Last.fm threshold was reached (half the
+            # track or 4 minutes, whichever comes first).
+            if 'scrobble_eligible' not in lh_cols:
+                cursor.execute("ALTER TABLE listening_history ADD COLUMN scrobble_eligible INTEGER DEFAULT 0")
+                logger.info("Added scrobble_eligible column to listening_history")
+                # every attested source: media servers attest their own plays,
+                # and lastfm/listenbrainz rows are attested imports (their
+                # pending cross-service forwards must keep working).
+                cursor.execute("""
+                    UPDATE listening_history SET scrobble_eligible = 1
+                    WHERE server_source IN ('plex', 'jellyfin', 'navidrome',
+                                            'lastfm', 'listenbrainz')
+                """)
+
         except Exception as e:
             logger.error(f"Error creating listening_history table: {e}")
 
@@ -5910,34 +6155,97 @@ class MusicDatabase:
         row AND bump tracks.play_count / last_played for the smart-radio recency
         signal. ``event`` is the dict from core.playback.play_log.build_play_event.
 
-        Returns True if the history row was newly inserted.
+        Returns the listening_history row id for the play, or None when the
+        event was matched onto an existing row from another source (that row
+        is server-attested and already scrobble-eligible) or the insert
+        failed. The player uses the id to mark the row scrobble-eligible
+        once the Last.fm threshold is reached.
         """
+        from core.listening_scope import SHARED_OWNER
+        from core.listening_import.dedup import canonical_played_at
+
         if not event:
-            return False
-        inserted = self.insert_listening_events([event])
-        db_id = event.get('db_track_id')
+            return None
+        self.insert_listening_events([event])
         lib2_id = event.get('lib2_track_id')
-        if db_id is not None or lib2_id is not None:
-            conn = None
-            try:
-                conn = self._get_connection()
-                cursor = conn.cursor()
-                if lib2_id is not None and cursor.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_tracks'"
-                ).fetchone():
-                    cursor.execute("""
-                        UPDATE lib2_tracks
-                        SET play_count = COALESCE(play_count, 0) + 1,
-                            last_played = ?, updated_at=CURRENT_TIMESTAMP
-                        WHERE id = ?
-                    """, (event.get('played_at'), lib2_id))
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if lib2_id is not None and cursor.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_tracks'"
+            ).fetchone():
+                cursor.execute("""
+                    UPDATE lib2_tracks
+                    SET play_count = COALESCE(play_count, 0) + 1,
+                        last_played = ?, updated_at=CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (event.get('played_at'), lib2_id))
                 conn.commit()
-            except Exception as e:
-                logger.error(f"Error bumping play_count for track {db_id}: {e}")
-            finally:
-                if conn:
-                    conn.close()
-        return inserted > 0
+            # IS is NULL-safe for track_id (streams may carry None). The lookup
+            # uses the canonical played_at because insert_import_events stores
+            # the canonicalized form, not the raw event value. When the event
+            # was matched onto an existing row from another source there is no
+            # soulsync_web row, and None is the right answer: that row is
+            # server-attested and already scrobble-eligible.
+            owner = event.get('profile_id')
+            if owner is None:
+                owner = SHARED_OWNER
+            played_at = canonical_played_at(event.get('played_at')) or event.get('played_at')
+            cursor.execute("""
+                SELECT id FROM listening_history
+                WHERE track_id IS ? AND played_at IS ?
+                  AND server_source = 'soulsync_web' AND profile_id = ?
+                ORDER BY id DESC LIMIT 1
+            """, (event.get('track_id'), played_at, owner))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error recording web player play: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
+    def mark_play_scrobble_eligible(self, play_id, profile_id=None):
+        """Mark a SoulSync web-player play as scrobble-eligible.
+
+        The player calls this once playback crosses the Last.fm threshold
+        (half the track or 4 minutes, whichever comes first). Only
+        soulsync_web rows in the caller's own pile can be flipped here:
+        server and import rows are eligible from insert, and this must never
+        touch them. Tracks of 30s or less never scrobble (duration_ms 0 means
+        unknown, e.g. a stream, and is allowed through).
+
+        Returns True when a row was actually flipped.
+        """
+        from core.listening_scope import SHARED_OWNER
+
+        if isinstance(play_id, bool):
+            return False
+        try:
+            play_id = int(play_id)
+            owner = int(profile_id) if profile_id is not None else SHARED_OWNER
+        except (TypeError, ValueError):
+            return False
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE listening_history SET scrobble_eligible = 1
+                WHERE id = ? AND server_source = 'soulsync_web'
+                  AND profile_id = ? AND scrobble_eligible = 0
+                  AND (duration_ms = 0 OR duration_ms > 30000)
+            """, (play_id, owner))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error marking play {play_id} scrobble-eligible: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
 
     def update_track_play_counts(self, counts):
         """Update play_count and last_played on the tracks table.
@@ -5991,20 +6299,26 @@ class MusicDatabase:
         exactly what would make a "vs last month" delta lie."""
         if not where:
             return dict(self._EMPTY_OVERVIEW)
-        from core.listening_scope import play_duration_sql
+        from core.listening_scope import total_play_ms_sql
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+            # the plays are read once into the cte, the time total then looks
+            # each played track up once instead of once per play
             cursor.execute(f"""
+                WITH plays AS MATERIALIZED (
+                    SELECT artist, album, title, duration_ms, lib2_track_id
+                    FROM listening_history
+                    {where}
+                )
                 SELECT
                     COUNT(*) as total_plays,
-                    COALESCE(SUM({play_duration_sql()}), 0) as total_time_ms,
+                    {total_play_ms_sql('plays')} as total_time_ms,
                     COUNT(DISTINCT artist) as unique_artists,
                     COUNT(DISTINCT album) as unique_albums,
                     COUNT(DISTINCT title || '|||' || COALESCE(artist, '')) as unique_tracks
-                FROM listening_history
-                {where}
+                FROM plays
             """)
             row = cursor.fetchone()
             return {
@@ -6284,18 +6598,9 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) as play_count
-                FROM listening_history lh
-                JOIN lib2_tracks t ON t.id = lh.lib2_track_id
-                JOIN lib2_albums al ON al.id = t.album_id
-                JOIN lib2_artists a ON a.id = al.primary_artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != '' AND a.genres != '[]'
-                GROUP BY a.genres
-                ORDER BY play_count DESC
-                LIMIT 50
-            """)
+            # every payload, not the top 50. a genre spread over lots of small
+            # artist payloads used to fall off the cut and undercount.
+            cursor.execute(self._played_genres_sql(where))
             # Parse genre JSON and aggregate
             genre_counts = {}
             for row in cursor.fetchall():
@@ -6318,7 +6623,8 @@ class MusicDatabase:
             total = sum(genre_counts.values()) or 1
             result = sorted(
                 [{'genre': g, 'play_count': c, 'percentage': round(c / total * 100, 1)} for g, c in genre_counts.items()],
-                key=lambda x: x['play_count'], reverse=True
+                # name breaks ties, or which one makes the cut is up to sqlite
+                key=lambda x: (-x['play_count'], str(x['genre']))
             )[:15]
             return result
         except Exception as e:
@@ -6334,6 +6640,28 @@ class MusicDatabase:
     # acquisition history. We have both halves, so we can answer "you own 40%
     # metal and play 12% of it" — which is a fact about the user, not a number
     # about the software.
+
+    @staticmethod
+    def _played_genres_sql(where):
+        """plays per artist genre payload, as (genres, plays) rows. counts each
+        track's plays first, then joins each played track once. joining per
+        play hit tracks 150k times for 11k distinct tracks, 0.5 s on every
+        genre shelf."""
+        return f"""
+            WITH played AS MATERIALIZED (
+                SELECT lh.lib2_track_id AS tid, COUNT(*) AS n
+                FROM listening_history lh
+                {where} AND lh.lib2_track_id IS NOT NULL
+                GROUP BY lh.lib2_track_id
+            )
+            SELECT a.genres, SUM(played.n) AS plays
+            FROM played
+            JOIN lib2_tracks t ON t.id = played.tid
+            JOIN lib2_albums al ON al.id = t.album_id
+            JOIN lib2_artists a ON a.id = al.primary_artist_id
+            WHERE a.genres IS NOT NULL AND a.genres != '' AND a.genres != '[]'
+            GROUP BY a.genres
+        """
 
     @staticmethod
     def _accumulate_genres(genre_counts, genres_str, weight):
@@ -6388,16 +6716,7 @@ class MusicDatabase:
 
             played = {}
             where = self._listening_time_filter(time_range, alias='lh', owner=owner)
-            cursor.execute(f"""
-                SELECT a.genres, COUNT(*) AS plays
-                FROM listening_history lh
-                JOIN lib2_tracks t ON t.id = lh.lib2_track_id
-                JOIN lib2_albums al ON al.id = t.album_id
-                JOIN lib2_artists a ON a.id = al.primary_artist_id
-                {where}
-                AND a.genres IS NOT NULL AND a.genres != ''
-                GROUP BY a.genres
-            """)
+            cursor.execute(self._played_genres_sql(where))
             for genres_str, count in cursor.fetchall():
                 self._accumulate_genres(played, genres_str, count)
 
@@ -10737,7 +11056,7 @@ class MusicDatabase:
 
             # Return unique variations
             return list(set(variations))
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -10747,6 +11066,13 @@ class MusicDatabase:
                               skipping the per-variation SQL loop. Intended for callers iterating
                               a discography that already fetched the artist's tracks once via
                               get_candidate_tracks_for_albums. None preserves original behavior.
+            candidate_tracks_exhaustive: when True, an EMPTY candidate_tracks list is the
+                              caller's assertion that the artist owns nothing in the library
+                              (the pre-fetch consulted the library and found zero rows) — the
+                              legacy variation loop is skipped for a fast miss. The
+                              album-aware fallback below still runs. Callers that pass []
+                              merely because a pool lookup came back empty (no information)
+                              must leave this False so the legacy path runs (#1621).
 
         Returns (track, confidence) tuple where confidence is 0.0-1.0
         """
@@ -10754,7 +11080,7 @@ class MusicDatabase:
             best_match = None
             best_confidence = 0.0
 
-            if candidate_tracks is not None:
+            if candidate_tracks:
                 # BATCHED PATH — score every pre-fetched track in-memory.
                 # _calculate_track_confidence already handles title normalization,
                 # so no need for the per-variation SQL widening.
@@ -10764,8 +11090,22 @@ class MusicDatabase:
                     if confidence > best_confidence:
                         best_confidence = confidence
                         best_match = track
+            elif candidate_tracks is not None and candidate_tracks_exhaustive:
+                # EXHAUSTIVE-EMPTY — the caller proved the artist has no library
+                # rows (discography pre-fetch found zero albums/tracks). Skip the
+                # legacy variation loop: scoring zero candidates in-memory is the
+                # fast "owns nothing" path those callers rely on (~15-30s/track
+                # otherwise). best_confidence stays 0.0 so the album-aware
+                # fallback below still runs — identical outcome to the old
+                # batched-against-zero-candidates behavior.
+                logger.debug(f"Enhanced track matching for '{title}' by '{artist}': exhaustive empty pool — skipping variation loop")
             else:
                 # LEGACY PATH — generate title variations and fire SQL per variation.
+                # None, or an empty list WITHOUT the exhaustive flag, means "no
+                # information" (e.g. the sync candidate pool found no rows), NOT
+                # "no match": fall through to the pre-#1289 per-variation SQL loop.
+                # (#1621: a 3,228-track Liked Songs sync matched 0 because []
+                # took the batched path and this loop never ran.)
                 title_variations = self._generate_track_title_variations(title)
 
                 logger.debug(f"Enhanced track matching for '{title}' by '{artist}': trying {len(title_variations)} variations")
@@ -10801,9 +11141,116 @@ class MusicDatabase:
 
             # Album-aware fallback: find album by title (any artist), check tracks on it
             # Handles multi-artist albums filed under a different artist in the library
-            if album and best_confidence < confidence_threshold:
+            if album and (artist or '').strip() and best_confidence < confidence_threshold:
                 logger.debug(f"Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
                 try:
+                    # (#1715) Evidence helpers, computed once per call. A
+                    # "placeholder" artist name carries no artist evidence
+                    # either way; anything else is a real filing/credit
+                    # that can agree or conflict with the searched artist.
+                    try:
+                        from core.imports.compilation import is_various_artists_name as _is_va_name
+                    except Exception as _va_import_err:
+                        logger.debug(f"Album-aware fallback: VA-name helper unavailable: {_va_import_err}")
+                        _is_va_name = None
+                    try:
+                        from core.text.normalize import normalize_key as _artist_nkey
+                    except Exception as _nkey_import_err:
+                        logger.debug(f"Album-aware fallback: normalize_key unavailable: {_nkey_import_err}")
+                        _artist_nkey = self._normalize_for_comparison
+                    _placeholder_squashed = {
+                        'unknown', 'unknownartist', 'unknownartists',
+                        'artistunknown', 'noartist', 'unknownalbum',
+                        'unknownalbumartist', 'untitled',
+                    }
+
+                    def _placeholder_artist(name):
+                        n = (name or '').strip()
+                        if not n:
+                            return True
+                        if _is_va_name is not None and _is_va_name(n):
+                            return True
+                        # MusicBrainz/Picard spellings: '[Unknown]',
+                        # '<Unknown>', '[No Artist]' — brackets are
+                        # punctuation around the placeholder, not a name.
+                        core = self._normalize_for_comparison(n).strip(' []<>(){}')
+                        return core.replace(' ', '') in _placeholder_squashed
+
+                    # Exact artist-evidence keys for the searched artist:
+                    # every known variation, keyed the way artists.name_key
+                    # is ('AC/DC' == 'ACDC', spacing unified). Fuzzy
+                    # similarity is NOT identity — edit-distance-1 names
+                    # (John William vs John Williams) must not pass.
+                    _artist_keys = {
+                        _artist_nkey(v) for v in self._get_artist_variations(artist)
+                    } | {_artist_nkey(artist)}
+                    _split_re = r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*'
+
+                    def _evidence_keys(db_track):
+                        """Keyed artist names the row evidences: the album
+                        artist and the per-track credit, each whole and
+                        split on credit delimiters — a joint filing
+                        ('Simon & Garfunkel', 'Tony Bennett & Lady Gaga')
+                        evidences EACH partner, in either field."""
+                        keys = set()
+                        for name in (db_track.artist_name, getattr(db_track, 'track_artist', None)):
+                            if not name:
+                                continue
+                            keys.add(_artist_nkey(name))
+                            for piece in re.split(_split_re, self._normalize_for_comparison(name), flags=re.IGNORECASE):
+                                if piece.strip():
+                                    keys.add(_artist_nkey(piece))
+                        return keys
+
+                    def _fallback_row_confidence(db_track):
+                        """(confidence, is_evidence) for one fallback row,
+                        or None when the row must not match. (#1715) This
+                        fallback used to take title_sim as the whole
+                        confidence, so a same-titled track on a same-named
+                        album by a COMPLETELY DIFFERENT artist matched at
+                        1.0: playlist sync put the wrong song on the
+                        playlist and counted the real track as owned, so
+                        it was never wishlisted or downloaded."""
+                        _title_score, _title_passed = self._score_title_similarity(title, db_track)
+                        if not _title_passed:
+                            return None
+                        if _placeholder_artist(db_track.track_artist) and _placeholder_artist(db_track.artist_name):
+                            # No usable artist evidence anywhere on the
+                            # row (placeholder album artist and a
+                            # placeholder or missing credit — the
+                            # soundtrack-rip shape). Title+album is the
+                            # only signal, so the title must clear every
+                            # guard the scorer applies AND be
+                            # near-identical: a merely similar title here
+                            # is a different song ('Believe' vs
+                            # 'Believer'), which a raw char ratio waved
+                            # through.
+                            if _title_score < 0.95:
+                                return None
+                            return _title_score, False
+                        # The row DOES carry artist evidence — a real
+                        # per-track credit, or filing under a specific
+                        # artist. This fallback is the only path that can
+                        # surface a cross-artist row at all, so the
+                        # evidence must be exact: a keyed name/piece equal
+                        # to a searched-artist variation. Deliberate
+                        # trade: a soundtrack filed under its composer
+                        # with no per-track credit no longer matches its
+                        # performer here — that filing is
+                        # indistinguishable from the wrong-artist case
+                        # above. An exact key is artist similarity 1.0,
+                        # so the confidence is the scorer's weighting
+                        # with the artist term at full marks.
+                        if not (_evidence_keys(db_track) & _artist_keys):
+                            return None
+                        return _title_score * 0.5 + 0.5, True
+
+                    _fallback_gate = max(0.7, confidence_threshold)
+                    _evidence_best = None
+                    _evidence_best_conf = 0.0
+                    _plain_best = None
+                    _plain_best_conf = 0.0
+
                     album_candidates = self.search_albums(title=album, artist="", limit=10, server_source=server_source)
                     for album_candidate in album_candidates:
                         album_title_sim = max(
@@ -10843,21 +11290,47 @@ class MusicDatabase:
                                   AND COALESCE(f.file_state, 'active') <> 'deleted'
                             WHERE t.album_id = ? {source_filter}
                         """, [*mapping_params, *params])
+                        _rows = cursor.fetchall()
+                        conn.close()
 
                         # Playlist writes need the requested server's ID, just
                         # like artist matches; a Library-v2 row ID is not a song ID.
-                        for db_track in self._rows_to_tracks(cursor.fetchall(), server_source=server_source):
-                            title_sim = max(
-                                self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
-                                self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
-                            )
-                            if title_sim > best_confidence and title_sim >= 0.7:
-                                best_confidence = title_sim
-                                best_match = db_track
+                        for db_track in self._rows_to_tracks(_rows, server_source=server_source):
+                            try:
+                                _scored = _fallback_row_confidence(db_track)
+                            except Exception as _row_err:
+                                # One bad row must not abandon the whole
+                                # fallback (remaining rows/albums may hold
+                                # the real match).
+                                logger.debug(f"Album-aware fallback row scoring failed for '{db_track.title}': {_row_err}")
+                                continue
+                            if _scored is None:
+                                continue
+                            _conf, _is_evidence = _scored
+                            if _is_evidence:
+                                if _conf > _evidence_best_conf:
+                                    _evidence_best_conf = _conf
+                                    _evidence_best = db_track
+                            elif _conf > _plain_best_conf:
+                                _plain_best_conf = _conf
+                                _plain_best = db_track
 
-                        if best_match and best_confidence >= 0.7:
-                            logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
-                            return best_match, best_confidence
+                    # A row WITH artist evidence outranks a no-evidence row
+                    # even at a lower weighted confidence: the scales are
+                    # not comparable (pure guarded title vs title+artist),
+                    # and the credited row is the one whose artist agrees.
+                    if _evidence_best is not None and _evidence_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_evidence_best.title}' by '{_evidence_best.artist_name}' (confidence: {_evidence_best_conf:.3f})")
+                        return _evidence_best, _evidence_best_conf
+                    if _plain_best is not None and _plain_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_plain_best.title}' by '{_plain_best.artist_name}' (confidence: {_plain_best_conf:.3f})")
+                        return _plain_best, _plain_best_conf
+                    # Fold the strongest fallback score into the diagnostic
+                    # best the no-match return below reports.
+                    for _m, _c in ((_evidence_best, _evidence_best_conf), (_plain_best, _plain_best_conf)):
+                        if _m is not None and _c > best_confidence:
+                            best_match = _m
+                            best_confidence = _c
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
@@ -11271,10 +11744,12 @@ class MusicDatabase:
 
     def get_artist_tracks_indexed(self, name: str, server_source: Optional[str] = None, limit: int = 10000) -> List[DatabaseTrack]:
         """Indexed two-step lookup: artist id by exact name (then folded-name
-        fallback), then that artist's tracks via the release. Avoids the
-        function-in-WHERE pattern in search_tracks that defeats the name index.
-        Returns [] when the artist isn't in the library — caller can decide to
-        fall back to the slower LIKE-based path for track_artist recall."""
+        fallback), then that artist's tracks via the release OR a per-track
+        credit (#1621: compilation/soundtrack tracks filed under another album
+        artist), both through indexed joins. Avoids the function-in-WHERE
+        pattern in search_tracks that defeats the name index. Returns [] when
+        the artist isn't in the library — caller can decide to fall back to
+        the slower LIKE-based path for diacritic/punctuation recall."""
         if not name:
             return []
         try:
@@ -11300,8 +11775,10 @@ class MusicDatabase:
                 return []
 
             placeholders = ','.join('?' for _ in artist_ids)
-            where = f"al.primary_artist_id IN ({placeholders})"
-            params: list = list(artist_ids)
+            where = (f"(al.primary_artist_id IN ({placeholders}) OR t.id IN "
+                     f"(SELECT ta.track_id FROM lib2_track_artists ta "
+                     f"WHERE ta.artist_id IN ({placeholders})))")
+            params: list = list(artist_ids) * 2
             if server_source:
                 where += (" AND (EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
                           "WHERE m.entity_type='track' AND m.entity_id=t.id "
@@ -12092,6 +12569,151 @@ class MusicDatabase:
         from core.text.normalize import normalize_for_comparison
         return normalize_for_comparison(text)
     
+    def _score_title_similarity(self, search_title: str, db_track: DatabaseTrack):
+        """The guarded title score from _calculate_track_confidence, split
+        out so the album-aware fallback can apply the SAME title guards
+        (length penalty, context/subtitle qualifier handling, word-level
+        plausibility, 0.6 floor) instead of trusting a raw char ratio
+        (#1715 review). Returns (score, passed): when passed is False the
+        score is the halved sub-threshold value _calculate_track_confidence
+        returns immediately; when True, score is the title similarity the
+        artist weighting should use."""
+        search_title_norm = self._normalize_for_comparison(search_title)
+        db_title_norm = self._normalize_for_comparison(db_track.title)
+
+        # Direct similarity with Unicode normalization
+        title_similarity = self._string_similarity(search_title_norm, db_title_norm)
+
+        # Also try with cleaned versions (removing parentheses, brackets, etc.)
+        clean_search_title = self._clean_track_title_for_comparison(search_title)
+        clean_db_title = self._clean_track_title_for_comparison(db_track.title)
+        clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
+
+        # Use the best title similarity (direct or cleaned)
+        best_title_similarity = max(title_similarity, clean_title_similarity)
+
+        # Length ratio penalty: if the DB title is significantly longer/shorter than the
+        # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
+        # SequenceMatcher gives high scores when the shorter string is fully contained
+        # in the longer one, which causes false positives for prefix/suffix matches.
+        len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
+        len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
+        if len_search > 0 and len_db > 0:
+            len_ratio = min(len_search, len_db) / max(len_search, len_db)
+            if len_ratio < 0.7:
+                # Titles differ in length by more than 30% — penalize heavily
+                best_title_similarity *= len_ratio
+
+        # #808: a parenthetical qualifier that merely RESTATES the release
+        # context is album context, not a version difference. Wishlist
+        # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
+        # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
+        # the qualifier appears in the album title, yet the length-ratio
+        # penalty above crushed the pair to ~0.17 and wishlist cleanup
+        # never recognised the owned edition. Strip qualifiers confirmed
+        # by the db album title (or by the other title) and score that
+        # variant with its OWN length guard — genuine version markers
+        # ('(Live)' on a studio album) appear in no context, keep their
+        # qualifier, and keep their penalty.
+        db_album_norm = self._normalize_for_comparison(
+            getattr(db_track, 'album_title', '') or '')
+        from core.text.title_match import strip_redundant_context_qualifiers
+        ctx_search = strip_redundant_context_qualifiers(
+            search_title_norm, db_album_norm, db_title_norm)
+        ctx_db = strip_redundant_context_qualifiers(
+            db_title_norm, db_album_norm, search_title_norm)
+        if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
+            ctx_sim = self._string_similarity(ctx_search, ctx_db)
+            ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
+            if ctx_ratio < 0.7:
+                ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
+            best_title_similarity = max(best_title_similarity, ctx_sim)
+
+        # #825: a bracketed qualifier that is a SUBTITLE — not a version
+        # marker and not numeric — is the same song. 'Llamando a la tierra
+        # (Serenade From the Stars)' vs the library's bare 'Llamando a la
+        # tierra': the subtitle restates nothing (so #808 keeps it) and the
+        # length penalty crushed the pair to ~0.14 — sync re-added it to
+        # the wishlist forever and cleanup (same matcher) never removed it.
+        # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
+        # are kept by the helper, so their mismatch penalty still stands.
+        from core.text.title_match import strip_subtitle_qualifiers
+        sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
+        sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
+        if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
+            sub_sim = self._string_similarity(sub_search, sub_db)
+            sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
+            if sub_ratio < 0.7:
+                sub_sim *= sub_ratio  # stripped forms still length-guarded
+            best_title_similarity = max(best_title_similarity, sub_sim)
+
+        # Word-level guard: SequenceMatcher's char ratio over-credits
+        # different songs that share a long substring or only a stopword
+        # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
+        # vs "Around the World" = 0.62). Since a same-artist comparison
+        # always scores artist = 1.0, the title is the only discriminator,
+        # so a bad-but-moderate title score gets carried over the threshold
+        # (#769). Reject pairs that aren't near-identical AND share no
+        # significant word — the real track is then reported missing.
+        from core.text.title_match import titles_plausibly_same
+        if not titles_plausibly_same(
+            clean_search_title or search_title_norm,
+            clean_db_title or db_title_norm,
+            best_title_similarity,
+        ):
+            return best_title_similarity * 0.5, False  # below any threshold
+
+        # Require minimum title similarity to prevent a perfect artist match from
+        # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
+        if best_title_similarity < 0.6:
+            return best_title_similarity * 0.5, False  # Can never exceed 0.3, well below any threshold
+
+        return best_title_similarity, True
+
+    def _score_artist_similarity(self, search_artist: str, db_track: DatabaseTrack) -> float:
+        """The artist score from _calculate_track_confidence, split out so
+        its exact semantics can be reused and probed on their own
+        (#1715)."""
+        search_artist_norm = self._normalize_for_comparison(search_artist)
+        db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
+
+        artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+        # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+        # often differs from the per-track artist (e.g. Vaiana OST is filed under
+        # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+        # Jackson). Score against tracks.track_artist too and take the better
+        # match so playlist sync can find these.
+        #
+        # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+        # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+        # delimiters and score each piece independently. Without this, a
+        # discography completion check for Artist2 would miss a track stored
+        # in the library under Artist1's album with a "feat. Artist2" credit.
+        db_track_artist = getattr(db_track, 'track_artist', None)
+        if db_track_artist:
+            db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+            # Whole-string similarity first as the floor.
+            track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+            # Then split on multi-artist delimiters and score each piece —
+            # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+            # "x" between names all show up here in real-world tags.
+            pieces = re.split(
+                r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                db_track_artist_norm,
+                flags=re.IGNORECASE,
+            )
+            for piece in pieces:
+                piece = piece.strip()
+                if not piece:
+                    continue
+                piece_sim = self._string_similarity(search_artist_norm, piece)
+                if piece_sim > track_artist_sim:
+                    track_artist_sim = piece_sim
+            artist_similarity = max(artist_similarity, track_artist_sim)
+
+        return artist_similarity
+
     def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
         """Calculate confidence score for track match with enhanced cleaning and Unicode normalization"""
         try:
@@ -12100,139 +12722,20 @@ class MusicDatabase:
             search_artist_norm = self._normalize_for_comparison(search_artist)
             db_title_norm = self._normalize_for_comparison(db_track.title)
             db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
-            
+
             # Debug logging for Unicode normalization
             if search_title != search_title_norm or search_artist != search_artist_norm or \
                db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
                 logger.debug("Unicode normalization:")
                 logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
                 logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
-            
-            # Direct similarity with Unicode normalization
-            title_similarity = self._string_similarity(search_title_norm, db_title_norm)
 
-            # Also try with cleaned versions (removing parentheses, brackets, etc.)
-            clean_search_title = self._clean_track_title_for_comparison(search_title)
-            clean_db_title = self._clean_track_title_for_comparison(db_track.title)
-            clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
-            
-            # Use the best title similarity (direct or cleaned)
-            best_title_similarity = max(title_similarity, clean_title_similarity)
+            best_title_similarity, title_passed = self._score_title_similarity(search_title, db_track)
+            if not title_passed:
+                return best_title_similarity
 
-            # Length ratio penalty: if the DB title is significantly longer/shorter than the
-            # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
-            # SequenceMatcher gives high scores when the shorter string is fully contained
-            # in the longer one, which causes false positives for prefix/suffix matches.
-            len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
-            len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
-            if len_search > 0 and len_db > 0:
-                len_ratio = min(len_search, len_db) / max(len_search, len_db)
-                if len_ratio < 0.7:
-                    # Titles differ in length by more than 30% — penalize heavily
-                    best_title_similarity *= len_ratio
+            artist_similarity = self._score_artist_similarity(search_artist, db_track)
 
-            # #808: a parenthetical qualifier that merely RESTATES the release
-            # context is album context, not a version difference. Wishlist
-            # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
-            # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
-            # the qualifier appears in the album title, yet the length-ratio
-            # penalty above crushed the pair to ~0.17 and wishlist cleanup
-            # never recognised the owned edition. Strip qualifiers confirmed
-            # by the db album title (or by the other title) and score that
-            # variant with its OWN length guard — genuine version markers
-            # ('(Live)' on a studio album) appear in no context, keep their
-            # qualifier, and keep their penalty.
-            db_album_norm = self._normalize_for_comparison(
-                getattr(db_track, 'album_title', '') or '')
-            from core.text.title_match import strip_redundant_context_qualifiers
-            ctx_search = strip_redundant_context_qualifiers(
-                search_title_norm, db_album_norm, db_title_norm)
-            ctx_db = strip_redundant_context_qualifiers(
-                db_title_norm, db_album_norm, search_title_norm)
-            if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
-                ctx_sim = self._string_similarity(ctx_search, ctx_db)
-                ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
-                if ctx_ratio < 0.7:
-                    ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
-                best_title_similarity = max(best_title_similarity, ctx_sim)
-
-            # #825: a bracketed qualifier that is a SUBTITLE — not a version
-            # marker and not numeric — is the same song. 'Llamando a la tierra
-            # (Serenade From the Stars)' vs the library's bare 'Llamando a la
-            # tierra': the subtitle restates nothing (so #808 keeps it) and the
-            # length penalty crushed the pair to ~0.14 — sync re-added it to
-            # the wishlist forever and cleanup (same matcher) never removed it.
-            # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
-            # are kept by the helper, so their mismatch penalty still stands.
-            from core.text.title_match import strip_subtitle_qualifiers
-            sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
-            sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
-            if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
-                sub_sim = self._string_similarity(sub_search, sub_db)
-                sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
-                if sub_ratio < 0.7:
-                    sub_sim *= sub_ratio  # stripped forms still length-guarded
-                best_title_similarity = max(best_title_similarity, sub_sim)
-
-            # Word-level guard: SequenceMatcher's char ratio over-credits
-            # different songs that share a long substring or only a stopword
-            # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
-            # vs "Around the World" = 0.62). Since a same-artist comparison
-            # always scores artist = 1.0, the title is the only discriminator,
-            # so a bad-but-moderate title score gets carried over the threshold
-            # (#769). Reject pairs that aren't near-identical AND share no
-            # significant word — the real track is then reported missing.
-            from core.text.title_match import titles_plausibly_same
-            if not titles_plausibly_same(
-                clean_search_title or search_title_norm,
-                clean_db_title or db_title_norm,
-                best_title_similarity,
-            ):
-                return best_title_similarity * 0.5  # below any threshold
-
-            # Require minimum title similarity to prevent a perfect artist match from
-            # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
-            if best_title_similarity < 0.6:
-                return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
-
-            # the artist is scored only once the title has cleared its floor:
-            # below 0.6 the result is title-only, and almost every candidate in a
-            # pool is a different song by the same artist
-            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
-
-            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
-            # often differs from the per-track artist (e.g. Vaiana OST is filed under
-            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
-            # Jackson). Score against tracks.track_artist too and take the better
-            # match so playlist sync can find these.
-            #
-            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
-            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
-            # delimiters and score each piece independently. Without this, a
-            # discography completion check for Artist2 would miss a track stored
-            # in the library under Artist1's album with a "feat. Artist2" credit.
-            db_track_artist = getattr(db_track, 'track_artist', None)
-            if db_track_artist:
-                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
-                # Whole-string similarity first as the floor.
-                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
-                # Then split on multi-artist delimiters and score each piece —
-                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
-                # "x" between names all show up here in real-world tags.
-                pieces = re.split(
-                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
-                    db_track_artist_norm,
-                    flags=re.IGNORECASE,
-                )
-                for piece in pieces:
-                    piece = piece.strip()
-                    if not piece:
-                        continue
-                    piece_sim = self._string_similarity(search_artist_norm, piece)
-                    if piece_sim > track_artist_sim:
-                        track_artist_sim = piece_sim
-                artist_similarity = max(artist_similarity, track_artist_sim)
-            
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
@@ -12242,11 +12745,11 @@ class MusicDatabase:
                 confidence *= 0.3  # Reduce confidence by 70%
 
             return confidence
-            
+
         except Exception as e:
             logger.error(f"Error calculating track confidence: {e}")
             return 0.0
-    
+
     def _clean_track_title_for_comparison(self, title: str) -> str:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         return MusicDatabase._clean_track_title_cached(title)
@@ -16170,7 +16673,7 @@ class MusicDatabase:
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
-                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
+                                   'include_instrumentals', 'include_other_artists', 'lookback_days', 'preferred_metadata_source',
                                    'auto_download', 'auto_download_pref', 'quality_profile_id']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
@@ -16207,6 +16710,7 @@ class MusicDatabase:
                     include_acoustic = bool(row['include_acoustic']) if 'include_acoustic' in existing_columns else False
                     include_compilations = bool(row['include_compilations']) if 'include_compilations' in existing_columns else False
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
+                    include_other_artists = bool(row['include_other_artists']) if 'include_other_artists' in existing_columns else False
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
                     auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
@@ -16240,6 +16744,7 @@ class MusicDatabase:
                         include_acoustic=include_acoustic,
                         include_compilations=include_compilations,
                         include_instrumentals=include_instrumentals,
+                        include_other_artists=include_other_artists,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
                         auto_download=auto_download,
@@ -16833,6 +17338,67 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding similar artist: {e}")
             return False
+
+    def replace_similar_artists(self, source_artist_id: str, similars: List[Dict[str, Any]],
+                                profile_id: int = 1,
+                                source_provider: Optional[str] = None) -> int:
+        """swap one artist's similar artists for a fresh fetch, in one go.
+
+        the upsert only ever added. a name a better match no longer produces
+        (Colde stored for Cold) stayed forever, and every refetch bumped
+        occurrence_count, which the reader sums. the hero's rotation history
+        (last_featured) carries over by name.
+
+        each entry takes add_or_update_similar_artist's kwargs. returns how
+        many rows went in; an empty list leaves the old set alone."""
+        from core.context_sentinels import is_context_sentinel
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return 0
+        rows = [s for s in similars or [] if s.get('similar_artist_name')]
+        if not rows:
+            return 0
+        provider = (str(source_provider).strip().lower() or None) if source_provider else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT similar_artist_name, last_featured FROM similar_artists
+                    WHERE profile_id = ? AND source_artist_id = ? AND last_featured IS NOT NULL
+                """, (profile_id, source_artist_id))
+                featured = {(r[0] or '').casefold(): r[1] for r in cursor.fetchall()}
+                cursor.execute(
+                    "DELETE FROM similar_artists WHERE profile_id = ? AND source_artist_id = ?",
+                    (profile_id, source_artist_id))
+                stored = 0
+                for row in rows:
+                    name = row['similar_artist_name']
+                    genres = row.get('genres')
+                    image_url = row.get('image_url')
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
+                         similarity_rank, occurrence_count, last_updated, profile_id,
+                         image_url, genres, popularity, metadata_updated_at, source_provider,
+                         last_featured)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?,
+                                CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP END, ?, ?)
+                        ON CONFLICT(profile_id, source_artist_id, similar_artist_name) DO NOTHING
+                    """, (source_artist_id, row.get('similar_artist_spotify_id'),
+                          row.get('similar_artist_itunes_id'), row.get('similar_artist_deezer_id'),
+                          row.get('similar_artist_musicbrainz_id'), name,
+                          row.get('similarity_rank', 1), profile_id, image_url,
+                          json.dumps(genres) if genres else None, row.get('popularity', 0) or 0,
+                          image_url, provider, featured.get(name.casefold())))
+                    stored += max(cursor.rowcount, 0)
+                conn.commit()
+                return stored
+        except Exception as e:
+            logger.error(f"Error replacing similar artists: {e}")
+            return 0
 
     def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""
@@ -21621,11 +22187,11 @@ class MusicDatabase:
                 gone = [c for c in cards
                         if c.get('play_file_path') and not os.path.exists(c['play_file_path'])]
                 if gone:
+                    # only about those cards' paths (upstream 919c8d50d), not
+                    # every path in the library on each dashboard load
                     from core.library.expired_cleanup import path_suffix_key
-                    cursor.execute(
-                        "SELECT path FROM lib2_track_files"
-                        " WHERE file_state = 'active' AND path IS NOT NULL")
-                    live_keys = {path_suffix_key(r[0]) for r in cursor.fetchall()}
+                    from core.library.live_paths import live_suffix_keys
+                    live_keys = live_suffix_keys(cursor, [c['play_file_path'] for c in gone])
                     dead = {id(c) for c in gone
                             if path_suffix_key(c['play_file_path']) not in live_keys}
                     cards = [c for c in cards if id(c) not in dead]
@@ -21676,6 +22242,42 @@ class MusicDatabase:
                         if hit and hit[0]:
                             return hit[0]
                     return ''
+
+                # the library album behind each card, so its play / queue /
+                # add-to-playlist buttons can act on the whole album. the
+                # newest track's path is the exact answer (indexed); a path
+                # that moved roots falls back to the names. None when the
+                # library has no such album, and the card stays single-track.
+                for card in cards:
+                    card['album_id'] = None
+                    card['artist_id'] = None
+                    try:
+                        hit = None
+                        if card['play_file_path']:
+                            cursor.execute(
+                                "SELECT t.album_id, al.primary_artist_id"
+                                " FROM lib2_track_files f"
+                                " JOIN lib2_tracks t ON t.id = f.track_id"
+                                " JOIN lib2_albums al ON al.id = t.album_id"
+                                " WHERE f.path = ? AND f.file_state = 'active' LIMIT 1",
+                                (card['play_file_path'],))
+                            hit = cursor.fetchone()
+                        if not hit and card['album_name']:
+                            from core.library2.importer import normalize_name
+                            cursor.execute(
+                                """
+                                SELECT al.id, al.primary_artist_id
+                                FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                                WHERE ar.name_key = ? AND LOWER(al.title) = LOWER(?)
+                                LIMIT 1
+                                """,
+                                (normalize_name(card['artist_name'] or ''), card['album_name']))
+                            hit = cursor.fetchone()
+                        if hit:
+                            card['album_id'] = hit[0]
+                            card['artist_id'] = hit[1]
+                    except Exception as e:
+                        logger.debug("recently-added album id lookup failed: %s", e)
 
                 for card in cards:
                     try:
@@ -22660,6 +23262,9 @@ class MusicDatabase:
         A new mirror inherits the current global Quality Profile. Refreshing
         an existing mirror preserves its durable assignment unless the caller
         explicitly supplies a new one.
+
+        ``source_skipped`` works the same way: pass it (a dict or None) and
+        it replaces the stored counts, leave it out and they stay.
         """
         from core.playlists.source_refs import coalesce_mirror_track, stable_source_track_id
 
@@ -22698,8 +23303,8 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -22710,13 +23315,19 @@ class MusicDatabase:
                             WHEN ? THEN excluded.quality_profile_id
                             ELSE mirrored_playlists.quality_profile_id
                         END,
+                        source_skipped = CASE
+                            WHEN ? THEN excluded.source_skipped
+                            ELSE mirrored_playlists.source_skipped
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     source, source_playlist_id, name,
                     kwargs.get('description'), kwargs.get('owner'),
                     kwargs.get('image_url'), len(tracks), profile_id,
                     resolved_quality_profile_id,
+                    self._source_skipped_json(kwargs.get('source_skipped')),
                     1 if quality_profile_id is not None else 0,
+                    1 if 'source_skipped' in kwargs else 0,
                 ))
                 playlist_id = cursor.execute(
                     "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
@@ -22733,6 +23344,20 @@ class MusicDatabase:
                     old_extra_map = {row['source_track_id']: row['extra_data'] for row in cursor.fetchall()}
                 except Exception as e:
                     logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
+                # and when each track first joined, so a rewrite (an add, a
+                # remove, a reorder, a re-mirror) never resets its date added
+                old_added_map = {}
+                try:
+                    cursor.execute("""
+                        SELECT source_track_id, added_at FROM mirrored_playlist_tracks
+                        WHERE playlist_id = ? AND source_track_id IS NOT NULL AND added_at IS NOT NULL
+                        ORDER BY position
+                    """, (playlist_id,))
+                    for row in cursor.fetchall():
+                        old_added_map.setdefault(row['source_track_id'], row['added_at'])
+                except Exception as e:
+                    logger.debug("Failed to preserve mirrored playlist added_at: %s", e)
+                now_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
                 # Replace all tracks
                 from core.playlists.source_refs import stable_source_track_id
@@ -22749,15 +23374,16 @@ class MusicDatabase:
                     # Restore preserved discovery data if the incoming track doesn't have its own
                     if not extra and sid and sid in old_extra_map:
                         extra = old_extra_map[sid]
+                    added_at = t.get('added_at') or (old_added_map.get(sid) if sid else None) or now_utc
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
-                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data, added_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         playlist_id, i + 1,
                         t.get('track_name', ''), t.get('artist_name', ''),
                         t.get('album_name', ''), t.get('duration_ms', 0),
-                        t.get('image_url'), sid or None, extra
+                        t.get('image_url'), sid or None, extra, added_at
                     ))
                 conn.commit()
                 logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")
@@ -22801,6 +23427,56 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error linking mirrored playlist {playlist_id} to server: {e}")
+            return False
+
+    def set_mirrored_playlist_image_url(
+        self,
+        playlist_id: int,
+        image_url: Optional[str],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Set (or clear, with None) a mirrored playlist's poster, owner-scoped.
+
+        For user playlists this is the cover the owner picked: the mirror
+        upsert preserves image_url on every track edit, so a cover set here
+        survives adds, removes and reorders. The list and detail views fall
+        back to track art when it is NULL.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET image_url = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [image_url, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting image for mirrored playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_description(
+        self,
+        playlist_id: int,
+        description: Optional[str],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Set (or clear, with None) a mirrored playlist's description, owner-scoped."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET description = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [description, int(playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting description for mirrored playlist {playlist_id}: {e}")
             return False
 
     def backfill_missing_mirrored_covers(self, profile_id: int = 1) -> int:
@@ -22958,7 +23634,38 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        try:
+            pl['source_skipped'] = json.loads(pl['source_skipped']) if pl.get('source_skipped') else None
+        except (TypeError, ValueError):
+            pl['source_skipped'] = None
         return pl
+
+    def set_mirrored_playlist_source_skipped(
+        self,
+        source: str,
+        source_playlist_id: str,
+        skipped: Optional[Dict[str, int]],
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """store what the source skipped on an existing mirror, without touching its tracks.
+
+        for a fresh fetch that isn't a mirror write (identify re-pulls the
+        playlist). no mirror yet means nothing to update.
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET source_skipped = ? "
+                    "WHERE source = ? AND source_playlist_id = ?" + owner_sql,
+                    [self._source_skipped_json(skipped), source, str(source_playlist_id), *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving skipped counts for {source}:{source_playlist_id}: {e}")
+            return False
 
     def get_mirrored_playlist_by_source(
         self,
@@ -23165,8 +23872,12 @@ class MusicDatabase:
         profile_id: Optional[int] = None,
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
+        sync_mode: Optional[str] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
+
+        ``sync_mode`` None leaves it alone, '' clears it back to the global
+        mode, anything else is stored as given (the route validates it).
 
         Returns ``'ok'``, ``'not_found'``, ``'unknown_quality_profile'`` or
         ``'error'``.  Both fields are validated BEFORE anything is written and
@@ -23196,6 +23907,10 @@ class MusicDatabase:
                 if organize_by_playlist is not None:
                     assignments.append("organize_by_playlist=?")
                     params.append(1 if organize_by_playlist else 0)
+
+                if sync_mode is not None:
+                    assignments.append("sync_mode=?")
+                    params.append(sync_mode or None)
 
                 if not assignments:
                     return 'ok'
@@ -25180,8 +25895,14 @@ class MusicDatabase:
             conn.commit()
             logger.info(f"Seeded {len(default_urls)} default HiFi instances")
 
-# Thread-safe singleton pattern for database access
-_database_instances: Dict[int, MusicDatabase] = {}  # Thread ID -> Database instance
+# Thread-safe singleton pattern for database access.
+# Keyed by (thread ID, resolved database path): the same thread may legitimately
+# need different database files over its lifetime (tests set DATABASE_PATH per
+# module; workers pass explicit paths). Keying by thread alone silently returned
+# the WRONG database when a second path was requested after the first — e.g. a
+# test module's DATABASE_PATH was ignored because an earlier module had already
+# cached an instance for this thread, so queries ran against the wrong file.
+_database_instances: Dict[Tuple[int, str], MusicDatabase] = {}
 _database_lock = threading.Lock()
 
 def get_database(database_path: str = None) -> MusicDatabase:
@@ -25196,12 +25917,16 @@ def get_database(database_path: str = None) -> MusicDatabase:
     if database_path is None or database_path == "database/music_library.db":
         database_path = os.environ.get('DATABASE_PATH', 'database/music_library.db')
 
-    thread_id = threading.get_ident()
+    # The cache key includes the resolved path: two different paths requested
+    # from the same thread must yield two different instances. (Previously the
+    # key was the thread ID alone, so the second path silently got the first
+    # path's database.)
+    key = (threading.get_ident(), database_path)
 
     with _database_lock:
-        if thread_id not in _database_instances:
-            _database_instances[thread_id] = MusicDatabase(database_path)
-        return _database_instances[thread_id]
+        if key not in _database_instances:
+            _database_instances[key] = MusicDatabase(database_path)
+        return _database_instances[key]
 
 def close_database():
     """Close database instances (safe to call from any thread)"""

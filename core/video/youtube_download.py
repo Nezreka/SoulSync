@@ -288,7 +288,13 @@ def _default_move(src: str, dest: str, on_progress: Optional[Callable[[int], Non
                 copied += len(chunk)
                 if on_progress and total:
                     on_progress(min(99, int(copied * 100 / total)))   # 100 only once it's in place
-        shutil.copystat(src, tmp)                   # preserve mtime, like shutil.move/copy2
+        # mtime is a courtesy. nfs/smb/unraid shares can refuse the metadata
+        # step (errno 524 on an nfs4 acl xattr, #1713) after the data landed.
+        try:
+            shutil.copystat(src, tmp)
+        except OSError as e:
+            logger.info("youtube import: kept the copy of %s without its timestamps/permissions (%s)",
+                        os.path.basename(dest), e)
         # Verify the copy before the atomic rename — a silently short copy (SMB
         # hiccup that didn't raise) must never be promoted to the real name.
         if total > 0:

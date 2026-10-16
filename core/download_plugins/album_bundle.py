@@ -203,6 +203,106 @@ def album_title_relevance(candidate_title: str, album_name: str) -> float:
     return coverage
 
 
+# Tribute / cover markers that disqualify a release for an ORIGINAL wishlist
+# album (the tribute-picker report). A title like "Animals Reimagined – A
+# Tribute to Pink Floyd" contains every significant word of "Animals" BY
+# CONSTRUCTION, so the relevance floor above cannot see it — the marker has
+# to be named explicitly.
+#
+# Bare "cover"/"covers" are deliberately NOT markers: tracker/usenet naming
+# tags legitimate rips with artwork words ([Covers], [Front Cover],
+# [FLAC + CUE + LOG + Covers], "+ Covers") and every seeded lossless copy
+# carrying scans would be refused as a "tribute album" (review BLOCK on
+# #1641). Real cover albums are caught by the explicit-phrase markers
+# ("cover album", "cover version", "cover band", "covers of").
+_TRIBUTE_COVER_MARKERS = (
+    "tribute",
+    "salute",
+    "a tribute to",
+    "in the style of",
+    "cover album",
+    "cover version",
+    "cover versions",
+    "cover band",
+    "covers of",
+)
+
+
+def _phrase_in_normalized_text(phrase: str, normalized_text: str) -> bool:
+    """Word-boundary (not substring) phrase match on normalized text.
+
+    Same anchoring as the full-phrase bonus in ``album_title_relevance``:
+    'cover' must not fire inside 'undercover'.
+    """
+    if not phrase or not normalized_text:
+        return False
+    return bool(re.search(rf"(?:^| ){re.escape(phrase)}(?: |$)", normalized_text))
+
+
+def _has_unexplained_tribute_marker(candidate_title: str, album_name: str,
+                                    artist_name: str) -> bool:
+    """True when the release title carries a tribute/cover marker that the
+    wishlist item does NOT explain.
+
+    The wishlist item explains the marker when the album NAME or the artist
+    NAME carries it too: a user who wishlisted a tribute album still gets
+    their tribute album, and an artist literally named 'Cover Drive' keeps
+    their own releases. Only when the item is an original (no marker in its
+    own name or artist) does a marked release get rejected.
+    """
+    norm_title = _normalize_release_text(candidate_title or "")
+    if not norm_title:
+        return False
+    norm_album = _normalize_release_text(album_name or "")
+    norm_artist = _normalize_release_text(artist_name or "")
+    for phrase in _TRIBUTE_COVER_MARKERS:
+        if not _phrase_in_normalized_text(phrase, norm_title):
+            continue
+        if _phrase_in_normalized_text(phrase, norm_album):
+            continue  # the wishlist item IS this tribute/cover album
+        if _phrase_in_normalized_text(phrase, norm_artist):
+            continue  # the marker is the artist's own name, not a tribute
+        return True
+    return False
+
+
+# Placeholder artist names that carry no identity. "Various Artists" is what
+# the metadata layer stores for compilations, but real-world VA release
+# titles say "VA - ..." — the placeholder words never appear there, so
+# gating on them would refuse every VA bundle. Treated like a missing
+# artist name: no opinion (fail open). "Various" included to match
+# core/library_reorganize.py's compilation placeholder set.
+_ARTIST_PLACEHOLDER_NAMES = frozenset({
+    "various artists",
+    "various",
+    "va",
+    "unknown artist",
+    "unknown",
+})
+
+
+def _release_has_artist_token(candidate_title: str, artist_name: str) -> bool:
+    """True when at least one significant artist word appears (word-boundary)
+    in the release title.
+
+    Empty or unparseable artist name -> True (fail open): with no artist
+    info to judge by there is no opinion, and the old behavior is kept
+    rather than dropping releases we cannot judge.
+    """
+    normalized = _normalize_release_text(artist_name or "")
+    if normalized in _ARTIST_PLACEHOLDER_NAMES:
+        # "Various Artists" is what the metadata layer stores for
+        # compilations, but real-world VA release titles say "VA - ..." —
+        # the placeholder words never appear. A placeholder carries no
+        # identity, so like a missing artist name it means no opinion.
+        return True
+    words = _significant_words(normalized)
+    if not words:
+        return True
+    title_words = set(_normalize_release_text(candidate_title or "").split())
+    return any(w in title_words for w in words)
+
+
 def profile_allowed_formats(quality_profile_id=None):
     """The formats the caller's quality profile will accept, or None for any.
 
@@ -321,6 +421,7 @@ def _usenet_age_bucket(candidate) -> float:
 
 def pick_best_album_release(candidates, quality_guess,
                             album_name: str = "",
+                            artist_name: str = "",
                             min_seeders: int = 0,
                             allowed_formats=None,
                             allow_mixed: bool = False,
@@ -336,7 +437,22 @@ def pick_best_album_release(candidates, quality_guess,
        different album. When ``album_name`` is given and NOTHING clears the
        relevance floor, return None — the caller then falls back to per-track
        rather than downloading a confident mismatch.
-    0a. FORMAT gate (#1149): drop candidates whose format cannot satisfy the
+    0a. IDENTITY gate (artist + tribute markers): the relevance floor only
+       scores the ALBUM's words, so "Animals Reimagined – A Tribute to Pink
+       Floyd" clears it for a Pink Floyd "Animals" wishlist item and then wins
+       on seeders — handing a tribute album to the downloader. Two sub-gates,
+       both fail-open:
+       - tribute/cover markers: reject a marked release when the wishlist
+         item is an original (the marker is unexplained by the album/artist
+         name). A wishlisted tribute album still passes — the filter only
+         fires when the item is an original.
+       - artist tokens: require at least one significant artist word in the
+         release title, so a wrong-artist same-name album can't win.
+       Only applied when we know the album name (same condition as gate 0);
+       without an artist name the artist sub-gate has no opinion (old
+       behavior). When nothing clears it, return None — same fallback
+       contract as gate 0.
+    0b. FORMAT gate (#1149): drop candidates whose format cannot satisfy the
        caller's quality profile. ``allowed_formats=None`` disables it, which
        is what a profile with fallback enabled (or no ranked targets) means
        everywhere else in the pipeline. Quality used to be the SECOND sort key
@@ -344,7 +460,7 @@ def pick_best_album_release(candidates, quality_guess,
        seeders no matter what the profile said — sorting cannot express "never
        this", only "prefer that". A release whose format cannot be determined
        is dropped too rather than assumed lossy and ranked.
-    0b. SIZE gate: drop candidates whose bytes contradict the quality their
+    0c. SIZE gate: drop candidates whose bytes contradict the quality their
        title claims — a 60 MB "FLAC" of a 45-minute album is a transcode, and
        a release averaging far more than its stated lossy bitrate is not the
        album that was searched for. Same mechanism as Lidarr's
@@ -352,7 +468,7 @@ def pick_best_album_release(candidates, quality_guess,
        same fail-open contract: without ``expected_duration_seconds`` there is
        no opinion. Runs before availability so the log names the quality lie
        rather than a dead swarm.
-    0c. Availability gate (#1139): drop candidates whose indexer-reported
+    0d. Availability gate (#1139): drop candidates whose indexer-reported
        seeder count is BELOW ``min_seeders``. Sorting by seeders was never
        enough — with every candidate on zero, the sort still handed back a
        release nobody is serving, and the download then sat on "downloading
@@ -418,7 +534,36 @@ def pick_best_album_release(candidates, quality_guess,
             return None
         candidates = relevant
 
-    # 0a. Format gate. Runs before the seeder and size gates so the log says
+    # 0a. Identity gate (artist + tribute markers). Runs right after the
+    # relevance floor so the log names the identity problem ("wrong artist" /
+    # "tribute album") rather than a later format/seeder complaint.
+    if album_name:
+        identified = []
+        for c in candidates:
+            title = release_evidence(c).title or ""
+            if _has_unexplained_tribute_marker(title, album_name, artist_name):
+                logger.debug("[Album Bundle] Rejected '%s': tribute/cover marker", title)
+                continue
+            if not _release_has_artist_token(title, artist_name):
+                logger.debug("[Album Bundle] Rejected '%s': no artist token for '%s'",
+                             title, artist_name)
+                continue
+            identified.append(c)
+        if not identified:
+            logger.warning(
+                "[Album Bundle] No candidate cleared the artist/tribute identity "
+                "gate for '%s' by '%s' (%d rejected) — refusing the bundle so the "
+                "caller falls back to per-track.",
+                album_name, artist_name or '?', len(candidates),
+            )
+            return None
+        if len(identified) != len(candidates):
+            logger.info("[Album Bundle] Dropped %d candidate(s) failing the "
+                        "artist/tribute identity gate",
+                        len(candidates) - len(identified))
+        candidates = identified
+
+    # 0b. Format gate. Runs before the seeder and size gates so the log says
     # "nothing in the right format" rather than "nothing with enough seeders"
     # when both are true — the first is the actionable one.
     if allowed_formats:

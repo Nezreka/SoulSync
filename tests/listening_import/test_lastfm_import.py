@@ -57,6 +57,7 @@ def test_normalizes_lastfm_recent_track_payload():
         # INT-01: this importer resolves against `lib2_tracks`, so the id it
         # carries is a CATALOGUE id and belongs in the catalogue column.
         "lib2_track_id": None,
+        "scrobble_eligible": 1,
     }
 
 

@@ -21,7 +21,10 @@ class LibraryReorganizeJob(RepairJob):
     help_text = (
         "Scans Library-v2 albums that own files and computes their destination "
         "with the same planner and queue as interactive Reorganize. Dry run is "
-        "enabled by default and creates review findings; live mode queues albums."
+        "enabled by default and creates review findings; live mode queues albums.\n\n"
+        "A library-wide scan that gets stopped (or a restart) picks up at the album "
+        "it stopped on next time, then goes back to the top once it reaches the end. "
+        "Changing dry run or your naming settings starts it over."
     )
     icon = "repair-icon-reorganize"
     default_enabled = False
@@ -103,11 +106,25 @@ class LibraryReorganizeJob(RepairJob):
             "file_organization.enabled", True,
         ):
             return result
+        from core.library_reorganize import naming_fingerprint
+
         dry_run = self._dry_run(context)
         albums = self._albums(context)
-        for index, album in enumerate(albums):
-            if context.check_stop():
-                break
+        # #1716: a library-wide scan resumes right after the last album a run
+        # finished under the same mode and naming; a scoped run never touches
+        # that checkpoint.
+        library_wide = get_scope_file_paths(context) is None
+        scan_key = f"{'dry' if dry_run else 'live'}|{naming_fingerprint()}"
+        start = self.resume_index(context, [a["id"] for a in albums], scan_key) if library_wide else 0
+        if start:
+            logger.info("Reorganize: resuming at album %d of %d", start + 1, len(albums))
+        for index in range(start, len(albums)):
+            album = albums[index]
+            stopping = context.check_stop()
+            if library_wide and index > start and (stopping or (index - start) % 25 == 0):
+                self.save_checkpoint(context, albums[index - 1]["id"], scan_key)
+            if stopping:
+                return result
             album_id = int(album["id"])
             # There is deliberately no `legacy_album_id IS NOT NULL` gate here.
             # That back-reference is written ONLY by the one-shot upgrade
@@ -212,6 +229,9 @@ class LibraryReorganizeJob(RepairJob):
                     result.errors += 1
             if context.update_progress:
                 context.update_progress(index + 1, len(albums))
+        if library_wide:
+            # the pass reached the end, so the next run starts at the top
+            self.save_checkpoint(context, None)
         return result
 
     def estimate_scope(self, context: JobContext) -> int:

@@ -72,6 +72,11 @@ export function WishlistOrb({
   const everExpandedRef = useRef(expanded);
   if (expanded) everExpandedRef.current = true;
 
+  // the entrance plays once. a poll refetch can reorder orbs, and moving a node
+  // restarts its css animations, so without this every moved orb blinked out
+  // and faded back in while a wishlist run was going.
+  const [entered, setEntered] = useState(false);
+
   const image = orbImage(group, artistImages);
   const imageFallback = orbImageFallback(group, artistImages, artistImageFallbacks ?? new Map());
   const ringCovers = orbRingCovers(group);
@@ -80,10 +85,15 @@ export function WishlistOrb({
 
   return (
     <div
-      className={`wl-orb-group${expanded ? ' expanded' : ''}${processing ? ' orb-processing' : ''}`}
+      className={`wl-orb-group${expanded ? ' expanded' : ''}${processing ? ' orb-processing' : ''}${entered ? ' wl-orb-entered' : ''}`}
       data-artist={group.name}
       data-failing={group.failingCount}
-      style={{ animationDelay: `${orbAnimationDelay(index)}ms` }}
+      style={entered ? undefined : { animationDelay: `${orbAnimationDelay(index)}ms` }}
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget && event.animationName === 'orbEntrance') {
+          setEntered(true);
+        }
+      }}
     >
       <div className="wl-orb-tooltip">
         {group.name}

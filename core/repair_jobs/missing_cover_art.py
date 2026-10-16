@@ -1,8 +1,14 @@
 """Missing Cover Art Filler Job — finds albums without artwork and locates art from APIs."""
 
+import hashlib
+import json
+from contextlib import nullcontext
+
 from core.library2.maintenance_subjects import active_album_subjects
 from core.library2.maintenance_subjects import subject_details
+from core.lookup_failures import LookupFailures, watch_lookup_failures
 from core.repair_jobs import register_job
+from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
 from utils.logging_config import get_logger
 
@@ -23,22 +29,22 @@ class MissingCoverArtJob(RepairJob):
         'When artwork is found, a finding is created with the image URL so you can review '
         'and apply it. The job does not download or embed artwork automatically.\n\n'
         'Settings:\n'
-        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used'
+        '- Prefer Source: Optional source to try first; otherwise the primary metadata source is used\n'
+        '- Remember Empty Lookups: When on, an album no source had art for is not searched '
+        'again until it changes, your art sources change, or the recheck time passes. '
+        'Fewer repeated requests to the metadata services\n'
+        '- Recheck After Days: How long an empty answer is trusted (default 7)'
     )
     icon = 'repair-icon-coverart'
     default_enabled = True
     default_interval_hours = 48
-    default_settings = {}
+    default_settings = {
+        'remember_empty_lookups': False,
+        'recheck_after_days': 7,
+    }
     auto_fix = False
 
     def scan(self, context: JobContext) -> JobResult:
-        import os
-
-        from core.library2.paths import resolve_lib2_path
-        from core.library2.provider_adapters import fetch_artwork_url
-        from core.library2.tag_cache import observe_file_tags
-        from core.library2.validation import artwork_checks
-
         result = JobResult()
         settings = self._get_settings(context)
         configured_order = (
@@ -55,9 +61,44 @@ class MissingCoverArtJob(RepairJob):
         albums = drop_hand_tagged(
             context, active_album_subjects(context.db, context.config_manager), path_key="rep_path")
         total = len(albums)
+        # Opt-in (#1708): an album no source had art for is not searched again
+        # until what is asked changes or the recheck time passes.
+        memory = None
+        if settings.get('remember_empty_lookups'):
+            try:
+                recheck_days = max(0.0, float(settings.get('recheck_after_days', 7)))
+            except (TypeError, ValueError):
+                recheck_days = 7.0
+            memory = EmptyLookupMemory.open(context.db, self.job_id, recheck_days)
+        # The provider clients turn a failed request into an empty result, so
+        # the requests are watched: a throttled lookup is not an empty answer.
+        watching = watch_lookup_failures() if memory else nullcontext(LookupFailures())
+        try:
+            with watching as health:
+                finished = self._scan_albums(context, result, albums, source_order, memory, health)
+            if memory and finished:
+                # only a scan that saw every album may forget the missing ones
+                memory.prune(str(subject['album_id']) for subject in albums)
+        finally:
+            if memory:
+                memory.close()
+        if context.update_progress:
+            context.update_progress(total, total)
+        return result
+
+    def _scan_albums(self, context, result, albums, source_order, memory, health):
+        import os
+
+        from core.library2.paths import resolve_lib2_path
+        from core.library2.provider_adapters import fetch_artwork_url
+        from core.library2.tag_cache import observe_file_tags
+        from core.library2.validation import artwork_checks
+
         for index, subject in enumerate(albums):
             if context.check_stop() or (index % 10 == 0 and context.wait_if_paused()):
-                return result
+                return False
+            if memory and index % 25 == 0:
+                memory.commit()
             result.scanned += 1
             raw_path = str(subject.get("rep_path") or "")
             resolved = raw_path if os.path.isfile(raw_path) else resolve_lib2_path(
@@ -75,13 +116,23 @@ class MissingCoverArtJob(RepairJob):
                 result.skipped += 1
                 continue
 
-            provider_result = fetch_artwork_url(
-                "album",
-                artist_name=subject.get("artist_name") or "",
-                album_title=subject.get("title") or "",
-                source_ids=subject.get("album_source_ids") or {},
-                source_order=source_order,
-            )
+            key = str(subject['album_id'])
+            signature = self._lookup_signature(subject, source_order)
+            if memory and memory.recently_empty(key, signature):
+                provider_result = None
+            else:
+                failures_before = health.count
+                provider_result = fetch_artwork_url(
+                    "album",
+                    artist_name=subject.get("artist_name") or "",
+                    album_title=subject.get("title") or "",
+                    source_ids=subject.get("album_source_ids") or {},
+                    source_order=source_order,
+                )
+                if memory and provider_result:
+                    memory.forget(key)
+                elif memory and health.count == failures_before and not self._spotify_rate_limited(context):
+                    memory.remember(key, signature)
             sidecar_from_embedded = sidecar_missing and embedded
             if provider_result is None and not sidecar_from_embedded:
                 result.skipped += 1
@@ -141,9 +192,25 @@ class MissingCoverArtJob(RepairJob):
                     result.findings_created += 1
                 else:
                     result.findings_skipped_dedup += 1
-        if context.update_progress:
-            context.update_progress(total, total)
-        return result
+        return True
+
+    @staticmethod
+    def _lookup_signature(subject, source_order) -> str:
+        """A short fingerprint of everything that decides what the lookup asks."""
+        ids = subject.get("album_source_ids") or {}
+        payload = json.dumps(
+            [subject.get("title"), subject.get("artist_name"),
+             sorted((k, str(v)) for k, v in ids.items() if v), list(source_order or [])],
+            default=str)
+        return hashlib.sha1(payload.encode('utf-8')).hexdigest()[:16]
+
+    @staticmethod
+    def _spotify_rate_limited(context) -> bool:
+        check = getattr(context, 'is_spotify_rate_limited', None)
+        try:
+            return bool(check()) if callable(check) else False
+        except Exception:  # noqa: BLE001 - an unreadable flag means "do not trust this answer"
+            return True
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:

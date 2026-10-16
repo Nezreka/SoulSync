@@ -67,7 +67,8 @@ def _discover_shelf_cache(key_extra=None):
             key = (fn.__name__, request.full_path, get_current_profile_id(), extra)
             hit = _DISCOVER_SHELF_CACHE.get(key)
             now = _t.time()
-            if hit and now < hit[0]:
+            from core.discovery.warm_refresh import refreshing
+            if hit and now < hit[0] and not refreshing():
                 body, status, ctype = hit[1]
                 return Response(body, status=status, content_type=ctype)
             out = fn(*args, **kwargs)

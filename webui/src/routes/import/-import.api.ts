@@ -175,6 +175,7 @@ export async function saveAutoImportSettings(input: {
   scanInterval: number;
   qualityProfileId?: number | null;
   autoProcess?: boolean;
+  clearFinished?: boolean;
 }): Promise<void> {
   await readJson<{ success: boolean; error?: string }>(
     apiClient.post('auto-import/settings', {
@@ -183,6 +184,7 @@ export async function saveAutoImportSettings(input: {
         scan_interval: input.scanInterval,
         quality_profile_id: input.qualityProfileId ?? null,
         ...(input.autoProcess === undefined ? {} : { auto_process: input.autoProcess }),
+        ...(input.clearFinished === undefined ? {} : { clear_finished: input.clearFinished }),
       },
     }),
   );

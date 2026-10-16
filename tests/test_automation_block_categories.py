@@ -27,6 +27,15 @@ def test_no_block_falls_through_to_other():
     assert not homeless, f"no category rule matches: {homeless}"
 
 
+def test_ntfy_and_gotify_are_offered_as_notify_blocks():
+    """The engine and the config forms handle ntfy/gotify, but the palette is
+    served from NOTIFICATIONS, so a missing entry hides them from the builder."""
+    offered = {b['type'] for b in blocks_for_scope('music')['notifications']}
+    for t in ('ntfy', 'gotify'):
+        assert t in offered, f"{t} is not offered in the builder palette"
+        assert block_category(t) == 'Notify'
+
+
 def test_every_category_used_is_in_the_display_order():
     used = {block_category(b['type']) for b in ALL_BLOCKS}
     missing = sorted(used - set(CATEGORY_ORDER))

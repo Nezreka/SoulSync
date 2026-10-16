@@ -1699,7 +1699,16 @@ function showPinDialog(profile, mode = 'pin') {
             autocomplete: 'current-password', maxlength: '200', 'aria-label': `${profile.name}'s password`,
             'aria-describedby': 'profile-pin-error',
         });
-        card.append(input, error);
+        input.name = 'password';
+        // password managers pair a password with the username in its form. there's
+        // no visible username here, so carry the profile name hidden beside it
+        const login = pfEl('input', {
+            type: 'text', name: 'username', autocomplete: 'username', value: profile.name,
+            readonly: true, hidden: true, tabindex: '-1', 'aria-hidden': 'true',
+        });
+        const form = pfEl('form', { action: '/api/profiles/select', method: 'post', autocomplete: 'on', style: 'width:100%' }, [login, input]);
+        form.addEventListener('submit', (e) => { e.preventDefault(); submit(); });
+        card.append(form, error);
         const go = pfEl('button', { type: 'button', class: 'pf-btn pf-btn--primary', text: 'Continue', style: 'margin-top:8px;width:100%' });
         go.addEventListener('click', () => submit());
         keys.push(go);
@@ -4614,10 +4623,81 @@ function initializeWatchlist() {
     console.log('Watchlist system initialized');
 }
 
+// The sidebar's page ids are coarser than the URL space: several distinct routes
+// share one page id (/audiobooks, /audiobooks/<asin>, /audiobooks/library, ...).
+// Comparing page ids in navigateToPage's early-return used to swallow "go home"
+// clicks from any sub-route, because the click looked like a no-op even though
+// the URL was different and the click handler had already preventDefaulted the
+// anchor. The guard now compares the resolved target path against the current
+// path (see _navGuardPath), so a nav item is a reliable way back to its
+// section's home page. The pointerdown/click double-fire is absorbed by the
+// _lastNavTarget echo token below, restoring the old synchronous no-op.
+function _navTargetPath(pageId, options = {}) {
+    if (pageId === 'dashboard') return '/';
+    if (pageId === 'artist-detail' && options.artistId) {
+        return buildArtistDetailPath(options.artistId, options.artistSource, options.artistName, options.focusAlbumId);
+    }
+    if (pageId === 'label-detail' && options.labelId) {
+        return buildLabelDetailPath(options.labelId, options.labelName);
+    }
+    return '/' + pageId;
+}
+
+// What the TanStack bridge actually navigates to for a pageId — the guard
+// must compare against this, not the fallback branch's pushState path. They
+// differ in one place: the bridge takes the dashboard to '/dashboard' (the
+// route manifest path) while the legacy fallback pushes '/'.
+function _navGuardPath(pageId, options = {}) {
+    if (pageId === 'dashboard') return '/dashboard';
+    return _navTargetPath(pageId, options);
+}
+
+function _normalizeNavPath(path) {
+    const stripped = window.SoulSyncURL?.strip(String(path || '')) ?? String(path || '');
+    const bare = stripped.split('?')[0].split('#')[0];
+    if (bare.length > 1 && bare.endsWith('/')) return bare.slice(0, -1);
+    return bare || '/';
+}
+
+// The sidebar fires navigateToPage twice per mouse click: pointerdown (for an
+// instant response) and click ~100-200ms later. The guard above compares
+// against window.location.pathname, which only changes once TanStack commits
+// the navigation — async — so without its own synchronous signal the
+// click-phase call would fire a second router.navigate to the same target
+// (double loaders, double history entries). This records the last target
+// synchronously; the echo honors it exactly once and stands down. History
+// traversals (Back/forward) bypass navigateToPage, so popstate clears it.
+let _lastNavTarget = null;
+let _lastNavAt = 0;
+// Just wider than the pointerdown->click gap (~150ms). A stale token can
+// swallow at most one legitimate click before it expires or is consumed,
+// so keep the window tight.
+const _NAV_ECHO_WINDOW_MS = 1000;
+
+function _noteNavTarget(target) {
+    _lastNavTarget = target;
+    _lastNavAt = Date.now();
+}
+
+function _isNavEcho(target) {
+    if (_lastNavTarget !== target) return false;
+    if (Date.now() - _lastNavAt > _NAV_ECHO_WINDOW_MS) {
+        _lastNavTarget = null;
+        return false;
+    }
+    _lastNavTarget = null;
+    return true;
+}
+
+window.addEventListener('popstate', () => { _lastNavTarget = null; });
+
 function navigateToPage(pageId, options = {}) {
     navigationEpoch += 1;
 
-    if (!options.forceReload && pageId === currentPage) return;
+    const navTarget = _normalizeNavPath(_navGuardPath(pageId, options));
+    if (!options.forceReload
+        && (navTarget === _normalizeNavPath(window.location.pathname) || _isNavEcho(navTarget))) return;
+    _noteNavTarget(navTarget);
 
     // Permission guard — redirect to home page if not allowed
     if (!isPageAllowed(pageId)) {
@@ -4675,10 +4755,7 @@ function navigateToPage(pageId, options = {}) {
     }
 
     if (!options.skipPushState) {
-        const urlPath = pageId === 'dashboard' ? '/'
-            : (pageId === 'artist-detail' && options.artistId) ? buildArtistDetailPath(options.artistId, options.artistSource, options.artistName, options.focusAlbumId)
-            : (pageId === 'label-detail' && options.labelId) ? buildLabelDetailPath(options.labelId, options.labelName)
-            : '/' + pageId;
+        const urlPath = _navTargetPath(pageId, options);
         if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== urlPath) {
             if (options.replace === true) {
                 history.replaceState({ page: pageId }, '', urlPath);

@@ -184,7 +184,8 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             _written = write_library_m3u(
                 _entries, _dest, entry_base_path=_base,
                 rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
-                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '')
+                rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+                relative=bool(config_manager.get('m3u_export.relative_paths', False)))
             if _written:
                 logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
                 m3u_note = f" | Library M3U: {len(_entries)} tracks → {_written}"
@@ -411,6 +412,9 @@ def _run_soulsync_full_refresh():
             for fname in files:
                 if os.path.splitext(fname)[1].lower() in audio_exts:
                     audio_files.append(os.path.join(root, fname))
+
+        # Deterministic order, independent of the filesystem walk (#1696).
+        audio_files.sort()
 
         total = len(audio_files)
         logger.info("[SoulSync Full Refresh] Found %d audio files", total)

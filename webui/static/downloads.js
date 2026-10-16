@@ -1916,7 +1916,7 @@ async function startMissingTracksProcess(playlistId) {
         // If this is an artist album download, use album name and include full context
         // Match 'artist_album_', 'enhanced_search_album_', 'discover_album_', and 'seasonal_album_' prefixes
         // Note: 'enhanced_search_track_' is excluded — single track search results use singles context
-        const _isAlbumContext = playlistId.startsWith('artist_album_') || playlistId.startsWith('enhanced_search_album_') || playlistId.startsWith('discover_album_') || playlistId.startsWith('seasonal_album_') || playlistId.startsWith('spotify_library_') || playlistId.startsWith('issue_download_') || playlistId.startsWith('library_redownload_') || playlistId.startsWith('beatport_release_');
+        const _isAlbumContext = isAlbumContextPlaylistId(playlistId);
         const _isSearchTrack = playlistId.startsWith('enhanced_search_track_') || playlistId.startsWith('gsearch_track_');
         if (_isAlbumContext || _isSearchTrack) {
             requestBody.playlist_name = process.album?.name || process.playlist.name;
@@ -2037,6 +2037,56 @@ async function startMissingTracksProcess(playlistId) {
     }
 }
 
+
+function isAlbumContextPlaylistId(playlistId) {
+    return ['artist_album_', 'enhanced_search_album_', 'discover_album_', 'seasonal_album_',
+        'spotify_library_', 'issue_download_', 'library_redownload_', 'beatport_release_']
+        .some(prefix => playlistId.startsWith(prefix));
+}
+
+// the library half of Begin Analysis, read-only, so the modal opens knowing
+// what's owned instead of a column of 'pending'. nothing is queued.
+async function previewModalOwnership(playlistId) {
+    const process = activeDownloadProcesses[playlistId];
+    if (!process || !process.tracks?.length) return;
+    const isAlbum = isAlbumContextPlaylistId(playlistId);
+    const progressText = document.getElementById(`analysis-progress-text-${playlistId}`);
+    if (progressText) progressText.textContent = 'Checking your library...';
+    let data = null;
+    try {
+        const response = await fetch(`/api/playlists/${playlistId}/ownership-preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                tracks: process.tracks,
+                is_album_download: isAlbum,
+                album_context: isAlbum ? process.album : null,
+                artist_context: isAlbum ? process.artist : null,
+            }),
+        });
+        data = await response.json();
+    } catch (error) {
+        console.debug('ownership preview failed:', error);
+    }
+    // begin analysis ran (or the modal closed) while we waited: its answer wins
+    if (activeDownloadProcesses[playlistId] !== process || process.status !== 'idle') return;
+    if (!data?.success || !Array.isArray(data.results)) {
+        if (progressText) progressText.textContent = 'Ready to start';
+        return;
+    }
+    updateTrackAnalysisResults(playlistId, data.results);
+    const found = data.results.filter(r => r.found).length;
+    const missing = data.results.length - found;
+    const foundEl = document.getElementById(`stat-found-${playlistId}`);
+    const missingEl = document.getElementById(`stat-missing-${playlistId}`);
+    if (foundEl) foundEl.textContent = found;
+    if (missingEl) missingEl.textContent = missing;
+    if (progressText) {
+        progressText.textContent = missing
+            ? `${found} in your library, ${missing} missing`
+            : 'All in your library';
+    }
+}
 
 function updateTrackAnalysisResults(playlistId, results) {
     // Update match results for all rows (tracks are now pre-populated)

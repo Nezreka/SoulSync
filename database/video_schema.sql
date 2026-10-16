@@ -899,3 +899,80 @@ CREATE TABLE IF NOT EXISTS video_manual_matches (
     PRIMARY KEY (kind, tmdb_id)
 );
 CREATE INDEX IF NOT EXISTS idx_manual_matches_library ON video_manual_matches(library_id);
+
+-- Subtitle wanted queue ("Replace Bazarr", Phase 1). One row per video ×
+-- language × flags: what the import hook tried (or still needs) to fetch from
+-- the subtitle providers. A miss is a durable 'failed' row — not a silent
+-- no-op — so Phase 2's retry loop can pick it back up (a miss when NO provider
+-- was even configured stays 'wanted', attempts untouched, so it retries once
+-- a key is added). video_kind is
+-- 'movie' | 'episode' (movies.id | episodes.id) once the library row exists;
+-- a fresh import has no library row yet (the scanner ingest creates it after
+-- the file lands), so those rows key on the download instead
+-- ('download', video_downloads.id). Per-item language overrides are rows with
+-- user_set=1 (written by the Phase 4 settings UI — the import hook only ever
+-- creates user_set=0 rows, and treats ONLY user_set=1 rows as an override:
+-- when no user-set row exists for the video it refreshes from the CURRENT
+-- subtitle_langs, so changing the global list takes effect on re-grab.
+-- Pre-existing user_set=0 rows for languages no longer wanted are left alone,
+-- not deleted.)
+-- PHASE 2: rows keyed ('download', video_downloads.id) are never reconciled
+-- once the scanner ingest creates the library row (movies.id / episodes.id) —
+-- a later successful library-keyed resolution would create a DUPLICATE set of
+-- rows for the same video. Phase 2 must re-key (or clean up) download-keyed
+-- rows once the library row exists.
+CREATE TABLE IF NOT EXISTS subtitle_wanted (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_kind TEXT NOT NULL,        -- 'movie' | 'episode' | 'download'
+    video_id INTEGER NOT NULL,       -- movies.id | episodes.id | video_downloads.id
+    language TEXT NOT NULL,          -- 'en'
+    hi INTEGER NOT NULL DEFAULT 0,
+    forced INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'wanted',  -- wanted | fetching | have | failed
+    user_set INTEGER NOT NULL DEFAULT 0,    -- 1 = per-item override (Phase 4 UI)
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    last_upgrade_check_at TEXT,      -- Phase 3: upgrade loop re-check cooldown
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(video_kind, video_id, language, hi, forced)
+);
+CREATE INDEX IF NOT EXISTS idx_subtitle_wanted_status ON subtitle_wanted(status);
+
+-- ── "Replace Bazarr" Phase 2: fetch history + per-provider daily quota ───────
+CREATE TABLE IF NOT EXISTS subtitle_fetch_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    video_kind TEXT NOT NULL,        -- 'movie' | 'episode' | 'download'
+    video_id INTEGER NOT NULL,
+    language TEXT NOT NULL,
+    hi INTEGER NOT NULL DEFAULT 0,
+    forced INTEGER NOT NULL DEFAULT 0,
+    provider TEXT NOT NULL,          -- provider id, or '' when no provider was tried
+    candidate_title TEXT,            -- best candidate's title, if any
+    score REAL,                      -- best candidate's score, if any
+    outcome TEXT NOT NULL,           -- 'downloaded' | 'miss' | 'below_threshold' | 'error'
+    attempted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_subtitle_fetch_history_video
+    ON subtitle_fetch_history(video_kind, video_id);
+CREATE INDEX IF NOT EXISTS idx_subtitle_fetch_history_attempted
+    ON subtitle_fetch_history(attempted_at);
+
+CREATE TABLE IF NOT EXISTS subtitle_quota (
+    provider TEXT NOT NULL,
+    day TEXT NOT NULL,               -- YYYY-MM-DD (UTC)
+    used INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (provider, day)
+);
+
+-- ── "Replace Bazarr" Phase 3: per-movie/per-show subtitle language overrides ──
+-- Policy vs state separation (see VideoDatabase.subtitle_override_set): the
+-- override is POLICY ("this show wants en+es"); subtitle_wanted rows are
+-- per-video×language fetch state. A show-level override must not require
+-- materializing per-episode wanted rows, and clearing is a single-row delete.
+CREATE TABLE IF NOT EXISTS subtitle_overrides (
+    kind TEXT NOT NULL,              -- 'movie' | 'show'
+    item_id INTEGER NOT NULL,        -- movies.id | shows.id
+    languages TEXT NOT NULL,         -- JSON array of language codes, e.g. '["en","es"]'
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, item_id)
+);

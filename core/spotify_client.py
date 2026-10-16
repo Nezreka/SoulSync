@@ -1488,7 +1488,10 @@ class SpotifyClient:
             raise
 
     @rate_limited
-    def _get_playlist_tracks(self, playlist_id: str) -> List[Track]:
+    def _get_playlist_tracks(self, playlist_id: str, raise_errors: bool = False) -> List[Track]:
+        """All tracks of a playlist. A failed fetch returns [] unless
+        ``raise_errors``, so callers that would store the result as the
+        playlist's contents can tell a failure from an empty playlist."""
         if not self.is_spotify_authenticated():
             return []
 
@@ -1521,6 +1524,8 @@ class SpotifyClient:
             return tracks
 
         except Exception as e:
+            if raise_errors:
+                raise
             logger.error(f"Error fetching playlist tracks: {e}")
             return []
     
@@ -1538,11 +1543,20 @@ class SpotifyClient:
 
         try:
             playlist_data = self.sp.playlist(playlist_id)
-            tracks = self._get_playlist_tracks(playlist_id)
+            # A failed track fetch must not come back as an empty playlist: a
+            # mirror refresh would store it, deleting every track it had.
+            tracks = self._get_playlist_tracks(playlist_id, raise_errors=True)
             return Playlist.from_spotify_playlist(playlist_data, tracks)
 
         except Exception as e:
-            logger.error(f"Error fetching playlist {playlist_id}: {e}")
+            if http_error_status(e) == 403:
+                logger.error(
+                    f"Spotify refused the tracks of playlist {playlist_id} (403). Spotify only "
+                    f"serves the items of playlists you own or collaborate on, so a playlist "
+                    f"you follow can't be read. Copy it into a playlist of your own instead."
+                )
+            else:
+                logger.error(f"Error fetching playlist {playlist_id}: {e}")
             return None
 
     def _liked_songs_as_playlist(self) -> Optional[Playlist]:

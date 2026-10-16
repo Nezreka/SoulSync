@@ -199,6 +199,194 @@ def owned_hit_is_rerelease_original(db, requested_album: str, expected_year,
         return False
 
 
+def release_year_of(album_context) -> Optional[str]:
+    """Release year of the album being analyzed, or None.
+
+    powers the re-release gate (5BILLION round 3): owning 'Chaosphere' (1998)
+    must not read as owning 'Chaosphere (25th Anniversary Remastered 2023 Edition)'.
+    """
+    if not album_context:
+        return None
+    year = str(album_context.get('release_date') or album_context.get('year') or '')[:4]
+    return year if year.isdigit() else None
+
+
+def album_tracks_map_for(db, album_context, artist_context, active_server) -> dict:
+    """Album fast path: find the album in the db and map its lowercased track
+    titles to their rows, so tracks match inside the one album instead of N
+    global searches. Empty when the album isn't in the library."""
+    album_tracks_map = {}
+    if not album_context or not artist_context:
+        return album_tracks_map
+    album_name = album_context.get('name', '')
+    artist_name = artist_context.get('name', '')
+    total_tracks = album_context.get('total_tracks', 0) or 0
+    if not album_name or not artist_name:
+        return album_tracks_map
+    try:
+        db_album, album_confidence = db.check_album_exists_with_editions(
+            title=album_name, artist=artist_name,
+            confidence_threshold=0.7,
+            expected_track_count=total_tracks if total_tracks > 0 else None,
+            server_source=active_server,
+            expected_year=release_year_of(album_context),
+        )
+        if db_album and album_confidence >= 0.7:
+            db_album_tracks = db.get_tracks_by_album(db_album.id)
+            for t in db_album_tracks:
+                album_tracks_map[t.title.lower().strip()] = t
+            logger.info(f"[Album Analysis] Found album '{db_album.title}' in DB with {len(db_album_tracks)} tracks (confidence: {album_confidence:.2f})")
+        else:
+            logger.warning(f"[Album Analysis] Album '{album_name}' not found in DB — falling back to per-track search")
+    except Exception as album_err:
+        logger.error(f"[Album Analysis] Album lookup error: {album_err} — falling back to per-track search")
+    return album_tracks_map
+
+
+def live_manual_match(db, profile_id, track_data, source) -> Optional[dict]:
+    """The user's saved manual library match for this track, or None.
+
+    a saved match whose library track no longer exists is not a match, it is
+    a stale row (#1138). trusting it marked the track found, pulled it off the
+    wishlist and skipped the download, so a song whose file the user had
+    deleted silently vanished from every reprocess. dropping it sends the
+    track down the normal path like any other missing track.
+    """
+    from core.library import manual_library_match as _mlm
+    stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
+    if not stid:
+        return None
+    match = _mlm.get_match_for_track(db, profile_id, track_data, default_source=source)
+    if match and not _mlm.match_is_live(db, match):
+        logger.warning(
+            "[Manual Match] '%s' has a saved library match (track %s) whose file is "
+            "no longer in the library — ignoring the stale match and processing the "
+            "track normally. Remove it under Tools -> Manual Library Match to stop "
+            "this warning.",
+            track_data.get('name', ''), match.get('library_track_id'),
+        )
+        return None
+    return match or None
+
+
+def _artist_name_of(artist) -> str:
+    # both string format and Spotify API format {'name': 'Artist Name'}
+    if isinstance(artist, str):
+        return artist
+    if isinstance(artist, dict) and 'name' in artist:
+        return artist['name']
+    return str(artist)
+
+
+def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
+                           expected_year, album_only, active_server):
+    """Is this track already in the library? -> (found, confidence, db_track).
+
+    the one ownership answer the download analysis gives, lifted out so the
+    album modal can show it before anything is downloaded. album_only is the
+    allow-duplicates rule for album downloads: only a copy in THIS album counts.
+    """
+    track_name = track_data.get('name', '')
+    artists = track_data.get('artists', [])
+    if album_tracks_map:
+        # Album-scoped matching: check against known album tracks first
+        track_name_lower = track_name.lower().strip()
+        # Issue #589 — strip suffixes that just repeat the album
+        # context (e.g. "Shy Away (MTV Unplugged Live)" on a
+        # "MTV Unplugged" album → "Shy Away") so album-owned
+        # tracks don't false-miss when the local DB stored the
+        # base title. Only fires inside the album-confirmed
+        # scope; global matching elsewhere is unchanged.
+        from core.matching.album_context_title import strip_redundant_album_suffix
+        album_name = (album_context or {}).get('name', '')
+        normalized_title = strip_redundant_album_suffix(track_name, album_name).lower().strip()
+        # Direct title match (try both raw and normalized)
+        if track_name_lower in album_tracks_map:
+            return True, 1.0, album_tracks_map[track_name_lower]
+        if normalized_title and normalized_title in album_tracks_map:
+            return True, 1.0, album_tracks_map[normalized_title]
+        # Fuzzy match against album tracks using string similarity.
+        # Compare BOTH the raw and normalized source titles —
+        # whichever scores higher wins.
+        best_sim = 0.0
+        best_track = None
+        for db_title_lower, db_track in album_tracks_map.items():
+            sim_raw = db._string_similarity(track_name_lower, db_title_lower)
+            sim_norm = db._string_similarity(normalized_title, db_title_lower) if normalized_title else 0.0
+            sim = max(sim_raw, sim_norm)
+            if sim > best_sim:
+                best_sim = sim
+                best_track = db_track
+        if best_sim >= 0.7:
+            return True, best_sim, best_track
+        # not in THIS album. with allow-duplicates that's missing; otherwise
+        # fall back to a global per-track search
+        if album_only:
+            return False, 0.0, None
+        fallback_album = album_name or None
+        for artist in artists:
+            db_track, track_confidence = db.check_track_exists(
+                track_name, _artist_name_of(artist), confidence_threshold=0.7,
+                server_source=active_server, album=fallback_album,
+            )
+            if db_track and track_confidence >= 0.7:
+                # Re-release gate (5BILLION round 3): the hit came from the
+                # ORIGINAL of this re-release → not ownership of THIS edition.
+                if owned_hit_is_rerelease_original(db, fallback_album, expected_year, db_track):
+                    logger.info(
+                        "[Album Analysis] '%s' owned only on the original "
+                        "release of '%s' — re-release stays missing",
+                        track_name, fallback_album)
+                    continue
+                return True, track_confidence, db_track
+        return False, 0.0, None
+    if album_only:
+        # album download, album not in the db yet → all missing
+        return False, 0.0, None
+    # Non-album download (playlist/single track) — always check global
+    for artist in artists:
+        db_track, track_confidence = db.check_track_exists(
+            track_name, _artist_name_of(artist), confidence_threshold=0.7,
+            server_source=active_server,
+        )
+        if db_track and track_confidence >= 0.7:
+            return True, track_confidence, db_track
+    return False, 0.0, None
+
+
+def preview_ownership(db, tracks_json, *, album_context, artist_context, is_album,
+                      profile_id, source, active_server, allow_duplicates) -> list:
+    """What Begin Analysis would say is owned, without starting anything.
+
+    same order of questions as the analysis (saved manual match, then the
+    library), read-only: no batch, no wishlist removal, no downloads. the
+    album modal shows it the moment it opens.
+    """
+    album_tracks_map = (
+        album_tracks_map_for(db, album_context, artist_context, active_server)
+        if is_album else {}
+    )
+    expected_year = release_year_of(album_context)
+    results = []
+    for i, track_data in enumerate(tracks_json or []):
+        if not isinstance(track_data, dict):
+            continue
+        track_index = track_data.get('_original_index', i)
+        if live_manual_match(db, profile_id, track_data, source):
+            results.append({'track_index': track_index, 'found': True, 'confidence': 1.0})
+            continue
+        found, confidence, _ = match_track_in_library(
+            db, track_data,
+            album_tracks_map=album_tracks_map,
+            album_context=album_context,
+            expected_year=expected_year,
+            album_only=allow_duplicates and is_album,
+            active_server=active_server,
+        )
+        results.append({'track_index': track_index, 'found': found, 'confidence': confidence})
+    return results
+
+
 def expected_release_duration_seconds(tracks_json) -> Optional[int]:
     """Total playing time of the requested release, or None if unknown.
 
@@ -482,7 +670,6 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 download_batches[batch_id]['analysis_processed'] = 0
 
         from database.music_database import MusicDatabase
-        from core.library import manual_library_match as _mlm
         db = MusicDatabase()
         active_server = deps.config_manager.get_active_media_server()
         analysis_results = []
@@ -618,44 +805,17 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
         # ALBUM FAST PATH: If this is an album download, try to find the album in the DB first
         # and match tracks within it — faster and more accurate than N global searches
-        album_tracks_map = {}  # Maps normalized title -> DatabaseTrack for album-scoped matching
-        # Release year of the album being analyzed — powers the re-release gate
-        # (5BILLION round 3): owning 'Chaosphere' (1998) must not read as owning
-        # 'Chaosphere (25th Anniversary Remastered 2023 Edition)'.
-        batch_expected_year = None
-        if batch_album_context:
-            _ry = str(batch_album_context.get('release_date')
-                      or batch_album_context.get('year') or '')[:4]
-            batch_expected_year = _ry if _ry.isdigit() else None
-        if batch_is_album and batch_album_context and batch_artist_context and not force_download_all:
-            album_name = batch_album_context.get('name', '')
-            artist_name = batch_artist_context.get('name', '')
-            total_tracks = batch_album_context.get('total_tracks', 0)
-            if album_name and artist_name:
-                try:
-                    db_album, album_confidence = db.check_album_exists_with_editions(
-                        title=album_name, artist=artist_name,
-                        confidence_threshold=0.7,
-                        expected_track_count=total_tracks if total_tracks > 0 else None,
-                        server_source=active_server,
-                        expected_year=batch_expected_year
-                    )
-                    if db_album and album_confidence >= 0.7:
-                        db_album_tracks = db.get_tracks_by_album(db_album.id)
-                        for t in db_album_tracks:
-                            album_tracks_map[t.title.lower().strip()] = t
-                        logger.info(f"[Album Analysis] Found album '{db_album.title}' in DB with {len(db_album_tracks)} tracks (confidence: {album_confidence:.2f})")
-                    else:
-                        logger.warning(f"[Album Analysis] Album '{album_name}' not found in DB — falling back to per-track search")
-                except Exception as album_err:
-                    logger.error(f"[Album Analysis] Album lookup error: {album_err} — falling back to per-track search")
+        batch_expected_year = release_year_of(batch_album_context)
+        album_tracks_map = {}
+        if batch_is_album and not force_download_all:
+            album_tracks_map = album_tracks_map_for(
+                db, batch_album_context, batch_artist_context, active_server)
 
         for i, track_data in enumerate(tracks_json):
             # Use original table index if provided (for partial track selection),
             # otherwise fall back to enumeration index
             track_index = track_data.get('_original_index', i)
             track_name = track_data.get('name', '')
-            artists = track_data.get('artists', [])
             found, confidence = False, 0.0
             # Additive payload: the owned library track (DatabaseTrack) when this
             # item is found in the library, so downstream (playlist materialization)
@@ -664,28 +824,10 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
 
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
-            _stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
             _manual_match = (
-                _mlm.get_match_for_track(db, batch_profile_id, track_data, default_source=batch_source)
-                if (not ignore_manual_matches and _stid) else None
+                None if ignore_manual_matches
+                else live_manual_match(db, batch_profile_id, track_data, batch_source)
             )
-            # A saved match whose library track no longer exists is not a
-            # match — it is a stale row (#1138). Trusting it marked the track
-            # "found", pulled it OFF the wishlist and skipped the download, so
-            # a song whose file the user had deleted silently disappeared from
-            # every reprocess: never synced, never re-downloaded, never
-            # wishlisted. Dropping it here sends the track down the normal
-            # path, which downloads it or wishlists it like any other missing
-            # track.
-            if _manual_match and not _mlm.match_is_live(db, _manual_match):
-                logger.warning(
-                    "[Manual Match] '%s' has a saved library match (track %s) whose file is "
-                    "no longer in the library — ignoring the stale match and processing the "
-                    "track normally. Remove it under Tools -> Manual Library Match to stop "
-                    "this warning.",
-                    track_name, _manual_match.get('library_track_id'),
-                )
-                _manual_match = None
             if _manual_match:
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:
@@ -729,97 +871,15 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             if force_download_all:
                 logger.warning(f"[Force Download] Skipping database check for '{track_name}' - treating as missing")
                 found, confidence = False, 0.0
-            elif album_tracks_map:
-                # Album-scoped matching: check against known album tracks first
-                track_name_lower = track_name.lower().strip()
-                # Issue #589 — strip suffixes that just repeat the album
-                # context (e.g. "Shy Away (MTV Unplugged Live)" on a
-                # "MTV Unplugged" album → "Shy Away") so album-owned
-                # tracks don't false-miss when the local DB stored the
-                # base title. Only fires inside the album-confirmed
-                # scope; global matching elsewhere is unchanged.
-                from core.matching.album_context_title import strip_redundant_album_suffix
-                _album_name_for_strip = (batch_album_context or {}).get('name', '')
-                _normalized_source_title = strip_redundant_album_suffix(
-                    track_name, _album_name_for_strip
-                ).lower().strip()
-                # Direct title match (try both raw and normalized)
-                if track_name_lower in album_tracks_map:
-                    found, confidence = True, 1.0
-                    matched_track = album_tracks_map[track_name_lower]
-                elif _normalized_source_title and _normalized_source_title in album_tracks_map:
-                    found, confidence = True, 1.0
-                    matched_track = album_tracks_map[_normalized_source_title]
-                else:
-                    # Fuzzy match against album tracks using string similarity.
-                    # Compare BOTH the raw and normalized source titles —
-                    # whichever scores higher wins. Preserves strict
-                    # matching when the album doesn't imply version
-                    # context (helper returns the input unchanged).
-                    best_sim = 0.0
-                    best_track = None
-                    for db_title_lower, _db_track in album_tracks_map.items():
-                        sim_raw = db._string_similarity(track_name_lower, db_title_lower)
-                        sim_norm = db._string_similarity(_normalized_source_title, db_title_lower) if _normalized_source_title else 0.0
-                        sim = max(sim_raw, sim_norm)
-                        if sim > best_sim:
-                            best_sim = sim
-                            best_track = _db_track
-                    if best_sim >= 0.7:
-                        found, confidence = True, best_sim
-                        matched_track = best_track
-                    else:
-                        # Fall back to global per-track search for this track
-                        # When allow_duplicates is on for album downloads, skip global
-                        # search — the track isn't in THIS album so treat as missing
-                        if allow_duplicates and batch_is_album:
-                            found, confidence = False, 0.0
-                        else:
-                            _fallback_album = batch_album_context.get('name') if batch_album_context else None
-                            for artist in artists:
-                                if isinstance(artist, str):
-                                    artist_name = artist
-                                elif isinstance(artist, dict) and 'name' in artist:
-                                    artist_name = artist['name']
-                                else:
-                                    artist_name = str(artist)
-                                db_track, track_confidence = db.check_track_exists(
-                                    track_name, artist_name, confidence_threshold=0.7, server_source=active_server, album=_fallback_album
-                                )
-                                if db_track and track_confidence >= 0.7:
-                                    # Re-release gate (5BILLION round 3): the hit
-                                    # came from the ORIGINAL of this re-release →
-                                    # not ownership of THIS edition; keep missing.
-                                    if owned_hit_is_rerelease_original(
-                                            db, _fallback_album, batch_expected_year, db_track):
-                                        logger.info(
-                                            "[Album Analysis] '%s' owned only on the original "
-                                            "release of '%s' — re-release stays missing",
-                                            track_name, _fallback_album)
-                                        continue
-                                    found, confidence = True, track_confidence
-                                    matched_track = db_track
-                                    break
-            elif allow_duplicates and batch_is_album:
-                # Allow duplicates + album download + album not in DB yet → treat all as missing
-                found, confidence = False, 0.0
             else:
-                # Non-album download (playlist/single track) — always check global
-                for artist in artists:
-                    # Handle both string format and Spotify API format {'name': 'Artist Name'}
-                    if isinstance(artist, str):
-                        artist_name = artist
-                    elif isinstance(artist, dict) and 'name' in artist:
-                        artist_name = artist['name']
-                    else:
-                        artist_name = str(artist)
-                    db_track, track_confidence = db.check_track_exists(
-                        track_name, artist_name, confidence_threshold=0.7, server_source=active_server
-                    )
-                    if db_track and track_confidence >= 0.7:
-                        found, confidence = True, track_confidence
-                        matched_track = db_track
-                        break
+                found, confidence, matched_track = match_track_in_library(
+                    db, track_data,
+                    album_tracks_map=album_tracks_map,
+                    album_context=batch_album_context,
+                    expected_year=batch_expected_year,
+                    album_only=allow_duplicates and batch_is_album,
+                    active_server=active_server,
+                )
 
             analysis_results.append({
                 'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence,

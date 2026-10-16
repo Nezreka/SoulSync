@@ -84,8 +84,8 @@ def worker(tmp_path, monkeypatch):
     return w, db, add_track
 
 
-def _apply(w, path, bpm=127.6):
-    return w._fix_metadata_gap("track", "lib2:1", str(path), {"found_fields": {"bpm": bpm}})
+def _apply(w, path, bpm=127.6, bpm_source='deezer'):
+    return w._fix_metadata_gap("track", "lib2:1", str(path), {"found_fields": {"bpm": bpm}, "bpm_source": bpm_source})
 
 
 @pytest.mark.parametrize("ext, make", [(".mp3", _mp3), (".flac", _flac), (".m4a", _m4a)])
@@ -155,11 +155,25 @@ def test_bpm_tags_turned_off_leaves_the_file_alone(worker, tmp_path):
     _flac(path)
     add_track(path)
 
-    out = _apply(w, path)
+    out = _apply(w, path, bpm_source='deezer')
 
     assert out["success"]
     assert "turned off" in out["message"] or "are off" in out["message"]
     assert "bpm" not in MutagenFile(str(path))
+
+
+def test_local_bpm_writes_despite_deezer_setting_off(worker, tmp_path):
+    """Locally-analyzed BPM is not gated by the deezer.tags.bpm setting."""
+    w, _, add_track = worker
+    w._config_manager = _Cfg(**{"deezer.tags.bpm": False})
+    path = tmp_path / "song.flac"
+    _flac(path)
+    add_track(path)
+
+    out = _apply(w, path, bpm_source='local')
+
+    assert out["success"]
+    assert "bpm" in MutagenFile(str(path))
 
 
 def test_an_unreachable_file_still_saves_the_bpm_and_says_so(worker, tmp_path):

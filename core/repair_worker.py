@@ -94,6 +94,7 @@ FINDING_TYPE_META = {
     'missing_lyrics':           {'label': 'Missing Lyrics', 'verb': 'Apply Lyrics'},
     'missing_replaygain':       {'label': 'Missing ReplayGain', 'verb': 'Apply RG'},
     'replaygain_retag':         {'label': 'ReplayGain Retag', 'verb': 'Apply RG'},
+    'untagged_download':        {'label': 'Untagged Downloads', 'verb': 'Write Tags'},
     'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
     'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
     'metadata_gap':             {'label': 'Metadata Gaps', 'verb': 'Auto-Fill'},
@@ -180,6 +181,7 @@ JOB_CATEGORIES = {
     'short_preview_track': 'Audio quality',
     'replaygain_filler': 'Audio quality',
     # What is written on and about the tracks.
+    'untagged_downloads': 'Tags & metadata',
     'track_number_repair': 'Tags & metadata',
     'album_tag_consistency': 'Tags & metadata',
     'library_retag': 'Tags & metadata',
@@ -635,6 +637,14 @@ class RepairWorker:
             except Exception as e:
                 logger.error("Failed to initialize AcoustIDClient: %s", e)
         return self._acoustid_client
+
+    def refresh_acoustid_config(self):
+        """Refresh AcoustID client configuration after settings update."""
+        if self._acoustid_client is not None:
+            try:
+                self._acoustid_client.refresh_config()
+            except Exception as e:
+                logger.debug("Failed to refresh AcoustID client config: %s", e)
 
     @property
     def metadata_cache(self):
@@ -1330,6 +1340,13 @@ class RepairWorker:
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
             run_status = 'cancelled'
+        # the worker itself was stopped (master switch off, shutdown) while the
+        # job ran. every job's check_stop() sees that flag and returns what it
+        # has, so the run reads as finished unless it is marked here, once,
+        # instead of in each job. not 'cancelled': nobody stopped this job.
+        if run_status == 'completed' and self.should_stop:
+            run_status = 'stopped'
+            run_error = 'Repair worker stopped before the job finished'
         # the job quit on its own before the end. not a crash and not done:
         # say so, with the job's reason, instead of a clean 'completed'
         if run_status == 'completed' and getattr(result, 'stopped_early', ''):
@@ -2161,6 +2178,48 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
+        """Reopen all dismissed findings, optionally filtered.
+
+        The bulk undo for dismiss — e.g. reopening 10k+ dismissed BPM
+        findings at once. Only touches dismissed rows; resolved findings
+        represent completed work and are never reopened in bulk.
+        Returns the number of findings reopened.
+        """
+        # Guard against empty-string filters silently becoming unfiltered
+        if job_id == "" or finding_type == "":
+            logger.warning("Bulk reopen called with empty filter, refusing")
+            return 0
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            cursor = conn.cursor()
+            query = """
+                UPDATE repair_findings
+                SET status = 'pending', user_action = NULL, resolved_at = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'dismissed'
+            """
+            params = []
+            if job_id:
+                query += " AND job_id = ?"
+                params.append(job_id)
+            if finding_type:
+                query += " AND finding_type = ?"
+                params.append(finding_type)
+            cursor.execute(query, params)
+            conn.commit()
+            count = cursor.rowcount
+            logger.info("Reopened %d dismissed findings (job_id=%s, finding_type=%s)",
+                        count, job_id, finding_type)
+            return count
+        except Exception as e:
+            logger.error("Error bulk reopening findings: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def library_visibility_preflight(self, sample_size: int = 200) -> tuple:
         """Can this process actually SEE the library the catalogue describes?
 
@@ -2612,6 +2671,7 @@ class RepairWorker:
             'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
+            'untagged_download': self._fix_untagged_download,
             'expired_download': self._fix_expired_download,
             'empty_folder': self._fix_empty_folder,
             'metadata_gap': self._fix_metadata_gap,
@@ -3952,9 +4012,14 @@ class RepairWorker:
         The fix_action is passed via details['_fix_action']:
           'staging' — move file to the staging folder for import
           'delete'  — delete file from disk
+          'delete_confirmed' — delete, after the user saw the library track
+                               that shares its filename
         If no action specified, returns an error asking the user to choose.
         """
         fix_action = details.get('_fix_action', '')
+        confirmed = fix_action == 'delete_confirmed'
+        if confirmed:
+            fix_action = 'delete'
         if fix_action not in ('staging', 'delete'):
             return {'success': False, 'error': 'Please choose an action: move to staging or delete',
                     'needs_action': True}
@@ -3977,7 +4042,7 @@ class RepairWorker:
             # raised. Fail closed if the DB cannot be read: neither action may
             # move or delete a file whose current status is unknown.
             from core.repair_jobs.orphan_file_detector import (
-                is_tracked_path, known_file_suffixes,
+                is_tracked_path, known_file_suffixes, same_name_library_paths,
             )
             try:
                 suffixes = known_file_suffixes(self.db)
@@ -3989,10 +4054,19 @@ class RepairWorker:
             if is_tracked_path(resolved, suffixes):
                 return {'success': True, 'action': 'already_tracked',
                         'message': 'File is now tracked in the library; no file was changed'}
-            if is_tracked_path(resolved, suffixes, min_depth=1):
-                return {'success': False, 'error':
-                        'Another library track has the same filename, but its album path '
-                        'differs; verify this orphan manually before moving or deleting it'}
+            # a library track with the same filename in another album may be
+            # this song or a different one. staging keeps the file so it goes
+            # ahead. a delete shows the user that track and waits for a yes:
+            # refusing both with no way past left these stuck for good.
+            if fix_action == 'delete' and not confirmed and is_tracked_path(resolved, suffixes, min_depth=1):
+                try:
+                    library_paths = same_name_library_paths(self.db, resolved)
+                except Exception as e:
+                    logger.debug("same-name library lookup failed: %s", e)
+                    library_paths = []
+                return {'success': False, 'needs_confirm': True, 'library_paths': library_paths,
+                        'error': 'A library track has the same filename in another folder. '
+                                 'Check it is the same song before deleting this file.'}
 
             if fix_action == 'staging':
                 # Move to staging folder
@@ -4597,6 +4671,7 @@ class RepairWorker:
         # Resolve container/host path mismatches, keep only files that exist.
         download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
         resolved = []
+        folder_there = False
         for p in track_paths:
             if native_album_id is not None:
                 from core.library2.paths import resolve_lib2_path
@@ -4605,6 +4680,16 @@ class RepairWorker:
                 rp = _resolve_file_path(p, self.transfer_folder, download_folder, config_manager=self._config_manager) or p
             if os.path.isfile(rp):
                 resolved.append(rp)
+            elif os.path.isdir(os.path.dirname(rp)):
+                folder_there = True
+
+        if not resolved and folder_there:
+            # #1701: the album's folder is right here but its files aren't, so
+            # they moved after the scan. calling that a success wrote nothing to
+            # disk and hid it, same folder rule as retire_vanished_findings.
+            return {'success': False, 'stale': True,
+                    'error': "Cover saved to the library, but the album's files moved "
+                             "since the scan so none were written. The next scan picks it up"}
 
         if not resolved:
             # Media-server-only album (no local files): DB thumbnail is all we can set.
@@ -4876,6 +4961,57 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
 
+    def _fix_untagged_download(self, entity_type, entity_id, file_path, details):
+        """write title/artist/album back from the download record. only the
+        fields the file is missing, so a tag fixed by hand since the scan stays."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+        keys = hand_tagged_path_keys(self.db)
+        if is_hand_tagged_path(raw_path, keys) or is_hand_tagged_path(resolved, keys):
+            return {'success': False, 'error': 'Hand-tagged file: its tags are left as they are'}
+        from core.repair_jobs.untagged_downloads import missing_core_fields
+        from core.tag_writer import read_file_tags, write_tags_to_file
+        current = read_file_tags(resolved)
+        missing = missing_core_fields(current)
+        if not missing:
+            return {'success': True, 'action': 'already_tagged',
+                    'message': 'File already has its title, artist and album'}
+        data = {}
+        if 'title' in missing and details.get('track_title'):
+            data['title'] = details['track_title']
+        if 'artist' in missing and details.get('artist'):
+            data['artist_name'] = details['artist']
+        if 'album' in missing and details.get('album_title'):
+            data['album_title'] = details['album_title']
+        if not current.get('track_number') and details.get('track_number'):
+            data['track_number'] = details['track_number']
+        if not data:
+            return {'success': False, 'error': 'The download record has nothing to write'}
+        result = write_tags_to_file(resolved, data, embed_cover=False)
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error') or 'Could not write tags'}
+        written = result.get('written_fields') or []
+        # the Library-v2 copy of this file shows the new tags right away
+        conn = self.db._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id FROM lib2_track_files WHERE path IN (?, ?) AND file_state = 'active' LIMIT 1",
+                (raw_path, resolved)).fetchone()
+        finally:
+            conn.close()
+        if row:
+            self._refresh_lib2_tag_cache({'library_v2': {'file_id': row[0]}}, resolved)
+        return {'success': True, 'action': 'wrote_tags',
+                'message': f"Wrote {', '.join(written)}"}
+
     def _fix_empty_folder(self, entity_type, entity_id, file_path, details):
         """Apply an empty-folder finding: re-check the folder is still empty/junk-
         only (anything that gained a real file since the scan is left alone), then
@@ -4900,12 +5036,20 @@ class RepairWorker:
         return {'success': True, 'action': 'removed_empty_folder',
                 'message': f'Removed empty folder: {_name}'}
 
-    def _write_bpm_tag(self, file_path, bpm):
+    def _write_bpm_tag(self, file_path, bpm, bpm_source=None):
         """put an applied bpm into the file too. it only ever reached the
-        database, so players and media servers never saw it. the deezer
-        "BPM" tag setting turns this off. returns a note for the message."""
-        if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
-            return ' (BPM tags are off in settings, file not changed)'
+        database, so players and media servers never saw it. returns a note
+        for the message.
+
+        the deezer.tags.bpm setting gates deezer-sourced bpm writes only.
+        locally-analyzed bpm always writes — the backfill is an explicit
+        user action to fix bpm.
+        """
+        # Deezer-sourced BPM respects the deezer.tags.bpm setting.
+        # Locally-analyzed BPM always writes (explicit user action).
+        if bpm_source == 'deezer':
+            if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+                return ' (BPM tags are off in settings, file not changed)'
         try:
             bpm = float(bpm)
         except (TypeError, ValueError):
@@ -5003,7 +5147,7 @@ class RepairWorker:
         message = f'Applied metadata: {", ".join(native_updates)}'
         if 'bpm' in native_updates:
             try:
-                message += self._write_bpm_tag(file_path, effective_bpm)
+                message += self._write_bpm_tag(file_path, effective_bpm, details.get('bpm_source'))
             except ValueError as exc:
                 return {'success': False, 'error': str(exc), 'retryable': True}
         return {'success': True, 'action': 'applied_metadata', 'message': message}
@@ -5416,7 +5560,11 @@ class RepairWorker:
 
         res = apply_album_year_fix(
             db=self.db,
-            album_id=int(album_id),
+            # album_id stays as-is: on Navidrome-backed libraries album ids
+            # are TEXT soul ids (e.g. '2G0CgWoRXSwDbwnkmPpg6e'), and int()
+            # raises on those. apply_album_year_fix only uses the id in SQL
+            # parameter bindings, which are type-agnostic. (#1633)
+            album_id=album_id,
             canonical_year=str(canonical_year),
             canonical_date=canonical_date,
             tracks=tracks,

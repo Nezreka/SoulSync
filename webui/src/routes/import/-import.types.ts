@@ -47,18 +47,33 @@ export interface ImportInboxFile {
   size: number;
 }
 
+/** what an import did with one track. 'completed' is a plain import. */
+export type ImportTrackOutcome = 'completed' | 'upgraded' | 'skipped_owned' | 'failed';
+
+export interface ImportOutcomeSummary {
+  imported: number;
+  upgraded: number;
+  skipped_owned: number;
+  failed: number;
+}
+
 export interface ImportInboxMatchLine {
   track_name: string;
   track_number?: number | string | null;
   file: string;
   file_path: string;
   confidence: number;
+  /** set once the import ran: what it did with this track, and why */
+  import_status?: ImportTrackOutcome | null;
+  import_reason?: string | null;
+  import_error?: string | null;
 }
 
 export interface ImportInboxMatch {
   matched_count: number;
   total_tracks: number;
   matches: ImportInboxMatchLine[];
+  summary?: ImportOutcomeSummary | null;
 }
 
 /** One staging item: an album folder, a loose-file group, or a single file,
@@ -272,6 +287,31 @@ export interface ImportAlbumMatch {
   spotify_track?: ImportAlbumTrack | null;
   staging_file?: ImportStagingFile | null;
   confidence: number;
+  /** How the file was paired: 'mbid' | 'isrc' for exact-ID pairings, null for fuzzy. */
+  match_type?: string | null;
+  /** Existing-library pre-check (see core/imports/library_check.py). */
+  library_status?: ImportLibraryStatus | null;
+}
+
+export type ImportLibraryDecision = 'import' | 'skip_owned' | 'upgrade' | 'uncertain';
+
+export interface ImportLibraryStatus {
+  decision: ImportLibraryDecision;
+  reason: string;
+  library_path?: string | null;
+}
+
+export interface ImportTrackDisposition {
+  track_name: string;
+  file_name: string;
+  decision: 'imported' | 'skipped_owned' | 'upgraded' | 'error';
+  reason: string;
+}
+
+export interface ImportDispositionSummary {
+  imported: number;
+  skipped_owned: number;
+  upgraded: number;
 }
 
 export interface ImportAlbumMatchPayload {
@@ -287,6 +327,8 @@ export interface ImportProcessPayload {
   total?: number;
   errors?: string[];
   error?: string;
+  dispositions?: ImportTrackDisposition[];
+  summary?: ImportDispositionSummary;
 }
 
 export interface ImportAutoImportActiveItem {
@@ -324,6 +366,8 @@ export interface ImportAutoImportSettingsPayload {
   // app-wide default profile" (Settings -> Quality), same as every other
   // context that doesn't specify its own.
   quality_profile_id?: number | null;
+  /** take a folder out of staging once every track was imported or already owned */
+  clear_finished?: boolean;
   error?: string;
 }
 
@@ -348,9 +392,11 @@ export interface ImportAutoImportMatchData {
     track?: { name?: string | null };
     file?: string | null;
     confidence?: number | null;
-    import_status?: 'completed' | 'failed' | null;
+    import_status?: ImportTrackOutcome | null;
+    import_reason?: string | null;
     import_error?: string | null;
   }>;
+  summary?: ImportOutcomeSummary | null;
 }
 
 export interface ImportAutoImportResult {
@@ -392,6 +438,9 @@ export interface ImportQueueEntry {
    * isn't connected (see `is_active_media_server_ready` in core/imports/side_effects.py).
    * The queue item renders a Settings link instead of the plain error list. */
   blockedByMediaServer?: boolean;
+  /** Per-track import outcomes, accumulated as the job runs (see
+   * core/imports/library_check.py for the decision vocabulary). */
+  dispositions?: ImportTrackDisposition[];
 }
 
 export interface ImportAlbumQueueJob {

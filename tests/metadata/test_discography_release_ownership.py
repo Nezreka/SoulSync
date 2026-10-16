@@ -50,8 +50,19 @@ class _FakeDB:
         return found, (1.0 if found else 0.0), 0, 0, False, []
 
     def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None,
-                           album=None, candidate_tracks=None):
-        pool = LIBRARY_TRACKS if candidate_tracks is None else candidate_tracks
+                           album=None, candidate_tracks=None, candidate_tracks_exhaustive=False):
+        # mirrors the real contract (#1621): a bare [] is "no information" and
+        # falls back to the whole-library ("legacy") search; [] + exhaustive
+        # is the proven-owns-nothing fast miss.
+        # MAINTENANCE: this fake hand-duplicates the real if/elif/else — keep
+        # it in sync with database/music_database.py::check_track_exists on
+        # every contract change (it drifted once already, silently).
+        if candidate_tracks:
+            pool = candidate_tracks
+        elif candidate_tracks is not None and candidate_tracks_exhaustive:
+            return None, 0.0
+        else:
+            pool = LIBRARY_TRACKS
         for t in pool:
             if t.title == title:
                 return t, 1.0

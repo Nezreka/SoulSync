@@ -11,6 +11,7 @@ import os
 import re
 from core.library2.maintenance_subjects import active_file_subjects
 from core.library2.maintenance_subjects import subject_details
+import time
 from difflib import SequenceMatcher
 from typing import Any, Dict, Optional
 
@@ -57,6 +58,13 @@ def _import_recording_mbids(subject: Dict[str, Any]) -> frozenset:
     return frozenset(str(v) for v in values if v)
 
 
+# a file's mtime comes from whatever wrote it: a nas clock running behind,
+# or exfat rounding down to 2 s, can stamp a change made just after a pass
+# started as older than the pass. the slack rescans those instead of
+# trusting them forever
+VERIFIED_CUTOFF_SLACK_S = 600
+
+
 @register_job
 class AcoustIDScannerJob(RepairJob):
     job_id = 'acoustid_scanner'
@@ -76,7 +84,9 @@ class AcoustIDScannerJob(RepairJob):
         '- Fingerprint Threshold: Minimum AcoustID match confidence (0.0–1.0)\n'
         '- Title Similarity: How closely the identified title must match\n'
         '- Artist Similarity: How closely the identified artist must match\n'
-        '- Batch Size: Tracks scanned between 2 s API pauses (checkpoint saved between batches)'
+        '- Batch Size: Tracks scanned between 2 s API pauses (checkpoint saved between batches)\n'
+        '- Skip Verified: Off by default. When on, tracks already marked verified are '
+        'not fingerprinted again unless the file changed since the last clean run'
     )
     icon = 'repair-icon-acoustid'
     default_enabled = True
@@ -86,6 +96,7 @@ class AcoustIDScannerJob(RepairJob):
         'title_similarity': 0.70,
         'artist_similarity': 0.60,
         'batch_size': 200,
+        'skip_verified': False,
     }
     auto_fix = False  # User chooses fix action per finding
     supports_file_scope = True
@@ -98,6 +109,10 @@ class AcoustIDScannerJob(RepairJob):
         title_threshold = settings.get('title_similarity', 0.70)
         artist_threshold = settings.get('artist_similarity', 0.60)
         batch_size = settings.get('batch_size', 200)
+        skip_verified = bool(settings.get('skip_verified'))
+        verified_cutoff = None
+        if skip_verified:
+            verified_cutoff = self._get_cfg(context, 'verified_cutoff')
 
         # Get AcoustID client
         acoustid_client = context.acoustid_client
@@ -131,6 +146,24 @@ class AcoustIDScannerJob(RepairJob):
                 result.errors += 1
                 return result
 
+        # Validate that the configured API key is accepted by AcoustID before
+        # scanning thousands of tracks.
+        probe_test_key = getattr(acoustid_client, 'test_api_key', None)
+        if callable(probe_test_key):
+            try:
+                valid_key, key_reason = probe_test_key()
+            except Exception as e:
+                logger.debug("AcoustID pre-flight key test encountered non-fatal error: %s", e)
+                valid_key, key_reason = True, str(e)
+            if not valid_key:
+                logger.warning("AcoustID scan not started: %s", key_reason)
+                if context.report_progress:
+                    context.report_progress(
+                        log_line=f'AcoustID key invalid — scan aborted: {key_reason}',
+                        log_type='error')
+                result.errors += 1
+                return result
+
         # Load all library tracks from DB with their file paths
         db_tracks = self._load_db_tracks(context)
         if not db_tracks:
@@ -145,6 +178,22 @@ class AcoustIDScannerJob(RepairJob):
             )
         if checkpoint_id is not None:
             checkpoint_id = str(checkpoint_id)
+
+        # A pass is a walk through the whole list: it starts when there is no
+        # checkpoint and ends when the list runs out. A run that resumes from a
+        # checkpoint continues the same pass, so it must never move the cutoff
+        # that ``skip_verified`` trusts. The cutoff is the START of the last
+        # pass that finished clean: a file changed while the pass was running
+        # has a newer mtime and is scanned again by the next one.
+        if checkpoint_id is None:
+            pass_started_at = time.time()
+            pass_dirty = False
+            self._set_cfg(context, 'pass_started_at', pass_started_at)
+        else:
+            pass_started_at = self._get_cfg(context, 'pass_started_at')
+            # A checkpoint with no recorded start (saved before this existed)
+            # cannot be vouched for, so this pass never promotes.
+            pass_dirty = bool(self._get_cfg(context, 'pass_dirty')) or pass_started_at is None
 
         # Build ordered list of (track_id, info) sorted by ID for deterministic order
         track_list = sorted(db_tracks.items(), key=lambda x: str(x[0]))
@@ -166,16 +215,17 @@ class AcoustIDScannerJob(RepairJob):
         hand_tagged = hand_tagged_path_keys(context.db)
 
         batch_count = 0
+        unread = 0
         # Checkpoint = the last track that FINISHED scanning. Saving the
         # about-to-start track here used to skip one unprocessed track forever
         # on stop/pause (the resume filter keeps only IDs past the checkpoint).
         last_completed_id = None
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 return result
             if i % 10 == 0 and context.wait_if_paused():
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 return result
 
             # Resolve the DB path to an actual file on disk
@@ -192,6 +242,11 @@ class AcoustIDScannerJob(RepairJob):
             else:
                 resolved = self._resolve_path(file_path, context)
             if not resolved:
+                # Not looked at, so the pass cannot count as clean (a music
+                # mount that is missing would otherwise "finish" with every
+                # file skipped).
+                pass_dirty = True
+                unread += 1
                 result.skipped += 1
                 continue
             try:
@@ -221,6 +276,19 @@ class AcoustIDScannerJob(RepairJob):
             if track_info.get('metadata_locked') or is_hand_tagged_path(resolved, hand_tagged):
                 track_info['hand_tagged'] = True
 
+            # Opt-in: a verified file that has not been touched since the last
+            # clean run has nothing new to check. A file written after that
+            # run started (re-download, retag, replacement) is scanned again.
+            if (verified_cutoff is not None
+                    and track_info.get('db_verification_status') == 'verified'
+                    and not self._modified_since(
+                        resolved, verified_cutoff - VERIFIED_CUTOFF_SLACK_S)):
+                result.skipped += 1
+                last_completed_id = track_id
+                if context.update_progress and (i + 1) % 10 == 0:
+                    context.update_progress(i + 1, total)
+                continue
+
             result.scanned += 1
             batch_count += 1
 
@@ -234,10 +302,14 @@ class AcoustIDScannerJob(RepairJob):
                 )
 
             try:
-                self._scan_file(
+                status = self._scan_file(
                     resolved, track_id, track_info, acoustid_client, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
+                if status == 'abort_invalid_key':
+                    logger.warning("Aborting AcoustID scan due to invalid API key")
+                    self._save_progress(context, last_completed_id, result, pass_dirty)
+                    return result
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
                 result.errors += 1
@@ -250,14 +322,32 @@ class AcoustIDScannerJob(RepairJob):
             # Rate limit: pause between batches to avoid hammering AcoustID API
             if batch_count >= batch_size:
                 batch_count = 0
-                self._save_checkpoint_id(context, last_completed_id)
+                self._save_progress(context, last_completed_id, result, pass_dirty)
                 if context.sleep_or_stop(2):
                     return result
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)
 
-        # Clear checkpoint on full completion
+        # Reached the end of the list: promote the pass to the clean cutoff
+        # when nothing in it errored or went unread, then clear the checkpoint.
+        # A pass that does not promote is counted and reported, since the only
+        # visible effect would be a library that never gets skipped.
+        if pass_started_at is not None and not pass_dirty and result.errors == 0:
+            self._set_cfg(context, 'verified_cutoff', pass_started_at)
+            self._set_cfg(context, 'dirty_passes', 0)
+        elif skip_verified:
+            # only warn people who turned the setting on. with it off an
+            # unresolved path or one rate limit would warn every run about a
+            # setting they never touched
+            dirty_passes = int(self._get_cfg(context, 'dirty_passes') or 0) + 1
+            self._set_cfg(context, 'dirty_passes', dirty_passes)
+            msg = (f"AcoustID pass did not finish clean ({result.errors} errors and "
+                   f"{unread} unreadable files in this run, earlier runs of the pass may "
+                   f"have had more); {dirty_passes} in a row, skip_verified cutoff not moved")
+            logger.warning(msg)
+            if context.report_progress:
+                context.report_progress(log_line=msg, log_type='warning')
         self._save_checkpoint_id(context, None)
 
         if context.update_progress:
@@ -346,6 +436,8 @@ class AcoustIDScannerJob(RepairJob):
                 context.report_progress(
                     log_line=f'Error: {fname} — {message}', log_type='error')
             result.errors += 1
+            if probe.get('_acoustid_invalid_key'):
+                return 'abort_invalid_key'
             return
 
         outcome = probe.get('_acoustid_decision')
@@ -833,6 +925,31 @@ class AcoustIDScannerJob(RepairJob):
             context.config_manager.set(
                 f'repair.jobs.{self.job_id}.checkpoint_id', track_id
             )
+
+    def _get_cfg(self, context: JobContext, name: str):
+        if not context.config_manager:
+            return None
+        return context.config_manager.get(f'repair.jobs.{self.job_id}.{name}', None)
+
+    def _set_cfg(self, context: JobContext, name: str, value) -> None:
+        if context.config_manager:
+            context.config_manager.set(f'repair.jobs.{self.job_id}.{name}', value)
+
+    def _save_progress(self, context: JobContext, track_id, result, pass_dirty: bool) -> None:
+        """Save the checkpoint together with whether the pass has gone dirty,
+        so a resumed run still knows about errors from the run before it."""
+        self._set_cfg(context, 'pass_dirty', bool(pass_dirty or result.errors))
+        self._save_checkpoint_id(context, track_id)
+
+    @staticmethod
+    def _modified_since(path: str, epoch: float) -> bool:
+        """True when the file's mtime or ctime is after ``epoch``, or it
+        cannot be stat'ed (so it gets scanned rather than silently skipped)."""
+        try:
+            st = os.stat(path)
+        except OSError:
+            return True
+        return max(st.st_mtime, st.st_ctime) > epoch
 
     def _get_settings(self, context: JobContext) -> dict:
         if not context.config_manager:
