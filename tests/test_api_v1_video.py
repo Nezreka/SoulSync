@@ -180,3 +180,83 @@ def test_youtube_follow_unfollow_round_trip(client):
     r = client.post("/api/v1/video/youtube/unfollow", json={"youtube_id": "UCtest123"})
     assert r.status_code == 200, r.get_json()
     assert r.get_json()["data"]["following"] is False
+
+
+def _seed_stats(db):
+    with db.connect() as conn:
+        conn.execute("INSERT INTO movies (id, server_source, title, updated_at) VALUES (1, 'plex', 'Heat', '2026-10-01 10:00:00')")
+        conn.execute("INSERT INTO movies (id, server_source, title) VALUES (2, 'jellyfin', 'Other Server')")
+        conn.execute("INSERT INTO media_files (movie_id, relative_path, size_bytes) VALUES (1, 'Heat.mkv', 1000)")
+        conn.execute("INSERT INTO shows (id, server_source, title, updated_at) VALUES (1, 'plex', 'Lost', '2026-10-02 08:30:00')")
+        conn.execute("INSERT INTO seasons (id, show_id, season_number) VALUES (1, 1, 1)")
+        # (episode, has_file, monitored, air_date)
+        rows = [(1, 1, 1, "2004-09-22"), (2, 0, 1, "2004-09-29"), (3, 0, 0, "2004-10-06"), (4, 0, 1, "2999-01-01")]
+        for row in rows:
+            conn.execute("INSERT INTO episodes (show_id, season_id, season_number, episode_number, has_file, monitored, air_date) "
+                         "VALUES (1, 1, 1, ?, ?, ?, ?)", row)
+        conn.execute("INSERT INTO media_files (episode_id, relative_path, size_bytes) VALUES (1, 'Lost.S01E01.mkv', 500)")
+        for title, status, speed in [("a", "downloading", 300), ("b", "queued", 0), ("c", "importing", 0),
+                                     ("d", "failed", 0), ("e", "import_failed", 0), ("f", "completed", 0),
+                                     ("g", "completed", 0), ("h", "cancelled", 0)]:
+            conn.execute("INSERT INTO video_downloads (kind, title, status, speed_bps) VALUES ('movie', ?, ?, ?)",
+                         (title, status, speed))
+    db.set_setting("video_last_scan_at", "1792172934.5")
+
+
+def test_stats_counts_the_video_server_only(client, monkeypatch):
+    import api.video as videoapi
+    import core.video.sources as sources
+
+    _seed_stats(videoapi.get_video_db())
+    monkeypatch.setattr(sources, "resolve_video_server", lambda db=None: "plex")
+
+    r = client.get("/api/v1/video/stats")
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()["data"]
+    assert data["server"] == "plex"
+    # the jellyfin movie is not counted, an episode with no file is not a library episode,
+    # and only a monitored aired one is missing (the unmonitored and the unaired are not)
+    lib = data["library"]
+    assert (lib["movies"], lib["shows"], lib["episodes"], lib["episodes_missing"], lib["size_bytes"]) == (1, 1, 1, 1, 1500)
+    assert data["database"]["last_update"] == "2026-10-02T08:30:00+00:00"
+    assert data["database"]["last_scan"].startswith("2026-")
+    assert data["database"]["size_mb"] > 0
+    dl = data["downloads"]
+    assert (dl["active"], dl["failed"], dl["completed"], dl["cancelled"], dl["speed_bps"]) == (3, 2, 2, 1, 300)
+    assert dl["by_status"]["import_failed"] == 1 and dl["by_status"]["searching"] == 0
+    assert data["wishlist"]["total"] == 0
+
+
+def test_stats_on_an_empty_db_is_all_zeros(client, monkeypatch):
+    import core.video.sources as sources
+    monkeypatch.setattr(sources, "resolve_video_server", lambda db=None: None)
+
+    data = client.get("/api/v1/video/stats").get_json()["data"]
+    assert data["library"] == {"movies": 0, "shows": 0, "episodes": 0, "episodes_missing": 0, "size_bytes": 0}
+    assert data["downloads"]["active"] == 0 and data["downloads"]["completed_all_time"] == 0
+    assert data["database"]["last_update"] is None and data["database"]["last_scan"] is None
+
+
+def test_downloads_status_filter(client):
+    import api.video as videoapi
+    import core.video.download_monitor as monitor
+
+    _seed_stats(videoapi.get_video_db())
+    with patch.object(monitor, "ensure_started", lambda *a, **k: None):
+        everything = client.get("/api/v1/video/downloads").get_json()["data"]["downloads"]
+        assert len(everything) == 8
+
+        r = client.get("/api/v1/video/downloads?status=downloading")
+        assert r.status_code == 200, r.get_json()
+        assert [d["title"] for d in r.get_json()["data"]["downloads"]] == ["a"]
+        assert r.get_json()["data"]["count"] == 1
+
+        active = client.get("/api/v1/video/downloads?status=active").get_json()["data"]
+        assert sorted(d["title"] for d in active["downloads"]) == ["a", "b", "c"]
+
+        mixed = client.get("/api/v1/video/downloads?status=failed,completed").get_json()["data"]
+        assert sorted(d["title"] for d in mixed["downloads"]) == ["d", "e", "f", "g"]
+
+        bad = client.get("/api/v1/video/downloads?status=downlaoding")
+        assert bad.status_code == 400
+        assert bad.get_json()["error"]["code"] == "BAD_REQUEST"
