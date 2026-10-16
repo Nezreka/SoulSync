@@ -16134,6 +16134,27 @@ def _get_batch_lock(batch_id):
 # Batch lifecycle logic lives in core/downloads/lifecycle.py (imported above as _downloads_lifecycle).
 
 
+def _on_album_completion_finished(batch_id, album_id, imported_paths):
+    """Schedule post-import reconciliation for album-completion downloads only."""
+    if not imported_paths:
+        return
+
+    logger.info(
+        "[Album Completion] Post-import reconciliation requested: "
+        "batch=%s album=%s tracks=%d",
+        batch_id, album_id, len(imported_paths),
+    )
+
+    from core.automation.album_completion_reconcile import schedule
+
+    schedule(
+        album_id=album_id,
+        imported_paths=imported_paths,
+        scan_manager=web_scan_manager,
+        media_engine=media_server_engine,
+    )
+
+
 def _build_lifecycle_deps():
     """Build LifecycleDeps bundle from web_server.py globals on each call."""
     return _downloads_lifecycle.LifecycleDeps(
@@ -16164,6 +16185,7 @@ def _build_lifecycle_deps():
         deezer_discovery_states=deezer_discovery_states,
         spotify_public_discovery_states=spotify_public_discovery_states,
         get_global_max_concurrent=_get_global_max_concurrent,
+        on_album_completion_finished=_on_album_completion_finished,
     )
 
 

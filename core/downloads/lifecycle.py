@@ -448,6 +448,7 @@ class LifecycleDeps:
     # Soulseek is). Optional so a caller that has not been updated keeps the
     # old per-batch behaviour rather than losing its limit entirely.
     get_global_max_concurrent: Callable[[], int | None] | None = None
+    on_album_completion_finished: Callable[[str, str, tuple], None] | None = None
 
     def __post_init__(self) -> None:
         if self.ensure_wishlist_track_format is None:
@@ -922,6 +923,31 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         # missing song): the file still has to join whatever album is
         # already in its folder, or navidrome shows two albums
         _adopt_loose_tracks(_cons_files, cons_tag, batch.get('album_context'))
+
+
+    # Album-completion-only handoff after final tag consistency.
+    if batch.get('album_completion_only') and deps.on_album_completion_finished:
+        completed = [
+            task for task in tasks_snapshot.values()
+            if isinstance(task, dict)
+            and task.get('status') == 'completed'
+            and task.get('final_file_path')
+            and os.path.isfile(task['final_file_path'])
+        ]
+        if completed:
+            try:
+                playlist_id = str(batch.get('playlist_id') or '')
+                if playlist_id.startswith('album_completion:'):
+                    album_id = playlist_id[len('album_completion:'):]
+                    paths = tuple(
+                        task['final_file_path'] for task in completed
+                    )
+                    deps.on_album_completion_finished(batch_id, album_id, paths)
+            except Exception:
+                logger.exception(
+                    '[Album Completion] Post-download sync handoff failed for %s',
+                    batch_id,
+                )
 
 
 def on_download_completed(batch_id: str, task_id: str, success: bool, deps: LifecycleDeps) -> None:
