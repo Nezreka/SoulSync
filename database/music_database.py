@@ -267,6 +267,11 @@ class DatabaseTrackWithMetadata:
     duration: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Per-track credit, when the row carries one. The sync match cache
+    # revalidation (#1721) scores this row as a candidate: without the
+    # credit, compilation/soundtrack evidence was invisible to the artist
+    # scorer and legitimate cached matches failed validation.
+    track_artist: Optional[str] = None
 
 @dataclass
 class WatchlistArtist:
@@ -11335,8 +11340,8 @@ class MusicDatabase:
             track_id_str = str(track_id)
             scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
             cursor.execute(f"""
-                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
-                       t.duration, t.created_at, t.updated_at,
+                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number,
+                       t.duration, t.created_at, t.updated_at, t.track_artist,
                        a.name as artist_name, al.title as album_title
                 FROM tracks t
                 JOIN artists a ON t.artist_id = a.id
@@ -11356,7 +11361,8 @@ class MusicDatabase:
                     track_number=row['track_number'],
                     duration=row['duration'],
                     created_at=row['created_at'],
-                    updated_at=row['updated_at']
+                    updated_at=row['updated_at'],
+                    track_artist=row['track_artist'] if 'track_artist' in row.keys() else None
                 )
             return None
             
@@ -21028,6 +21034,24 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error saving sync match cache: {e}")
             return False
+
+    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str) -> int:
+        """Delete ONE sync match cache row. Returns rows deleted.
+
+        Used when a cached pairing is proven stale under the current
+        matcher (#1721): the row must not survive to poison the next sync,
+        but the rest of the cache (other tracks, other servers) is fine."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
+                (str(spotify_track_id), server_source))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error deleting sync match cache row: {e}")
+            return 0
 
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
