@@ -114,7 +114,7 @@ def _as_int(v: Any) -> Optional[int]:
 def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = None,
                      episode: Any = None, imdb_id: Any = None, tmdb_id: Any = None,
                      tvdb_id: Any = None, air_date: Any = None, absolute: Any = None,
-                     series_type: Any = None) -> List[Tuple[str, str, List[tuple]]]:
+                     series_type: Any = None, alt: Any = None) -> List[Tuple[str, str, List[tuple]]]:
     """The set of Prowlarr searches to run for one request, as ``(type, query, extra)``.
 
     Pure (no I/O) so it's unit-tested. Always includes the scene-formatted text search;
@@ -138,11 +138,24 @@ def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = 
         strat.append(("movie", t, extra))
         strat.append(("search", build_query("movie", t, year=year), []))
     elif scope == "episode":
+        # a tvdbid asks the indexer in TVDB's numbering, so when the scene
+        # (TVDB) numbering differs from TMDB's (``alt``), that's what goes with it
+        alt_s = alt_e = None
+        if alt:
+            try:
+                alt_s, alt_e = int(alt[0]), int(alt[1])
+            except (TypeError, ValueError, IndexError):
+                alt_s = alt_e = None
+        if alt_s is not None and len(alt) > 2 and alt[2]:
+            # exclusive: the TMDB number names another episode in the scene's
+            # numbering, so searching it only finds the wrong one
+            season, episode, s_i, e_i = alt_s, alt_e, alt_s, alt_e
+        q_s, q_e = (alt_s, alt_e) if (tvdb and alt_s is not None) else (s_i, e_i)
         extra = []
-        if s_i is not None:
-            extra.append(("season", s_i))
-        if e_i is not None:
-            extra.append(("ep", e_i))
+        if q_s is not None:
+            extra.append(("season", q_s))
+        if q_e is not None:
+            extra.append(("ep", q_e))
         if tvdb:
             extra.append(("tvdbid", tvdb))
         if imdb:
@@ -157,6 +170,8 @@ def build_strategies(scope: str, title: Any, *, year: Any = None, season: Any = 
         q_std = build_query("episode", t, season=season, episode=episode)
         if q_std != q_typed:
             strat.append(("search", q_std, []))
+        if alt_s is not None:
+            strat.append(("search", build_query("episode", t, season=alt_s, episode=alt_e), []))
     elif scope == "season":
         extra = []
         if s_i is not None:
@@ -227,7 +242,8 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
                     episode: Any = None, source: str = "torrent", imdb_id: Any = None,
                     tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
                     absolute: Any = None, series_type: Any = None,
-                    max_wait_seconds: Any = None, indexer_names: Any = None) -> dict:
+                    max_wait_seconds: Any = None, indexer_names: Any = None,
+                    alt: Any = None) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
@@ -252,7 +268,8 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     ids = target_ids if target_ids is not None else _indexer_ids()
     strategies = build_strategies(scope, title, year=year, season=season, episode=episode,
                                   imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
-                                  air_date=air_date, absolute=absolute, series_type=series_type)
+                                  air_date=air_date, absolute=absolute, series_type=series_type,
+                                  alt=alt)
     if not strategies:
         return {"configured": True, "hits": []}
 

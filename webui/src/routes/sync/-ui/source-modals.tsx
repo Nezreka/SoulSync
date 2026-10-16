@@ -32,6 +32,28 @@ function statePlaylistTracks(state: SourcePlaylistState): unknown[] {
   return Array.isArray(state.playlist?.tracks) ? (state.playlist.tracks as unknown[]) : [];
 }
 
+/**
+ * The discovery start body the source's policy asks for, derived from the
+ * config so a wiring omission cannot break a start invisibly. ListenBrainz
+ * REQUIRES {playlist}; beatport REQUIRES its chart_data (startSourceDiscovery
+ * wraps it as {chart_data}), and without it the endpoint answers 400, which
+ * left beatport's Start and Rediscover buttons dead. Everyone else sends nothing.
+ */
+export function defaultDiscoveryStartBody(
+  config: SourceVerticalConfig,
+  state: SourcePlaylistState,
+): unknown {
+  if (config.discovery.startBody === 'playlist') {
+    return { playlist: { name: state.playlist?.name, tracks: statePlaylistTracks(state) } };
+  }
+  if (config.discovery.startBody === 'chart_data') {
+    const chart = state.playlist?.chart_data;
+    if (chart && typeof chart === 'object') return chart;
+    return { name: state.playlist?.name, tracks: statePlaylistTracks(state) };
+  }
+  return undefined;
+}
+
 // Both engine entries are declared by the shell globals (globals.d.ts) with
 // their real signatures.
 
@@ -163,14 +185,8 @@ export function SourceModals({
         mirroredSource={mirroredSource}
         onClose={close}
         onStartDiscovery={() => {
-          // The LB endpoint REQUIRES {playlist} (web_server 34966-34970) —
-          // derive it from the config so a wiring omission cannot break the
-          // start invisibly; the prop stays as an override.
-          const body =
-            discoveryStartBody?.(state) ??
-            (config.discovery.startBody === 'playlist'
-              ? { playlist: { name: state.playlist?.name, tracks: statePlaylistTracks(state) } }
-              : undefined);
+          // the prop stays as an override of the config-derived body
+          const body = discoveryStartBody?.(state) ?? defaultDiscoveryStartBody(config, state);
           void vertical.startDiscovery(openId, body);
         }}
         onStartSync={() => void vertical.startSync(openId)}
@@ -184,15 +200,7 @@ export function SourceModals({
                   return; // Reset failed
                 }
                 const body =
-                  discoveryStartBody?.(state) ??
-                  (config.discovery.startBody === 'playlist'
-                    ? {
-                        playlist: {
-                          name: state.playlist?.name,
-                          tracks: statePlaylistTracks(state),
-                        },
-                      }
-                    : undefined);
+                  discoveryStartBody?.(state) ?? defaultDiscoveryStartBody(config, state);
                 void vertical.startDiscovery(openId, body);
               }
             : undefined

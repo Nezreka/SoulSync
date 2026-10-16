@@ -1,9 +1,9 @@
 /**
- * The download bridge. This is the path that queues files, so the assertions
+ * The release download. This is the path that queues files, so the assertions
  * are on the ARGUMENTS handed to the download engine, not on whether it was
- * called — a chart opened as an artist_album, or a release credited to 'Various
- * Artists', would still "pass" a called/not-called test and would put the wrong
- * folders on disk.
+ * called: a release credited to 'Various Artists' would still "pass" a
+ * called/not-called test and would put the wrong folders on disk. (chart-type
+ * lists open as discoveries now, see -beatport.lists.test.ts.)
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,39 +12,23 @@ import {
   type BeatportDownloadEnv,
   defaultBeatportDownloadEnv,
   isBeatportModalOpening,
-  openBeatportChartAsDownloadModal,
-  openBeatportChartCard,
   openBeatportRelease,
-  openBeatportTop100,
-  openBeatportGenreTop100,
-  openBeatportTop10List,
   resetBeatportModalLatch,
 } from './-beatport.downloads';
 
 /** Every call the bridge makes to the outside world, recorded in order. */
 function makeEnv() {
-  const scheduled: { callback: () => void; ms: number }[] = [];
-  const slept: number[] = [];
   const env: BeatportDownloadEnv = {
     showToast: vi.fn(),
     showLoadingOverlay: vi.fn(),
     hideLoadingOverlay: vi.fn(),
-    setOverlayMessage: vi.fn(),
     openDownloadModal: vi.fn(),
     registerDownload: vi.fn(),
     // Pinned so the generated ids are literals in the assertions below.
     now: () => 1700000000000,
     random: () => 0.5,
-    schedule: (callback, ms) => {
-      scheduled.push({ callback, ms });
-    },
-    // The interval is still ASSERTED (see `slept`) — it is recorded rather
-    // than waited on, so the poll's timing stays covered without the wall time.
-    sleep: async (ms) => {
-      slept.push(ms);
-    },
   };
-  return { env, scheduled, slept };
+  return { env };
 }
 
 function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
@@ -213,319 +197,6 @@ describe('opening a release', () => {
   });
 });
 
-/* ── Chart cards ──────────────────────────────────────────────────────────── */
-
-const CHART = {
-  name: 'Peak Hour',
-  creator: 'DJ X',
-  url: 'https://beatport.com/chart/peak-hour/1',
-  image: 'http://chart.jpg',
-};
-
-const SCRAPED = {
-  success: true,
-  tracks: [{ title: 'A', artist: 'X, Y', duration: '3:20' }],
-};
-
-describe('opening a chart card', () => {
-  it('opens it as a COMPILATION under the playlist context', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportChartCard(CHART, 'chart', env);
-
-    // The scraper gets the PREFIXED name; the download gets 'name - creator'.
-    expect(JSON.parse(calls[0].init?.body as string)).toEqual({
-      chart_url: CHART.url,
-      chart_name: 'Featured Chart: Peak Hour',
-      limit: 100,
-      enrich: false,
-    });
-
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Peak Hour - DJ X');
-    expect(args[4]).toEqual({ id: 'beatport_various', name: 'Various Artists' });
-    expect(args[6]).toBe('playlist');
-    // Comma-split artists, so the engine builds one folder per artist.
-    expect((args[2] as { artists: string[] }[])[0].artists).toEqual(['X', 'Y']);
-    expect((args[3] as { album_type: string }).album_type).toBe('compilation');
-  });
-
-  it('uses the DJ prefix and the DJ copy for the DJ variant', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportChartCard(CHART, 'dj', env);
-    expect(JSON.parse(calls[0].init?.body as string).chart_name).toBe('DJ Chart: Peak Hour');
-  });
-
-  it('refuses an url-less chart with variant-specific copy', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportChartCard({ name: 'n', creator: 'c' }, 'chart', env);
-    await openBeatportChartCard({ name: 'n', creator: 'c' }, 'dj', env);
-    expect(env.showToast).toHaveBeenNthCalledWith(1, 'No chart URL available', 'error');
-    expect(env.showToast).toHaveBeenNthCalledWith(2, 'No DJ chart URL available', 'error');
-    expect(calls).toHaveLength(0);
-  });
-
-  it('reports the variant-specific empty-chart message', async () => {
-    stubFetch(() => ({ success: true, tracks: [] }));
-    const { env } = makeEnv();
-    await openBeatportChartCard(CHART, 'dj', env);
-    expect(env.showToast).toHaveBeenCalledWith(
-      'Error loading Peak Hour: No tracks found in this DJ chart',
-      'error',
-    );
-  });
-
-  it('is NOT double-click guarded, which is what the vanilla does', async () => {
-    stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await Promise.all([
-      openBeatportChartCard(CHART, 'chart', env),
-      openBeatportChartCard(CHART, 'chart', env),
-    ]);
-    // Neither chart handler touches _beatportModalOpening. Adding the guard
-    // here would be an improvement, not a transcription — recorded, not made.
-    expect(env.openDownloadModal).toHaveBeenCalledTimes(2);
-  });
-
-  it('writes enrichment progress into the loading overlay', async () => {
-    let polls = 0;
-    stubFetch((url) => {
-      if (url.startsWith('/api/beatport/enrich-tracks')) return { success: true, async: true };
-      if (url.startsWith('/api/beatport/enrich-progress')) {
-        polls++;
-        return polls === 1
-          ? { success: true, completed: 1, total: 2, current_track: 'A' }
-          : { success: true, done: true, completed: 2, total: 2, tracks: [{ title: 'A+' }] };
-      }
-      return SCRAPED;
-    });
-    const { env, slept } = makeEnv();
-    await openBeatportChartCard(CHART, 'chart', env);
-
-    expect(env.setOverlayMessage).toHaveBeenCalledWith('Fetching track metadata... (1/2) A');
-    // 1957's fixed 800ms gap, once per poll.
-    expect(slept).toEqual([800, 800]);
-    // The enriched tracks reach the modal, not the scraped ones.
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect((args[2] as { name: string }[])[0].name).toBe('A+');
-  });
-
-  it('still downloads the SCRAPED tracks when enrichment fails outright', async () => {
-    stubFetch((url) => {
-      if (url.startsWith('/api/beatport/enrich-tracks')) return { success: false };
-      return SCRAPED;
-    });
-    const { env } = makeEnv();
-    await openBeatportChartCard(CHART, 'chart', env);
-    // A failed enrichment must never block the download — it only means less
-    // metadata.
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect((args[2] as { name: string }[])[0].name).toBe('A');
-  });
-});
-
-/* ── The chart modal opener ───────────────────────────────────────────────── */
-
-describe('openBeatportChartAsDownloadModal', () => {
-  it('clears the latch unconditionally, even when it did not set it', async () => {
-    stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    // A Top 100 click that latched and has not timed out yet.
-    const inFlight = openBeatportTop100('beatport', env);
-    expect(isBeatportModalOpening()).toBe(true);
-
-    openBeatportChartAsDownloadModal([{ title: 'A' }], 'Chart', null, env);
-    // 2002's comment: so a cached (fast) enrichment can still open the modal.
-    expect(isBeatportModalOpening()).toBe(false);
-    await inFlight;
-  });
-
-  it('registers the bubble with an empty image when the chart has none', () => {
-    const { env } = makeEnv();
-    openBeatportChartAsDownloadModal([{ title: 'A' }], 'Beatport Top 100', null, env);
-    expect(env.registerDownload).toHaveBeenCalledWith(
-      'Beatport Top 100',
-      '',
-      'beatport_chart_1700000000000_i',
-    );
-  });
-
-  it('gives the compilation album the timestamp-only id, not the suffixed one', () => {
-    const { env } = makeEnv();
-    openBeatportChartAsDownloadModal([{ title: 'A' }], 'Chart', 'http://i.jpg', env);
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    // The album id and the virtual playlist id are DIFFERENT shapes in the
-    // vanilla; collapsing them would change the key the engine tracks.
-    expect((args[3] as { id: string }).id).toBe('beatport_chart_1700000000000');
-    expect(args[0]).toBe('beatport_chart_1700000000000_i');
-  });
-});
-
-/* ── The top-10 track lists (sync-services.js) ────────────────────────────── */
-
-describe('the top-10 list container flow', () => {
-  it('opens the list as a compilation under the name it is given', async () => {
-    stubFetch(() => ({ success: true, tracks: [{ title: 'A+' }] }));
-    const { env } = makeEnv();
-    await openBeatportTop10List([{ title: 'A' }], 'Beatport Top 10', env);
-
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Beatport Top 10');
-    expect(args[6]).toBe('playlist');
-    expect(args[4]).toEqual({ id: 'beatport_various', name: 'Various Artists' });
-    // No image for either list (4931 passes null).
-    expect(env.registerDownload).toHaveBeenCalledWith('Beatport Top 10', '', expect.any(String));
-  });
-
-  it('opens the overlay with the count already filled in', async () => {
-    stubFetch(() => ({ success: true, tracks: [] }));
-    const { env } = makeEnv();
-    await openBeatportTop10List([{ title: 'A' }, { title: 'B' }], 'Hype Top 10', env);
-    // 4925 — every other flow starts with a 'Scraping …' line instead.
-    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Fetching track metadata... (0/2)');
-  });
-
-  it('toasts rather than opening an empty download', async () => {
-    const calls = stubFetch(() => ({ success: true }));
-    const { env } = makeEnv();
-    await openBeatportTop10List([], 'Beatport Top 10', env);
-    // 4917. The vanilla can also fail one step earlier with a selector string
-    // in the message; there is no container to name here, so the port uses the
-    // other message this flow already produces.
-    expect(env.showToast).toHaveBeenCalledWith(
-      'Error loading Beatport Top 10: No track data found for Beatport Top 10',
-      'error',
-    );
-    expect(calls).toHaveLength(0);
-    expect(env.openDownloadModal).not.toHaveBeenCalled();
-    expect(env.hideLoadingOverlay).toHaveBeenCalled();
-  });
-
-  it('is latched, and released by the same blind 2s timer as Top 100', async () => {
-    stubFetch(() => ({ success: true, tracks: [{ title: 'A' }] }));
-    const { env, scheduled } = makeEnv();
-    await openBeatportTop10List([{ title: 'A' }], 'Beatport Top 10', env);
-    expect(scheduled).toEqual([{ callback: expect.any(Function), ms: 2000 }]);
-
-    // The chart-modal opener cleared the latch on the way out, so a second
-    // click is allowed — which is the vanilla's behaviour, not a leak.
-    expect(isBeatportModalOpening()).toBe(false);
-  });
-});
-
-/* ── Top 100 ──────────────────────────────────────────────────────────────── */
-
-describe('the two Top 100 buttons', () => {
-  it('hit the right endpoint and name the download after the list', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportTop100('beatport', env);
-    expect(calls[0].url).toBe('/api/beatport/top-100?enrich=false');
-    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Scraping Beatport Top 100...');
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Beatport Top 100');
-  });
-
-  it('hits the hype endpoint for the hype variant', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportTop100('hype', env);
-    expect(calls[0].url).toBe('/api/beatport/hype-top-100?enrich=false');
-    expect(env.registerDownload).toHaveBeenCalledWith('Hype Top 100', '', expect.any(String));
-  });
-
-  it('shows NO loading toast, unlike every other flow', async () => {
-    stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    await openBeatportTop100('beatport', env);
-    expect(env.showToast).not.toHaveBeenCalled();
-  });
-
-  it('releases the latch on a blind 2s timer rather than when the work ends', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        await gate;
-        return new Response(JSON.stringify(SCRAPED), { status: 200 });
-      }),
-    );
-    const { env, scheduled } = makeEnv();
-    const inFlight = openBeatportTop100('beatport', env);
-
-    expect(scheduled).toEqual([{ callback: expect.any(Function), ms: 2000 }]);
-    expect(isBeatportModalOpening()).toBe(true);
-
-    // The timer fires while the scrape is still running — so a scrape slower
-    // than 2s can be started a second time. Transcribed, not fixed.
-    scheduled[0].callback();
-    expect(isBeatportModalOpening()).toBe(false);
-    release();
-    await inFlight;
-  });
-
-  it('swallows a second click before the timer fires', async () => {
-    const calls = stubFetch(() => SCRAPED);
-    const { env } = makeEnv();
-    const first = openBeatportTop100('beatport', env);
-    const second = openBeatportTop100('beatport', env);
-    await Promise.all([first, second]);
-    expect(calls.filter((c) => c.url.includes('top-100'))).toHaveLength(1);
-  });
-
-  it('reports a failure with the list name', async () => {
-    stubFetch(() => ({ success: true, tracks: [] }));
-    const { env } = makeEnv();
-    await openBeatportTop100('hype', env);
-    expect(env.showToast).toHaveBeenCalledWith(
-      'Error loading Hype Top 100: No tracks found in Hype Top 100',
-      'error',
-    );
-  });
-});
-
-describe('the genre Top 100 flow', () => {
-  it('hits the genre tracks endpoint and files it under the genre', async () => {
-    const calls = stubFetch(() => ({ success: true, tracks: [{ title: 'T' }] }));
-    const { env, scheduled } = makeEnv();
-    await openBeatportGenreTop100('tech-house', 11, 'Tech House', env);
-
-    expect(calls[0].url).toBe('/api/beatport/genre/tech-house/11/tracks?enrich=false');
-    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Scraping Tech House Top 100...');
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Tech House Top 100');
-    expect(args[6]).toBe('playlist');
-    // No image, and the same blind 2s latch as its two homepage twins.
-    expect(env.registerDownload).toHaveBeenCalledWith('Tech House Top 100', '', expect.any(String));
-    expect(scheduled).toEqual([{ callback: expect.any(Function), ms: 2000 }]);
-  });
-
-  it('shows no loading toast, like the other Top 100 buttons', async () => {
-    stubFetch(() => ({ success: true, tracks: [{ title: 'T' }] }));
-    const { env } = makeEnv();
-    await openBeatportGenreTop100('g', 1, 'G', env);
-    expect(env.showToast).not.toHaveBeenCalled();
-  });
-
-  it('reports an empty chart with the genre in both halves of the message', async () => {
-    stubFetch(() => ({ success: true, tracks: [] }));
-    const { env } = makeEnv();
-    await openBeatportGenreTop100('g', 1, 'Techno', env);
-    expect(env.showToast).toHaveBeenCalledWith(
-      'Error loading Techno Top 100: No tracks found in Techno Top 100',
-      'error',
-    );
-    expect(env.hideLoadingOverlay).toHaveBeenCalled();
-  });
-});
-
-/* ── The default environment ──────────────────────────────────────────────── */
-
 describe('defaultBeatportDownloadEnv', () => {
   afterEach(() => {
     delete window.showToast;
@@ -566,17 +237,6 @@ describe('defaultBeatportDownloadEnv', () => {
       env.hideLoadingOverlay();
       env.registerDownload('c', 'i', 'vp');
     }).not.toThrow();
-  });
-
-  it("writes progress into the overlay's message node, and tolerates its absence", () => {
-    expect(() => defaultBeatportDownloadEnv().setOverlayMessage('x')).not.toThrow();
-
-    document.body.innerHTML =
-      '<div id="loading-overlay"><div class="loading-message">Processing...</div></div>';
-    defaultBeatportDownloadEnv().setOverlayMessage('Fetching track metadata... (1/2)');
-    expect(document.querySelector('#loading-overlay .loading-message')?.textContent).toBe(
-      'Fetching track metadata... (1/2)',
-    );
   });
 
   it('generates a fresh id per call', () => {

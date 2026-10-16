@@ -40,17 +40,8 @@ async function ensureBeatportContentLoaded() {
             await loadBeatportChartsFromBackend();
             throwIfBeatportLoadAborted();
 
-            initializeBeatportRebuildSlider();
-            initializeBeatportReleasesSlider();
-            initializeBeatportHypePicksSlider();
-            initializeBeatportChartsSlider();
-            initializeBeatportDJSlider();
-            throwIfBeatportLoadAborted();
-            await Promise.all([
-                loadBeatportTop10Lists(),
-                loadBeatportTop10Releases()
-            ]);
-            throwIfBeatportLoadAborted();
+            // Browsing and sliders belong to the React Beatport tab. Keep
+            // only the persisted discovery/download-state hydration here.
             showBeatportDownloadsSection();
 
             beatportContentState.loaded = true;

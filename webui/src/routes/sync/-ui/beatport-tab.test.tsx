@@ -10,12 +10,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BeatportGenre } from '../-beatport.api';
 
-const openTop100 = vi.fn();
+const openList = vi.fn();
 
 vi.mock('../-beatport.downloads', () => ({
   defaultBeatportDownloadEnv: () => ({ tag: 'env' }),
-  openBeatportTop100: (variant: string, env: unknown) => openTop100(variant, env),
 }));
+
+vi.mock('../-beatport.lists', () => ({
+  openBeatportList: (request: unknown, env: unknown) => openList(request, env),
+}));
+
+/** the beatport vertical, as far as the tab touches it */
+function fakeVertical() {
+  return {
+    states: { 'top-100': { phase: 'discovered' } },
+    seed: vi.fn(),
+    startDiscovery: vi.fn(),
+  } as unknown as import('../-sync.use-vertical').SourceVertical;
+}
 
 /** Each section is stubbed to a marker: this file's job is order, not content. */
 vi.mock('./beatport-sections', () => ({
@@ -73,7 +85,7 @@ vi.mock('./genre-page', () => ({
 import { BeatportTab } from './beatport-tab';
 
 beforeEach(() => {
-  openTop100.mockClear();
+  openList.mockClear();
 });
 
 afterEach(() => {
@@ -129,21 +141,48 @@ describe('the pane', () => {
 });
 
 describe('the three nav buttons', () => {
-  it('sends each Top 100 button its OWN variant', () => {
-    // Both buttons call the same function and differ only by this argument, so
-    // a copy-paste gives you Beatport's chart under the Hype button.
-    render(<BeatportTab />);
+  it('opens each Top 100 button as its OWN list', () => {
+    // Both buttons call the same function and differ only by the ref, so a
+    // copy-paste gives you Beatport's chart under the Hype button.
+    render(<BeatportTab vertical={fakeVertical()} onOpen={vi.fn()} />);
 
     fireEvent.click(screen.getByText('Beatport Top 100'));
-    expect(openTop100).toHaveBeenCalledWith('beatport', { tag: 'env' });
+    expect(openList.mock.calls[0][0]).toEqual({ ref: 'top-100', label: 'Beatport Top 100' });
 
     fireEvent.click(screen.getByText('Hype Top 100'));
-    expect(openTop100).toHaveBeenLastCalledWith('hype', { tag: 'env' });
-    expect(openTop100).toHaveBeenCalledTimes(2);
+    expect(openList.mock.calls[1][0]).toEqual({ ref: 'hype-100', label: 'Hype Top 100' });
+    expect(openList).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands the list opener the beatport vertical and the modal opener', async () => {
+    const vertical = fakeVertical();
+    const onOpen = vi.fn();
+    render(<BeatportTab vertical={vertical} onOpen={onOpen} />);
+    fireEvent.click(screen.getByText('Beatport Top 100'));
+    const env = openList.mock.calls[0][1];
+    expect(env.phaseOf('top-100')).toBe('discovered');
+    expect(env.phaseOf('hype-10')).toBeUndefined();
+    env.seed('top-100', { name: 'x' });
+    expect(vertical.seed).toHaveBeenCalledWith('top-100', { name: 'x' });
+    env.open('top-100');
+    expect(onOpen).toHaveBeenCalledWith('top-100');
+    await env.startDiscovery('top-100', { ref: 'top-100' });
+    expect(vertical.startDiscovery).toHaveBeenCalledWith('top-100', { ref: 'top-100' });
+  });
+
+  it('says so instead of failing silently when there is no vertical', () => {
+    const toast = vi.fn();
+    vi.stubGlobal('showToast', toast);
+    window.showToast = toast;
+    render(<BeatportTab />);
+    fireEvent.click(screen.getByText('Beatport Top 100'));
+    expect(openList).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith('Beatport lists are not available here', 'error');
+    delete window.showToast;
   });
 
   it('opens the genre browser, and neither Top 100 does', () => {
-    render(<BeatportTab />);
+    render(<BeatportTab vertical={fakeVertical()} onOpen={vi.fn()} />);
     expect(screen.queryByTestId('genre-modal')).toBeNull();
 
     fireEvent.click(screen.getByText('Beatport Top 100'));
@@ -151,7 +190,7 @@ describe('the three nav buttons', () => {
 
     fireEvent.click(screen.getByText('Browse by Genre'));
     expect(screen.getByTestId('genre-modal')).toBeTruthy();
-    expect(openTop100).toHaveBeenCalledTimes(1);
+    expect(openList).toHaveBeenCalledTimes(1);
   });
 });
 

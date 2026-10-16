@@ -310,6 +310,10 @@ def resolve_library_file_path_with_diagnostic(
     if not allow_fuzzy:
         return None, attempt
 
+    folded = _resolve_ignoring_case(path_parts, base_dirs, accept=allowed)
+    if folded:
+        return folded, attempt
+
     sibling = _resolve_via_sibling_album_folder(path_parts, base_dirs)
     if sibling and allowed(sibling):
         return sibling, attempt
@@ -347,6 +351,35 @@ def _single_physical_match(matches):
         except OSError:
             return None
     return first
+
+
+def _resolve_ignoring_case(path_parts: List[str], base_dirs: List[str], *, accept=None) -> Optional[str]:
+    """the suffix walk again, with case folded on every segment.
+
+    plex reports the folder as it was when plex scanned it, so a folder renamed
+    to "Bring Me The Horizon" keeps coming back as "Bring Me the Horizon" and
+    never exists here on a case-sensitive mount. each segment has to match ONE
+    entry ignoring case (find_on_disk), so a split folder or two files that
+    differ only by case still refuse.
+
+    a suffix only gets walked when its first folder exists under the base in
+    some case, from the cached listing, so a genuine miss costs no listdirs.
+    """
+    from core.library.case_folding import _dir_listing
+    from core.library.path_resolve import find_on_disk
+
+    parts = [p for p in path_parts if p]
+    matches = []
+    for base in base_dirs:
+        listing = _dir_listing(base)
+        for i in range(0, len(parts) - 1):
+            if parts[i].casefold() not in listing:
+                continue
+            found = find_on_disk(base, parts[i:], fold_case=True)
+            if found and os.path.isfile(found) and (accept is None or accept(found)):
+                logger.debug("resolved %r ignoring case: %s", parts[-1], found)
+                matches.append(found)
+    return _single_physical_match(matches) if matches else None
 
 
 def _resolve_via_sibling_album_folder(

@@ -100,11 +100,17 @@ def test_unreachable_namespace_stops_expensive_album_scans(tmp_path, monkeypatch
         return real_scandir(path)
 
     monkeypatch.setattr(os, 'scandir', count_scans)
-    for i in range(server_paths._GIVE_UP_AFTER + 50):
+    for i in range(server_paths._GIVE_UP_AFTER):
         assert server_paths.local_path_for(f'/music/A/B/{i}.flac', config) is None
     # Each allowed miss scans the artist once per fuzzy strategy, and its
-    # album once for synthesized filenames. Exact suffix probes remain cheap.
-    assert len(scans) == server_paths._GIVE_UP_AFTER * 3
+    # album once for synthesized filenames. Case folding also reads the root
+    # once, then reuses its cached listing for every following miss.
+    assert scans.count(str(root)) == 1
+    assert len(scans) == server_paths._GIVE_UP_AFTER * 3 + 1
+    scans_before_give_up = list(scans)
+    for i in range(server_paths._GIVE_UP_AFTER, server_paths._GIVE_UP_AFTER + 50):
+        assert server_paths.local_path_for(f'/music/A/B/{i}.flac', config) is None
+    assert scans == scans_before_give_up
 
 
 

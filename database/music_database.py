@@ -432,6 +432,11 @@ class DatabaseTrackWithMetadata:
     duration: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Per-track credit, when the row carries one. The sync match cache
+    # revalidation (#1721) scores this row as a candidate: without the
+    # credit, compilation/soundtrack evidence was invisible to the artist
+    # scorer and legitimate cached matches failed validation.
+    track_artist: Optional[str] = None
 
 @dataclass
 class WatchlistArtist:
@@ -2033,6 +2038,7 @@ class MusicDatabase:
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
+            self._purge_beatport_positional_matches(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
@@ -2140,6 +2146,7 @@ class MusicDatabase:
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
+        'beatport_positional_purged': ('table', '_beatport_positional_purged'),
     }
 
     def _record_migration(self, cursor, name):
@@ -4350,6 +4357,38 @@ class MusicDatabase:
         # rows survive the rebuild below; nothing writes them any more.
         'artist', 'album', 'track',
     )
+
+    def _purge_beatport_positional_matches(self, cursor):
+        """one-time: drop what the old beatport ids and enrichment left behind.
+
+        every beatport chart called its tracks beatport_chart_0, _1, ... by
+        position, so a sync match saved for chart A's track 1 came back for
+        every chart's track 1 (maV, oct 12 2026: a trance chart synced with
+        tracks from the beatport top 10). those rows can't be told apart, so
+        they all go, along with manual matches filed under the same ids. the
+        cached beatport track pages go too: the old enrichment stored charts
+        as tracks there, and the json reads refill them correctly."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_beatport_positional_purged' in tables:
+                return
+            counts = {}
+            if 'sync_match_cache' in tables:
+                cursor.execute("DELETE FROM sync_match_cache WHERE spotify_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['sync_match_cache'] = max(cursor.rowcount, 0)
+            if 'manual_library_track_matches' in tables:
+                cursor.execute("DELETE FROM manual_library_track_matches WHERE source_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['manual_library_track_matches'] = max(cursor.rowcount, 0)
+            if 'metadata_cache_entities' in tables:
+                cursor.execute("DELETE FROM metadata_cache_entities WHERE source = 'beatport' AND entity_type = 'track'")
+                counts['metadata_cache_entities'] = max(cursor.rowcount, 0)
+            cursor.execute("CREATE TABLE _beatport_positional_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'beatport_positional_purged')
+            logger.info("beatport positional id purge: %s", counts)
+        except Exception as e:
+            logger.error(f"Error purging beatport positional matches: {e}")
+
 
     def _drop_retired_match_provenance_triggers(self, cursor):
         """Remove the trigger set that used to fill this table.
@@ -10148,7 +10187,7 @@ class MusicDatabase:
                 SELECT {id_column} AS public_id, t.album_id,
                        al.primary_artist_id AS artist_id, t.title,
                        t.track_number, t.duration, t.added_at AS created_at,
-                       t.updated_at,
+                       t.updated_at, t.track_artist,
                        COALESCE(t.track_artist, a.name) as artist_name,
                        al.title as album_title
                 FROM lib2_tracks t
@@ -10169,7 +10208,8 @@ class MusicDatabase:
                     track_number=row['track_number'],
                     duration=row['duration'],
                     created_at=row['created_at'],
-                    updated_at=row['updated_at']
+                    updated_at=row['updated_at'],
+                    track_artist=row['track_artist'] if 'track_artist' in row.keys() else None
                 )
             return None
             
@@ -19499,6 +19539,24 @@ class MusicDatabase:
             logger.error(f"Error saving sync match cache: {e}")
             return False
 
+    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str) -> int:
+        """Delete ONE sync match cache row. Returns rows deleted.
+
+        Used when a cached pairing is proven stale under the current
+        matcher (#1721): the row must not survive to poison the next sync,
+        but the rest of the cache (other tracks, other servers) is fine."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
+                (str(spotify_track_id), server_source))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error deleting sync match cache row: {e}")
+            return 0
+
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
         try:
@@ -24389,7 +24447,7 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     result[row['playlist_id']] = {
                         'total': 0, 'discovered': 0, 'wishlisted': 0,
-                        'in_library': 0, 'library_checked': 0,
+                        'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                     }
 
                 # Core counts: total + discovered, grouped per playlist
@@ -24419,7 +24477,7 @@ class MusicDatabase:
                     if pid not in result:
                         result[pid] = {
                             'total': 0, 'discovered': 0, 'wishlisted': 0,
-                            'in_library': 0, 'library_checked': 0,
+                            'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                         }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
@@ -24433,17 +24491,32 @@ class MusicDatabase:
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                         WHERE mp.profile_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
+                          AND {_WISHLISTED}
                         GROUP BY mpt.playlist_id
-                    """, (profile_id,))
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (profile_id,))
                     for row in cursor.fetchall():
                         pid = row['playlist_id']
                         if pid in result:
                             result[pid]['wishlisted'] = row['wishlisted'] or 0
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
+
+                # wing it guesses nobody fixed: what the card's "need a match"
+                # link opens, so it counts exactly what the pool lists (#1721)
+                try:
+                    cursor.execute(f"""
+                        SELECT mpt.playlist_id, COUNT(*) as needs_match
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        WHERE mp.profile_id = ? AND {self._WING_IT_ATTENTION}
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['needs_match'] = row['needs_match'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch needs-match counts failed: {e}")
 
                 # NOTE: in_library is no longer derived here. It used to be a
                 # join with two paths and both were wrong. The ID path compared
@@ -24470,6 +24543,48 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result
+
+    # a mirrored track is wishlisted under the id sync filed it under: the
+    # matched id once discovery found one (often deezer's), the playlist's own
+    # id before that. asking only for the source id read 0 for every
+    # deezer-identified spotify playlist (#1721).
+    _MIRROR_TRACK_WISHLISTED = (
+        "((mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.profile_id = mp.profile_id AND wt.spotify_track_id = mpt.source_track_id)) "
+        "OR (json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.profile_id = mp.profile_id "
+        "AND wt.spotify_track_id = json_extract(mpt.extra_data, '$.matched_data.id'))))"
+    )
+
+    def get_wishlisted_ids(self, ids, profile_id: Optional[int] = None) -> set:
+        """which of ``ids`` have a wishlist row, for this profile when given."""
+        wanted = sorted({str(i) for i in ids or [] if i})
+        found: set = set()
+        if not wanted:
+            return found
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                scoped = profile_id is not None and any(
+                    r[1] == 'profile_id' for r in cursor.fetchall())
+                # sqlite caps bound parameters, so ask in chunks
+                for start in range(0, len(wanted), 500):
+                    chunk = wanted[start:start + 500]
+                    sql = ("SELECT spotify_track_id FROM wishlist_tracks WHERE spotify_track_id IN ("
+                           + ",".join("?" * len(chunk)) + ")")
+                    params = list(chunk)
+                    if scoped:
+                        sql += " AND profile_id = ?"
+                        params.append(int(profile_id))
+                    cursor.execute(sql, params)
+                    found.update(str(r[0]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug(f"wishlisted id lookup failed: {e}")
+        return found
 
     def get_mirrored_playlist_status_counts(self, playlist_id: int) -> dict:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
@@ -24499,11 +24614,10 @@ class MusicDatabase:
                     cursor.execute("""
                         SELECT COUNT(*) as wishlisted
                         FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id=mpt.playlist_id
                         WHERE mpt.playlist_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
-                    """, (playlist_id,))
+                          AND {_WISHLISTED}
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (playlist_id,))
                     result['wishlisted'] = cursor.fetchone()['wishlisted'] or 0
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")

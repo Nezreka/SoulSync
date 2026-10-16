@@ -28,13 +28,11 @@ function makeEnv(): BeatportDownloadEnv {
     showToast: vi.fn(),
     showLoadingOverlay: vi.fn(),
     hideLoadingOverlay: vi.fn(),
-    setOverlayMessage: vi.fn(),
     openDownloadModal: vi.fn(),
     registerDownload: vi.fn(),
     now: () => 1700000000000,
     random: () => 0.5,
-    schedule: vi.fn(),
-    sleep: async () => {},
+    openList: vi.fn(),
   };
 }
 
@@ -268,23 +266,18 @@ describe('the hype-picks section', () => {
 describe('the featured-charts section', () => {
   const CHART = { name: 'Peak Hour', creator: 'DJ X', url: 'http://c', image: 'http://i.jpg' };
 
-  it('scrapes with the FEATURED prefix on click', async () => {
-    const calls = stubApi({
-      '/api/beatport/featured-charts': { success: true, charts: [CHART] },
-      '/api/beatport/chart/extract': { success: true, tracks: [{ title: 'T' }] },
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'T' }] },
-    });
+  it('opens the chart as a playlist to identify, by its url', async () => {
+    // it used to scrape the chart and hand it to the download modal as a
+    // "Various Artists" compilation named after the chart, which is how the
+    // chart name ended up as the album in plex (maV, oct 12 2026)
+    stubApi({ '/api/beatport/featured-charts': { success: true, charts: [CHART] } });
     const env = makeEnv();
     render(<BeatportFeaturedChartsSection env={env} />);
     await waitFor(() => expect(screen.getByText('Peak Hour')).toBeInTheDocument());
 
     fireEvent.click(document.querySelector('.beatport-chart-card') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    expect(calls).toContain('/api/beatport/chart/extract');
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    // A compilation under the playlist context, credited to Various Artists.
-    expect(args[1]).toBe('Peak Hour - DJ X');
-    expect(args[6]).toBe('playlist');
+    expect(env.openList).toHaveBeenCalledWith({ url: CHART.url, label: 'Peak Hour' });
+    expect(env.openDownloadModal).not.toHaveBeenCalled();
   });
 
   it('binds a click even to an url-less card, unlike the release sections', async () => {
@@ -352,36 +345,17 @@ describe('the DJ-charts section', () => {
     expect(document.querySelectorAll('.beatport-dj-slide')).toHaveLength(2);
   });
 
-  it('scrapes with the DJ prefix, which is the only wire difference', async () => {
-    const calls: string[] = [];
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string, init?: RequestInit) => {
-        calls.push(url);
-        if (url === '/api/beatport/chart/extract') {
-          expect(JSON.parse(init?.body as string).chart_name).toBe('DJ Chart: Warmup');
-          return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
-            status: 200,
-          });
-        }
-        if (url.startsWith('/api/beatport/enrich-tracks')) {
-          return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
-            status: 200,
-          });
-        }
-        return new Response(JSON.stringify({ success: true, charts: [CHART] }), { status: 200 });
-      }),
-    );
+  it('opens the dj chart the same way', async () => {
+    stubApi({ '/api/beatport/dj-charts': { success: true, charts: [CHART] } });
     const env = makeEnv();
     render(<BeatportDJChartsSection env={env} />);
     await waitFor(() => expect(screen.getByText('Warmup')).toBeInTheDocument());
 
     fireEvent.click(document.querySelector('.beatport-dj-card') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    expect(calls).toContain('/api/beatport/chart/extract');
+    expect(env.openList).toHaveBeenCalledWith({ url: CHART.url, label: CHART.name });
   });
 
-  it('binds unconditionally too, and toasts the DJ-specific copy', async () => {
+  it('binds unconditionally too, and toasts when there is no url', async () => {
     stubApi({ '/api/beatport/dj-charts': { success: true, charts: [{ name: 'No URL' }] } });
     const env = makeEnv();
     render(<BeatportDJChartsSection env={env} />);
@@ -389,7 +363,7 @@ describe('the DJ-charts section', () => {
 
     fireEvent.click(document.querySelector('.beatport-dj-card') as Element);
     await waitFor(() =>
-      expect(env.showToast).toHaveBeenCalledWith('No DJ chart URL available', 'error'),
+      expect(env.showToast).toHaveBeenCalledWith('No chart URL available', 'error'),
     );
   });
 

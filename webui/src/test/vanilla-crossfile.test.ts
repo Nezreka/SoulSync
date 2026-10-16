@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -34,11 +34,6 @@ const PORT_FILES = [
 const EXPECTED_EDGES = [
   'applyProgressiveTrackRendering <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'autoSavePlaylistM3U <- downloads.js [sync-spotify.js]',
-  'cleanupBeatportChartsSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportDJSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportHypePicksSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportRebuildSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportReleasesSlider <- core.js [beatport-ui.js]',
   'cleanupDownloadProcess <- downloads.js [sync-spotify.js]',
   'cleanupWishlist <- downloads.js [sync-services.js]',
   'clearWishlist <- downloads.js [sync-services.js]',
@@ -155,7 +150,7 @@ describe('calls that cross out of the files the sync port deletes', () => {
     // becomes deletable-by-association.
     const dir = resolve(process.cwd(), 'static');
     const settings = readFileSync(resolve(dir, 'settings.js'), 'utf8');
-    const beatport = readFileSync(resolve(dir, 'beatport-ui.js'), 'utf8');
+    expect(existsSync(resolve(dir, 'beatport-ui.js'))).toBe(false);
     for (const name of [
       'loadPlexMusicLibraries',
       'selectPlexLibrary',
@@ -168,9 +163,6 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ]) {
       expect(settings, `${name} should be defined in settings.js`).toContain(
         `async function ${name}(`,
-      );
-      expect(beatport, `${name} must not be back in beatport-ui.js`).not.toContain(
-        `function ${name}(`,
       );
     }
   });
@@ -213,16 +205,17 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ).toEqual([]);
   });
 
-  it('covers the Beatport slider teardown core.js drives on page-leave', () => {
-    const actual = computeEdges();
+  it('never calls the deleted Beatport slider globals from core.js', () => {
+    const core = stripComments(readFileSync(resolve(process.cwd(), 'static/core.js'), 'utf8'));
     for (const name of [
       'cleanupBeatportRebuildSlider',
       'cleanupBeatportReleasesSlider',
       'cleanupBeatportHypePicksSlider',
       'cleanupBeatportChartsSlider',
       'cleanupBeatportDJSlider',
+      'resetBeatportSliderInitFlags',
     ]) {
-      expect(actual).toContain(`${name} <- core.js [beatport-ui.js]`);
+      expect(core).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
     }
   });
 });

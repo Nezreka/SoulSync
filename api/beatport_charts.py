@@ -116,6 +116,22 @@ def start_beatport_discovery(url_hash):
         if state['phase'] == 'discovering':
             return jsonify({"error": "Discovery already in progress"}), 400
 
+        # a list opened again carries this week's tracks: identify those, not
+        # last week's, and don't stack new results on top of the old ones
+        state['chart'] = chart_data
+        state['discovery_results'] = []
+        state['spotify_total'] = len(chart_data['tracks'])
+        state['wing_it_count'] = 0
+
+        # a beatport list is mirrored by its ref so it shows up with the other
+        # mirrors and can refresh. an old random chart hash isn't a ref and
+        # gets no mirror.
+        try:
+            from core.beatport.playlist import mirror_chart
+            mirror_chart(get_database(), url_hash, chart_data, get_current_profile_id())
+        except Exception as e:
+            logger.warning(f"Beatport mirror failed for {url_hash}: {e}")
+
         # Update phase to discovering
         state['phase'] = 'discovering'
         state['status'] = 'discovering'

@@ -27,7 +27,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { MirroredPlaylistDetail } from '../-sync.api';
-import type { MirroredTrack } from '../-sync.mirrored';
+import type { MirroredTrack, MirroredTrackStatus } from '../-sync.mirrored';
 
 import {
   mirroredDetailSourceIcon,
@@ -36,6 +36,8 @@ import {
   mirroredRowDuration,
   mirroredTotalRuntime,
   timeAgo,
+  trackStatusChip,
+  trackStatusSegments,
 } from '../-sync.mirrored';
 import { skippedNoteText } from '../-sync.modal-core';
 import { AddSongsPanel } from '../../../features/playlists/add-songs-panel';
@@ -83,6 +85,9 @@ export interface MirroredDetailModalProps {
   onDuplicate?: () => Promise<void>;
   /** a mirror only: an editable copy in My Playlists; the tab opens it. */
   onMakeMine?: () => Promise<void>;
+  /** the wing it pool for this playlist. the tab closes this modal first, the
+   *  pool is a vanilla overlay that sits under it (#1721). */
+  onFindMatches?: () => void;
 }
 
 export type TrackSort = 'custom' | 'title' | 'artist' | 'album' | 'added' | 'duration';
@@ -269,6 +274,7 @@ function TrackRow({
   onPlay?: () => void;
 }) {
   const cls = `mm-row${edit?.dragging ? ' mm-row--dragging' : ''}${edit?.over ? ' mm-row--over' : ''}`;
+  const chip = trackStatusChip(track.status);
   return (
     <div
       className={cls}
@@ -340,7 +346,14 @@ function TrackRow({
       )}
       <div className="mm-row-main">
         <span className="mm-row-title">{track.track_name}</span>
-        <span className="mm-row-artist">{track.artist_name}</span>
+        <span className="mm-row-artist">
+          <span className="mm-row-artist-name">{track.artist_name}</span>
+          {chip ? (
+            <span className="mm-row-st" data-st={track.status} title={chip}>
+              {chip}
+            </span>
+          ) : null}
+        </span>
       </div>
       <span className="mm-row-album">{track.album_name || ''}</span>
       <span className="mm-row-dur">{mirroredRowDuration(track.duration_ms)}</span>
@@ -412,6 +425,7 @@ export function MirroredDetailModal({
   onRefresh,
   onDuplicate,
   onMakeMine,
+  onFindMatches,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const own = isUserPlaylist(data);
@@ -421,10 +435,15 @@ export function MirroredDetailModal({
   const [addOpen, setAddOpen] = useState(own && tracks.length === 0);
   const [playing, setPlaying] = useState<PlaylistPlayMode | null>(null);
   const [makingMine, setMakingMine] = useState(false);
-  const shownTracks = sortTracks(tracks, sort);
-  // dragging only means something in the playlist's own order
+  // click a part of the status line to see just those tracks
+  const [statusFilter, setStatusFilter] = useState<MirroredTrackStatus | null>(null);
+  const segments = trackStatusSegments(data.status_counts);
+  const shownTracks = sortTracks(tracks, sort).filter(
+    (t) => !statusFilter || t.status === statusFilter,
+  );
+  // dragging only means something in the playlist's own order, all of it
   const editable = own && Boolean(onRemoveTrack && onReorder);
-  const draggable = editable && sort === 'custom';
+  const draggable = editable && sort === 'custom' && !statusFilter;
   const runPlay = async (mode: PlaylistPlayMode, from = 0) => {
     if (playing) return;
     setPlaying(mode);
@@ -787,6 +806,31 @@ export function MirroredDetailModal({
                 ) : null}
               </div>
               {skippedNote ? <div className="mm-skipped-note">{skippedNote}</div> : null}
+              {segments.length > 0 ? (
+                <div className="mm-status" role="group" aria-label="Where the tracks stand">
+                  {segments.map((seg) => (
+                    <button
+                      key={seg.status}
+                      type="button"
+                      className={`mm-status-seg${statusFilter === seg.status ? ' mm-status-seg--on' : ''}`}
+                      data-st={seg.status}
+                      aria-pressed={statusFilter === seg.status}
+                      title={statusFilter === seg.status ? 'Show every track' : 'Show only these'}
+                      onClick={() =>
+                        setStatusFilter((cur) => (cur === seg.status ? null : seg.status))
+                      }
+                    >
+                      <span className="mm-status-dot" aria-hidden="true" />
+                      <b>{seg.count}</b> {seg.label}
+                    </button>
+                  ))}
+                  {onFindMatches && (data.status_counts?.needs_match ?? 0) > 0 ? (
+                    <button type="button" className="mm-status-fix" onClick={onFindMatches}>
+                      Find matches
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {/* play is the one big thing; the rest sit beside it, quiet */}
               <div className="mm-play-row">
                 <button

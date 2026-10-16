@@ -37,6 +37,7 @@ import {
   libraryOwnedKnown,
   libraryTotal,
 } from '../-sync.library';
+import { needsMatchLabel } from '../-sync.mirrored';
 import { isLikedPlaylist } from '../../../features/playlists/user-playlists';
 import { LikedArt, PlaylistArt, PlaylistCollage, playlistCoverTiles } from './playlist-art';
 import { SourceIcon } from './source-icon';
@@ -117,6 +118,12 @@ export interface PlaylistCardProps {
   onToggleSelect?: () => void;
   /** play the whole playlist from the card. a disc on the art, on hover. */
   onPlay?: () => Promise<unknown>;
+  /**
+   * open the wing it pool for this playlist. the card's one loud line, and
+   * only when tracks need a pick: nothing downloads them until someone does,
+   * and the old card never said so (#1721).
+   */
+  onNeedsMatch?: () => void;
 }
 
 /**
@@ -205,10 +212,12 @@ export function PlaylistCard({
   selected,
   onToggleSelect,
   onPlay,
+  onNeedsMatch,
 }: PlaylistCardProps) {
   const [starting, setStarting] = useState(false);
   const state = libraryCardState(row);
   const pct = libraryCoveragePct(row);
+  const needsMatch = onNeedsMatch && !status ? needsMatchLabel(row) : null;
   // in select mode the whole card is the checkbox. one hit target the size
   // of the card beats a 16px box you have to aim for forty times over.
   const activate = selecting && onToggleSelect ? onToggleSelect : onOpen;
@@ -324,6 +333,23 @@ export function PlaylistCard({
           </div>
         ) : null}
         <div className="pl-card-meta card-meta">{status ?? playlistCardMeta(row, when)}</div>
+        {needsMatch ? (
+          <button
+            type="button"
+            className="pl-card-attn"
+            title="Nothing downloads these until you pick the right song"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (selecting) {
+                activate();
+                return;
+              }
+              onNeedsMatch?.();
+            }}
+          >
+            {needsMatch}
+          </button>
+        ) : null}
         {/* The schedule is a CONTROL, not a label: with Auto-Sync's board
             gone this is the only place a cadence gets set. It still reads as a
             quiet pill at rest — a dropdown sitting open on every card was the

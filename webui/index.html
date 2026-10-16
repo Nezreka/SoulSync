@@ -9030,6 +9030,43 @@
                                                         </div>
                                                     </div>
 
+                                                    <!-- Beatport -->
+                                                    <div class="tag-service-group">
+                                                        <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                            <span class="tag-group-arrow">&#9654;</span>
+                                                            <label class="checkbox-label"
+                                                                onclick="event.stopPropagation()">
+                                                                <input type="checkbox" id="embed-beatport" checked
+                                                                    onchange="toggleServiceTags(this, 'beatport')"> Beatport
+                                                            </label>
+                                                            <span class="tag-service-count">6 tags</span>
+                                                        </div>
+                                                        <div class="tag-service-body" style="display:none;">
+                                                            <small class="tag-embed-desc">Found by ISRC, only the exact recording. Free for
+                                                                tracks that came from a Beatport chart; other electronic tracks are looked
+                                                                up on Beatport.</small>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.bpm" checked> BPM</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.key" checked> Key</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.label" checked> Label</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.catalog_number" checked> Catalog
+                                                                number</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.genre_merge" checked> Genre</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.track_id" checked> Track
+                                                                ID</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    id="beatport-search-all"> Look up every track, not just
+                                                                electronic ones
+                                                                <small class="tag-embed-desc">Slower: one Beatport request per
+                                                                    track.</small></label>
+                                                        </div>
+                                                    </div>
+
                                                     <!-- General -->
                                                     <div class="tag-service-group">
                                                         <div class="tag-service-header" onclick="toggleTagGroup(this)">
@@ -12245,11 +12282,7 @@
     <!-- Watchlist Artist Config Modal -->
 
     <!-- Genre Browser Modal: REACT (routes/sync/-ui/genre-browser-modal.tsx).
-         The vanilla copy stood here, OUTSIDE #sync-page, so deleting the page
-         markup did not take it — an id-collision guard caught all three of its
-         ids living in both places. Its only readers are getElementById calls in
-         beatport-ui.js, whose entry point is #browse-by-genre-btn, an element
-         only React renders now. -->
+         The vanilla copy and beatport-ui.js, its only reader, are gone. -->
 
     <!-- Tool Help Modal -->
     <!-- Retag Tool Modal -->
@@ -12558,7 +12591,6 @@
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
     <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>

@@ -167,6 +167,25 @@ def set_cached_beatport_data(section_type, data_key, data, genre_slug=None):
 
 
 
+def _browse_json(name, *args):
+    """a browse section read from the page json (core/beatport/browse.py), or
+    None so the route falls back to its html scrape. the html selectors had
+    gone stale: new releases, both chart rows and the genre hero came back
+    empty, hero titles were glued to the artist."""
+    try:
+        from core.beatport import browse
+        return getattr(browse, name)(*args)
+    except Exception as e:
+        logger.warning(f"beatport {name} json read failed: {e}")
+        return None
+
+
+def _browse_response(section, cache_key, key, items):
+    data = {"success": True, key: items, "count": len(items), "source": "next_data"}
+    set_cached_beatport_data(section, cache_key, data)
+    return add_cache_headers(jsonify(data), 3600)
+
+
 # --- Beatport Data API ---
 
 @bp.route('/api/beatport/hero-tracks')
@@ -184,6 +203,9 @@ def get_beatport_hero_tracks():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh hero tracks data...")
+        listed = _browse_json('hero')
+        if listed:
+            return _browse_response('homepage', 'hero_tracks', 'tracks', listed)
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -334,6 +356,9 @@ def get_beatport_new_releases():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh new releases data...")
+        listed = _browse_json('new_releases')
+        if listed:
+            return _browse_response('homepage', 'new_releases', 'releases', listed)
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -466,6 +491,9 @@ def get_beatport_featured_charts():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh featured charts data...")
+        listed = _browse_json('featured_charts')
+        if listed:
+            return _browse_response('homepage', 'featured_charts', 'charts', listed)
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -615,6 +643,9 @@ def get_beatport_dj_charts():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh DJ charts data...")
+        listed = _browse_json('dj_charts')
+        if listed:
+            return _browse_response('homepage', 'dj_charts', 'charts', listed)
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()
@@ -1243,6 +1274,11 @@ def get_beatport_genre_hero(genre_slug, genre_id):
         # Check cache first (1-hour TTL like other genre data)
         cache_key = f"hero_{genre_slug}_{genre_id}"
         cached_data = get_cached_beatport_data('genre', cache_key, genre_slug)
+        if not cached_data:
+            listed = _browse_json('genre_hero', genre_slug, genre_id)
+            if listed:
+                set_cached_beatport_data('genre', cache_key, listed, genre_slug)
+                cached_data = listed
 
         if cached_data:
             logger.info(f"Returning cached hero data for {genre_slug}")
@@ -1384,6 +1420,13 @@ def get_beatport_genre_top10_releases(genre_slug, genre_id):
             cached_data['cached'] = True
             return jsonify(cached_data)
 
+        listed = _browse_json('genre_top10_releases', genre_slug, genre_id)
+        if listed:
+            data = {"releases": listed, "count": len(listed), "genre_slug": genre_slug,
+                    "genre_id": genre_id, "cached": False, "source": "next_data"}
+            set_cached_beatport_data('genre', 'top_10_releases', data, genre_slug)
+            return jsonify({**data, "success": True})
+
         # Initialize the Beatport scraper
         scraper = BeatportUnifiedScraper()
 
@@ -1465,6 +1508,42 @@ def get_beatport_genre_sections(genre_slug, genre_id):
             "error": str(e),
             "sections": {}
         }), 500
+
+@bp.route('/api/beatport/list', methods=['GET'])
+def get_beatport_list():
+    """one beatport list by ref (or a pasted beatport url), shaped as the
+    chart_data discovery takes. every chart-type list opens through here."""
+    from core.beatport.fetch import fetch_list
+    from core.beatport.playlist import chart_data
+    from core.beatport.refs import parse_ref, ref_from_url
+
+    ref = request.args.get('ref', '')
+    parsed = parse_ref(ref) if ref else ref_from_url(request.args.get('url', ''))
+    if parsed is None:
+        return jsonify({"success": False, "error": "Not a Beatport list"}), 400
+    listed = fetch_list(parsed, genre_name=request.args.get('genre_name', ''))
+    if not listed:
+        return jsonify({
+            "success": False,
+            "error": "Beatport didn't return this list. If it keeps happening Beatport is blocking "
+                     "requests, and a FlareSolverr at localhost:8191 gets past it.",
+        }), 502
+    return jsonify({"success": True, **chart_data(listed)})
+
+
+@bp.route('/api/beatport/snapshot', methods=['POST'])
+def save_beatport_snapshot():
+    """freeze a beatport list as it is today, as a dated mirrored playlist."""
+    from core.beatport.playlist import save_snapshot
+    from core.profile_context import get_current_profile_id
+    from database.music_database import get_database
+
+    ref = (request.get_json(silent=True) or {}).get('ref', '')
+    saved = save_snapshot(get_database(), ref, get_current_profile_id())
+    if not saved:
+        return jsonify({"success": False, "error": "Couldn't take a snapshot of that list"}), 400
+    return jsonify({"success": True, **saved})
+
 
 @bp.route('/api/beatport/top-100', methods=['GET'])
 def get_beatport_top_100():
@@ -1766,6 +1845,9 @@ def get_beatport_homepage_top10_releases_cards():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh top 10 releases data...")
+        listed = _browse_json('top10_releases')
+        if listed:
+            return _browse_response('homepage', 'top_10_releases', 'releases', listed)
 
         # Initialize the Beatport scraper
         scraper = BeatportUnifiedScraper()
@@ -2181,6 +2263,9 @@ def get_beatport_hype_picks():
 
         # Cache miss - scrape fresh data
         logger.info("Cache miss - scraping fresh hype picks data...")
+        listed = _browse_json('hype_picks')
+        if listed:
+            return _browse_response('homepage', 'hype_picks', 'releases', listed)
 
         # Initialize scraper
         scraper = BeatportUnifiedScraper()

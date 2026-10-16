@@ -220,6 +220,22 @@ class BeatportUnifiedScraper:
                 self._apply_clearance(client.last_cookies, client.last_user_agent)
             return _SolvedResponse(status, html, url)
 
+    def _json_list(self, ref, limit=None, list_name='', genre_name=''):
+        """a list read from the page json (core.beatport). None means the page
+        had no json for it, and the caller falls back to the html scrape."""
+        try:
+            from core.beatport.fetch import fetch_list
+            result = fetch_list(ref, scraper=self, limit=limit, genre_name=genre_name)
+        except Exception as e:
+            _beatport_log(f"json list read failed for {ref}: {e}")
+            return None
+        if not result or not result.get('tracks'):
+            return None
+        if list_name:
+            for track in result['tracks']:
+                track['list_name'] = list_name
+        return result
+
     def get_page(self, url: str) -> Optional[BeautifulSoup]:
         """Fetch and parse a page with error handling"""
         try:
@@ -902,6 +918,10 @@ class BeatportUnifiedScraper:
         """Scrape Beatport Top 100"""
         _beatport_log("\nScraping Beatport Top 100...")
 
+        listed = self._json_list('top-100', limit, 'Top 100')
+        if listed:
+            return listed['tracks']
+
         soup = self.get_page(f"{self.base_url}/top-100")
         tracks = self.extract_tracks_from_page(soup, "Top 100", limit)
 
@@ -1013,170 +1033,22 @@ class BeatportUnifiedScraper:
 
         return None
 
-    def _try_json_chart_extraction(self, soup, chart_name: str, limit: int) -> List[Dict]:
-        """Try to extract rich track data from page JSON. Returns list of tracks or empty list."""
-        json_obj = self.extract_json_object_from_release_page(soup)
-        if not json_obj:
-            return []
-
-        json_tracks = self.extract_all_tracks_from_json(json_obj)
-        if not json_tracks:
-            return []
-
-        converted = []
-        for i, td in enumerate(json_tracks[:limit]):
-            track = self.convert_chart_json_to_rich_track_format(td, i + 1, chart_name)
-            if track:
-                converted.append(track)
-
-        if len(converted) >= 5:
-            _beatport_log(f"   JSON extraction found {len(converted)} tracks with rich metadata")
-            return converted
-
-        return []
-
-    def extract_all_tracks_from_json(self, json_obj: Dict) -> List[Dict]:
-        """Extract ALL track objects from page JSON (no release filtering). Works for charts, top-100, track pages, etc."""
-        try:
-            queries = json_obj.get('props', {}).get('pageProps', {}).get('dehydratedState', {}).get('queries', [])
-
-            # Try multiple query indices — charts may use index 0 or 1
-            for idx in range(min(len(queries), 5)):
-                query = queries[idx]
-                if not isinstance(query, dict):
-                    continue
-
-                data = query.get('state', {}).get('data', {})
-
-                # Pattern 1: data.results[] (release pages, chart pages)
-                if isinstance(data, dict):
-                    results = data.get('results', [])
-                    if results and isinstance(results, list) and len(results) > 0:
-                        first = results[0] if isinstance(results[0], dict) else {}
-                        if first.get('title') or first.get('name'):
-                            _beatport_log(f"   Found {len(results)} tracks in queries[{idx}].data.results")
-                            return results
-
-                # Pattern 2: data itself is a single track object (track pages)
-                if isinstance(data, dict) and (data.get('title') or data.get('name')) and data.get('id'):
-                    _beatport_log(f"   Found single track in queries[{idx}].data")
-                    return [data]
-
-                # Pattern 3: data.tracks[]
-                if isinstance(data, dict):
-                    tracks = data.get('tracks', [])
-                    if tracks and isinstance(tracks, list) and len(tracks) > 0:
-                        first = tracks[0] if isinstance(tracks[0], dict) else {}
-                        if first.get('title') or first.get('name'):
-                            _beatport_log(f"   Found {len(tracks)} tracks in queries[{idx}].data.tracks")
-                            return tracks
-
-        except Exception as e:
-            _beatport_log(f"   Error extracting tracks from JSON: {e}")
-
-        return []
-
-    def convert_chart_json_to_rich_track_format(self, track_data: Dict, position: int, chart_name: str) -> Dict:
-        """Convert a JSON track object from a chart page to a rich format with per-track release metadata."""
-        try:
-            if not isinstance(track_data, dict):
-                return None
-
-            title = track_data.get('title') or track_data.get('name', 'Unknown Title')
-            mix_name = track_data.get('mix_name') or track_data.get('mix', '')
-
-            # Artists
-            artist = 'Unknown Artist'
-            if 'artists' in track_data and isinstance(track_data['artists'], list):
-                artist_names = []
-                for a in track_data['artists']:
-                    if isinstance(a, dict) and 'name' in a:
-                        artist_names.append(a['name'])
-                    elif isinstance(a, str):
-                        artist_names.append(a)
-                if artist_names:
-                    artist = ', '.join(artist_names)
-
-            # Duration — may be int seconds, float, or "m:ss" string
-            raw_duration = track_data.get('duration') or track_data.get('length') or 0
-            if isinstance(raw_duration, str) and ':' in raw_duration:
-                parts = raw_duration.split(':')
-                try:
-                    duration = (int(parts[0]) * 60 + int(parts[1]))
-                except (ValueError, IndexError):
-                    duration = 0
-            else:
-                try:
-                    duration = int(raw_duration) if raw_duration else 0
-                except (ValueError, TypeError):
-                    duration = 0
-
-            # BPM, key, genre
-            bpm = track_data.get('bpm')
-            key_data = track_data.get('key')
-            key = key_data.get('name') if isinstance(key_data, dict) else None
-            genre_data = track_data.get('genre')
-            genre = genre_data.get('name') if isinstance(genre_data, dict) else None
-
-            # Per-track release metadata
-            release_data = track_data.get('release', {}) if isinstance(track_data.get('release'), dict) else {}
-            release_name = release_data.get('name', '')
-            release_id = str(release_data.get('id', ''))
-
-            release_image = ''
-            image_data = release_data.get('image')
-            if isinstance(image_data, dict):
-                release_image = image_data.get('uri', image_data.get('url', ''))
-            elif isinstance(image_data, str):
-                release_image = image_data
-
-            label = 'Unknown Label'
-            label_data = release_data.get('label')
-            if isinstance(label_data, dict):
-                label = label_data.get('name', 'Unknown Label')
-
-            publish_date = release_data.get('publish_date', release_data.get('date', ''))
-
-            # Track URL
-            track_url = ''
-            if 'slug' in track_data and 'id' in track_data:
-                track_url = f"{self.base_url}/track/{track_data['slug']}/{track_data['id']}"
-
-            track = {
-                'position': position,
-                'title': title,
-                'mix_name': mix_name,
-                'artist': artist,
-                'list_name': chart_name,
-                'url': track_url,
-                'label': label,
-                'bpm': bpm,
-                'key': key,
-                'genre': genre,
-                'duration': duration,
-                'type': 'track',
-                # Per-track release context
-                'release_name': release_name,
-                'release_id': release_id,
-                'release_image': release_image,
-                'release_date': publish_date
-            }
-
-            return track
-
-        except Exception as e:
-            _beatport_log(f"   Error converting chart JSON track: {e}")
-            return None
-
     def enrich_chart_tracks(self, tracks: List[Dict], progress_callback=None) -> List[Dict]:
         """
         Enrich basic chart tracks by visiting each track's page to get release metadata.
         Each track must have a 'url' field pointing to /track/slug/id.
         Returns tracks with added: release_name, release_id, release_image, release_date,
-        duration, bpm, key, genre, mix_name, label.
+        duration, bpm, key, genre, mix_name, label, isrc.
         progress_callback: optional callable(completed, total, track_name) for progress updates.
+
+        the track page is read through core.beatport (its track-details query).
+        a page that doesn't answer leaves the track as it came: never a guess.
+        the old code fell back to matching titles against whatever list the
+        page had, which on a track page is "charts with this track", and
+        turned a chart into a track with no artist and no release.
         """
         import time
+        from core.beatport.fetch import fetch_track
 
         enriched = []
         total = len(tracks)
@@ -1184,63 +1056,29 @@ class BeatportUnifiedScraper:
 
         for i, track in enumerate(tracks):
             track_url = track.get('url', '')
-            if not track_url or '/track/' not in track_url:
+            fetched = False
+            if track.get('release_name') and track.get('beatport_id'):
+                # already read from page json, nothing to add
                 enriched.append(track)
-                continue
-
-            try:
-                soup = self.get_page(track_url)
-                if not soup:
-                    enriched.append(track)
-                    continue
-
-                json_obj = self.extract_json_object_from_release_page(soup)
-                if not json_obj:
-                    enriched.append(track)
-                    continue
-
-                # Get all tracks from the JSON — the track page JSON contains the track itself
-                json_tracks = self.extract_all_tracks_from_json(json_obj)
-
-                # Find the matching track by URL id
-                track_id_from_url = track_url.rstrip('/').split('/')[-1]
-                matched = None
-                for jt in json_tracks:
-                    if str(jt.get('id', '')) == track_id_from_url:
-                        matched = jt
-                        break
-
-                if not matched and json_tracks:
-                    # Debug: show what IDs we have vs what we're looking for
-                    sample_ids = [str(jt.get('id', '')) for jt in json_tracks[:5]]
-                    _beatport_log(f"   [{i+1}] No ID match for '{track_id_from_url}' in {sample_ids}... trying title match")
-                    # Fallback: match by title similarity
-                    track_title = track.get('title', '').lower().strip()
-                    for jt in json_tracks:
-                        jt_title = (jt.get('title') or jt.get('name', '')).lower().strip()
-                        if track_title and jt_title and (track_title in jt_title or jt_title in track_title):
-                            matched = jt
-                            _beatport_log(f"   [{i+1}] Title matched: '{jt_title}'")
-                            break
-
-                # Fallback: use first track if only one result
-                if not matched and len(json_tracks) == 1:
-                    matched = json_tracks[0]
-
-                if matched:
-                    rich = self.convert_chart_json_to_rich_track_format(matched, i + 1, track.get('list_name', ''))
-                    if rich:
-                        enriched.append(rich)
-                        if (i + 1) <= 3 or (i + 1) % 25 == 0:
-                            _beatport_log(f"   [{i+1}/{total}] {rich.get('artist', '?')} - {rich.get('title', '?')} | {rich.get('release_name', 'no release')}")
-                    else:
-                        enriched.append(track)
+            elif not track_url or '/track/' not in track_url:
+                enriched.append(track)
+            else:
+                fetched = True
+                try:
+                    rich = fetch_track(track_url, scraper=self)
+                except Exception as e:
+                    _beatport_log(f"   [{i+1}/{total}] Error enriching track: {e}")
+                    rich = None
+                if rich:
+                    rich['position'] = track.get('position', i + 1)
+                    rich['list_name'] = track.get('list_name', '')
+                    if track.get('rank'):
+                        rich['rank'] = track['rank']
+                    enriched.append(rich)
+                    if (i + 1) <= 3 or (i + 1) % 25 == 0:
+                        _beatport_log(f"   [{i+1}/{total}] {rich.get('artist', '?')} - {rich.get('title', '?')} | {rich.get('release_name', 'no release')}")
                 else:
                     enriched.append(track)
-
-            except Exception as e:
-                _beatport_log(f"   [{i+1}/{total}] Error enriching track: {e}")
-                enriched.append(track)
 
             # Report progress (always runs — success, failure, or exception)
             if progress_callback:
@@ -1248,7 +1086,7 @@ class BeatportUnifiedScraper:
                 progress_callback(i + 1, total, track_name)
 
             # Small delay between requests
-            if i < total - 1:
+            if fetched and i < total - 1:
                 time.sleep(0.3)
 
         enriched_count = sum(1 for t in enriched if t.get('release_name'))
@@ -1349,12 +1187,72 @@ class BeatportUnifiedScraper:
             _beatport_log(f"   Error converting track data: {e}")
             return None
 
+    def _release_metadata_from_json(self, ref) -> Optional[Dict]:
+        """get_release_metadata's answer read from the release page json, or
+        None so the old path runs."""
+        from core.beatport.fetch import fetch_next_data, remember_tracks
+        from core.beatport.next_data import list_tracks, release_meta
+
+        data = fetch_next_data(ref.url, scraper=self)
+        meta = release_meta(data) if data else None
+        tracks = list_tracks(data, 'release') if data else None
+        if not meta or not tracks:
+            return None
+        remember_tracks(tracks)
+
+        count = len(tracks)
+        album_type = meta.get('type') if meta.get('type') in ('album', 'ep', 'single') else (
+            'single' if count == 1 else 'ep' if count <= 6 else 'album')
+        album_obj = {
+            'id': f"beatport_release_{meta['id']}",
+            'name': meta['name'] or 'Unknown Release',
+            'album_type': album_type,
+            'images': [{'url': meta['image']}] if meta.get('image') else [],
+            'release_date': meta.get('release_date', ''),
+            'total_tracks': count,
+            'label': meta.get('label') or 'Unknown Label',
+            'catalog_number': meta.get('catalog_number', ''),
+        }
+        first_artist = (meta.get('artists') or [{}])[0]
+        artist_obj = {
+            'id': f"beatport_artist_{first_artist.get('id', '')}",
+            'name': first_artist.get('name') or 'Unknown Artist',
+        }
+        out_tracks = []
+        for i, t in enumerate(tracks):
+            mix = t.get('mix_name') or ''
+            name = f"{t['title']} ({mix})" if mix and mix.lower() != 'original mix' else t['title']
+            out_tracks.append({
+                'id': t['id'],
+                'name': name,
+                'artists': [{'name': a['name']} for a in t.get('artists') or []] or [{'name': 'Unknown Artist'}],
+                'duration_ms': t.get('duration_ms', 0),
+                'track_number': i + 1,
+                'disc_number': 1,
+                'album': album_obj,
+                'isrc': t.get('isrc', ''),
+                'beatport_extra': {
+                    'bpm': t.get('bpm'),
+                    'key': t.get('key'),
+                    'genre': t.get('genre'),
+                    'isrc': t.get('isrc', ''),
+                },
+            })
+        return {'success': True, 'tracks': out_tracks, 'album': album_obj, 'artist': artist_obj}
+
     def get_release_metadata(self, release_url: str) -> Dict:
         """
         Fetch a release page and return structured metadata suitable for the download modal.
         Returns album/artist/tracks in a Spotify-compatible format so the frontend can
         open openDownloadMissingModalForArtistAlbum() directly.
         """
+        from core.beatport.refs import ref_from_url
+        ref = ref_from_url(release_url)
+        if ref is not None and ref.kind == 'release':
+            built = self._release_metadata_from_json(ref)
+            if built:
+                return built
+
         try:
             soup = self.get_page(release_url)
             if not soup:
@@ -1603,6 +1501,10 @@ class BeatportUnifiedScraper:
     def scrape_hype_top_100(self, limit: int = 100, enrich: bool = True) -> List[Dict]:
         """Scrape Beatport Hype Top 100 - Fixed URL based on parser discovery"""
         _beatport_log("\nScraping Beatport Hype Top 100...")
+
+        listed = self._json_list('hype-100', limit, 'Hype Top 100')
+        if listed:
+            return listed['tracks']
 
         # Use the correct URL discovered by parser
         soup = self.get_page(f"{self.base_url}/hype-100")
@@ -2018,6 +1920,14 @@ class BeatportUnifiedScraper:
     def scrape_homepage_top10_lists(self) -> Dict[str, List[Dict]]:
         """Scrape Top 10 Lists from homepage - Beatport Top 10 and Hype Top 10"""
         _beatport_log("\nScraping Top 10 Lists from homepage...")
+
+        top = self._json_list('top-10', 10, 'Beatport Top 10')
+        hype = self._json_list('hype-10', 10, 'Hype Top 10')
+        if top or hype:
+            return {
+                "beatport_top10": top['tracks'] if top else [],
+                "hype_top10": hype['tracks'] if hype else [],
+            }
 
         soup = self.get_page(self.base_url)
         if not soup:
@@ -2937,6 +2847,11 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_charts(self, genre: Dict, limit: int = 100, enrich: bool = True) -> List[Dict]:
         """Scrape charts for a specific genre (default: top tracks)"""
+        listed = self._json_list(f"genre:{genre['slug']}:{genre['id']}:top-100", limit,
+                                 f"{genre['name']} Top 100", genre_name=genre.get('name', ''))
+        if listed:
+            return listed['tracks']
+
         tracks = []
 
         # First try dedicated top chart page URLs that might have more tracks
@@ -2972,6 +2887,10 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_top_10(self, genre: Dict) -> List[Dict]:
         """Scrape top 10 tracks for a specific genre"""
+        listed = self._json_list(f"genre:{genre['slug']}:{genre['id']}:top-10", 10,
+                                 f"{genre['name']} Top 10", genre_name=genre.get('name', ''))
+        if listed:
+            return listed['tracks']
         return self.scrape_genre_charts(genre, limit=10)
 
     def scrape_genre_releases(self, genre: Dict, limit: int = 100) -> List[Dict]:
@@ -3022,6 +2941,13 @@ class BeatportUnifiedScraper:
 
     def scrape_genre_hype_charts(self, genre: Dict, limit: int = 100) -> List[Dict]:
         """Scrape hype charts for a specific genre"""
+        # a top-10 ask reads the genre page's own hype 10, anything bigger the hype 100
+        kind = 'hype-10' if limit <= 10 else 'hype-100'
+        listed = self._json_list(f"genre:{genre['slug']}:{genre['id']}:{kind}", limit,
+                                 f"{genre['name']} Hype Charts", genre_name=genre.get('name', ''))
+        if listed:
+            return listed['tracks']
+
         tracks = []
 
         # Based on actual Beatport structure, try the correct hype URLs
@@ -3751,6 +3677,13 @@ class BeatportUnifiedScraper:
         """Extract tracks from a chart page, then enrich each with per-track release metadata"""
         tracks = []
 
+        from core.beatport.refs import ref_from_url
+        ref = ref_from_url(chart_url)
+        if ref is not None and ref.kind == 'chart':
+            listed = self._json_list(ref, limit, chart_name)
+            if listed:
+                return listed['tracks']
+
         try:
             soup = self.get_page(chart_url)
             if not soup:
@@ -4037,6 +3970,20 @@ class BeatportUnifiedScraper:
     def scrape_genre_top10_tracks(self, genre_slug, genre_id):
         """Scrape Top 10 tracks lists from genre page (Beatport Top 10 + Hype Top 10 if available)"""
         _beatport_log(f"Scraping Top 10 tracks for {genre_slug} (ID: {genre_id})")
+
+        # each list comes from its own query in the page json, never from the
+        # position of a card on the page
+        top = self._json_list(f"genre:{genre_slug}:{genre_id}:top-10", 10, 'Beatport Top 10')
+        hype = self._json_list(f"genre:{genre_slug}:{genre_id}:hype-10", 10, 'Hype Top 10')
+        if top or hype:
+            top_tracks = top['tracks'] if top else []
+            hype_tracks = hype['tracks'] if hype else []
+            return {
+                'beatport_top10': top_tracks,
+                'hype_top10': hype_tracks,
+                'total_tracks': len(top_tracks) + len(hype_tracks),
+                'has_hype_section': bool(hype_tracks),
+            }
 
         genre_url = f"https://www.beatport.com/genre/{genre_slug}/{genre_id}"
 

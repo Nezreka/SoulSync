@@ -88195,3 +88195,77 @@ body.src-modal-open { overflow: hidden; }
 @media (hover: none) {
     .mm-row-play { display: none; }
 }
+/* #1721: where each track stands. one quiet line under the meta that doubles
+   as a filter, and a chip on the rows that aren't in the library. a healthy
+   row says nothing, same as a healthy card. */
+.mm-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    margin-top: 12px;
+    font-size: 12.5px;
+}
+.mm-status-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--white-a70);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+.mm-status-seg b { color: #fff; font-weight: 650; }
+.mm-status-seg:hover { color: #fff; }
+.mm-status-seg--on {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-color: var(--white-a40);
+}
+.mm-status-seg:focus-visible,
+.mm-status-fix:focus-visible,
+.pl-card-attn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.8); outline-offset: 2px; border-radius: 4px; }
+.mm-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st, var(--white-a40)); }
+.mm-status-fix {
+    padding: 0;
+    border: none;
+    background: none;
+    color: #e3a63c;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.mm-status-fix:hover { text-decoration: underline; }
+[data-st="in_library"] { --st: #3ccf7a; }
+[data-st="wishlisted"] { --st: #6aa7ff; }
+[data-st="needs_match"] { --st: #e3a63c; }
+[data-st="missing"] { --st: #e0706a; }
+.mm-row-artist { display: flex; align-items: center; gap: 8px; }
+.mm-row-artist-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mm-row-st {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--st);
+}
+.mm-row-st::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.pl-card-attn {
+    align-self: flex-start;
+    margin-top: 1px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #e3a63c;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+.pl-card-attn:hover { text-decoration: underline; }

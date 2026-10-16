@@ -10,29 +10,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  BEATPORT_COMPILATION_ARTIST,
   absoluteBeatportUrl,
-  beatportChartAlbumId,
-  beatportChartPlaylistId,
   beatportDownloadContext,
-  beatportEnrichmentId,
   beatportRandomToken,
   beatportReleasePlaylistId,
   releaseBubbleImage,
   BEATPORT_SLIDERS,
   EXCLUDED_GENRE_NAMES,
   beatportCardBackground,
-  buildChartAlbum,
-  buildChartTrackName,
-  buildChartTracks,
   cleanTrackText,
   filterBeatportGenres,
   isExcludedGenre,
   normaliseReleaseTrackArtists,
-  parseBeatportDuration,
   slideCount,
   slidePosition,
-  splitBeatportArtists,
   upscaleBeatportArtwork,
   wrapSlideIndex,
 } from './-beatport.core';
@@ -93,29 +84,6 @@ describe('cleanTrackText (1638-1649)', () => {
     expect(cleanTrackText('')).toBe('');
     expect(cleanTrackText(undefined)).toBeUndefined();
     expect(cleanTrackText(null)).toBeNull();
-  });
-});
-
-describe('parseBeatportDuration (1990-1997)', () => {
-  it('reads m:ss', () => {
-    expect(parseBeatportDuration('3:45')).toBe(225000);
-    expect(parseBeatportDuration('0:30')).toBe(30000);
-    expect(parseBeatportDuration('10:05')).toBe(605000);
-  });
-
-  it('reads a bare seconds count, string or number', () => {
-    expect(parseBeatportDuration(225)).toBe(225000);
-    expect(parseBeatportDuration('225')).toBe(225000);
-  });
-
-  it('is 0 for nothing and for nonsense', () => {
-    expect(parseBeatportDuration(0)).toBe(0);
-    expect(parseBeatportDuration('')).toBe(0);
-    expect(parseBeatportDuration(null)).toBe(0);
-    expect(parseBeatportDuration(undefined)).toBe(0);
-    expect(parseBeatportDuration('abc')).toBe(0);
-    // NaN * 1000 is NaN, and the vanilla's `|| 0` catches it.
-    expect(parseBeatportDuration('x:y')).toBe(0);
   });
 });
 
@@ -239,100 +207,6 @@ describe('genre filtering (2380-2399)', () => {
   });
 });
 
-describe('the chart → download-modal bridge (1999-2064)', () => {
-  const album = buildChartAlbum('album_1', 'Beatport Top 100', 'http://art.jpg', 2);
-
-  it('builds a COMPILATION, not an album', () => {
-    expect(album).toEqual({
-      id: 'album_1',
-      name: 'Beatport Top 100',
-      album_type: 'compilation',
-      images: [{ url: 'http://art.jpg' }],
-      total_tracks: 2,
-    });
-  });
-
-  it('omits the images array entirely when there is no chart image', () => {
-    expect(buildChartAlbum('a', 'n', null, 0).images).toEqual([]);
-  });
-
-  it('credits every chart to the same synthetic artist', () => {
-    expect(BEATPORT_COMPILATION_ARTIST).toEqual({
-      id: 'beatport_various',
-      name: 'Various Artists',
-    });
-  });
-
-  it('appends the mix name unless it is the original mix', () => {
-    expect(buildChartTrackName({ title: 'Song', mix_name: 'Extended Mix' })).toBe(
-      'Song (Extended Mix)',
-    );
-    expect(buildChartTrackName({ title: 'Song', mix_name: 'Original Mix' })).toBe('Song');
-    // Case-insensitive, because Beatport is inconsistent about it.
-    expect(buildChartTrackName({ title: 'Song', mix_name: 'ORIGINAL MIX' })).toBe('Song');
-    expect(buildChartTrackName({ title: 'Song' })).toBe('Song');
-  });
-
-  it('defaults an untitled track the way the vanilla does', () => {
-    expect(buildChartTrackName({})).toBe('Unknown Title');
-  });
-
-  it('splits the artist string so the folder structure comes out right', () => {
-    expect(splitBeatportArtists('Artist One, Artist Two')).toEqual(['Artist One', 'Artist Two']);
-    expect(splitBeatportArtists('Solo Artist')).toEqual(['Solo Artist']);
-    // cleanTrackText runs first, so an unspaced comma is already normalised.
-    expect(splitBeatportArtists('One,Two')).toEqual(['One', 'Two']);
-    expect(splitBeatportArtists(undefined)).toEqual(['Unknown Artist']);
-  });
-
-  it('drops empty segments from a trailing comma', () => {
-    expect(splitBeatportArtists('One, ')).toEqual(['One']);
-  });
-
-  it('gives each track the compilation album when the scrape found no release', () => {
-    const tracks = buildChartTracks([{ title: 'A' }, { title: 'B' }], album);
-    expect(tracks[0].album).toBe(album);
-    expect(tracks[1].album).toBe(album);
-    expect(tracks.map((t) => t.id)).toEqual(['beatport_chart_0', 'beatport_chart_1']);
-    expect(tracks.map((t) => t.track_number)).toEqual([1, 2]);
-    expect(tracks[0].disc_number).toBe(1);
-  });
-
-  it('prefers per-track release metadata when the scrape found it', () => {
-    const [track] = buildChartTracks(
-      [
-        {
-          title: 'A',
-          release_name: 'TheRelease',
-          release_id: 'r9',
-          release_image: 'http://r.jpg',
-          release_date: '2024-01-01',
-        },
-      ],
-      album,
-    );
-    expect(track.album).toEqual({
-      id: 'beatport_release_r9',
-      // The release name is cleaned like every other scraped string.
-      name: 'The Release',
-      album_type: 'single',
-      images: [{ url: 'http://r.jpg' }],
-      release_date: '2024-01-01',
-      total_tracks: 1,
-    });
-  });
-
-  it('falls back to the index when a release has no id', () => {
-    const tracks = buildChartTracks([{ title: 'A' }, { title: 'B', release_name: 'R' }], album);
-    expect(tracks[1].album.id).toBe('beatport_release_1');
-  });
-
-  it('carries the duration through the parser', () => {
-    const [track] = buildChartTracks([{ title: 'A', duration: '3:45' }], album);
-    expect(track.duration_ms).toBe(225000);
-  });
-});
-
 describe('normaliseReleaseTrackArtists (1891-1894)', () => {
   it('flattens artist objects to names and leaves strings alone', () => {
     const out = normaliseReleaseTrackArtists([
@@ -349,12 +223,8 @@ describe('normaliseReleaseTrackArtists (1891-1894)', () => {
   });
 });
 
-describe('the download-modal context type (1900-1907 vs 2052-2060)', () => {
-  it('sends charts as a playlist and releases as an artist_album', () => {
-    // The release call passes only six arguments, so it takes the callee's
-    // default (shared-helpers.js 1763). The difference between the two call
-    // sites is an argument that ISN'T THERE, which is why it is easy to miss.
-    expect(beatportDownloadContext('chart')).toBe('playlist');
+describe('the download-modal context type (1900-1907)', () => {
+  it('sends a release as an artist_album', () => {
     expect(beatportDownloadContext('release')).toBe('artist_album');
   });
 });
@@ -374,7 +244,7 @@ describe('releaseBubbleImage (1910)', () => {
   });
 });
 
-describe('the four synthetic ids (1896, 1939, 2005, 2047)', () => {
+describe('the release id (1896)', () => {
   const now = () => 1700000000000;
 
   it("matches substr(2, n) on the vanilla's random suffix", () => {
@@ -385,28 +255,11 @@ describe('the four synthetic ids (1896, 1939, 2005, 2047)', () => {
     expect(beatportRandomToken(() => 0.123456789, 6)).toBe((0.123456789).toString(36).substr(2, 6));
   });
 
-  it('gives releases and charts DIFFERENT prefixes and the same 9-char suffix', () => {
+  it('gives a release a 9-char suffix', () => {
     const random = () => 0.123456789;
     const suffix = (0.123456789).toString(36).substr(2, 9);
     expect(suffix).toHaveLength(9);
     expect(beatportReleasePlaylistId(now, random)).toBe(`beatport_release_1700000000000_${suffix}`);
-    expect(beatportChartPlaylistId(now, random)).toBe(`beatport_chart_1700000000000_${suffix}`);
-  });
-
-  it("gives the chart's ALBUM id no random suffix at all", () => {
-    // 2005. Two charts opened in the same millisecond would share it. Kept as
-    // the vanilla has it: this is the id the download engine keys on.
-    expect(beatportChartAlbumId(now)).toBe('beatport_chart_1700000000000');
-    expect(beatportChartAlbumId(now)).toBe(beatportChartAlbumId(now));
-  });
-
-  it('gives the enrichment id a SHORTER suffix than the playlist ids', () => {
-    const random = () => 0.123456789;
-    const enrich = beatportEnrichmentId(now, random).split('_')[2];
-    const playlist = beatportChartPlaylistId(now, random).split('_')[3];
-    expect(enrich).toHaveLength(6);
-    expect(playlist).toHaveLength(9);
-    expect(beatportEnrichmentId(now, random)).toMatch(/^enrich_1700000000000_/);
   });
 });
 

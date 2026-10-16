@@ -526,21 +526,6 @@ function stopBeatportDiscoveryAndSyncPolling() {
     });
 }
 
-function resetBeatportSliderInitFlags() {
-    // The four `dataset.initialized = 'false'` writes that stood here are gone.
-    // They targeted #beatport-{rebuild,releases,charts,dj}-slider, ids the sync
-    // flip deleted along with the page — every lookup returned null, so every
-    // write was already a no-op. Removing them is behaviour-neutral and stops
-    // four dead `getElementById` calls tripping the class-as-id guard.
-    //
-    // The state resets below are KEPT: they are plain object writes, not DOM,
-    // and the slider state objects still exist in this file.
-    beatportReleasesSliderState.isInitialized = false;
-    beatportHypePicksSliderState.isInitialized = false;
-    beatportChartsSliderState.isInitialized = false;
-    beatportDJSliderState.isInitialized = false;
-}
-
 function cleanupBeatportContent() {
     const wasLoaded = beatportContentState.loaded || !!beatportContentState.loadingPromise;
     if (!wasLoaded) return;
@@ -553,12 +538,7 @@ function cleanupBeatportContent() {
     }
 
     stopBeatportDiscoveryAndSyncPolling();
-    cleanupBeatportRebuildSlider();
-    cleanupBeatportReleasesSlider();
-    cleanupBeatportHypePicksSlider();
-    cleanupBeatportChartsSlider();
-    cleanupBeatportDJSlider();
-    resetBeatportSliderInitFlags();
+    // React BeatportSlider releases its autoplay timer when it unmounts.
 
     beatportContentState.loadingPromise = null;
     beatportContentState.loaded = false;

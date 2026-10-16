@@ -27,11 +27,15 @@
  * empty and hidden, exactly as the markup has it, and the vanilla paints it.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import type { BeatportGenre } from '../-beatport.api';
+import type { BeatportDownloadEnv } from '../-beatport.downloads';
+import type { BeatportListEnv } from '../-beatport.lists';
+import type { SourceVertical } from '../-sync.use-vertical';
 
-import { defaultBeatportDownloadEnv, openBeatportTop100 } from '../-beatport.downloads';
+import { defaultBeatportDownloadEnv } from '../-beatport.downloads';
+import { openBeatportList } from '../-beatport.lists';
 import {
   BeatportDJChartsSection,
   BeatportFeaturedChartsSection,
@@ -43,14 +47,52 @@ import { BeatportTop10Lists, BeatportTop10Releases } from './beatport-top10';
 import { GenreBrowserModal } from './genre-browser-modal';
 import { GenrePage } from './genre-page';
 
-export function BeatportTab() {
+export interface BeatportTabProps {
+  /** the beatport vertical: every chart-type list opens as its discovery */
+  vertical?: SourceVertical;
+  /** opens the discovery modal for a list ref */
+  onOpen?: (sourceId: string) => void;
+}
+
+export function BeatportTab({ vertical, onOpen }: BeatportTabProps = {}) {
+  /**
+   * the vertical and the opener change every render; the env must not (every
+   * section would get a new object each time), so the list opener reads them
+   * through a ref.
+   */
+  const listEnvRef = useRef<BeatportListEnv | null>(null);
+  listEnvRef.current =
+    vertical && onOpen
+      ? {
+          showToast: (message, type) => window.showToast?.(message, type),
+          showLoadingOverlay: (message) => window.showLoadingOverlay?.(message),
+          hideLoadingOverlay: () => window.hideLoadingOverlay?.(),
+          phaseOf: (id) => vertical.states[id]?.phase,
+          seed: (id, playlist) => vertical.seed(id, playlist),
+          open: onOpen,
+          startDiscovery: (id, chart) => vertical.startDiscovery(id, chart),
+        }
+      : null;
+
   /**
    * ONE env for the whole tab. `defaultBeatportDownloadEnv()` builds a bag of
-   * injected vanilla functions (toast, overlay, openDownloadModal); rebuilding
-   * it per render would hand every section a new object each time, and the
-   * modal-open latch inside the download module is keyed on nothing else.
+   * injected vanilla functions (toast, overlay, openDownloadModal) for the
+   * release cards; `openList` sends every chart-type list to discovery.
    */
-  const env = useMemo(() => defaultBeatportDownloadEnv(), []);
+  const env = useMemo<BeatportDownloadEnv>(
+    () => ({
+      ...defaultBeatportDownloadEnv(),
+      openList: (request) => {
+        const listEnv = listEnvRef.current;
+        if (!listEnv) {
+          window.showToast?.('Beatport lists are not available here', 'error');
+          return;
+        }
+        void openBeatportList(request, listEnv);
+      },
+    }),
+    [],
+  );
 
   const [browsingGenres, setBrowsingGenres] = useState(false);
   const [genre, setGenre] = useState<BeatportGenre | null>(null);
@@ -79,9 +121,9 @@ export function BeatportTab() {
     <div id="beatport-rebuild-content" className="beatport-tab-content active">
       <BeatportHeroSection env={env} />
 
-      {/* 2846-2861. Three buttons, and none of them switches an inner view:
-          Browse by Genre opens the modal, and both Top 100s scrape, enrich and
-          hand off to the download modal (beatport-ui.js 2161 / 2197). */}
+      {/* Three buttons, and none of them switches an inner view: Browse by
+          Genre opens the modal, and both Top 100s open as playlists to
+          identify, then sync or download. */}
       <div className="beatport-nav-buttons-section">
         <div className="beatport-nav-buttons-container">
           <button
@@ -97,7 +139,7 @@ export function BeatportTab() {
             type="button"
             className="beatport-nav-button"
             id="beatport-top100-btn"
-            onClick={() => void openBeatportTop100('beatport', env)}
+            onClick={() => env.openList?.({ ref: 'top-100', label: 'Beatport Top 100' })}
           >
             <span className="beatport-nav-icon top100-icon" />
             <span className="beatport-nav-text">Beatport Top 100</span>
@@ -106,7 +148,7 @@ export function BeatportTab() {
             type="button"
             className="beatport-nav-button"
             id="hype-top100-btn"
-            onClick={() => void openBeatportTop100('hype', env)}
+            onClick={() => env.openList?.({ ref: 'hype-100', label: 'Hype Top 100' })}
           >
             <span className="beatport-nav-icon hype-icon" />
             <span className="beatport-nav-text">Hype Top 100</span>
