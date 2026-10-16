@@ -9015,6 +9015,43 @@
                                                         </div>
                                                     </div>
 
+                                                    <!-- Beatport -->
+                                                    <div class="tag-service-group">
+                                                        <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                            <span class="tag-group-arrow">&#9654;</span>
+                                                            <label class="checkbox-label"
+                                                                onclick="event.stopPropagation()">
+                                                                <input type="checkbox" id="embed-beatport" checked
+                                                                    onchange="toggleServiceTags(this, 'beatport')"> Beatport
+                                                            </label>
+                                                            <span class="tag-service-count">6 tags</span>
+                                                        </div>
+                                                        <div class="tag-service-body" style="display:none;">
+                                                            <small class="tag-embed-desc">Found by ISRC, only the exact recording. Free for
+                                                                tracks that came from a Beatport chart; other electronic tracks are looked
+                                                                up on Beatport.</small>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.bpm" checked> BPM</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.key" checked> Key</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.label" checked> Label</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.catalog_number" checked> Catalog
+                                                                number</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.genre_merge" checked> Genre</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.track_id" checked> Track
+                                                                ID</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    id="beatport-search-all"> Look up every track, not just
+                                                                electronic ones
+                                                                <small class="tag-embed-desc">Slower: one Beatport request per
+                                                                    track.</small></label>
+                                                        </div>
+                                                    </div>
+
                                                     <!-- General -->
                                                     <div class="tag-service-group">
                                                         <div class="tag-service-header" onclick="toggleTagGroup(this)">

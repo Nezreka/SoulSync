@@ -3278,6 +3278,10 @@ async function loadSettingsData() {
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
         document.getElementById('embed-hifi').checked = settings.hifi?.embed_tags !== false;
+        const embedBeatport = document.getElementById('embed-beatport');
+        if (embedBeatport) embedBeatport.checked = settings.beatport?.embed_tags !== false;
+        const beatportSearchAll = document.getElementById('beatport-search-all');
+        if (beatportSearchAll) beatportSearchAll.checked = settings.beatport?.search_all_tracks === true;
         // Load per-tag toggles from data-config attributes
         document.querySelectorAll('[data-config]').forEach(cb => {
             const path = cb.dataset.config.split('.');
@@ -3286,7 +3290,7 @@ async function loadSettingsData() {
             cb.checked = val !== false;
         });
         // Apply service disabled state to child tags
-        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi'].forEach(svc => {
+        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi', 'beatport'].forEach(svc => {
             const master = document.getElementById('embed-' + svc);
             if (master) toggleServiceTags(master, svc);
         });
@@ -6417,6 +6421,13 @@ async function saveSettings(quiet = false) {
             embed_tags: document.getElementById('embed-hifi').checked,
             tags: _collectServiceTags('hifi')
         },
+        // read only when the inputs exist: a missing element must leave the
+        // stored setting alone rather than save over it
+        beatport: document.getElementById('embed-beatport') ? {
+            embed_tags: document.getElementById('embed-beatport').checked,
+            search_all_tracks: document.getElementById('beatport-search-all')?.checked === true,
+            tags: _collectServiceTags('beatport')
+        } : undefined,
         deezer_download: {
             arl: document.getElementById('deezer-download-arl').value || '',
         },

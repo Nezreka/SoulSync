@@ -167,7 +167,8 @@ SOURCE_TAG_CONFIG = {
     "GENIUS_TRACK_ID": "genius.tags.track_id",
 }
 
-DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "jiosaavn", "tidal", "hifi", "qobuz", "lastfm", "genius", "bandcamp"]
+# beatport goes last: it looks a track up by the isrc the sources before it found
+DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "jiosaavn", "tidal", "hifi", "qobuz", "lastfm", "genius", "bandcamp", "beatport"]
 
 ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
@@ -1010,6 +1011,54 @@ def _process_bandcamp_source(pp: dict, metadata: dict, cfg, runtime, track_title
             pp["bandcamp_label"] = bc_label
 
 
+def _known_isrc(pp: dict, metadata: dict, audio_file=None) -> Optional[str]:
+    """the isrc any earlier source, the download or the file already has."""
+    for value in (pp.get("isrc"), pp.get("deezer_isrc"), pp.get("tidal_isrc"), pp.get("hifi_isrc"),
+                  pp.get("qobuz_isrc"), metadata.get("isrc")):
+        if value:
+            return str(value)
+    if audio_file is not None:
+        try:
+            return _isrc_tag_value(audio_file)
+        except Exception:
+            return None
+    return None
+
+
+def _process_beatport_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str,
+                             audio_file=None) -> None:
+    """bpm, key, label, catalog number and genre from beatport, for the exact
+    recording (core/beatport/enrich.py). free when the track came in through a
+    beatport list; a beatport search only for tracks that look electronic,
+    unless beatport.search_all_tracks is on."""
+    if cfg.get("beatport.embed_tags", True) is False:
+        return
+    isrc = _known_isrc(pp, metadata, audio_file)
+    if not isrc:
+        return
+    from core.beatport.enrich import lookup, looks_electronic
+    genres = (list(pp.get("mb_genres") or []) + list(pp.get("lastfm_tags") or [])
+              + list(pp.get("bandcamp_tags") or [])
+              + [pp.get("audiodb_genre"), pp.get("audiodb_style"), metadata.get("genre")])
+    allow_search = cfg.get("beatport.search_all_tracks", False) is True or looks_electronic(genres)
+    result = _call_source_lookup("Beatport track", lookup, isrc, artist_name, track_title,
+                                 allow_search=allow_search)
+    if result:
+        pp["beatport"] = result
+
+
+def _write_initial_key(audio_file, key: str, symbols) -> None:
+    if isinstance(audio_file.tags, symbols.ID3):
+        factory = getattr(symbols, "TKEY", None)
+        if factory is None:
+            from mutagen.id3 import TKEY as factory
+        audio_file.tags.add(factory(encoding=3, text=[key]))
+    elif is_vorbis_like(audio_file, symbols):
+        audio_file["INITIALKEY"] = [key]
+    elif isinstance(audio_file, symbols.MP4):
+        audio_file["----:com.apple.iTunes:initialkey"] = [symbols.MP4FreeForm(key.encode("utf-8"))]
+
+
 def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str, provenance=None, audio_file=None, track_artist_name: str = None) -> None:
     # #1567: lastfm/genius do TRACK-level lookups (track info / song search)
     # — key them on the track artist, not the album artist. Every other
@@ -1035,6 +1084,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_genius_source(pp, metadata, cfg, runtime, track_title, _track_artist)
     elif source_name == "bandcamp":
         _process_bandcamp_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "beatport":
+        _process_beatport_source(pp, metadata, cfg, runtime, track_title, _track_artist, audio_file=audio_file)
 
 
 def _more_precise_date(existing: Any, new: Any) -> str:
@@ -1194,7 +1245,15 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["\xa9day"] = [release_year]
         logger.info("Date tag: %s", release_year)
 
+    beatport = pp.get("beatport") or {}
     bpm_candidates = []
+    # beatport's bpm is the label's own, so it goes first when there is one
+    if beatport.get("bpm") and _tag_enabled(cfg, "beatport.tags.bpm"):
+        try:
+            if float(beatport["bpm"]) > 0:
+                bpm_candidates.append(("Beatport", beatport["bpm"]))
+        except (TypeError, ValueError):
+            pass
     if pp["deezer_bpm"] and pp["deezer_bpm"] > 0 and _tag_enabled(cfg, "deezer.tags.bpm"):
         bpm_candidates.append(("Deezer", pp["deezer_bpm"]))
     if pp["tidal_bpm"] and pp["tidal_bpm"] > 0 and _tag_enabled(cfg, "tidal.tags.bpm"):
@@ -1211,6 +1270,13 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         elif isinstance(audio_file, symbols.MP4):
             audio_file["tmpo"] = [bpm_int]
         logger.info("BPM (%s): %s", bpm_source, bpm_int)
+
+    if beatport.get("key") and _tag_enabled(cfg, "beatport.tags.key"):
+        from core.beatport.enrich import standard_key
+        initial_key = standard_key(beatport["key"])
+        if initial_key:
+            _write_initial_key(audio_file, initial_key, symbols)
+            logger.info("Key (Beatport): %s", initial_key)
 
     if _tag_enabled(cfg, "audiodb.tags.mood") and pp["audiodb_mood"]:
         if isinstance(audio_file.tags, symbols.ID3):
@@ -1238,6 +1304,8 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             enrichment_genres += pp["lastfm_tags"]
         if pp["bandcamp_tags"] and _tag_enabled(cfg, "bandcamp.tags.genre_merge"):
             enrichment_genres += pp["bandcamp_tags"]
+        if beatport.get("genre") and _tag_enabled(cfg, "beatport.tags.genre_merge"):
+            enrichment_genres.append(beatport["genre"])
         if enrichment_genres:
             from core.genre_filter import filter_genres as _filter_genres
             from core.genre_filter import _normalize_for_match
@@ -1325,6 +1393,9 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
         label_candidates.append(("Qobuz", pp["qobuz_label"]))
     if pp["bandcamp_label"] and _tag_enabled(cfg, "bandcamp.tags.label"):
         label_candidates.append(("Bandcamp", pp["bandcamp_label"]))
+    if (beatport.get("label") and beatport["label"] != "Unknown Label"
+            and _tag_enabled(cfg, "beatport.tags.label")):
+        label_candidates.append(("Beatport", beatport["label"]))
     if label_candidates and "LABEL" not in filtered_tags:
         label_source, final_label = label_candidates[0]
         # "a;b;c" from a provider is three labels, written as three values (#1305)
@@ -1353,6 +1424,14 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
             audio_file["GENIUS_URL"] = [pp["genius_url"]]
         elif isinstance(audio_file, symbols.MP4):
             audio_file["----:com.apple.iTunes:GENIUS_URL"] = [symbols.MP4FreeForm(pp["genius_url"].encode("utf-8"))]
+
+    if (beatport.get("catalog_number") and "CATALOGNUMBER" not in filtered_tags
+            and _tag_enabled(cfg, "beatport.tags.catalog_number")):
+        write_tag(audio_file, "CATALOGNUMBER", beatport["catalog_number"], symbols)
+        logger.info("Catalog number (Beatport): %s", beatport["catalog_number"])
+
+    if beatport.get("beatport_id") and _tag_enabled(cfg, "beatport.tags.track_id"):
+        write_tag(audio_file, "BEATPORT_TRACK_ID", str(beatport["beatport_id"]), symbols)
 
     if _tag_enabled(cfg, "bandcamp.tags.url") and pp["bandcamp_url"]:
         if isinstance(audio_file.tags, symbols.ID3):
@@ -2312,7 +2391,7 @@ def _blank_post_process_state() -> dict:
         "tidal_copyright": None, "hifi_isrc": None, "qobuz_isrc": None,
         "qobuz_copyright": None, "qobuz_label": None, "lastfm_tags": [],
         "lastfm_url": None, "genius_url": None, "release_year": None,
-        "bandcamp_url": None, "bandcamp_tags": [], "bandcamp_label": None,
+        "bandcamp_url": None, "bandcamp_tags": [], "bandcamp_label": None, "beatport": None,
     }
 
 
@@ -2373,6 +2452,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             "bandcamp_url": None,
             "bandcamp_tags": [],
             "bandcamp_label": None,
+            "beatport": None,
         }
 
         source_order = cfg.get("metadata_enhancement.post_process_order", None)
@@ -2418,6 +2498,9 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
             source_order = [s for s in source_order if s != "jiosaavn"]
         if not is_source_enabled("bandcamp"):
             source_order = [s for s in source_order if s != "bandcamp"]
+        # a saved order from before beatport existed still gets it, last
+        if "beatport" not in source_order:
+            source_order = list(source_order) + ["beatport"]
 
         db = get_database()
 
@@ -2437,7 +2520,7 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
 
         # Skip the early return when the genre fallback is on — there may be
         # genres to write even if no other metadata was enriched.
-        if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
+        if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"] and not pp["beatport"]:
             return
 
         release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)
