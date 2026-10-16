@@ -1929,6 +1929,7 @@ class MusicDatabase:
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
+            self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2030,6 +2031,7 @@ class MusicDatabase:
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
+        'beatport_positional_purged': ('table', '_beatport_positional_purged'),
     }
 
     def _record_migration(self, cursor, name):
@@ -5182,6 +5184,37 @@ class MusicDatabase:
             logger.info("similar artists rematch: requeued %s library artists", requeued)
         except Exception as e:
             logger.error(f"Error requeueing similar artists rematch: {e}")
+
+    def _purge_beatport_positional_matches(self, cursor):
+        """one-time: drop what the old beatport ids and enrichment left behind.
+
+        every beatport chart called its tracks beatport_chart_0, _1, ... by
+        position, so a sync match saved for chart A's track 1 came back for
+        every chart's track 1 (maV, oct 12 2026: a trance chart synced with
+        tracks from the beatport top 10). those rows can't be told apart, so
+        they all go, along with manual matches filed under the same ids. the
+        cached beatport track pages go too: the old enrichment stored charts
+        as tracks there, and the json reads refill them correctly."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_beatport_positional_purged' in tables:
+                return
+            counts = {}
+            if 'sync_match_cache' in tables:
+                cursor.execute("DELETE FROM sync_match_cache WHERE spotify_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['sync_match_cache'] = max(cursor.rowcount, 0)
+            if 'manual_library_track_matches' in tables:
+                cursor.execute("DELETE FROM manual_library_track_matches WHERE source_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['manual_library_track_matches'] = max(cursor.rowcount, 0)
+            if 'metadata_cache_entities' in tables:
+                cursor.execute("DELETE FROM metadata_cache_entities WHERE source = 'beatport' AND entity_type = 'track'")
+                counts['metadata_cache_entities'] = max(cursor.rowcount, 0)
+            cursor.execute("CREATE TABLE _beatport_positional_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'beatport_positional_purged')
+            logger.info("beatport positional id purge: %s", counts)
+        except Exception as e:
+            logger.error(f"Error purging beatport positional matches: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""

@@ -353,6 +353,10 @@ export function filterBeatportGenres<T extends { name: string }>(genres: readonl
 /* ── The chart → download-modal bridge (1999-2064) ────────────────────────── */
 
 export interface BeatportScrapedTrack {
+  /** the real beatport id, when the page json supplied it */
+  beatport_id?: string | number;
+  url?: string;
+  isrc?: string;
   title?: string;
   artist?: string;
   mix_name?: string;
@@ -424,15 +428,45 @@ export function splitBeatportArtists(rawArtist: string | null | undefined): stri
     .filter((a) => a);
 }
 
+/** djb2, as hex. only has to be stable, not secret. */
+function stableHash(text: string): string {
+  let h = 5381;
+  for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
+  return h.toString(16);
+}
+
 /**
- * 2012-2045. Per-track release metadata is preferred when the scrape found it;
- * otherwise every track shares the one compilation album object.
+ * The id a chart track goes by downstream: the sync match cache, the wishlist
+ * and Find & Add all key on it.
+ *
+ * it used to be `beatport_chart_<position>`, so track 1 of EVERY chart was
+ * `beatport_chart_0`. sync one chart and the next chart's track 1 got the
+ * first chart's match straight out of the cache (maV, oct 12 2026). now it's
+ * the real beatport id, from the page json or the track url, and a track with
+ * neither is named by what it is, never by where it sat.
+ */
+export function beatportTrackId(track: BeatportScrapedTrack): string {
+  if (track.beatport_id) return `beatport_${track.beatport_id}`;
+  const fromUrl = /\/track\/[^/]+\/(\d+)/.exec(track.url ?? '');
+  if (fromUrl) return `beatport_${fromUrl[1]}`;
+  const identity =
+    `${cleanTrackText(track.artist || '')}|${buildChartTrackName(track)}`.toLowerCase();
+  return `beatport_t_${stableHash(identity)}`;
+}
+
+/**
+ * 2012-2045. Per-track release metadata is preferred when the scrape found it.
+ *
+ * a track with no release is filed as its own single, never under the chart:
+ * the chart album put "Hype Top 10" into album tags and folder names, which is
+ * exactly the library mess maV reported.
  */
 export function buildChartTracks(
   tracks: readonly BeatportScrapedTrack[],
-  chartAlbum: DownloadModalAlbum,
+  _chartAlbum: DownloadModalAlbum,
 ): DownloadModalTrack[] {
   return tracks.map((track, index) => {
+    const id = beatportTrackId(track);
     const hasRelease = Boolean(track.release_name && track.release_name.length > 0);
     const trackAlbum: DownloadModalAlbum = hasRelease
       ? {
@@ -443,10 +477,17 @@ export function buildChartTracks(
           release_date: track.release_date || '',
           total_tracks: 1,
         }
-      : chartAlbum;
+      : {
+          id: `${id}_single`,
+          name: buildChartTrackName(track),
+          album_type: 'single',
+          images: [],
+          release_date: track.release_date || '',
+          total_tracks: 1,
+        };
 
     return {
-      id: `beatport_chart_${index}`,
+      id,
       name: buildChartTrackName(track),
       artists: splitBeatportArtists(track.artist),
       duration_ms: parseBeatportDuration(track.duration),

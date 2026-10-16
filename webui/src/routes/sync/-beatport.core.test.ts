@@ -289,13 +289,43 @@ describe('the chart → download-modal bridge (1999-2064)', () => {
     expect(splitBeatportArtists('One, ')).toEqual(['One']);
   });
 
-  it('gives each track the compilation album when the scrape found no release', () => {
-    const tracks = buildChartTracks([{ title: 'A' }, { title: 'B' }], album);
-    expect(tracks[0].album).toBe(album);
-    expect(tracks[1].album).toBe(album);
-    expect(tracks.map((t) => t.id)).toEqual(['beatport_chart_0', 'beatport_chart_1']);
+  it('files a track with no release as its own single, never under the chart', () => {
+    // maV (oct 12 2026): "Hype Top 10" ended up as the album name in plex
+    const tracks = buildChartTracks([{ title: 'A' }, { title: 'B', mix_name: 'Dub' }], album);
+    expect(tracks[0].album).not.toBe(album);
+    expect(tracks[0].album.name).toBe('A');
+    expect(tracks[1].album.name).toBe('B (Dub)');
+    expect(tracks[0].album.album_type).toBe('single');
     expect(tracks.map((t) => t.track_number)).toEqual([1, 2]);
     expect(tracks[0].disc_number).toBe(1);
+  });
+
+  it('never gives two charts the same track ids', () => {
+    // beatport_chart_<position> made track 1 of every chart beatport_chart_0,
+    // and the sync match cache handed the second chart the first one's matches
+    const chartA = buildChartTracks([{ title: 'Fancy Footwork', artist: 'Chromeo' }], album);
+    const chartB = buildChartTracks([{ title: 'Pitchin', artist: 'Hi-Gate' }], album);
+    expect(chartA[0].id).not.toBe(chartB[0].id);
+    expect(chartA[0].id.startsWith('beatport_chart_')).toBe(false);
+  });
+
+  it('uses the real beatport id when there is one', () => {
+    const [fromJson, fromUrl] = buildChartTracks(
+      [
+        { title: 'A', beatport_id: 30700667 },
+        { title: 'B', url: 'https://www.beatport.com/track/b/30438457' },
+      ],
+      album,
+    );
+    expect(fromJson.id).toBe('beatport_30700667');
+    expect(fromUrl.id).toBe('beatport_30438457');
+  });
+
+  it('names an id-less track by what it is, so it is the same id every time', () => {
+    const one = buildChartTracks([{ title: 'A', artist: 'X' }], album)[0].id;
+    const again = buildChartTracks([{ title: 'Z' }, { title: 'A', artist: 'X' }], album)[1].id;
+    expect(one).toBe(again);
+    expect(one).toMatch(/^beatport_t_[0-9a-f]+$/);
   });
 
   it('prefers per-track release metadata when the scrape found it', () => {
