@@ -195,7 +195,7 @@ def tier_key(source, resolution) -> str:
 
 
 def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_title=None,
-              want_date=None, want_absolute=None):
+              want_date=None, want_absolute=None, want_alt=None):
     from core.video.release_parse import title_region_year
     """Validate a hit actually matches what was searched (Sonarr/Radarr-style): the
     TITLE must match the wanted film/show (not just be a substring — 'The Cloverfield
@@ -235,15 +235,32 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
                 if has_absolute_episode(parsed.get("title"), want_absolute):
                     return None, None
             return None, "Not a single episode"
-        if want_season is not None and season != want_season:
+        # A multi-episode file (S01E01E02 / E01-03) satisfies any episode it spans.
+        ep_end = parsed.get("episode_end") or episode
+        # the scene's own (TVDB) numbering for this episode, when it differs
+        # from TMDB's: a release named by it is this episode too
+        alt_ok = exclusive = False
+        if want_alt:
+            try:
+                a_s, a_e = int(want_alt[0]), int(want_alt[1])
+                alt_ok = season == a_s and episode <= a_e <= ep_end
+                exclusive = len(want_alt) > 2 and bool(want_alt[2])
+            except (TypeError, ValueError, IndexError):
+                alt_ok = False
+        if exclusive and not alt_ok:
+            # the TMDB number names a different episode in the scene's
+            # numbering, so only the scene number (or the air date) is this one
+            if want_date and parsed.get("air_date") == want_date:
+                return None, None
+            return None, "Wrong episode (scene numbering is S%02dE%02d)" % (a_s, a_e)
+        if want_season is not None and season != want_season and not alt_ok:
             # A date match trumps a numbering mismatch — scene season numbering for
             # dailies rarely agrees with TMDB's, but the air date is unambiguous.
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
             return None, "Wrong season"
-        # A multi-episode file (S01E01E02 / E01-03) satisfies any episode it spans.
-        ep_end = parsed.get("episode_end") or episode
-        if want_episode is not None and not (episode <= want_episode <= ep_end):
+        if (not alt_ok and want_episode is not None
+                and not (episode <= want_episode <= ep_end)):
             if want_date and parsed.get("air_date") == want_date:
                 return None, None
             return None, "Wrong episode"
@@ -282,7 +299,7 @@ def _scope_ok(parsed, scope, want_season, want_episode, want_year=None, want_tit
 
 def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
                      want_episode=None, size_gb=None, want_year=None, want_title=None,
-                     want_date=None, want_absolute=None, seeders=None) -> dict:
+                     want_date=None, want_absolute=None, seeders=None, want_alt=None) -> dict:
     """Judge a parsed search hit against the quality profile + the search scope.
 
     Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
@@ -334,7 +351,7 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
         _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode, want_year, want_title,
-                                    want_date, want_absolute)
+                                    want_date, want_absolute, want_alt)
         if scope_reason:
             rejected = scope_reason
 

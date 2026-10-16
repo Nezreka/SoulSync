@@ -37,6 +37,11 @@ _lock = threading.Lock()
 _FETCH_LIMIT = 200
 
 
+def _with_scene_numbering(items, db):
+    from core.video.numbering import annotate
+    return annotate(items, db=db)
+
+
 def is_running() -> bool:
     return _running
 
@@ -234,7 +239,7 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
     # due_only=False: matching an incoming feed against the wishlist spends no
     # searches, so there is nothing to back off from.
     for media_type, items in (("movie", db.movie_wishlist_to_download(due_only=False)),
-                              ("episode", db.episode_wishlist_to_download(due_only=False))):
+                              ("episode", _with_scene_numbering(db.episode_wishlist_to_download(due_only=False), db))):
         if any(it.get("owned") for it in items):
             per_item = vpw._cutoff_rank_for_item if any(
                 it.get("quality_profile_id") for it in items) else None
@@ -315,13 +320,15 @@ def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> 
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
     from core.automation.handlers.video_process_wishlist import search_context
+    from core.video.numbering import ctx_alt
     from core.video.quality_profile import load_for_item
     ctx = search_context(item, media_type)
     cands = _evaluate_hits(pool, load_for_item(get_video_db(), item), ctx["scope"],
                            ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
+                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"),
+                           want_alt=ctx_alt(ctx))
     for c in cands:
         c["source"] = "usenet" if str(c.get("protocol") or "") == "usenet" else "torrent"
     # Full ranked list, not just accepted: rejected candidates ride along into

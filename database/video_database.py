@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 52   # v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 53   # v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -7767,6 +7767,53 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def tvdb_season_cached(self, tvdb_id, season_number):
+        """(episodes, fetched_at) for a cached TVDB season, or None. episodes is
+        [(episode_number, air_date), ...]."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT episodes, fetched_at FROM tvdb_episode_cache WHERE tvdb_id=? AND season_number=?",
+                (int(tvdb_id), int(season_number))).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            eps = [(int(e[0]), e[1]) for e in json.loads(row[0] or "[]")]
+        except (TypeError, ValueError, IndexError):
+            return None
+        return eps, row[1]
+
+    def wished_episodes_on(self, show_tmdb_id, air_date) -> list:
+        """[(season, episode)] of a show's wished episodes that aired on this day."""
+        if not show_tmdb_id or not air_date:
+            return []
+        conn = self._get_connection()
+        try:
+            return [(int(r[0]), int(r[1])) for r in conn.execute(
+                "SELECT DISTINCT season_number, episode_number FROM video_wishlist "
+                "WHERE kind='episode' AND tmdb_id=? AND substr(air_date, 1, 10)=? "
+                "AND season_number IS NOT NULL AND episode_number IS NOT NULL",
+                (int(show_tmdb_id), str(air_date)[:10]))]
+        finally:
+            conn.close()
+
+    def tvdb_season_store(self, tvdb_id, season_number, episodes) -> None:
+        """cache a TVDB season's [(episode_number, air_date), ...]; an empty list
+        is stored too, so a season TVDB doesn't have isn't asked again all week."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                (int(tvdb_id), int(season_number),
+                 json.dumps([[int(n), d] for n, d in episodes or []])))
+            conn.commit()
+        finally:
+            conn.close()
+
     def episode_wishlist_to_download(self, due_only: bool = True, profile_id: int | None = None) -> list:
         """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
         the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
@@ -7801,7 +7848,12 @@ class VideoDatabase:
                 # series type (P8): daily/anime shows QUERY differently (air date /
                 # absolute number). NULL for shows not in the library = standard.
                 # MAX = a type set on ANY server's row wins over a NULL sibling.
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
+                # no type set: a show tagged Anime is numbered the anime way
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
+                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
+                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
                 # External ids for the indexer search. A tvdbid is what Sonarr hands
                 # Newznab so id-aware indexers resolve the series exactly instead of
                 # matching on a title that scene naming may spell differently. MAX
@@ -7887,7 +7939,12 @@ class VideoDatabase:
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
                 "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
+                # no type set: a show tagged Anime is numbered the anime way
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
+                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
+                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
                 "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
                 "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "

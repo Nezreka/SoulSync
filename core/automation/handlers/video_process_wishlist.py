@@ -489,6 +489,13 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
         if scope == "season":
             ctx.pop("episode", None)
             ctx.pop("air_date", None)
+        elif item.get("alt_season") is not None and item.get("alt_episode") is not None:
+            # the scene (TVDB) numbering, when it differs from TMDB's: queried
+            # and accepted alongside it (core/video/numbering.py)
+            ctx["alt_season"] = int(item["alt_season"])
+            ctx["alt_episode"] = int(item["alt_episode"])
+            if item.get("alt_exclusive"):
+                ctx["alt_exclusive"] = True
         # Series type (P8): daily/anime shows QUERY differently. Anime also carries
         # the wanted ABSOLUTE episode number (scene anime is numbered 'Show - 1071',
         # no season) — derived from the library's episode list, best-effort.
@@ -566,7 +573,10 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
 def _default_fetch_items(media_type: str) -> List[Dict[str, Any]]:
     from api.video import get_video_db
     db = get_video_db()
-    return db.movie_wishlist_to_download() if media_type == "movie" else db.episode_wishlist_to_download()
+    if media_type == "movie":
+        return db.movie_wishlist_to_download()
+    from core.video.numbering import annotate
+    return annotate(db.episode_wishlist_to_download(), db=db)
 
 
 def _backfill_movie_available_dates(limit: int = 25) -> None:
@@ -615,7 +625,8 @@ def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
     from core.video.extto_search import extto_search
     from core.video.slskd_search import build_query
     query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                        season=ctx.get("season"), episode=ctx.get("episode"),
+                        season=ctx.get("alt_season", ctx.get("season")),
+                        episode=ctx.get("alt_episode", ctx.get("episode")),
                         air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
                         series_type=ctx.get("series_type"))
     eres = extto_search(query, limit=30, timeout=35, max_candidates=2,
@@ -635,6 +646,7 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     hybrid chain, but normal torrent users should get it automatically."""
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
+    from core.video.numbering import ctx_alt
     from core.video.quality_profile import load_for_item
     ctx = search_context(item, media_type)
     profile = load_for_item(get_video_db(), item)   # per-title profile (P2)
@@ -642,8 +654,11 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     if source == "soulseek":
         from core.video.download_monitor import _search_for_retry
         from core.video.slskd_search import build_query
+        # one query: the scene's own numbering when it differs (what files
+        # and share folders are named by)
         query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                            season=ctx.get("season"), episode=ctx.get("episode"),
+                            season=ctx.get("alt_season", ctx.get("season")),
+                            episode=ctx.get("alt_episode", ctx.get("episode")),
                             air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
                             series_type=ctx.get("series_type"))
         res = _search_for_retry(query) or {}
@@ -657,7 +672,7 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
                                air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
                                series_type=ctx.get("series_type"),
                                imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
-                               tvdb_id=ctx.get("tvdb_id"))
+                               tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx))
         prowlarr_err = None
         if not pres.get("configured"):
             prowlarr_err = "Prowlarr not configured"
@@ -693,10 +708,12 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
             return None, err
     else:
         return None, "unsupported source %r" % source
+    alt = ctx_alt(ctx)
     cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
                            want_year=ctx.get("year"),
                            want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"))
+                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"),
+                           want_alt=alt)
     for c in cands:
         if source == "torrent" and str(c.get("indexer_id") or "").lower() == "extto":
             c["source"] = "extto"
