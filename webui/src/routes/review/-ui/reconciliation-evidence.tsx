@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
-import { ProviderReleaseId } from './provider-release-id';
+import { ProviderReference, ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
@@ -42,9 +42,7 @@ function MusicBrainzId({ value, kind }: { value: unknown; kind: 'release' | 'rec
   const id = label(value);
   if (!id) return null;
   return (
-    <a href={musicBrainzBrowserUrl(kind, id)} target="_blank" rel="noreferrer">
-      {id}
-    </a>
+    <ProviderReference id={id} href={musicBrainzBrowserUrl(kind, id)} provider="MusicBrainz" />
   );
 }
 
@@ -539,7 +537,11 @@ export function ReleaseComparison({
     (candidate) => candidateAssignments(candidate) === firstShape,
   );
   return (
-    <section className={styles.releaseSection} aria-label="Compare release candidates">
+    <section
+      className={styles.releaseSection}
+      data-view={view}
+      aria-label="Compare release candidates"
+    >
       {view !== 'detail' && (
         <>
           <div className={styles.sectionHeading}>
@@ -622,8 +624,22 @@ export function ReleaseComparison({
           <div className={styles.releaseDetailHeader}>
             <div>
               <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
+              {Boolean(active.disambiguation) && (
+                <p className={styles.editionNote}>{label(active.disambiguation)}</p>
+              )}
+              <p className={styles.editionMeta}>
+                {[active.format, active.country, active.date]
+                  .map(label)
+                  .filter(Boolean)
+                  .join(' · ')}
+              </p>
+              <CandidateFit candidate={active} />
+              {count(active.excluded_video_tracks) > 0 && (
+                <p className={styles.muted}>
+                  {count(active.excluded_video_tracks)} video tracks excluded from audio review
+                </p>
+              )}
               <small>
-                {label(active.source)}{' '}
                 <ProviderReleaseId
                   source={label(active.source)}
                   releaseId={label(active.release_id)}
@@ -711,7 +727,7 @@ export function ReleaseComparison({
                 {missing.length > 0 && (
                   <section>
                     <strong>
-                      {missing.length} absent release track{missing.length === 1 ? '' : 's'}
+                      {missing.length} audio track{missing.length === 1 ? '' : 's'} missing
                     </strong>
                     <ul>
                       {missing.map((name, index) => (
@@ -1125,24 +1141,18 @@ export function ReconciliationEvidence({
         </section>
       )}
       {(!prominent || objects(details.checked_files).length > 0) && (
-        <details className={styles.technicalEvidence} open>
-          <summary>
-            <EvidenceIcon name="info" /> Technical evidence
-            <span>Raw files, tags, and IDs</span>
-          </summary>
-          <div className={styles.technicalGrid}>
-            {!prominent && <Facts finding={finding} details={details} />}
-            {!prominent && <AudioEvidence details={details} />}
-            <CheckedFiles details={details} />
-            {!prominent && reasons.length > 0 && (
-              <section className={styles.technicalCard}>
-                <h5>Why this track was paired</h5>
-                <p>{reasons.join(' · ')}</p>
-                {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
-              </section>
-            )}
-          </div>
-        </details>
+        <div className={styles.technicalGrid}>
+          {!prominent && <Facts finding={finding} details={details} />}
+          {!prominent && <AudioEvidence details={details} />}
+          <CheckedFiles details={details} />
+          {!prominent && reasons.length > 0 && (
+            <section className={styles.technicalCard}>
+              <h5>Why this track was paired</h5>
+              <p>{reasons.join(' · ')}</p>
+              {Boolean(details.confidence) && <p>Confidence: {label(details.confidence)}</p>}
+            </section>
+          )}
+        </div>
       )}
       {finding.last_error && <p className={styles.error}>Last attempt: {finding.last_error}</p>}
     </div>

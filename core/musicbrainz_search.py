@@ -1264,6 +1264,9 @@ class MusicBrainzSearchClient:
                     'duration_ms': recording.get('length', 0) or track.get('length', 0) or 0,
                     'track_number': track_num,
                     'disc_number': disc_number,
+                    'medium_format': media.get('format') or '',
+                    'release_track_id': track.get('id') or '',
+                    'video': recording.get('video') is True,
                 })
 
         images = [{'url': image_url, 'height': 250, 'width': 250}] if image_url else []

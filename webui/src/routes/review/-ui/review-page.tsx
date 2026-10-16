@@ -85,7 +85,7 @@ const categoryOptions = [
 ] as const;
 
 type QueueMode = 'review' | 'ready' | 'files' | 'all';
-type AlbumView = 'plan' | 'release' | 'tracks' | 'evidence';
+type AlbumView = 'plan' | 'release' | 'tracks';
 type TrackView = 'issues' | 'release';
 
 const queueModes: Array<{ value: QueueMode; label: string; risk: string }> = [
@@ -318,6 +318,7 @@ export function ReviewPage() {
   const [searchInput, setSearchInput] = useState('');
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
+  const [reanalyzing, setReanalyzing] = useState(false);
   const [busyDecision, setBusyDecision] = useState('');
   const [scanBusy, setScanBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -481,7 +482,7 @@ export function ReviewPage() {
   const pageCount = queue ? Math.max(1, Math.ceil(queue.total / queue.limit)) : 1;
   const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
   const typeInfo = active ? catalog[active.finding_type] : undefined;
-  const mutationBusy = busy || applyBusy || reviewCase?.refresh?.state === 'running';
+  const mutationBusy = busy || reanalyzing || applyBusy || reviewCase?.refresh?.state === 'running';
   const plan = reviewCase?.plan || emptyPlan;
   const albumModel = useMemo(() => buildAlbumModel(reviewCase), [reviewCase]);
   const {
@@ -508,6 +509,17 @@ export function ReviewPage() {
     decisionMembers,
     releaseOrderedAssignments,
   } = albumModel;
+  const sourceFolders = useMemo(
+    () =>
+      [
+        ...new Set(
+          assignments.flatMap((row) =>
+            row.file_path ? [row.file_path.slice(0, row.file_path.lastIndexOf('/'))] : [],
+          ),
+        ),
+      ].sort(),
+    [assignments],
+  );
   const readyChangeGroups = useMemo(
     () => groupReadyChanges(reviewCase?.items || []),
     [reviewCase?.items],
@@ -706,8 +718,11 @@ export function ReviewPage() {
       if (pending) return;
       pending = true;
       try {
-        const status = await fetchReviewApplyStatus();
-        if (!live) return;
+        const requestedOperation = operationRef.current;
+        const status = await fetchReviewApplyStatus(
+          requestedOperation && requestedOperation !== 'current' ? requestedOperation : undefined,
+        );
+        if (!live || requestedOperation !== operationRef.current) return;
         if (!operationRef.current && status.running && status.review_approved) {
           operationRef.current = status.operation_id || 'current';
           window.sessionStorage.setItem('review-operation', operationRef.current);
@@ -727,7 +742,13 @@ export function ReviewPage() {
           );
         } else if (status.running) {
           setApplyBusy(true);
-          setApplyProgress(`Processing ${status.done || 0} of ${status.total || 0} album actions…`);
+          setApplyProgress(
+            status.phase === 'queueing_organization'
+              ? 'Queueing folder organization…'
+              : status.phase === 'queueing_reanalysis'
+                ? 'Queueing album reanalysis…'
+                : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
+          );
           return;
         } else if (status.error || status.failed || status.stopped) {
           setError(
@@ -776,12 +797,15 @@ export function ReviewPage() {
   const reanalyzeAlbum = async () => {
     if (!reviewCase) return;
     setError('');
+    setNotice('');
+    setReanalyzing(true);
     try {
       await reanalyzeReviewCase(reviewCase.case_id);
       setReviewCase(await fetchReviewCase(reviewCase.case_id));
-      setNotice('Reanalyzing this album…');
     } catch (cause) {
       setError((cause as Error).message);
+    } finally {
+      setReanalyzing(false);
     }
   };
 
@@ -1029,7 +1053,7 @@ export function ReviewPage() {
 
   const readyActionControls =
     reviewCase && plan.ready > 0 ? (
-      <div className={styles.planActions}>
+      <div className={styles.inlineActions}>
         <button
           type="button"
           className={styles.primary}
@@ -1372,14 +1396,6 @@ export function ReviewPage() {
         >
           {reviewCase ? (
             <>
-              {notice && reviewCase.refresh?.state !== 'running' && (
-                <div className={styles.albumNotice} role="status" aria-live="polite">
-                  <span>{notice}</span>
-                  <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
-                    ×
-                  </button>
-                </div>
-              )}
               <div className={styles.albumHeader}>
                 <div className={styles.albumIdentity}>
                   <ReviewArtwork
@@ -1401,7 +1417,7 @@ export function ReviewPage() {
                 <div className={styles.nav}>
                   <button
                     type="button"
-                    disabled={reviewCase.refresh?.state === 'running'}
+                    disabled={mutationBusy}
                     onClick={() => void reanalyzeAlbum()}
                   >
                     Reanalyze album
@@ -1447,19 +1463,17 @@ export function ReviewPage() {
                   Tracks
                   <span>{assignments.length}</span>
                 </button>
-                <button
-                  type="button"
-                  aria-current={albumView === 'evidence' ? 'page' : undefined}
-                  onClick={() => {
-                    setAlbumView('evidence');
-                    setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
-                  }}
-                >
-                  Evidence
-                </button>
               </nav>
 
-              {reviewCase.refresh?.state === 'running' && (
+              {notice && !reanalyzing && reviewCase.refresh?.state !== 'running' && (
+                <div className={styles.albumNotice} role="status" aria-live="polite">
+                  <span>{notice}</span>
+                  <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
+                    ×
+                  </button>
+                </div>
+              )}
+              {(reanalyzing || reviewCase.refresh?.state === 'running') && (
                 <div className={styles.refreshBanner} role="status">
                   <span className={styles.loadingSpinner} aria-hidden="true" /> Reanalyzing this
                   album. The previous decisions remain visible while dependent track actions are
@@ -2031,10 +2045,10 @@ export function ReviewPage() {
                           aria-label="Track assignments"
                         >
                           <div className={styles.trackTableHead} aria-hidden="true">
-                            <span>Review state</span>
                             <span>Position</span>
-                            <span>Local file → release track</span>
-                            <span>Proposed action</span>
+                            <span>Local file</span>
+                            <span>Selected release track</span>
+                            <span>Status</span>
                           </div>
                           {trackView === 'release' ? (
                             releaseOrderedAssignments
@@ -2225,73 +2239,6 @@ export function ReviewPage() {
                     </section>
                   )}
 
-                  {albumView === 'evidence' && (
-                    <section className={styles.evidenceView} aria-label="Album evidence">
-                      <div className={styles.sectionHeading}>
-                        <div>
-                          <div className={styles.eyebrow}>Supporting information</div>
-                          <h3>Why this plan was chosen</h3>
-                          <p>
-                            Catalog source, album scope, numbering, and the evidence behind each
-                            action.
-                          </p>
-                        </div>
-                      </div>
-                      <dl className={styles.albumFacts}>
-                        <div>
-                          <dt>Selected release</dt>
-                          <dd>
-                            {reviewCase.album_plan?.source || 'Catalog'}{' '}
-                            <ProviderReleaseId
-                              source={reviewCase.album_plan?.source}
-                              releaseId={reviewCase.album_plan?.release_id}
-                            />
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Album scope</dt>
-                          <dd>
-                            {reviewCase.album_plan?.intent_scope
-                              ? `${reviewCase.album_plan.intent_scope} album`
-                              : 'Not decided'}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Numbering</dt>
-                          <dd>
-                            {numberingSchemeLabel(
-                              releaseHasMultipleDiscs,
-                              reviewCase.album_plan?.numbering_mode,
-                            )}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Track coverage</dt>
-                          <dd>
-                            {assignments.length} local and release slot record
-                            {assignments.length === 1 ? '' : 's'} compared
-                          </dd>
-                        </div>
-                      </dl>
-                      {reviewCase.items.length > 0 && (
-                        <label className={styles.evidencePicker}>
-                          Evidence for action
-                          <select
-                            value={activeId ?? ''}
-                            onChange={(event) => selectFinding(Number(event.target.value))}
-                          >
-                            {reviewCase.items.map((finding) => (
-                              <option key={finding.id} value={finding.id}>
-                                {findingHeading(finding)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
-                      {active && <ReconciliationEvidence finding={active} prominent />}
-                    </section>
-                  )}
-
                   {albumView === 'plan' &&
                     active &&
                     !activeAssignment &&
@@ -2363,18 +2310,28 @@ export function ReviewPage() {
                             </dd>
                           </div>
                         </dl>
+                        {sourceFolders.length > 1 && (
+                          <section
+                            className={styles.folderContext}
+                            aria-label="Combined album folders"
+                          >
+                            <h4>{sourceFolders.length} folders reviewed together</h4>
+                            <p>
+                              Track coverage and duplicate checks include all these files. Folder
+                              organization is a separate action.
+                            </p>
+                            <ul>
+                              {sourceFolders.map((folder) => (
+                                <li key={folder}>
+                                  <code>{folder}</code>
+                                </li>
+                              ))}
+                            </ul>
+                          </section>
+                        )}
                         <div className={`${styles.actions} ${styles.planContextActions}`}>
                           <button type="button" onClick={() => setAlbumView('tracks')}>
                             Review track assignments
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAlbumView('evidence');
-                              setActiveId((current) => current ?? reviewCase.items[0]?.id ?? null);
-                            }}
-                          >
-                            View supporting evidence
                           </button>
                         </div>
                       </section>
@@ -2424,12 +2381,6 @@ export function ReviewPage() {
                         view="detail"
                         numberingMode={reviewCase.album_plan?.numbering_mode}
                       />
-                    )}
-                    {albumView === 'evidence' && (
-                      <p>
-                        Evidence describes the selected action. Review the Plan tab for remaining
-                        album decisions.
-                      </p>
                     )}
                   </aside>
                 )}

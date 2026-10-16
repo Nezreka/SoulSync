@@ -446,11 +446,20 @@ export async function startBulkFix(options: {
  * finished — the vanilla's `catch { return; }` has exactly that effect.
  */
 export function fetchBulkFixStatus(): Promise<BulkFixStatus | null>;
-export function fetchBulkFixStatus<T>(readResponse: (response: Response) => Promise<T>): Promise<T>;
+export function fetchBulkFixStatus<T>(
+  readResponse: (response: Response) => Promise<T>,
+  operationId?: string,
+): Promise<T>;
 export async function fetchBulkFixStatus<T>(
   readResponse?: (response: Response) => Promise<T>,
+  operationId?: string,
 ): Promise<T | BulkFixStatus | null> {
-  if (readResponse) return readResponse(await fetch('/api/repair/bulk-fix/status'));
+  if (readResponse)
+    return readResponse(
+      await fetch(
+        `/api/repair/bulk-fix/status${operationId ? `?operation_id=${encodeURIComponent(operationId)}` : ''}`,
+      ),
+    );
   try {
     const response = await fetch('/api/repair/bulk-fix/status');
     return (await response.json()) as BulkFixStatus;

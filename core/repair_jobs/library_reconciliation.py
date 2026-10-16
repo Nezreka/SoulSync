@@ -489,6 +489,47 @@ def _track_items(data) -> list[dict]:
     return []
 
 
+def _group_unassigned_downloads(folders, tracks, albums, trusted, read_tags):
+    """Include sibling download fragments with unanimous exact album/artist tags.
+
+    This only establishes album context. The joint audio assignment still checks
+    every recording, duration and version and retains extras/duplicates for review.
+    Multiple possible owners or incomplete tags leave the fragment separate.
+    """
+    def identity(value):
+        # Audio-title normalization removes edition qualifiers; folder ownership
+        # must retain them so a regular and deluxe release cannot collide.
+        return ' '.join(str(value or '').casefold().split())
+
+    anchors = defaultdict(list)
+    for folder, paths in folders.items():
+        ids = {tracks[os.path.normpath(path)].get('album_id') for path in paths
+               if os.path.normpath(path) in tracks}
+        ids.discard(None)
+        album_id = trusted.get(folder) if folder in trusted else next(iter(ids)) if len(ids) == 1 else None
+        album = albums.get(album_id) or {}
+        if album_id is not None and _album_has_release_id(album):
+            anchors[os.path.dirname(folder)].append((folder, album_id, album))
+    groups = {folder: list(paths) for folder, paths in folders.items()}
+    for folder, paths in folders.items():
+        possible = anchors.get(os.path.dirname(folder), [])
+        if not possible or any(os.path.normpath(path) in tracks for path in paths):
+            continue
+        identities = {(identity(tags.get('album')),
+                       identity(tags.get('album_artist') or tags.get('artist')))
+                      for tags in (read_tags(path) for path in paths)}
+        if len(identities) != 1 or any(not value for value in next(iter(identities))):
+            continue
+        matches = [(anchor, album_id) for anchor, album_id, album in possible
+                   if (identity(album.get('album_title')),
+                       identity(album.get('artist_name'))) in identities]
+        if len(matches) == 1:
+            anchor, album_id = matches[0]
+            groups[anchor].extend(groups.pop(folder))
+            trusted[anchor] = album_id
+    return groups
+
+
 def _normalize_slot(item: dict, source: str) -> dict:
     def positive_int(value, default=None):
         try:
@@ -510,6 +551,8 @@ def _normalize_slot(item: dict, source: str) -> dict:
         'artist_names': artist_names,
         'track_number': positive_int(item.get('track_number')),
         'disc_number': positive_int(item.get('disc_number'), 1),
+        'medium_format': item.get('medium_format') or '',
+        'release_track_id': item.get('release_track_id') or '',
         'duration_ms': positive_int(item.get('duration_ms'), 0),
         'preview_url': item.get('preview_url') or item.get('previewUrl') or '',
         'source_track_id': item.get('id') or '',
@@ -533,8 +576,11 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
             raw = (get_album_tracks_for_source(source, release_id, exact_release=True)
                    if is_exact_release else
                    get_album_tracks_for_source(source, release_id))
-            release_cache[key] = [_normalize_slot(item, source)
-                                  for item in _track_items(raw)]
+            items = _track_items(raw)
+            excluded = sum(item.get('video') is True for item in items)
+            release_cache[key] = [{**_normalize_slot(item, source),
+                                   'excluded_video_tracks': excluded}
+                                  for item in items if item.get('video') is not True]
         slots = release_cache[key]
         if not slots:
             continue
@@ -658,7 +704,7 @@ def _numbered_slot(slot: dict, slot_index: int, numbering_mode: str,
     convention as a digital edition without inventing a different tracklist.
     """
     discs = {row.get('disc_number') or 1 for row in (slots or [])}
-    if numbering_mode != 'digital' or len(discs) <= 1:
+    if numbering_mode != 'digital' or (len(discs) <= 1 and not slot.get('excluded_video_tracks')):
         return slot
     return {**slot, 'disc_number': 1, 'track_number': slot_index + 1}
 
@@ -1171,6 +1217,8 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
         'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
         'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
         'matched': candidate.matched, 'total_slots': len(release_slots),
+        'excluded_video_tracks': max((slot.get('excluded_video_tracks', 0)
+                                      for slot in release_slots), default=0),
         'missing': len(candidate_plan['missing_slots']),
         'extra': len(candidate_plan['extra_files']),
         'continuous_numbering': bool(_continuous_numbering(row)),
@@ -1803,6 +1851,13 @@ class LibraryReconciliationJob(RepairJob):
                             folders[dirpath].append(os.path.join(dirpath, name))
             folders = _group_disc_folders(folders, tracks, roots)
             folders, trusted_logical_groups = _group_logical_albums(folders, tracks, albums)
+            discovery_cache = ReconciliationEvidence(context.db, client)
+            try:
+                folders = _group_unassigned_downloads(
+                    folders, tracks, albums, trusted_logical_groups,
+                    lambda path: discovery_cache.read_tags(path, _read_file_tags))
+            finally:
+                discovery_cache.close()
         target_member_folders: set[str] = set()
         if target_folder is not None:
             target_folder = os.path.normpath(target_folder)

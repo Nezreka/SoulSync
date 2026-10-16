@@ -1504,3 +1504,22 @@ def test_fix_search_response_includes_recording_disambiguation(monkeypatch):
         response = search_musicbrainz_tracks()
 
     assert response.get_json()['tracks'][0]['disambiguation'] == 'live'
+
+
+def test_release_tracks_preserve_video_and_medium_identity():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release.return_value = {
+        'id': 'mixed', 'title': 'Concert', 'media': [
+            {'position': 1, 'format': 'Blu-ray', 'tracks': [
+                {'id': 'video-slot', 'number': '1', 'recording': {'id': 'video', 'video': True}}]},
+            {'position': 2, 'format': 'CD', 'tracks': [
+                {'id': 'audio-slot', 'number': '1', 'recording': {'id': 'audio', 'video': False}}]},
+        ]}
+    tracks = client.get_release_album_tracks('mixed')['items']
+    assert len(tracks) == 2  # Other consumers retain the complete catalogue.
+    assert tracks[0]['video'] is True
+    assert tracks[1]['video'] is False
+    assert tracks[1]['disc_number'] == 2
+    assert tracks[1]['release_track_id'] == 'audio-slot'
+    assert tracks[0]['medium_format'] == 'Blu-ray'

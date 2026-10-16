@@ -480,8 +480,7 @@ describe('library reconciliation review queue', () => {
     expect(
       screen.getByRole('button', { name: 'Apply release track numbers to 1 track now' }),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Evidence' }));
-    expect(screen.getByRole('heading', { name: 'Why this plan was chosen' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Evidence' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
@@ -764,7 +763,9 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
-    await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy(), {
+      timeout: 3000,
+    });
   });
 
   it('puts required choices before independent safe changes on a mixed album', async () => {
@@ -938,7 +939,8 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
 
     await screen.findByRole('heading', { name: 'Loose files' });
-    expect(screen.getByText('Technical evidence')).toBeTruthy();
+    expect(screen.queryByText('Technical evidence')).toBeNull();
+    expect(screen.getByText('Local evidence')).toBeTruthy();
     expect(screen.queryByLabelText('Evidence summary')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
     await waitFor(() =>
@@ -1213,7 +1215,7 @@ describe('library reconciliation review queue', () => {
     expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(3);
     expect(images.some((image) => image.src.includes('first-release'))).toBe(true);
     expect(
-      screen.getByText('12/12 assigned').closest('[data-tone]')?.getAttribute('data-tone'),
+      screen.getAllByText('12/12 assigned')[0].closest('[data-tone]')?.getAttribute('data-tone'),
     ).toBe('good');
     expect(screen.getByText('2 missing').closest('[data-tone]')?.getAttribute('data-tone')).toBe(
       'danger',

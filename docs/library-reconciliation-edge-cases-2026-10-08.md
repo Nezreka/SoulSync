@@ -109,7 +109,12 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 9. A scan interrupted before completion preserves previous plans and findings; a successful scan retires stale ones.
 10. The review queue must distinguish algorithmic uncertainty from presentation state. A selected row should reveal its detail without changing the underlying confidence or risk classification.
 11. Headings describe the proposed outcome (“Use continuous numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.
-12. The default album view is the actionable plan. The complete track audit and technical evidence remain available as separate views so dense albums do not bury the controlling decision.
+12. The default album view is the actionable plan. The complete track audit and per-track evidence remain available together in Tracks so dense albums do not bury the controlling decision.
 13. Queue modes separate albums that need input, supported changes ready to apply, and recoverable file actions. Type filtering refines the selected mode instead of duplicating it.
-14. Release comparisons show available title, country, format, date, and disambiguation before asking the user to pin an edition. The Plan view keeps this comparison compact; the Evidence view owns the full file-by-file mapping.
+14. Release comparisons show available title, country, format, date, and disambiguation before asking the user to pin an edition. The Plan view keeps this comparison compact; the Release inspector owns the candidate file-by-file mapping.
 15. Exact proposed changes remain visible with the selected track. Raw tags, identifiers, and scoring diagnostics may remain collapsed.
+
+## Mixed audio/video releases and downloaded fragments
+
+- Gojira — *The Flesh Alive*: the selected release has 30 explicitly video-marked Blu-ray recordings and 13 CD audio tracks. Audio coverage is 13/13; videos are noted separately, never requested as missing audio. Audio on Blu-ray and recordings with unknown video flags remain eligible. Original medium positions remain evidence; digital numbering uses the filtered audio sequence.
+- Split Chain — *motionblur (DELUXE)*: a regular album folder and deluxe addendum can already form one logical album while ten newly downloaded, unindexed files remain in a third sibling folder. Include a unanimous exact album/artist fragment only with one authoritative sibling owner, then match the full collection jointly. Never strip edition qualifiers when deciding fragment ownership.

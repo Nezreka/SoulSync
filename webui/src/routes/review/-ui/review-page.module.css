@@ -100,12 +100,6 @@
   width: 100%;
   text-align: left;
 }
-.planActions .primary {
-  border-color: #43866a;
-  background: #20503f;
-  color: #d4fbe5;
-  font-weight: 700;
-}
 .workspace {
   display: grid;
   grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
@@ -438,7 +432,6 @@
 }
 .review[data-refresh='running'] .decisionActions button,
 .review[data-refresh='running'] .actions button,
-.review[data-refresh='running'] .planActions button,
 .review[data-refresh='running'] .assignmentCorrection button {
   pointer-events: none;
   opacity: 0.55;
@@ -465,7 +458,6 @@
 .decisionGrid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
 }
 .decisionGrid[data-single='true'] {
   display: block;
@@ -844,7 +836,7 @@
   gap: 8px;
   margin: -3px 0 12px;
 }
-.releaseContext span {
+.releaseContext > span {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -984,10 +976,6 @@
 .trackWorkspace .rowPosition {
   justify-self: end;
 }
-.trackWorkspace .trackComparison,
-.trackWorkspace .rowResult {
-  grid-column: 1 / -1;
-}
 .releaseStepLink {
   padding: 12px 16px;
   border: 1px solid #50496c;
@@ -1017,7 +1005,6 @@
 }
 .matrixRow {
   width: 100%;
-  padding: 10px 12px;
   border: 0;
   border-top: 1px solid #343849;
   background: #191c28;
@@ -1033,7 +1020,6 @@
 }
 .matrixRow[data-status='change'] {
   box-shadow: inset 3px 0 #547db5;
-  background: #1a2230;
 }
 .matrixRow[data-status='extra'],
 .matrixRow[data-status='missing'],
@@ -1045,9 +1031,6 @@
 }
 .matrixRow[data-status='confirmed'] {
   background: #17251f;
-}
-.matrixRow[data-status='settled'] {
-  background: #1d202b;
 }
 .matrixRow span {
   min-width: 0;
@@ -1065,20 +1048,6 @@
   color: #8f98ad;
   margin-top: 2px;
 }
-.rowChange {
-  color: #c7d9d0 !important;
-  line-height: 1.35;
-}
-.rowAction {
-  display: inline-block;
-  margin-top: 7px;
-  padding: 5px 9px;
-  border: 1px solid #6b6790;
-  border-radius: 7px;
-  color: #d8ccfa;
-  font-size: 11px;
-  font-style: normal;
-}
 .matrixRow i {
   display: inline-block;
   border: 1px solid #5a6075;
@@ -1086,24 +1055,6 @@
   padding: 3px 7px;
   font-style: normal;
   font-size: 11px;
-}
-.trackComparison {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
-  gap: 9px;
-  align-items: center;
-}
-.trackComparison > span {
-  min-width: 0;
-}
-.trackComparison > b {
-  color: #697187;
-  text-align: center;
-}
-.rowResult strong {
-  color: #dce0ea;
-  font-size: 12px;
-  font-weight: 600;
 }
 .trackTable > .findingDetail {
   min-width: 0;
@@ -1193,37 +1144,15 @@
   font-size: 15px;
   line-height: 1.45;
 }
-.planBadges,
-.planActions {
+.planBadges {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
 }
-.planActions {
-  border-top: 1px solid #303547;
-  margin-top: 14px;
-  padding-top: 14px;
-}
-.planActions button {
-  background: #272b3c;
-  border: 1px solid #4a4e63;
-  border-radius: 9px;
-  padding: 9px 12px;
-  color: #f5f5fa;
-  cursor: pointer;
-}
-.planActions details {
-  color: #b9c1d3;
-  font-size: 13px;
-}
-.planActions summary {
-  cursor: pointer;
-}
 .readySummaryList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 8px;
   margin-top: 14px;
 }
 .readySummaryList button {
@@ -1256,8 +1185,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 16px;
-  padding: 16px;
   border: 1px solid #3f669a;
   border-radius: 11px;
   background: #1b293d;
@@ -1446,8 +1373,7 @@
 .releaseSection,
 .changesCard,
 .duplicateCard,
-.problemCard,
-.technicalEvidence {
+.problemCard {
   border: 1px solid #3b4053;
   border-radius: 13px;
   background: #171a26;
@@ -1617,8 +1543,7 @@
   font-size: 13px;
   font-weight: 650;
 }
-.confirmedGroup > summary::-webkit-details-marker,
-.technicalEvidence > summary::-webkit-details-marker {
+.confirmedGroup > summary::-webkit-details-marker {
   display: none;
 }
 .confirmedGroup > summary span {
@@ -1777,22 +1702,6 @@
   display: grid;
   gap: 5px;
 }
-.technicalEvidence > summary {
-  display: grid;
-  grid-template-columns: 20px auto 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 16px;
-  cursor: pointer;
-  list-style: none;
-  color: #cad0df;
-  font-weight: 650;
-}
-.technicalEvidence > summary span {
-  color: #8f98ad;
-  font-size: 12px;
-  font-weight: 400;
-}
 .technicalGrid {
   display: grid;
   gap: 12px;
@@ -1863,35 +1772,6 @@
 .evidenceView {
   background: #151721;
 }
-.albumFacts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1px;
-  margin: 0;
-  overflow: hidden;
-  border: 1px solid #383d4f;
-  border-radius: 10px;
-  background: #383d4f;
-}
-.albumFacts > div {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  padding: 13px 14px;
-  background: #1a1d29;
-}
-.albumFacts dt {
-  color: #969fb3;
-  font-size: 12px;
-}
-.albumFacts dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.albumFacts a,
-.albumFacts code {
-  color: #cfc6ff;
-}
 .releaseSelector {
   display: grid;
   gap: 7px;
@@ -1903,11 +1783,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-width: 0;
   padding: 10px;
-  border: 1px solid #42485e;
-  border-radius: 9px;
-  background: #1d2130;
   color: #e9edf7;
   text-align: left;
   cursor: pointer;
@@ -1940,12 +1816,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
   border-bottom: 1px solid #3d4358;
 }
 .releaseDetailHeader > div {
   display: grid;
-  gap: 4px;
 }
 .releaseDetailHeader small {
   color: #aeb7ca;
@@ -2016,39 +1890,16 @@
 }
 .candidateExceptions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
   border-top: 1px solid #454b60;
 }
 .candidateExceptions section {
-  padding: 10px;
-  border: 1px solid #614651;
   border-radius: 8px;
-  background: #281e25;
 }
 .candidateExceptions strong {
   font-size: 13px;
 }
 .candidateExceptions ul {
   margin: 7px 0 0;
-  padding-left: 20px;
-  font-size: 12px;
-}
-.evidencePicker {
-  display: grid;
-  gap: 6px;
-  margin-top: 18px;
-  color: #aeb6c9;
-  font-size: 13px;
-}
-.evidencePicker select {
-  width: min(100%, 620px);
-  padding: 9px 10px;
-  border: 1px solid #474c60;
-  border-radius: 9px;
-  background: #191c28;
-  color: #eef0f7;
 }
 .error,
 .notice {
@@ -2215,17 +2066,6 @@
     grid-column: 2;
     justify-self: end;
   }
-  .trackComparison,
-  .rowResult {
-    grid-column: 1 / -1;
-  }
-  .trackComparison {
-    grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
-    padding-top: 3px;
-  }
-  .albumFacts {
-    grid-template-columns: 1fr;
-  }
   .candidateCard > button:first-child {
     grid-template-columns: 26px 48px minmax(0, 1fr);
   }
@@ -2248,7 +2088,7 @@
   .releaseContext {
     display: grid;
   }
-  .releaseContext span {
+  .releaseContext > span {
     flex-wrap: wrap;
   }
   .planContext dl {
@@ -2293,13 +2133,6 @@
   }
   .matrixCounts {
     justify-content: flex-start;
-  }
-  .trackComparison {
-    grid-template-columns: 1fr;
-  }
-  .trackComparison > b {
-    transform: rotate(90deg);
-    text-align: left;
   }
   .decisionActions {
     padding: 0 12px 13px;
@@ -2662,4 +2495,194 @@
   .albumApplyAll button {
     white-space: normal;
   }
+}
+/* Shared review surfaces: keep identity compact and details in the inspector. */
+.inlineActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.albumApplyAll {
+  padding: 20px;
+  margin-top: 0;
+}
+.readySummaryList {
+  gap: 12px;
+  margin: 16px 0;
+}
+.providerReference {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.providerReference code {
+  overflow-wrap: anywhere;
+  color: #b9c1d4;
+  user-select: all;
+}
+.providerReference a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 9px;
+  border: 1px solid #535a75;
+  border-radius: 6px;
+  color: #ded4ff;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.providerReference a:hover {
+  background: #302b46;
+  border-color: #ab92ed;
+}
+.releaseSection[data-view='detail'] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.releaseSection[data-view='detail'] .releaseDetail {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.editionNote {
+  margin: 4px 0;
+  color: #d9c8ff;
+  font-size: 15px;
+}
+.editionMeta {
+  margin: 0;
+  color: #b4bdcf;
+  font-size: 13px;
+}
+.releaseDetailHeader {
+  padding: 16px;
+}
+.releaseDetailHeader > div {
+  gap: 10px;
+  min-width: 0;
+}
+.releaseDetailHeader .candidateStats {
+  justify-content: flex-start;
+}
+.candidateCard {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.candidateCard > button:first-child {
+  flex: 1 1 350px;
+  min-width: 0;
+}
+.candidateCard .candidateUse {
+  margin: 12px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.candidateExceptions {
+  grid-template-columns: 1fr;
+  padding: 16px;
+  gap: 16px;
+}
+.candidateExceptions section {
+  padding: 14px 16px;
+  background: #251f28;
+  border: 0;
+  border-left: 3px solid #b47285;
+}
+.candidateExceptions ul {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-left: 24px;
+  font-size: 13px;
+  line-height: 1.5;
+  list-style: decimal;
+}
+.candidateExceptions li {
+  padding: 5px 4px;
+  border-bottom: 1px solid #3b303b;
+}
+.trackWorkspace .trackTableHead,
+.trackTableHead,
+.trackWorkspace .matrixRow,
+.matrixRow {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) minmax(100px, 0.5fr);
+  gap: 12px;
+}
+.trackWorkspace .rowPosition,
+.rowPosition {
+  grid-column: auto;
+  justify-self: start;
+}
+.matrixRow .rowStatus {
+  grid-column: auto;
+}
+.matrixRow {
+  padding: 12px;
+}
+.compactLocal,
+.compactRelease {
+  min-width: 0;
+}
+@media (max-width: 700px) {
+  .trackWorkspace .trackTableHead,
+  .trackTableHead {
+    display: none;
+  }
+  .trackWorkspace .matrixRow,
+  .matrixRow {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .matrixRow .rowPosition {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .matrixRow .rowStatus {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .compactLocal,
+  .compactRelease {
+    grid-column: 2;
+  }
+  .compactLocal::before {
+    content: 'Local file';
+    color: #a6aec3;
+    font-size: 11px;
+  }
+  .compactRelease::before {
+    content: 'Selected release track';
+    color: #a6aec3;
+    font-size: 11px;
+  }
+  .inlineActions {
+    justify-content: flex-start;
+  }
+  .albumApplyAll {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}
+.folderContext {
+  margin: 16px 0;
+  padding: 14px 0;
+  border-top: 1px solid #3b4053;
+}
+.folderContext h4 {
+  margin: 0 0 8px;
+}
+.folderContext p {
+  color: #b4bdcf;
+}
+.folderContext ul {
+  padding-left: 20px;
+}
+.folderContext li {
+  padding: 6px 0;
+  overflow-wrap: anywhere;
 }

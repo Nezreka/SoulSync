@@ -12,7 +12,8 @@ describe('ProviderReleaseId', () => {
     ['deezer', '219614472', 'https://www.deezer.com/album/219614472'],
   ])('links a %s release to its public catalog page', (source, id, href) => {
     render(<ProviderReleaseId source={source} releaseId={id} />);
-    expect(screen.getByRole('link', { name: id })).toHaveAttribute('href', href);
+    expect(screen.getByRole('link', { name: /View on/ })).toHaveAttribute('href', href);
+    expect(screen.getByText(id).closest('a')).toBeNull();
   });
 
   it('leaves an unknown provider as plain text', () => {

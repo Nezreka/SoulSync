@@ -7274,6 +7274,7 @@ class RepairWorker:
             self._bulk_fix_state = {
                 'running': True,
                 'operation_id': uuid.uuid4().hex,
+                'phase': 'metadata',
                 'review_case_ids': [key for key, _ in review_case_folders or []],
                 'total': len(ids),
                 'done': 0,
@@ -7293,6 +7294,7 @@ class RepairWorker:
                 # ("312 cover art, 40 lyrics") instead of one opaque number.
                 'per_type': {},
             }
+            self._save_bulk_fix_report()
             self._bulk_fix_thread = threading.Thread(
                 target=self._run_bulk_fix,
                 args=(list(ids), fix_action, review_approved,
@@ -7368,8 +7370,10 @@ class RepairWorker:
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:
                         state['errors'].append({'id': fid, 'error': error_msg})
+                self._save_bulk_fix_report(state)
             if (organize_album_ids and not state['failed'] and not state['stopped'] and
                     not state.get('error')):
+                state['phase'] = 'queueing_organization'
                 from core.reorganize_queue import get_queue
                 queue = get_queue()
                 for album_id in dict.fromkeys(organize_album_ids):
@@ -7386,7 +7390,12 @@ class RepairWorker:
                     )
                     if queued.get('queued') or queued.get('reason') == 'already_queued':
                         state['organize_queued'] += 1
+                    else:
+                        state['error'] = ('Metadata changes applied, but folder organization '
+                                          'could not be queued: ' + str(queued.get('reason') or queued.get('error') or 'unknown reason'))
+                        break
             if state['fixed'] and review_case_folders:
+                state['phase'] = 'queueing_reanalysis'
                 valid_cases = [(key, folder) for key, folder in review_case_folders if folder]
                 if len(valid_cases) <= 3:
                     queued = [self._schedule_album_refresh(key, folder, scope='discovery')
@@ -7429,14 +7438,30 @@ class RepairWorker:
             # loop raises, and if start_bulk_fix re-assigns the reference after
             # a very fast run it can only store an already-dead thread, which
             # the guard reads as not-running anyway.
+            state['phase'] = 'finished'
+            self._save_bulk_fix_report({**state, 'running': False})
             self._bulk_fix_thread = None
             state['running'] = False
             logger.info("Background bulk fix finished: %d fixed, %d failed of %d",
                         state['fixed'], state['failed'], state['total'])
 
-    def get_bulk_fix_status(self) -> dict:
+    def _save_bulk_fix_report(self, state=None):
+        from core.repair_operation_reports import save_report
+        try:
+            save_report(self.db, state if state is not None else self._bulk_fix_state)
+        except Exception:
+            logger.exception('Could not persist bulk operation report')
+
+    def get_bulk_fix_status(self, operation_id: str = None) -> dict:
         """Progress of the current (or most recent) background bulk fix."""
         with self._bulk_fix_lock:
+            if operation_id and operation_id != self._bulk_fix_state.get('operation_id'):
+                from core.repair_operation_reports import load_report
+                saved = load_report(self.db, operation_id)
+                if saved and saved.get('running'):
+                    saved = {**saved, 'running': False, 'stopped': True,
+                             'error': 'The server restarted during this operation. Review the refreshed album before retrying.'}
+                return saved or {'running': False, 'report_unavailable': True}
             state = dict(self._bulk_fix_state)
             state['errors'] = list(state.get('errors', []))
             return state

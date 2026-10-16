@@ -657,7 +657,9 @@ def repair_bulk_fix_status():
     try:
         if _repair_worker() is None:
             return jsonify({'running': False}), 200
-        return jsonify(_repair_worker().get_bulk_fix_status()), 200
+        operation_id = request.args.get('operation_id')
+        return jsonify(_repair_worker().get_bulk_fix_status(operation_id)
+                       if operation_id else _repair_worker().get_bulk_fix_status()), 200
     except Exception as e:
         logger.error(f"Error getting bulk fix status: {e}")
         return jsonify({'running': False, 'error': str(e)}), 500

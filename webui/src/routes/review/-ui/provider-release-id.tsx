@@ -1,4 +1,5 @@
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
+import styles from './review-page.module.css';
 
 function releaseUrl(source: string, releaseId: string): string | null {
   switch (source.toLowerCase()) {
@@ -22,11 +23,29 @@ export function ProviderReleaseId({
 }) {
   if (!releaseId) return <code>unknown</code>;
   const href = releaseUrl(source, releaseId);
-  return href ? (
-    <a href={href} target="_blank" rel="noreferrer">
-      <code>{releaseId}</code>
-    </a>
-  ) : (
-    <code>{releaseId}</code>
+  const provider =
+    { musicbrainz: 'MusicBrainz', itunes: 'Apple Music', deezer: 'Deezer' }[source.toLowerCase()] ||
+    source;
+  return <ProviderReference id={releaseId} href={href} provider={provider} />;
+}
+
+export function ProviderReference({
+  id,
+  href,
+  provider,
+}: {
+  id: string;
+  href: string | null;
+  provider: string;
+}) {
+  return (
+    <span className={styles.providerReference}>
+      <code>{id}</code>
+      {href && (
+        <a href={href} target="_blank" rel="noreferrer">
+          View on {provider} ↗
+        </a>
+      )}
+    </span>
   );
 }

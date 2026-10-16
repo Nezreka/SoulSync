@@ -2201,3 +2201,42 @@ def test_filename_and_library_row_repair_when_file_tags_are_already_correct(tmp_
     with db._get_connection() as conn:
         row = conn.execute('SELECT title, track_number, file_path FROM tracks WHERE id = 1').fetchone()
     assert tuple(row) == ('Hourglass', 2, str(target))
+
+
+def test_video_slots_are_excluded_without_discarding_bluray_audio(monkeypatch):
+    from core.repair_jobs.library_reconciliation import _score_release_candidates, candidate_preview
+    items = [
+        {'id': 'video', 'name': 'Concert video', 'video': True, 'disc_number': 1},
+        {'id': 'audio', 'name': 'Song', 'video': False, 'disc_number': 2,
+         'track_number': 1, 'duration_ms': 200000, 'medium_format': 'Blu-ray'},
+        {'id': 'unknown', 'name': 'Bonus', 'disc_number': 2, 'track_number': 2},
+    ]
+    monkeypatch.setattr('core.repair_jobs.library_reconciliation.get_album_tracks_for_source',
+                        lambda *args, **kwargs: {'items': items})
+    row = _score_release_candidates([], [('musicbrainz', 'release')], {})[0]
+    assert [slot['source_track_id'] for slot in row.slots] == ['audio', 'unknown']
+    assert row.plan['missing_slots'] == [0, 1]
+    assert candidate_preview([], row, {})['excluded_video_tracks'] == 1
+    assert _numbered_slot(row.slots[0], 0, 'digital', row.slots)['disc_number'] == 1
+    assert _numbered_slot(row.slots[0], 0, 'release', row.slots)['disc_number'] == 2
+
+
+def test_unassigned_download_grouping_requires_one_exact_album_owner():
+    from core.repair_jobs.library_reconciliation import _group_unassigned_downloads
+    folders = {'/artist/deluxe': ['/artist/deluxe/a'], '/artist/download': ['/artist/download/b']}
+    tracks = {'/artist/deluxe/a': {'album_id': 'deluxe'}}
+    albums = {'deluxe': {'album_title': 'motionblur (DELUXE)', 'artist_name': 'Split Chain',
+                          'musicbrainz_release_id': 'release'}}
+    tags = {'album': 'motionblur (DELUXE)', 'artist': 'Split Chain'}
+    trusted = {}
+    result = _group_unassigned_downloads(folders, tracks, albums, trusted, lambda _: tags)
+    assert result == {'/artist/deluxe': ['/artist/deluxe/a', '/artist/download/b']}
+    assert trusted == {'/artist/deluxe': 'deluxe'}
+    assert _group_unassigned_downloads(folders, tracks, albums, {},
+                                      lambda _: {**tags, 'artist': 'Other'}) == folders
+    assert _group_unassigned_downloads(folders, tracks, albums, {},
+                                      lambda _: {**tags, 'album': 'motionblur'}) == folders
+    folders['/artist/another'] = ['/artist/another/c']
+    tracks['/artist/another/c'] = {'album_id': 'other'}
+    albums['other'] = dict(albums['deluxe'])
+    assert _group_unassigned_downloads(folders, tracks, albums, {}, lambda _: tags) == folders

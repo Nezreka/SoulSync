@@ -413,6 +413,6 @@ export async function reanalyzeReviewCase(caseId: string): Promise<void> {
   );
 }
 
-export async function fetchReviewApplyStatus(): Promise<BulkFixStatus> {
-  return fetchBulkFixStatus(readJson<BulkFixStatus>);
+export async function fetchReviewApplyStatus(operationId?: string): Promise<BulkFixStatus> {
+  return fetchBulkFixStatus(readJson<BulkFixStatus>, operationId);
 }

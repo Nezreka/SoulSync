@@ -201,3 +201,32 @@ def test_large_review_batch_waits_for_its_followup_scan(tmp_path):
     assert status['reconciliation_queued'] and status['fixed'] == 4
     assert status['review_case_ids'] == [key for key, _ in cases]
     assert all(worker._album_refreshes[key]['state'] == 'running' for key, _ in cases)
+
+
+def test_completed_operation_survives_restart_and_new_operation(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _add_genre_finding(db, 'first', 1)
+    worker = _worker(db, tmp_path)
+    first = worker.start_bulk_fix(job_id='genre_cleanup')['operation_id']
+    _wait_done(worker)
+    worker._bulk_fix_thread.join() if worker._bulk_fix_thread else None
+    _add_genre_finding(db, 'second', 2)
+    second = worker.start_bulk_fix(job_id='genre_cleanup')['operation_id']
+    _wait_done(worker)
+    restarted = _worker(db, tmp_path)
+    for operation_id in [first, second]:
+        report = restarted.get_bulk_fix_status(operation_id)
+        assert report['operation_id'] == operation_id
+        assert report['fixed'] == 1
+        assert not report['running']
+    assert restarted.get_bulk_fix_status('unknown')['report_unavailable']
+
+
+def test_interrupted_operation_is_not_reported_as_success(tmp_path):
+    from core.repair_operation_reports import save_report
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    save_report(db, {'operation_id': 'interrupted', 'running': True, 'done': 1, 'fixed': 1})
+    report = _worker(db, tmp_path).get_bulk_fix_status('interrupted')
+    assert report['stopped'] and not report['running']
+    assert 'restarted' in report['error']
+    assert report['fixed'] == 1

@@ -85,12 +85,15 @@ flowchart TD
 
 The evidence cache uses retry delays of 1, 2, 4 and 8 seconds and a service-failure circuit threshold of 3. Renaming/tag editing can invalidate the path/stat cache while still reusing the fingerprint-keyed lookup. Cache failure is not evidence that a song is absent.
 
+- Unindexed sibling download folders join exactly one release-backed album only when every file agrees on the exact album and artist tags, preserving edition qualifiers. Multiple owners, mixed tags, or unknown tags keep folders separate. Joint recording/version/duration assignment follows grouping; grouping alone never verifies audio or moves files.
+
 ## 3. Release discovery, ranking and edition choice
 
 ```mermaid
 flowchart TD
     Seed["Start with canonical pin and linked provider album/release IDs"] --> Load["Fetch provider tracklists; normalize slot title, artist, disc/track, duration, recording ID and version description"]
-    Load --> Score["Run the same file-slot matcher for every candidate"]
+    Load --> Audio["Exclude explicitly video-marked recordings from audio review; retain unknown flags and audio on any medium, plus original disc/track identity"]
+    Audio --> Score["Run the same file-slot matcher for every candidate"]
     Score --> Expand{"Insufficient coverage or album-context conflict?"}
     Expand -->|Yes| Discover["Bounded title/artist searches, MusicBrainz release-group alternatives or audio-seeded releases"]
     Discover --> ScoreMore["Score added candidates with the same matcher"]
@@ -285,7 +288,6 @@ flowchart TD
     Modes --> Plan["Plan: dynamic ordered decisions, completion checks, apply controls and album context"]
     Modes --> Release["Release: candidate cards and shared mapping inspector; explicit Use this release"]
     Modes --> Tracks["Tracks: all assignment states, filters and shared evidence/action inspector"]
-    Modes --> Evidence["Evidence: supporting album reasoning and selected finding evidence"]
 ```
 
 The UI distinguishes **confirmed by evidence**, **previously reviewed**, **numbering preview**, **ready metadata**, **unresolved**, and **waiting for fulfillment**. A purple selected-row outline means selection only; it does not change risk or confidence. A green completed decision is distinct from a ready action that has not yet been applied. Counts refer to albums, tracks/slots, actions or grouped field changes as labeled; these quantities are not interchangeable.
@@ -315,7 +317,7 @@ flowchart TD
     Updating --> Fresh["Replace with refreshed case; completed case advances, unresolved case stays open"]
     Batch["Server-side bulk operation has operation ID and progress counters"] --> Result
     Batch --> Navigate["Browser can leave; worker continues independently"]
-    Navigate --> Reconnect["Return and poll operation ID; recover running progress or explain unavailable/replaced report"]
+    Navigate --> Reconnect["Return and poll operation ID; recover report by immutable operation ID; ignore stale polls; distinguish interrupted runs from completed reports"]
 ```
 
 Additional application constraints:
@@ -324,6 +326,7 @@ Additional application constraints:
 - Saved assignment overrides are scoped to release and file evidence. Two files cannot manually reserve one release slot. Confirming an assignment reanalyzes the album before dependent metadata is offered.
 - Metadata apply checks current tag/library values, metadata locks and rename collisions. It is not blanket permission to overwrite unrelated fields or choose a different release.
 - Recoverable quarantine is explicit; the ordinary ready-metadata batch excludes it.
+- Operation reports are persisted at start, after each item and at completion, retained for 30 days. A restarted worker marks unfinished reports as interrupted; it does not replay them. Organization and reanalysis are reported as queued, separately from completed metadata edits.
 - Bulk jobs report individual failures. Navigation does not cancel an in-process server job; a server restart is different, and an unavailable operation report is surfaced rather than invented as success.
 - Broad batches can queue a full reconciliation. Completion of a scan that began before the action cannot stand in for the post-action refresh.
 - Successfully wishlisting a missing track keeps the album pending until fulfillment is reconciled. A wishlist state is not proof of download completion.

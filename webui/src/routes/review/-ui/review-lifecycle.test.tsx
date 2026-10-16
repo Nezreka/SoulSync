@@ -162,7 +162,7 @@ it('restores an operation after returning and reports its terminal result', asyn
   const read = fetchMock.getMockImplementation()!;
   window.sessionStorage.setItem('review-operation', 'operation-one');
   fetchMock.mockImplementation(async (input: string) =>
-    input.endsWith('/bulk-fix/status')
+    new URL(input, 'http://localhost').pathname.endsWith('/bulk-fix/status')
       ? reply({ operation_id: 'operation-one', running: false, fixed: 2, total: 2 })
       : read(input),
   );
