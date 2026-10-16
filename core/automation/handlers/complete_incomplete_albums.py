@@ -122,12 +122,24 @@ def auto_complete_incomplete_albums(config, deps):
         seen_releases.add(release_key)
         eligible.append(finding)
 
-        if len(eligible) >= max_albums:
-            break
-
+    # max_albums caps what gets queued, not what gets looked at. capping the
+    # candidates let cooling-down or re-pinned albums at the top eat every slot
     queued = 0
+    cooling_down = getattr(deps, 'album_completion_cooling_down', None)
     for finding in eligible:
+        if queued >= max_albums:
+            break
         details = finding['details']
+
+        if callable(cooling_down):
+            try:
+                if cooling_down(
+                    str(details['canonical_source']).strip(),
+                    str(details['canonical_album_id']).strip(),
+                ):
+                    continue
+            except Exception:  # noqa: S110 — the queue's claim is the real gate
+                pass
 
         try:
             pin = deps.get_current_album_pin(details.get("album_id"))

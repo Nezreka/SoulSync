@@ -1615,7 +1615,7 @@ def _register_automation_handlers():
     from core.automation.album_completion_queue import queue_album_completion
     from core.automation.album_completion_scope import verify_shared_album_scope
     from core.automation.album_completion_verify import filter_still_missing
-    from core.automation.album_completion_cooldown import claim_attempt, release_attempt
+    from core.automation.album_completion_cooldown import claim_attempt, is_cooling_down, release_attempt
     from core.automation.album_pin import get_current_album_pin
     from core.search.enriched_download import fetch_release
 
@@ -1649,6 +1649,9 @@ def _register_automation_handlers():
             ),
         )
         return queue_album_completion(**kwargs, deps=completion_deps)
+
+    def _completion_cooling_down(source, release_id):
+        return is_cooling_down(get_database(), get_current_profile_id(), source, release_id)
 
     def _get_completion_album_pin(album_id):
         return get_current_album_pin(get_database(), album_id)
@@ -1705,6 +1708,7 @@ def _register_automation_handlers():
         queue_album_completion=_queue_album_completion,
         get_current_album_pin=_get_completion_album_pin,
         fetch_canonical_release=_fetch_completion_release,
+        album_completion_cooling_down=_completion_cooling_down,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,

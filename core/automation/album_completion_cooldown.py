@@ -1,5 +1,6 @@
 """Persistent, atomic cooldown for automatic album-completion attempts."""
 
+import sqlite3
 import time
 import uuid
 
@@ -73,3 +74,29 @@ def release_attempt(db, profile_id, source, release_id, token):
         raise
     finally:
         conn.close()
+
+
+def is_cooling_down(db, profile_id, source, release_id, *, now=None):
+    """Read-only peek so the handler can skip a release without fetching it.
+
+    claim_attempt is still the real gate, this just saves the api call.
+    """
+    if profile_id is None or not source or not release_id:
+        return False
+    timestamp = time.time() if now is None else float(now)
+    conn = db._get_connection()
+    try:
+        row = conn.execute("""
+            SELECT claimed_at FROM album_completion_attempts
+            WHERE profile_id = ?
+              AND canonical_source = ?
+              AND canonical_album_id = ?
+        """, (
+            str(profile_id), str(source).casefold(), str(release_id),
+        )).fetchone()
+    except sqlite3.OperationalError:
+        # no claims yet, table not created
+        return False
+    finally:
+        conn.close()
+    return row is not None and row[0] > timestamp - COOLDOWN_SECONDS

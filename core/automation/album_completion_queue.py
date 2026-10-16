@@ -1,8 +1,9 @@
 """Safe, profile-scoped album-completion batch creation."""
 
-
+import logging
 import uuid
 
+logger = logging.getLogger(__name__)
 
 
 def prepare_completion_tracks(album, missing_tracks, source, artist, *, expected_album_id=None):
@@ -57,7 +58,9 @@ def queue_album_completion(*, canonical_source, canonical_album_id, album_id, al
     except Exception:
         return {"status": "skipped", "reason": "Library verification failed"}
     batches = deps.download_batches
-    with deps.tasks_lock:
+
+    def _blocked():
+        # called under tasks_lock. no db work in here, the lock is the download hot path
         for batch in batches.values():
             if (batch.get("phase") not in ("complete", "error", "cancelled", "failed")
                     and batch.get("album_completion_only")
@@ -67,56 +70,75 @@ def queue_album_completion(*, canonical_source, canonical_album_id, album_id, al
                 return {"status": "skipped", "reason": "Release already queued"}
         if sum(1 for batch in batches.values() if batch.get("phase") == "analysis") >= 3:
             return {"status": "skipped", "reason": "Too many active analysis batches"}
-        claim = getattr(deps, "claim_completion_attempt", None)
-        release = getattr(deps, "release_completion_attempt", None)
-        if not callable(claim) or not callable(release):
-            return {"status": "skipped", "reason": "Persistent cooldown unavailable"}
-        try:
-            cooldown_token = claim(
-                profile_id, canonical_source, canonical_album_id
-            )
-        except Exception:
-            return {"status": "skipped", "reason": "Persistent cooldown failed"}
-        if not cooldown_token:
-            return {"status": "skipped", "reason": "Release is cooling down"}
+        return None
 
-        batch_id = str(uuid.uuid4())
-        batches[batch_id] = {
-            "phase": "analysis",
-            "playlist_id": "album_completion:" + str(album_id),
-            "playlist_name": album_title,
-            "queue": [],
-            "active_count": 0,
-            "max_concurrent": 1,
-            "permanently_failed_tracks": [],
-            "cancelled_tracks": set(),
-            "queue_index": 0,
-            "analysis_total": len(missing_tracks),
-            "analysis_processed": 0,
-            "analysis_results": [],
-            "profile_id": profile_id,
-            "canonical_source": canonical_source,
-            "canonical_album_id": canonical_album_id,
-            "album_completion_only": True,
-            "is_album_download": True,
-            "force_download_all": False,
-            "force_replace": False,
-            "ignore_manual_matches": False,
-            "ignore_blocklist": False,
-            "playlist_folder_mode": False,
-            "album_context": album_ctx,
-            "artist_context": {
-                "name": (album_ctx.get("artists") or [{}])[0].get("name", artist),
-                "id": "",
-                "genres": [],
-                "source": canonical_source,
-            },
-            "wing_it": False,
-            "skip_acoustid": False,
-            "batch_source": canonical_source,
-            "playlist_source": canonical_source,
-            "requested_quality_profile_id": None,
-        }
+    with deps.tasks_lock:
+        blocked = _blocked()
+    if blocked:
+        return blocked
+
+    claim = getattr(deps, "claim_completion_attempt", None)
+    release = getattr(deps, "release_completion_attempt", None)
+    if not callable(claim) or not callable(release):
+        return {"status": "skipped", "reason": "Persistent cooldown unavailable"}
+    # claim outside the lock, it's a sqlite write
+    try:
+        cooldown_token = claim(
+            profile_id, canonical_source, canonical_album_id
+        )
+    except Exception:
+        return {"status": "skipped", "reason": "Persistent cooldown failed"}
+    if not cooldown_token:
+        return {"status": "skipped", "reason": "Release is cooling down"}
+
+    batch_id = str(uuid.uuid4())
+    new_batch = {
+        "phase": "analysis",
+        "playlist_id": "album_completion:" + str(album_id),
+        "playlist_name": album_title,
+        "queue": [],
+        "active_count": 0,
+        "max_concurrent": 1,
+        "permanently_failed_tracks": [],
+        "cancelled_tracks": set(),
+        "queue_index": 0,
+        "analysis_total": len(missing_tracks),
+        "analysis_processed": 0,
+        "analysis_results": [],
+        "profile_id": profile_id,
+        "canonical_source": canonical_source,
+        "canonical_album_id": canonical_album_id,
+        "album_completion_only": True,
+        "is_album_download": True,
+        "force_download_all": False,
+        "force_replace": False,
+        "ignore_manual_matches": False,
+        "ignore_blocklist": False,
+        "playlist_folder_mode": False,
+        "album_context": album_ctx,
+        "artist_context": {
+            "name": (album_ctx.get("artists") or [{}])[0].get("name", artist),
+            "id": "",
+            "genres": [],
+            "source": canonical_source,
+        },
+        "wing_it": False,
+        "skip_acoustid": False,
+        "batch_source": canonical_source,
+        "playlist_source": canonical_source,
+        "requested_quality_profile_id": None,
+    }
+    with deps.tasks_lock:
+        # recheck, another batch may have landed while we claimed
+        blocked = _blocked()
+        if not blocked:
+            batches[batch_id] = new_batch
+    if blocked:
+        try:
+            release(profile_id, canonical_source, canonical_album_id, cooldown_token)
+        except Exception:
+            logger.debug("[Album Completion] cooldown release failed", exc_info=True)
+        return blocked
     try:
         deps.submit(batch_id, "album_completion:" + str(album_id), prepared_tracks)
     except Exception:

@@ -186,3 +186,5 @@ class AutomationDeps:
     queue_album_completion: Optional[Callable[..., Any]] = None
     get_current_album_pin: Optional[Callable[..., Any]] = None
     fetch_canonical_release: Optional[Callable[..., Any]] = None
+    # album_completion_cooling_down(source, release_id) -> bool, read-only peek
+    album_completion_cooling_down: Optional[Callable[..., Any]] = None

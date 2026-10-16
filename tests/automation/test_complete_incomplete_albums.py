@@ -548,3 +548,95 @@ def test_failed_pagination_never_queues_downloads():
     assert pages_requested == [0, 1]
     assert result["status"] == "skipped"
     assert queued == []
+
+
+def _release_deps(findings, queue, **extra):
+    return SimpleNamespace(
+        get_repair_findings=lambda **kw: {'items': findings, 'total': len(findings)},
+        get_current_album_pin=lambda album_id: {
+            'owner_profile_id': None, 'canonical_source': 'spotify',
+            'canonical_album_id': f'release-{album_id}',
+        },
+        fetch_canonical_release=extra.pop('fetch', None) or (lambda **kw: {
+            'album': {'id': kw['canonical_album_id'], 'source': kw['canonical_source']},
+            'tracks': [{'id': 'track-' + kw['canonical_album_id'], 'name': 'Missing Song',
+                        'track_number': 8, 'disc_number': 1}],
+        }),
+        queue_album_completion=queue,
+        **extra,
+    )
+
+
+_GOOD_SCAN = {'job_id': 'album_completeness', 'run_status': 'completed', 'errors': 0}
+
+
+def test_cooling_down_albums_do_not_eat_the_slots():
+    # first three keep failing and sit in cooldown, the fourth must still get its turn
+    findings = [_pinned_finding(i, i, f'release-{i}') for i in (1, 2, 3, 4)]
+    queued = []
+
+    def queue(**kw):
+        if kw['canonical_album_id'] in ('release-1', 'release-2', 'release-3'):
+            return {'status': 'skipped', 'reason': 'Release is cooling down'}
+        queued.append(kw['canonical_album_id'])
+        return {'status': 'queued'}
+
+    result = auto_complete_incomplete_albums(
+        {'_event_data': _GOOD_SCAN, 'max_albums': 3}, _release_deps(findings, queue))
+
+    assert queued == ['release-4']
+    assert result['queued_albums'] == 1
+
+
+def test_max_albums_still_caps_what_gets_queued():
+    findings = [_pinned_finding(i, i, f'release-{i}') for i in (1, 2, 3, 4)]
+    queued = []
+    queue = lambda **kw: queued.append(kw['canonical_album_id']) or {'status': 'queued'}  # noqa: E731
+
+    result = auto_complete_incomplete_albums(
+        {'_event_data': _GOOD_SCAN, 'max_albums': 2}, _release_deps(findings, queue))
+
+    assert queued == ['release-1', 'release-2']
+    assert result['queued_albums'] == 2
+
+
+def test_cooling_down_peek_skips_the_release_fetch():
+    findings = [_pinned_finding(i, i, f'release-{i}') for i in (1, 2)]
+    fetched = []
+    queued = []
+
+    def fetch(**kw):
+        fetched.append(kw['canonical_album_id'])
+        return {
+            'album': {'id': kw['canonical_album_id'], 'source': kw['canonical_source']},
+            'tracks': [{'id': 'track-' + kw['canonical_album_id'], 'name': 'Missing Song',
+                        'track_number': 8, 'disc_number': 1}],
+        }
+
+    deps = _release_deps(
+        findings,
+        lambda **kw: queued.append(kw['canonical_album_id']) or {'status': 'queued'},
+        fetch=fetch,
+        album_completion_cooling_down=lambda source, release_id: release_id == 'release-1',
+    )
+    auto_complete_incomplete_albums({'_event_data': _GOOD_SCAN, 'max_albums': 3}, deps)
+
+    assert fetched == ['release-2']
+    assert queued == ['release-2']
+
+
+def test_broken_cooling_down_peek_falls_through_to_the_queue():
+    findings = [_pinned_finding(1, 1, 'release-1')]
+    queued = []
+
+    def peek(source, release_id):
+        raise RuntimeError('db gone')
+
+    deps = _release_deps(
+        findings,
+        lambda **kw: queued.append(kw['canonical_album_id']) or {'status': 'queued'},
+        album_completion_cooling_down=peek,
+    )
+    auto_complete_incomplete_albums({'_event_data': _GOOD_SCAN, 'max_albums': 3}, deps)
+
+    assert queued == ['release-1']

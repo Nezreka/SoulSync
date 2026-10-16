@@ -398,3 +398,65 @@ def test_unavailable_cooldown_never_submits():
     assert result["status"] == "skipped"
     assert submissions == []
     assert deps.download_batches == {}
+
+
+def _queue_kwargs(deps):
+    return dict(
+        canonical_source="spotify", canonical_album_id="release-123",
+        album_id=42, album_title="Test Album", artist="Test Artist",
+        missing_tracks=[{"id": "track-1", "name": "Missing Song"}],
+        canonical_album={"id": "release-123", "source": "spotify", "name": "Test Album",
+                         "artists": [{"name": "Test Artist"}]},
+        deps=deps,
+    )
+
+
+def test_cooldown_claim_runs_outside_tasks_lock():
+    # the claim is a sqlite write, holding tasks_lock across it stalls every download
+    lock = Lock()
+    held = []
+    submissions = []
+    deps = SimpleNamespace(
+        profile_id=2, download_batches={}, tasks_lock=lock,
+        verify_album_scope=lambda album_id, profile_id: True,
+        verify_missing_tracks=lambda album_id, tracks, profile_id, related_album_ids: tracks,
+        claim_completion_attempt=lambda *args: held.append(lock.locked()) or "token-1",
+        release_completion_attempt=lambda *args: None,
+        submit=lambda *args: submissions.append(args),
+    )
+
+    result = queue_album_completion(**_queue_kwargs(deps))
+
+    assert result["status"] == "queued"
+    assert held == [False]
+    assert len(submissions) == 1
+
+
+def test_duplicate_landing_during_claim_releases_the_cooldown():
+    batches = {}
+    releases = []
+    submissions = []
+
+    def claim(*args):
+        # another run queues the same release while we're claiming
+        batches["racer"] = {
+            "phase": "analysis", "profile_id": 2, "album_completion_only": True,
+            "canonical_source": "spotify", "canonical_album_id": "release-123",
+        }
+        return "token-1"
+
+    deps = SimpleNamespace(
+        profile_id=2, download_batches=batches, tasks_lock=Lock(),
+        verify_album_scope=lambda album_id, profile_id: True,
+        verify_missing_tracks=lambda album_id, tracks, profile_id, related_album_ids: tracks,
+        claim_completion_attempt=claim,
+        release_completion_attempt=lambda *args: releases.append(args),
+        submit=lambda *args: submissions.append(args),
+    )
+
+    result = queue_album_completion(**_queue_kwargs(deps))
+
+    assert result == {"status": "skipped", "reason": "Release already queued"}
+    assert list(batches) == ["racer"]
+    assert releases == [(2, "spotify", "release-123", "token-1")]
+    assert submissions == []

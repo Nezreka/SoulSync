@@ -3,7 +3,7 @@
 import sqlite3
 
 from core.automation.album_completion_cooldown import (
-    claim_attempt, release_attempt,
+    claim_attempt, is_cooling_down, release_attempt,
 )
 
 
@@ -54,3 +54,16 @@ def test_stale_token_cannot_release_newer_reservation(tmp_path):
     assert claim_attempt(
         db, 2, "deezer", "release-1", now=186402
     ) is None
+
+
+def test_peek_matches_the_claim_window(tmp_path):
+    db = DB(tmp_path / "music.db")
+    # no table yet, nothing claimed
+    assert is_cooling_down(db, 2, "deezer", "release-1", now=100000) is False
+    assert claim_attempt(db, 2, "Deezer", "release-1", now=100000)
+    assert is_cooling_down(db, 2, "DEEZER", "release-1", now=100100) is True
+    assert is_cooling_down(db, 3, "deezer", "release-1", now=100100) is False
+    assert is_cooling_down(db, 2, "deezer", "release-2", now=100100) is False
+    # once the claim would succeed again, the peek must say so too
+    assert is_cooling_down(db, 2, "deezer", "release-1", now=186400) is False
+    assert claim_attempt(db, 2, "deezer", "release-1", now=186400)
