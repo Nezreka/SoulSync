@@ -96,16 +96,12 @@ def _invalidate_mirror_sync_fingerprint(playlist_id):
     the smallest change that makes the very next scheduled run authoritative,
     and it degrades safely: a lost preference write only costs one extra sync.
     """
+    from core.sync.sync_fingerprint import clear_fingerprint
     key = f"auto_mirror_{int(playlist_id)}"
     try:
         sync_statuses = _load_sync_status_file()
-        status = sync_statuses.get(key)
-        if not status:
-            return
-        for field in ('tracks_hash', 'mirror_tracks_hash', 'matched_tracks'):
-            status.pop(field, None)
-        sync_statuses[key] = status
-        _save_sync_status_file(sync_statuses)
+        if clear_fingerprint(sync_statuses, key):
+            _save_sync_status_file(sync_statuses)
     except Exception as e:
         logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
 

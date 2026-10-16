@@ -151,7 +151,7 @@ def run_mirrored_playlist_pipeline(
                 log_line='Refresh only: nothing pushed to the server or downloaded',
                 log_type='info',
             )
-            sync_summary = {'synced': 0, 'skipped': 0, 'wishlist_queued': 0}
+            sync_summary = {'synced': 0, 'skipped': 0, 'errors': 0, 'wishlist_queued': 0}
         else:
             sync_summary = sync_and_wishlist_fn(
                 deps,
@@ -193,6 +193,11 @@ def run_mirrored_playlist_pipeline(
         if skipped > 0:
             final_log_line += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             final_log_type = 'warning'
+        # imported here: core.automation.handlers imports this module
+        from core.automation.handlers._pipeline_shared import apply_sync_errors
+        result_errors: Dict[str, Any] = {}
+        final_log_line, final_log_type = apply_sync_errors(
+            sync_summary, result_errors, final_log_line, final_log_type)
         deps.update_progress(
             automation_id,
             status='finished',
@@ -212,6 +217,7 @@ def run_mirrored_playlist_pipeline(
             'sync_skipped': str(sync_summary['skipped']),
             'wishlist_queued': str(sync_summary['wishlist_queued']),
             'duration_seconds': str(duration),
+            **result_errors,
         }
         try:
             _record_playlist_pipeline_history(

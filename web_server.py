@@ -19562,6 +19562,25 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
     except Exception as e:
         logger.error(f"Error updating sync status for {playlist_id}: {e}")
 
+def _invalidate_sync_fingerprint(playlist_id):
+    """Drop the smart-skip fingerprint of a playlist whose sync failed.
+
+    A scheduled run skips a playlist whose track hash is unchanged and was
+    fully matched last time. A later failed write leaves that fingerprint
+    from the last good run in place, so the next run would skip the write
+    again, indefinitely. The rest of the status (last_synced, snapshot) still
+    describes that last good write and stays.
+    """
+    from core.sync.sync_fingerprint import clear_fingerprint
+    try:
+        sync_statuses = _load_sync_status_file()
+        if not clear_fingerprint(sync_statuses, playlist_id):
+            return
+        _save_sync_status_file(sync_statuses)
+        logger.info(f"Cleared smart-skip fingerprint for playlist {playlist_id} after a failed sync")
+    except Exception as e:
+        logger.error(f"Error clearing sync fingerprint for {playlist_id}: {e}")
+
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
     """Fetches all user playlists from Spotify and enriches them with local sync status."""
@@ -23717,6 +23736,7 @@ _cfg_sp(
     _run_full_missing_tracks_process=_run_full_missing_tracks_process,
     _tracks_with_mirrored_quality_profile=_tracks_with_mirrored_quality_profile,
     _update_and_save_sync_status=_update_and_save_sync_status,
+    _invalidate_sync_fingerprint=_invalidate_sync_fingerprint,
     _update_automation_progress=_update_automation_progress,
     is_wishlist_actually_processing=is_wishlist_actually_processing,
     get_tidal_client_for_profile=get_tidal_client_for_profile,

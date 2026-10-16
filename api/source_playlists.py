@@ -70,6 +70,7 @@ _recover_youtube_artist_cleaned = None
 _run_full_missing_tracks_process = None
 _tracks_with_mirrored_quality_profile = None
 _update_and_save_sync_status = None
+_invalidate_sync_fingerprint = None
 _update_automation_progress = None
 is_wishlist_actually_processing = None
 get_tidal_client_for_profile = None
@@ -5282,6 +5283,7 @@ def _build_sync_deps():
         record_sync_history_start=_record_sync_history_start,
         update_automation_progress=_update_automation_progress,
         update_and_save_sync_status=_update_and_save_sync_status,
+        invalidate_sync_fingerprint=_invalidate_sync_fingerprint,
         sync_states=sync_states,
         sync_lock=sync_lock,
         process_wishlist_automatically=_process_wishlist_automatically,

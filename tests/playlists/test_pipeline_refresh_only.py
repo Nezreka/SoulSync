@@ -125,3 +125,22 @@ def test_endpoint_default_is_the_full_pipeline(client):
     r = c.post('/api/mirrored-playlists/7/pipeline/run', json={})
     assert r.get_json()['state']['phase'] == 'Starting pipeline...'
     assert started[-1][-1] is False
+
+
+def test_a_failed_sync_is_reported_not_a_clean_completion(db):
+    """A sync that ended in error was counted, then dropped from the result:
+    the card read "Completed / Synced 0" with no sign anything failed."""
+    from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
+    pl_id = db.get_mirrored_playlists(1)[0]['id']
+    states = {f'auto_mirror_{pl_id}': {
+        'status': 'error', 'error': 'Navidrome playlist write failed'}}
+    deps = _minimal_deps(get_database=lambda: db, get_sync_states=lambda: states)
+    result = pipeline.run_mirrored_playlist_pipeline(
+        {'playlist_id': str(pl_id), 'profile_id': 1, '_automation_id': 'mirrored_x'},
+        deps,
+        refresh_fn=lambda cfg, deps: {'refreshed': '1', 'errors': '0'},
+        sync_one_fn=lambda *a, **k: {'status': 'started'},
+        sync_and_wishlist_fn=run_sync_and_wishlist,
+    )
+    assert result['sync_errors'] == '1'
+    assert 'Navidrome playlist write failed' in result['error']
