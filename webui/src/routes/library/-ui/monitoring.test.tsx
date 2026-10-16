@@ -74,6 +74,29 @@ describe('library v2 monitoring mutations', () => {
     expect(writes).toBe(0);
   });
 
+  it('shows pending sync outside the page and removes it when the queue drains', async () => {
+    let pending = 83;
+    server.use(
+      http.get('/api/library/v2/mirror-status', () =>
+        HttpResponse.json({ success: true, pending, failed: 0 }),
+      ),
+    );
+    const queryClient = createTestQueryClient();
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MirrorStatusBanner />
+      </QueryClientProvider>,
+    );
+    const message = await screen.findByText('83 wishlist sync operations pending…');
+    expect(view.container).not.toContainElement(message);
+    expect(screen.getByRole('region', { name: 'Background activity' })).toContainElement(message);
+    pending = 0;
+    await queryClient.invalidateQueries();
+    await waitFor(() =>
+      expect(screen.queryByText('83 wishlist sync operations pending…')).not.toBeInTheDocument(),
+    );
+  });
+
   it('shows a monitor-toggle failure and lets the same action retry', async () => {
     let attempts = 0;
     server.use(

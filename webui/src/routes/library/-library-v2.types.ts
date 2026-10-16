@@ -43,7 +43,7 @@ const libraryV2SearchObject = z.object({
   page: z.coerce.number().int().positive().default(1).catch(1),
   artist: z.coerce.number().int().positive().optional().catch(undefined),
   album: z.coerce.number().int().positive().optional().catch(undefined),
-  /** Artist detail: release collection or on-demand music videos. */
+  /** Compatibility with old links; videos now appear within Discovery. */
   artistView: z.enum(['releases', 'videos']).default('releases').catch('releases'),
   /** External entry hides management tools until the user chooses My Library. */
   immersive: z.boolean().default(false).catch(false),
@@ -55,6 +55,8 @@ const libraryV2SearchObject = z.object({
   /** The artist's display name — some sources (Bandcamp) have no id lookup at
    *  all, so the name has to travel in the URL. */
   discoverName: coercedString.optional().catch(undefined),
+  /** Legacy provider-album focus, carried through to the provider detail page. */
+  discoverAlbum: coercedString.optional().catch(undefined),
   /** ldp-03: `All Releases` renders as the V2 table or as the legacy card grid. */
   releaseView: z.enum(['table', 'cards']).optional().catch(undefined),
   /** ldp-05: compact V2 artist header vs. the rich legacy hero. */

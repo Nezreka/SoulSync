@@ -125,15 +125,16 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(detailRequests).toHaveLength(0);
   });
 
-  it('opens any other provider artist in Library Discovery', async () => {
+  it('keeps unknown provider artists on the original detail page without Library tabs', async () => {
     const { router } = renderAt('/artist-detail/deezer/2481?name=Aphex%20Twin');
 
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe('/library');
+    expect(router.state.location.pathname).toBe('/artist-detail/deezer/2481');
     expect(router.state.location.search).toMatchObject({
-      discover: 'deezer:2481',
-      view: 'discovery',
+      name: 'Aphex Twin',
     });
+    expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Discovery' })).not.toBeInTheDocument();
     expect(detailRequests[0]?.searchParams.get('source')).toBe('deezer');
     expect(detailRequests[0]?.searchParams.get('name')).toBe('Aphex Twin');
   });

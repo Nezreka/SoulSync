@@ -59,6 +59,19 @@ export const Route = createFileRoute('/library')({
           },
           replace: true,
         });
+      const albumSplit = search.discoverAlbum?.indexOf(':') ?? -1;
+      throw redirect({
+        to: '/artist-detail/$source/$id',
+        params: { source, id: providerId },
+        search: {
+          name: search.discoverName ?? '',
+          album:
+            albumSplit > 0 && search.discoverAlbum?.slice(0, albumSplit) === source
+              ? search.discoverAlbum.slice(albumSplit + 1)
+              : undefined,
+        },
+        replace: true,
+      });
     }
   },
   loaderDeps: ({ search }) => ({

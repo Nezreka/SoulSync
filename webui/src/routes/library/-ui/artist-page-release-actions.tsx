@@ -11,10 +11,20 @@ import {
 import { artistDetailQueryOptions } from '../../artist-detail/-artist-detail.api';
 import styles from './library-v2-page.module.css';
 
-/** Native monitoring for the preserved provider-artist components.
- * Library Discovery reuses their cards and shared track dialog for artists
- * without a catalogue row. Browsing is read-only; monitoring creates a native
- * identity and enables My Library through the supplied callback. */
+/**
+ * What Library v2 adds to upstream's artist page.
+ *
+ * That page is upstream's, unchanged, and shows only artists the catalogue
+ * does not hold: the route sends every other one to Library v2, and wraps the
+ * page in the provider below. Its release cards get a bookmark from here,
+ * through one line in `release-card.tsx`, that monitors the whole release.
+ * A click on the card still opens upstream's download dialog, which picks
+ * single tracks (see shell/download-modal-library.ts). Nothing is written
+ * until the user asks.
+ *
+ * Outside the provider (upstream's own tests, any other page that renders a
+ * release card) the card is exactly upstream's.
+ */
 
 const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
 
@@ -25,7 +35,6 @@ interface ArtistPageLibrary {
   artistName: string;
   /** The source that produced the discography, which owns the release ids. */
   discographySource: string;
-  onMonitored?: (artistId: number) => void;
 }
 
 interface ArtistPageRelease {
@@ -69,13 +78,11 @@ export function ArtistPageLibraryProvider({
   id,
   name,
   children,
-  onMonitored,
 }: {
   source: string;
   id: string;
   name: string;
   children: ReactNode;
-  onMonitored?: (artistId: number) => void;
 }) {
   // The page's own query under the same key, so this reads its cache.
   const detail = useQuery(artistDetailQueryOptions(source, id, name));
@@ -84,8 +91,8 @@ export function ArtistPageLibraryProvider({
   const discographySource = detail.data?.discography?.source || normalizedSource;
 
   const value = useMemo<ArtistPageLibrary>(
-    () => ({ source: normalizedSource, id, artistName, discographySource, onMonitored }),
-    [normalizedSource, id, artistName, discographySource, onMonitored],
+    () => ({ source: normalizedSource, id, artistName, discographySource }),
+    [normalizedSource, id, artistName, discographySource],
   );
 
   return (
@@ -121,7 +128,7 @@ function MonitorButton({
     if (!target || state !== 'idle') return;
     setState('busy');
     try {
-      const result = await monitorLibraryV2DiscoveryAlbum({
+      await monitorLibraryV2DiscoveryAlbum({
         source: target.source,
         artistSource: library.source,
         artistProviderId: library.id,
@@ -134,7 +141,6 @@ function MonitorButton({
         trackCount: target.trackCount,
       });
       setState('done');
-      library.onMonitored?.(result.artistId);
       // The artist has a catalogue row now; the route's lookup has to see it.
       void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
     } catch (error) {

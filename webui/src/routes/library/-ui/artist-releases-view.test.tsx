@@ -168,7 +168,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(router.state.location.search).toMatchObject({ immersive: false });
   });
 
-  it('loads music videos only when opened and preserves the release view', async () => {
+  it('automatically checks videos in Discovery and hides an empty shelf without a video button', async () => {
     const searches = vi.fn();
     server.use(
       http.post('/api/enhanced-search/source/youtube_videos', () => {
@@ -178,24 +178,42 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     const { router } = renderArtist('/library?artist=1&releases=all&releaseView=cards');
     await screen.findByRole('heading', { name: 'Portishead' });
-    expect(searches).not.toHaveBeenCalled();
-    expect(screen.queryByRole('heading', { name: 'Music Videos' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Music Videos$/ }));
-    await screen.findByText('No music videos found for this artist.');
-    expect(searches).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(searches).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: 'Music Videos' })).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: /^Music Videos$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('No music videos found for this artist.')).not.toBeInTheDocument();
     expect(router.state.location.search).toMatchObject({
-      artistView: 'videos',
+      artistView: 'releases',
       releases: 'all',
       releaseView: 'cards',
     });
     expect(screen.getByRole('button', { name: 'Discover View' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /^Music Videos$/ }));
-    await screen.findByRole('button', { name: 'Discover View' });
-    expect(router.state.location.search).toMatchObject({
-      artistView: 'releases',
-      releaseView: 'cards',
-    });
-    expect(screen.queryByRole('heading', { name: 'Music Videos' })).not.toBeInTheDocument();
+  });
+
+  it('shows matching music videos inside Discovery without a separate view switch', async () => {
+    server.use(
+      http.post('/api/enhanced-search/source/youtube_videos', () =>
+        HttpResponse.text(
+          JSON.stringify({
+            type: 'videos',
+            data: [
+              {
+                video_id: 'glory-box',
+                title: 'Portishead - Glory Box (Official Video)',
+                channel: 'Portishead',
+                duration: 270,
+              },
+            ],
+          }) + '\n',
+        ),
+      ),
+    );
+    renderArtist('/library?artist=1&view=discovery&immersive=true');
+    expect(await screen.findByRole('heading', { name: 'Music Videos' })).toBeInTheDocument();
+    expect(await screen.findByText('Portishead - Glory Box (Official Video)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Music Videos$/ })).not.toBeInTheDocument();
   });
 
   it('offers the Table ↔ Discover switch only on All Releases (ldp-03)', async () => {

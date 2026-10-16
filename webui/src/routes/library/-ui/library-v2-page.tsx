@@ -145,13 +145,11 @@ import {
 } from '../-library-v2.types';
 import { computeTrackEditValues } from '../-metadata-edit';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
-import { ProviderArtistDetailPage } from '../../artist-detail/-ui/artist-detail-page';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
 import { ReassignModal } from '../../artist-detail/-ui/reassign-modal';
 import { SimilarArtistsSection } from '../../artist-detail/-ui/similar-artists-section';
 import { AlbumArtPickerModal, ArtistImagePickerModal } from './art-picker-modal';
-import { ArtistPageLibraryProvider } from './artist-page-release-actions';
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import {
   classifyReleaseContent,
@@ -170,6 +168,7 @@ import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
+import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
 import { WatchAllModal } from './watch-all-modal';
 
@@ -4445,8 +4444,6 @@ export function LibraryV2Page() {
           <AlbumDetailView albumId={search.album} />
         ) : search.artist ? (
           <ArtistDetailView artistId={search.artist} />
-        ) : search.discover?.includes(':') ? (
-          <ProviderDiscoveryArtist identity={search.discover} name={search.discoverName ?? ''} />
         ) : search.section === 'wanted' ? (
           <WantedIndexView />
         ) : search.section === 'albums' ? (
@@ -4456,65 +4453,6 @@ export function LibraryV2Page() {
         )}
       </LibraryV2CanWishContext.Provider>
     </LibraryV2CanWriteContext.Provider>
-  );
-}
-
-/** Unknown provider artists remain read-only until a monitoring action. */
-function ProviderDiscoveryArtist({ identity, name }: { identity: string; name: string }) {
-  const navigate = useNavigate();
-  const [materialized, setMaterialized] = useState<{ identity: string; id: number } | null>(null);
-  const artistId = materialized?.identity === identity ? materialized.id : null;
-  const split = identity.indexOf(':');
-  const source = identity.slice(0, split);
-  const id = identity.slice(split + 1);
-  return (
-    <ArtistPageLibraryProvider
-      source={source}
-      id={id}
-      name={name}
-      onMonitored={(nativeId) => setMaterialized({ identity, id: nativeId })}
-    >
-      <ProviderArtistDetailPage
-        source={source}
-        id={id}
-        name={name}
-        page="library"
-        navigation={
-          <div className={styles.releasesBar}>
-            <div className={styles.releasesToggle}>
-              <button
-                type="button"
-                disabled={!artistId}
-                title={
-                  artistId
-                    ? 'Open My Library'
-                    : 'Monitor a release to add this artist to My Library'
-                }
-                onClick={() =>
-                  artistId &&
-                  void navigate({
-                    search: (p) => ({
-                      ...p,
-                      artist: artistId,
-                      discover: undefined,
-                      discoverName: undefined,
-                      releases: 'library',
-                      artistView: 'releases',
-                      immersive: false,
-                    }),
-                  })
-                }
-              >
-                My Library
-              </button>
-              <button type="button" className={styles.viewActive} aria-pressed>
-                Discovery
-              </button>
-            </div>
-          </div>
-        }
-      />
-    </ArtistPageLibraryProvider>
   );
 }
 
@@ -4543,15 +4481,12 @@ export function MirrorStatusBanner() {
       ? `${s.failed} wishlist sync ${s.failed === 1 ? 'operation' : 'operations'} failed — monitoring shown here may not match what the pipeline searches.`
       : `${s.pending} wishlist sync ${s.pending === 1 ? 'operation' : 'operations'} pending…`;
   return (
-    <div className={`${styles.grabBanner} ${s.failed > 0 ? styles.grab_err : styles.grab_busy}`}>
-      <span>
-        {label}
-        {retry.isError ? (
-          <span className={styles.mirrorRetryError} role="alert">
-            {mutationErrorMessage(retry.error, 'Mirror retry failed')}
-          </span>
-        ) : null}
-      </span>
+    <StatusNotice tone={s.failed > 0 ? 'err' : 'busy'} text={label}>
+      {retry.isError ? (
+        <span className={styles.mirrorRetryError} role="alert">
+          {mutationErrorMessage(retry.error, 'Mirror retry failed')}
+        </span>
+      ) : null}
       <button
         type="button"
         className={styles.grabBannerClose}
@@ -4561,7 +4496,7 @@ export function MirrorStatusBanner() {
       >
         {retry.isPending ? 'Retrying…' : retry.isError ? 'Retry again' : 'Retry'}
       </button>
-    </div>
+    </StatusNotice>
   );
 }
 
@@ -5208,12 +5143,7 @@ function WantedIndexView() {
       </header>
 
       {banner ? (
-        <div className={`${styles.grabBanner} ${styles[`grab_${banner.tone}`]}`}>
-          <span>{banner.text}</span>
-          <button type="button" className={styles.grabBannerClose} onClick={() => setBanner(null)}>
-            ×
-          </button>
-        </div>
+        <StatusNotice tone={banner.tone} text={banner.text} onDismiss={() => setBanner(null)} />
       ) : null}
 
       <div className={styles.toolbar}>
@@ -5633,16 +5563,11 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
       ) : (
         <>
           {grabBanner ? (
-            <div className={`${styles.grabBanner} ${styles[`grab_${grabBanner.tone}`]}`}>
-              <span>{grabBanner.text}</span>
-              <button
-                type="button"
-                className={styles.grabBannerClose}
-                onClick={() => setGrabBanner(null)}
-              >
-                ✕
-              </button>
-            </div>
+            <StatusNotice
+              tone={grabBanner.tone}
+              text={grabBanner.text}
+              onDismiss={() => setGrabBanner(null)}
+            />
           ) : null}
           <header className={styles.detailHeader}>
             <Artwork src={album.image_url ?? ''} alt={album.title} className={styles.detailThumb} />
@@ -6804,7 +6729,6 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const canWish = useLibraryV2CanWish();
   const search = Route.useSearch();
   const releasesMode = search.releases;
-  const showVideos = search.artistView === 'videos';
   // ldp-03/ldp-04/ldp-05: how `All Releases` renders and how rich the header
   // is are view settings, carried in the URL next to `releases` and `view`
   // like every other Library V2 view setting.
@@ -7062,16 +6986,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           ) : null}
 
           {grabBanner ? (
-            <div className={`${styles.grabBanner} ${styles[`grab_${grabBanner.tone}`]}`}>
-              <span>{grabBanner.text}</span>
-              <button
-                type="button"
-                className={styles.grabBannerClose}
-                onClick={() => setGrabBanner(null)}
-              >
-                ✕
-              </button>
-            </div>
+            <StatusNotice
+              tone={grabBanner.tone}
+              text={grabBanner.text}
+              onDismiss={() => setGrabBanner(null)}
+            />
           ) : null}
 
           {headerMode === 'rich' ? (
@@ -7292,19 +7211,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
           {releasesMode === 'all' ? (
             <>
               <div className={styles.musicVideosPanel}>
-                <button
-                  type="button"
-                  className={styles.btnGhost}
-                  aria-expanded={showVideos}
-                  onClick={() =>
-                    void navigate({
-                      search: (p) => ({ ...p, artistView: showVideos ? 'releases' : 'videos' }),
-                    })
-                  }
-                >
-                  Music Videos
-                </button>
-                {showVideos ? <ArtistVideosSection artistName={artist.name} standalone /> : null}
+                <ArtistVideosSection artistName={artist.name} />
               </div>
               <AppearsOnSection artistId={artist.id} artistName={artist.name} />
               <SimilarArtistsSection />

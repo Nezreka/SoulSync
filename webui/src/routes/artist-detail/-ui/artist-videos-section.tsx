@@ -705,7 +705,9 @@ export function ArtistVideosSection({
     slotRef.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
   }, []);
 
-  if (!standalone && (status === 'idle' || status === 'empty')) return null;
+  // The embedded shelf appears only once there is something to watch.
+  // Loading, empty and failed background searches do not add an empty section.
+  if (!standalone && curated.length === 0) return null;
 
   const countLabel =
     status === 'loading'
