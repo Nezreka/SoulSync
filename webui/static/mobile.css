@@ -5083,6 +5083,16 @@ body:has(.artist-map-container) #gsearch-bar {
         width: 36px;
         height: 36px;
     }
+    /* #1721: no room for the status words beside the artist, so a row
+       keeps just the dot. the line at the top names and filters them. */
+    .mm-row-st {
+        font-size: 0;
+        gap: 0;
+    }
+    .mm-row-st::before {
+        width: 7px;
+        height: 7px;
+    }
 
     /* Actions: stack, then wrap. The two captioned actions (Refresh,
        Sync & download) take a full row each — their buttons are the

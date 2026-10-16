@@ -150,7 +150,7 @@ def get_mirrored_playlists_endpoint():
         for pl in playlists:
             counts = batch_counts.get(pl['id'], {
                 'total': 0, 'discovered': 0, 'wishlisted': 0,
-                'in_library': 0, 'library_checked': 0,
+                'in_library': 0, 'library_checked': 0, 'needs_match': 0,
             })
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
@@ -161,6 +161,8 @@ def get_mirrored_playlists_endpoint():
             # owning none of it, and the card must not report the second when it
             # only knows the first.
             pl['library_checked_count'] = counts.get('library_checked', 0)
+            # wing it guesses still waiting on a pick, the card links to them (#1721)
+            pl['needs_match_count'] = counts.get('needs_match', 0)
             source_ref = describe_mirrored_source_ref(pl)
             pl['source_ref'] = source_ref.source_ref
             pl['source_ref_kind'] = source_ref.source_ref_kind
@@ -207,6 +209,21 @@ def _owned_mirrored_playlist(database, playlist_id):
     return database.get_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id())
 
 
+def _stamp_track_statuses(database, playlist):
+    """where each track stands, on the track, plus the totals (#1721).
+    best effort: the tracks still show without it."""
+    try:
+        from core.playlists.track_status import status_counts, track_status, wishlist_ids
+        tracks = playlist.get('tracks') or []
+        ids = {i for t in tracks for i in wishlist_ids(t)}
+        wishlisted = database.get_wishlisted_ids(ids, profile_id=playlist.get('profile_id'))
+        for t in tracks:
+            t['status'] = track_status(t, wishlisted)
+        playlist['status_counts'] = status_counts(t['status'] for t in tracks)
+    except Exception as e:
+        logger.debug(f"track statuses unavailable for mirror {playlist.get('id')}: {e}")
+
+
 @bp.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
@@ -225,6 +242,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         playlist['display_name'] = effective_mirrored_name(playlist)
         playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
+        _stamp_track_statuses(database, playlist)
         return jsonify(playlist)
     except Exception as e:
         logger.error(f"Error getting mirrored playlist: {e}")

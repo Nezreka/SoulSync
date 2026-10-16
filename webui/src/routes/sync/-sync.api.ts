@@ -11,6 +11,7 @@
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
+import type { MirroredTrackStatus } from './-sync.mirrored';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { SourceSkipped } from './-sync.state';
@@ -509,7 +510,10 @@ export interface MirroredPlaylistDetail {
     source_track_id?: string;
     /** when it joined the playlist; null for rows from before that was kept */
     added_at?: string | null;
+    status?: MirroredTrackStatus;
   }[];
+  /** how many tracks sit in each status (#1721) */
+  status_counts?: Partial<Record<MirroredTrackStatus, number>>;
 }
 
 /** GET /api/mirrored-playlists/<id> (1069). */

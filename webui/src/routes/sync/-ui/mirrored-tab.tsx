@@ -1253,6 +1253,7 @@ export function MirroredTab({
                   selecting={selecting}
                   selected={selected.has(row.id)}
                   onToggleSelect={() => toggleSelected(row.id)}
+                  onNeedsMatch={() => window.openWingItPoolModal?.(String(row.id))}
                   primary={
                     // The pipeline endpoint rejects file outright, and lastfm
                     // or a frozen beatport mirror cannot be scheduled either —
@@ -1400,6 +1401,11 @@ export function MirroredTab({
           data={detail.data}
           now={now}
           onClose={() => setDetail(null)}
+          onFindMatches={() => {
+            const id = detail.playlistId;
+            setDetail(null);
+            window.openWingItPoolModal?.(String(id));
+          }}
           onDelete={() => {
             const row = rows?.find((r) => r.id === detail.playlistId);
             if (row) void onDelete(row);

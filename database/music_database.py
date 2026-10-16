@@ -25821,7 +25821,7 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     result[row['playlist_id']] = {
                         'total': 0, 'discovered': 0, 'wishlisted': 0,
-                        'in_library': 0, 'library_checked': 0,
+                        'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                     }
 
                 # Core counts: total + discovered, grouped per playlist
@@ -25887,7 +25887,7 @@ class MusicDatabase:
                     if pid not in result:
                         result[pid] = {
                             'total': 0, 'discovered': 0, 'wishlisted': 0,
-                            'in_library': 0, 'library_checked': 0,
+                            'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                         }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
@@ -25901,17 +25901,32 @@ class MusicDatabase:
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                         WHERE mp.profile_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
+                          AND {_WISHLISTED}
                         GROUP BY mpt.playlist_id
-                    """, (profile_id,))
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (profile_id,))
                     for row in cursor.fetchall():
                         pid = row['playlist_id']
                         if pid in result:
                             result[pid]['wishlisted'] = row['wishlisted'] or 0
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
+
+                # wing it guesses nobody fixed: what the card's "need a match"
+                # link opens, so it counts exactly what the pool lists (#1721)
+                try:
+                    cursor.execute(f"""
+                        SELECT mpt.playlist_id, COUNT(*) as needs_match
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        WHERE mp.profile_id = ? AND {self._WING_IT_ATTENTION}
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['needs_match'] = row['needs_match'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch needs-match counts failed: {e}")
 
                 # NOTE: in_library is no longer derived here. It used to be a
                 # join with two paths and both were wrong. The ID path compared
@@ -25938,6 +25953,47 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result
+
+    # a mirrored track is wishlisted under the id sync filed it under: the
+    # matched id once discovery found one (often deezer's), the playlist's own
+    # id before that. asking only for the source id read 0 for every
+    # deezer-identified spotify playlist (#1721).
+    _MIRROR_TRACK_WISHLISTED = (
+        "((mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = mpt.source_track_id)) "
+        "OR (json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = json_extract(mpt.extra_data, '$.matched_data.id'))))"
+    )
+
+    def get_wishlisted_ids(self, ids, profile_id: Optional[int] = None) -> set:
+        """which of ``ids`` have a wishlist row, for this profile when given."""
+        wanted = sorted({str(i) for i in ids or [] if i})
+        found: set = set()
+        if not wanted:
+            return found
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                scoped = profile_id is not None and any(
+                    r[1] == 'profile_id' for r in cursor.fetchall())
+                # sqlite caps bound parameters, so ask in chunks
+                for start in range(0, len(wanted), 500):
+                    chunk = wanted[start:start + 500]
+                    sql = ("SELECT spotify_track_id FROM wishlist_tracks WHERE spotify_track_id IN ("
+                           + ",".join("?" * len(chunk)) + ")")
+                    params = list(chunk)
+                    if scoped:
+                        sql += " AND profile_id = ?"
+                        params.append(int(profile_id))
+                    cursor.execute(sql, params)
+                    found.update(str(r[0]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug(f"wishlisted id lookup failed: {e}")
+        return found
 
     def get_mirrored_playlist_status_counts(self, playlist_id: int) -> dict:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
@@ -25967,10 +26023,8 @@ class MusicDatabase:
                         SELECT COUNT(*) as wishlisted
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
-                    """, (playlist_id,))
+                          AND {_WISHLISTED}
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (playlist_id,))
                     result['wishlisted'] = cursor.fetchone()['wishlisted'] or 0
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
