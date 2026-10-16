@@ -24,19 +24,34 @@ function albumRow(artist: string, album: string, name: string, retry = 0) {
   };
 }
 
+/** The server's answer to "which of these artists are filed as audiobooks". */
+async function routedAnswer(input: RequestInfo | URL, routed: string[]) {
+  const body = (await (input as Request).clone().json()) as { names?: string[] };
+  return res({ success: true, routed: (body.names ?? []).filter((name) => routed.includes(name)) });
+}
+
 function stubFetch(
-  opts: { total?: number; albums?: unknown[]; singles?: unknown[]; processing?: boolean } = {},
+  opts: {
+    total?: number;
+    albums?: unknown[];
+    singles?: unknown[];
+    processing?: boolean;
+    /** Artists the server reports as filed under audiobooks. */
+    routed?: string[];
+  } = {},
 ) {
   const {
     albums = [albumRow('Aphex Twin', 'SAW', 'Xtal')],
     singles = [],
     processing = false,
+    routed = [],
   } = opts;
   const total = opts.total ?? albums.length + singles.length;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/audiobook-routes/check')) return routedAnswer(input, routed);
       if (url.includes('/api/wishlist/stats'))
         return res({
           total,
@@ -341,6 +356,7 @@ describe('wishlist route', () => {
       vi.fn(async (i: RequestInfo | URL) => {
         const url = i instanceof Request ? i.url : String(i);
         calls.push(url);
+        if (url.includes('/api/audiobook-routes/check')) return routedAnswer(i, []);
         if (url.includes('/api/wishlist/stats'))
           return res({ total: 1, albums: 1, singles: 0, next_run_in_seconds: 600 });
         if (url.includes('/api/wishlist/cycle')) return res({ cycle: 'albums' });
@@ -417,6 +433,107 @@ describe('wishlist route', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('1 title not found yet');
     // Its Clear All action is still there.
     expect(screen.getByRole('button', { name: 'Clear All' })).toBeInTheDocument();
+  });
+
+  describe('artists filed as audiobooks', () => {
+    const albums = [
+      albumRow('Aphex Twin', 'SAW', 'Xtal'),
+      albumRow('Aphex Twin', 'SAW', 'Ageispolis'),
+      albumRow('Bobby & Max', 'Folge 93', 'Teil 1'),
+      albumRow('Bobby & Max', 'Folge 93', 'Teil 2'),
+      albumRow('Bobby & Max', 'Folge 93', 'Teil 3'),
+    ];
+
+    it('leaves them out of the music tab and its counts', async () => {
+      stubFetch({ albums, routed: ['Bobby & Max'] });
+      renderRoute();
+
+      await waitFor(() => expect(screen.getAllByText('Aphex Twin').length).toBeGreaterThan(0));
+      await waitFor(() =>
+        expect(document.querySelector('.wishlist-page-count')?.textContent).toBe('2 tracks'),
+      );
+      expect(screen.queryByText('Bobby & Max')).not.toBeInTheDocument();
+      expect(document.querySelectorAll('.wl-orb-group')).toHaveLength(1);
+      expect(document.getElementById('wishlist-stat-albums')?.textContent).toBe('2');
+    });
+
+    it('lists them under the audiobook tab instead', async () => {
+      stubFetch({ albums, routed: ['Bobby & Max'] });
+      const base = globalThis.fetch as unknown as (i: RequestInfo | URL) => Promise<Response>;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (i: RequestInfo | URL) => {
+          const url = i instanceof Request ? i.url : String(i);
+          if (url.includes('/api/audiobooks/wishlist')) {
+            return res({ success: true, items: [], counts: {}, worker: {} });
+          }
+          return base(i);
+        }),
+      );
+      renderRoute(['/wishlist?media=audiobooks']);
+
+      const section = await waitFor(() => {
+        const found = document.querySelector('.wlp-routed');
+        expect(found).toBeInTheDocument();
+        return found as HTMLElement;
+      });
+      expect(section.textContent).toContain('Bobby & Max');
+      expect(section.textContent).toContain('3 tracks');
+      expect(section.textContent).not.toContain('Aphex Twin');
+    });
+
+    it('"Search now" on the audiobook tab also sends them to downloads', async () => {
+      const bulkCalls: { action: string; ids: string[] }[] = [];
+      let passes = 0;
+      stubFetch({ albums, routed: ['Bobby & Max'] });
+      const base = globalThis.fetch as unknown as (i: RequestInfo | URL) => Promise<Response>;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (i: RequestInfo | URL) => {
+          const url = i instanceof Request ? i.url : String(i);
+          if (url.includes('/api/audiobooks/wishlist/search')) {
+            passes += 1;
+            return res({ success: true, summary: { checked: 0, grabbed: 0 } });
+          }
+          if (url.includes('/api/audiobooks/wishlist')) {
+            return res({ success: true, items: [], counts: {}, worker: {} });
+          }
+          if (url.includes('wishlist/bulk')) {
+            const body = (await (i as Request).json()) as { action: string; track_ids: string[] };
+            bulkCalls.push({ action: body.action, ids: body.track_ids });
+            return res({
+              success: true,
+              results: body.track_ids.map((id) => ({ id, ok: true, message: 'Queued' })),
+            });
+          }
+          return base(i);
+        }),
+      );
+      renderRoute(['/wishlist?media=audiobooks']);
+      await waitFor(() => expect(document.querySelector('.wlp-routed')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Search now' }));
+
+      await waitFor(() => expect(bulkCalls).toHaveLength(1));
+      // the audiobook pass still runs, and ONLY the audio plays are grabbed
+      expect(passes).toBe(1);
+      expect(bulkCalls[0].action).toBe('grab');
+      expect(bulkCalls[0].ids).toEqual([
+        'Bobby & Max-Folge 93-Teil 1',
+        'Bobby & Max-Folge 93-Teil 2',
+        'Bobby & Max-Folge 93-Teil 3',
+      ]);
+      await waitFor(() =>
+        expect(document.body.textContent).toContain('Sent 3 of 3 tracks from the music search'),
+      );
+    });
+
+    it('shows no audiobook section when no artist is filed there', async () => {
+      stubFetch({ albums, routed: [] });
+      renderRoute(['/wishlist?media=audiobooks']);
+      await waitFor(() => expect(document.querySelector('.wlp-hero')).toBeInTheDocument());
+      expect(document.querySelector('.wlp-routed')).not.toBeInTheDocument();
+    });
   });
 
   it('redirects away when the profile may not see the wishlist', async () => {

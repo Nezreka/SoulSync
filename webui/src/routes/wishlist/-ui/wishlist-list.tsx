@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
+import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
+
 import type {
   ParsedWishlistTrack,
   WishlistArtistGroup,
@@ -114,7 +117,7 @@ function TrackRow({
           ? `${outcome.ok ? '✓ ' : '✗ '}${outcome.message}`
           : track.retry > 0
             ? `${track.failing ? '⚠ ' : ''}${track.retry} tries`
-            : 'queued'}
+            : 'waiting'}
       </span>
       <span className="wl-list-last" title={track.lastTried || undefined}>
         {track.lastTried || '—'}
@@ -174,6 +177,8 @@ export function WishlistList({
 }) {
   const [sort, setSort] = useState<WishlistListSort>('failing');
   const sorted = useMemo(() => sortGroups(groups, sort), [groups, sort]);
+  // Artists whose downloads are filed as audiobooks; one lookup for the whole list.
+  const audiobookArtists = useRoutedArtists(groups.map((group) => group.name));
   // Collapsed by default: the page opens as a compact artist INDEX (name,
   // count, failing badge) instead of a hundred-row scroll. null = the
   // explicit all-expanded state.
@@ -382,6 +387,7 @@ export function WishlistList({
             >
               {group.name}
             </button>
+            {audiobookArtists.has(group.name) ? <AudiobookRouteBadge /> : null}
             <span className="wl-list-artist-meta">
               {group.total} track{group.total === 1 ? '' : 's'}
             </span>

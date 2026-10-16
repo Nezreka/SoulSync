@@ -43,7 +43,7 @@ class _FakeMusicDatabase:
         self.owned_matches = set(owned_matches or [])
         self.track_checks = []
 
-    def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
+    def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
         self.track_checks.append((track_name, artist_name, server_source, album))
         if (track_name, artist_name) in self.owned_matches:
             return SimpleNamespace(id='db-track', title=track_name,

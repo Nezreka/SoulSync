@@ -38,7 +38,7 @@ class _FakeMusicDB:
         self.check_calls = []
 
     def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7,
-                            server_source=None, album=None):
+                            server_source=None, album=None, include_downloads=False):
         self.check_calls.append((track_name, artist_name, server_source, album))
         return self._hits.get((track_name, artist_name), (None, 0.0))
 

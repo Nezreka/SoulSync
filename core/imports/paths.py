@@ -265,9 +265,13 @@ def shared_transfer_root() -> str:
 
 
 def transfer_root_for_context(context) -> str:
-    """where this download/import's files go: the profile's own folder when
-    it has one, the configured transfer folder otherwise."""
-    return library_root_for_profile(import_profile_id(context)) or shared_transfer_root()
+    """where this download/import's files go: the audiobook folder for a routed
+    artist, else the profile's own folder when it has one, else the configured
+    transfer folder."""
+    from core.audiobook_routing import routed_root_for_context
+    return (routed_root_for_context(context)
+            or library_root_for_profile(import_profile_id(context))
+            or shared_transfer_root())
 
 
 # ── reverse lookup: which profile owns a path (#1504) ─────────────────────────

@@ -54,7 +54,7 @@ class _FakeDB:
         self.track_results_calls = []
         self.manual_matches = []
 
-    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None):
+    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
         key = (title.lower().strip(), artist.lower().strip())
         if key in self.found_tracks:
             conf = self.found_tracks[key]

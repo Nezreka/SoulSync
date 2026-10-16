@@ -50,7 +50,8 @@ class _FakeDB:
         return found, (1.0 if found else 0.0), 0, 0, False, []
 
     def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None,
-                           album=None, candidate_tracks=None, candidate_tracks_exhaustive=False):
+                           album=None, candidate_tracks=None, candidate_tracks_exhaustive=False,
+                           include_downloads=False):
         # mirrors the real contract (#1621): a bare [] is "no information" and
         # falls back to the whole-library ("legacy") search; [] + exhaustive
         # is the proven-owns-nothing fast miss.

@@ -479,6 +479,7 @@ class DiscographyBackfillJob(RepairJob):
                     server_source=active_server,
                     album=release_name,
                     candidate_tracks=candidate_tracks,
+                    include_downloads=True,
                 )
                 if db_track and confidence >= 0.7:
                     continue  # Already owned
