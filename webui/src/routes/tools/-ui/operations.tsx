@@ -120,7 +120,7 @@ function CadenceEditor({ job, onSaved }: { job: RepairJob; onSaved: () => void }
         );
       } else {
         // Fallback: legacy path (migration hasn't seeded the row yet).
-        await saveRepairJobSettings(job.job_id, hours, { ...(job.settings || {}) });
+        await saveRepairJobSettings(job.job_id, hours, { ...job.settings });
       }
       toast(`${job.display_name} now runs ${cadenceLabel(hours)}`, 'success');
       setEditing(false);
