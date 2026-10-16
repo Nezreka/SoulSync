@@ -24,6 +24,51 @@ function untagDiscogsAlbumId(id: string): { id: string; kind: 'master' | 'releas
   return { id: match[2], kind: match[1] === 'm' ? 'master' : 'release' };
 }
 
+const SERVICE_URL_PREFIXES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  spotify: {
+    artist: 'https://open.spotify.com/artist/',
+    album: 'https://open.spotify.com/album/',
+    track: 'https://open.spotify.com/track/',
+  },
+  musicbrainz: {
+    artist: 'https://musicbrainz.org/artist/',
+    album: 'https://musicbrainz.org/release/',
+    track: 'https://musicbrainz.org/recording/',
+  },
+  deezer: {
+    artist: 'https://www.deezer.com/artist/',
+    album: 'https://www.deezer.com/album/',
+    track: 'https://www.deezer.com/track/',
+  },
+  audiodb: {
+    artist: 'https://www.theaudiodb.com/artist/',
+    album: 'https://www.theaudiodb.com/album/',
+    track: 'https://www.theaudiodb.com/track/',
+  },
+  itunes: {
+    artist: 'https://music.apple.com/artist/',
+    album: 'https://music.apple.com/album/',
+    track: 'https://music.apple.com/song/',
+  },
+  // These services store complete URLs, so no prefix is needed.
+  lastfm: { artist: '', album: '', track: '' },
+  genius: { artist: '', track: '' },
+  tidal: {
+    artist: 'https://tidal.com/browse/artist/',
+    album: 'https://tidal.com/browse/album/',
+    track: 'https://tidal.com/browse/track/',
+  },
+  qobuz: {
+    artist: 'https://www.qobuz.com/artist/',
+    album: 'https://www.qobuz.com/album/',
+    track: 'https://www.qobuz.com/track/',
+  },
+  // Discogs album links require master/release handling below.
+  discogs: { artist: 'https://www.discogs.com/artist/' },
+  amazon: { album: 'https://music.amazon.com/albums/', track: 'https://music.amazon.com/tracks/' },
+  bandcamp: { artist: '', album: '', track: '' },
+};
+
 /** External links per service and entity type; null when the service has none. */
 export function getServiceUrl(service: string, entityType: string, id: unknown): string | null {
   if (!id) return null;
@@ -31,58 +76,8 @@ export function getServiceUrl(service: string, entityType: string, id: unknown):
     const { id: bareId, kind } = untagDiscogsAlbumId(String(id));
     return `https://www.discogs.com/${kind}/${bareId}`;
   }
-  const urls: Record<string, Record<string, string>> = {
-    spotify: {
-      artist: `https://open.spotify.com/artist/${id}`,
-      album: `https://open.spotify.com/album/${id}`,
-      track: `https://open.spotify.com/track/${id}`,
-    },
-    musicbrainz: {
-      artist: `https://musicbrainz.org/artist/${id}`,
-      album: `https://musicbrainz.org/release/${id}`,
-      track: `https://musicbrainz.org/recording/${id}`,
-    },
-    deezer: {
-      artist: `https://www.deezer.com/artist/${id}`,
-      album: `https://www.deezer.com/album/${id}`,
-      track: `https://www.deezer.com/track/${id}`,
-    },
-    audiodb: {
-      artist: `https://www.theaudiodb.com/artist/${id}`,
-      album: `https://www.theaudiodb.com/album/${id}`,
-      track: `https://www.theaudiodb.com/track/${id}`,
-    },
-    itunes: {
-      artist: `https://music.apple.com/artist/${id}`,
-      album: `https://music.apple.com/album/${id}`,
-      track: `https://music.apple.com/song/${id}`,
-    },
-    // Last.fm, Genius and Bandcamp store a FULL url rather than an id, so the
-    // "url" here is the value itself.
-    lastfm: { artist: String(id), album: String(id), track: String(id) },
-    genius: { artist: String(id), track: String(id) },
-    tidal: {
-      artist: `https://tidal.com/browse/artist/${id}`,
-      album: `https://tidal.com/browse/album/${id}`,
-      track: `https://tidal.com/browse/track/${id}`,
-    },
-    qobuz: {
-      artist: `https://www.qobuz.com/artist/${id}`,
-      album: `https://www.qobuz.com/album/${id}`,
-      track: `https://www.qobuz.com/track/${id}`,
-    },
-    // Discogs has no per-track page, and Amazon no artist page. (Discogs
-    // album is handled above -- its id needs master/release routing.)
-    discogs: {
-      artist: `https://www.discogs.com/artist/${id}`,
-    },
-    amazon: {
-      album: `https://music.amazon.com/albums/${id}`,
-      track: `https://music.amazon.com/tracks/${id}`,
-    },
-    bandcamp: { artist: String(id), album: String(id), track: String(id) },
-  };
-  return urls[service]?.[entityType] || null;
+  const prefix = SERVICE_URL_PREFIXES[service]?.[entityType];
+  return prefix === undefined ? null : `${prefix}${String(id)}` || null;
 }
 
 /** MusicBrainz's badge class is abbreviated; everything else uses its own name. */
