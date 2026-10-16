@@ -1134,7 +1134,8 @@ class PlaylistSyncService:
             active_server = config_manager.get_active_media_server()
 
             # --- User-confirmed match fast-path (Find & Add / manual match) ---
-            from core.sync.match_overrides import match_lookup_ids
+            from core.sync.match_overrides import (
+                cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
             cache_db = MusicDatabase()
 
             def _materialize(server_track_id):
@@ -1169,9 +1170,35 @@ class PlaylistSyncService:
                     if cached:
                         actual_track = _materialize(cached['server_track_id'])
                         if actual_track:
-                            logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
-                            return actual_track, cached['confidence']
-                        logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
+                            # #1721: the row may be an AUTO-match written by an
+                            # older, buggier matcher (the pre-fix #1715 fallback
+                            # cached a same-titled wrong-artist track at 1.0).
+                            # Honoring it unchecked pins the wrong song on the
+                            # playlist forever — the gated matcher below never
+                            # gets a say. Revalidate auto-shaped rows against
+                            # today's matcher; a proven-stale row is dropped
+                            # and matching falls through to the durable manual
+                            # match and then the fresh matcher, like a miss.
+                            if cached_match_is_stale(
+                                cache_db,
+                                title=original_title,
+                                artists=[_artist_name(a) for a in spotify_track.artists],
+                                album=getattr(spotify_track, 'album', None),
+                                server_source=active_server,
+                                cached_track_id=cached['server_track_id'],
+                                cached_track_row=cache_db.get_track_by_id(cached['server_track_id']),
+                                threshold=0.7,
+                            ):
+                                logger.info(
+                                    f"Sync cache stale for '{original_title}' — cached track "
+                                    f"{cached['server_track_id']} no longer matches under "
+                                    f"current rules; dropping the cached pairing")
+                                drop_stale_cached_match(cache_db, _match_id, active_server)
+                            else:
+                                logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                                return actual_track, cached['confidence']
+                        else:
+                            logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
                 except Exception as cache_err:
                     logger.debug(f"Sync cache lookup error: {cache_err}")
 
