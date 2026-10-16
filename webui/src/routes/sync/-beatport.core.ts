@@ -34,22 +34,6 @@ export function cleanTrackText<T extends string | null | undefined>(text: T): T 
 }
 
 /**
- * parseBeatportDuration (1990-1997) — to milliseconds.
- *
- * Accepts 'm:ss' or a bare seconds count. Anything unparseable lands on 0
- * because `NaN || 0` is 0 — which is why the vanilla's `|| 0` sits where it
- * does rather than around the whole expression.
- */
-export function parseBeatportDuration(raw: string | number | null | undefined): number {
-  if (!raw) return 0;
-  if (typeof raw === 'string' && raw.includes(':')) {
-    const parts = raw.split(':');
-    return (parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10)) * 1000 || 0;
-  }
-  return (parseInt(String(raw), 10) || 0) * 1000;
-}
-
-/**
  * The top-10 release card background (1824). A plain string replace, so a URL
  * without that exact segment passes through untouched. Only the BACKGROUND is
  * upscaled — the thumbnail keeps the 95px original.
@@ -350,177 +334,23 @@ export function filterBeatportGenres<T extends { name: string }>(genres: readonl
   return genres.filter((genre) => !isExcludedGenre(genre.name));
 }
 
-/* ── The chart → download-modal bridge (1999-2064) ────────────────────────── */
-
-export interface BeatportScrapedTrack {
-  /** the real beatport id, when the page json supplied it */
-  beatport_id?: string | number;
-  url?: string;
-  isrc?: string;
-  title?: string;
-  artist?: string;
-  mix_name?: string;
-  duration?: string | number;
-  release_name?: string;
-  release_id?: string | number;
-  release_image?: string;
-  release_date?: string;
-}
-
-export interface DownloadModalAlbum {
-  id: string;
-  name: string;
-  album_type: string;
-  images: { url: string }[];
-  total_tracks: number;
-  release_date?: string;
-}
-
-export interface DownloadModalTrack {
-  id: string;
-  name: string;
-  artists: string[];
-  duration_ms: number;
-  track_number: number;
-  disc_number: number;
-  album: DownloadModalAlbum;
-}
-
-/** 2004-2010. A chart is a COMPILATION; only a release is a real album. */
-export function buildChartAlbum(
-  albumId: string,
-  chartName: string,
-  chartImage: string | null | undefined,
-  trackCount: number,
-): DownloadModalAlbum {
-  return {
-    id: albumId,
-    name: chartName,
-    album_type: 'compilation',
-    images: chartImage ? [{ url: chartImage }] : [],
-    total_tracks: trackCount,
-  };
-}
-
-/**
- * 2025-2028. The mix name is appended UNLESS it is 'original mix' — compared
- * case-insensitively, because Beatport is inconsistent about the casing.
- */
-export function buildChartTrackName(track: BeatportScrapedTrack): string {
-  let name = cleanTrackText(track.title || 'Unknown Title');
-  if (track.mix_name && track.mix_name.toLowerCase() !== 'original mix') {
-    name = `${name} (${cleanTrackText(track.mix_name)})`;
-  }
-  return name;
-}
-
-/**
- * 2031-2034. Split on commas so the download engine gets real artist names and
- * builds the right folders. Note the split happens AFTER cleanTrackText, which
- * has already normalised 'A,B' to 'A, B'.
- */
-export function splitBeatportArtists(rawArtist: string | null | undefined): string[] {
-  const cleaned = cleanTrackText(rawArtist || 'Unknown Artist');
-  if (!cleaned.includes(',')) return [cleaned];
-  return cleaned
-    .split(',')
-    .map((a) => a.trim())
-    .filter((a) => a);
-}
-
-/** djb2, as hex. only has to be stable, not secret. */
-function stableHash(text: string): string {
-  let h = 5381;
-  for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
-  return h.toString(16);
-}
-
-/**
- * The id a chart track goes by downstream: the sync match cache, the wishlist
- * and Find & Add all key on it.
- *
- * it used to be `beatport_chart_<position>`, so track 1 of EVERY chart was
- * `beatport_chart_0`. sync one chart and the next chart's track 1 got the
- * first chart's match straight out of the cache (maV, oct 12 2026). now it's
- * the real beatport id, from the page json or the track url, and a track with
- * neither is named by what it is, never by where it sat.
- */
-export function beatportTrackId(track: BeatportScrapedTrack): string {
-  if (track.beatport_id) return `beatport_${track.beatport_id}`;
-  const fromUrl = /\/track\/[^/]+\/(\d+)/.exec(track.url ?? '');
-  if (fromUrl) return `beatport_${fromUrl[1]}`;
-  const identity =
-    `${cleanTrackText(track.artist || '')}|${buildChartTrackName(track)}`.toLowerCase();
-  return `beatport_t_${stableHash(identity)}`;
-}
-
-/**
- * 2012-2045. Per-track release metadata is preferred when the scrape found it.
- *
- * a track with no release is filed as its own single, never under the chart:
- * the chart album put "Hype Top 10" into album tags and folder names, which is
- * exactly the library mess maV reported.
- */
-export function buildChartTracks(
-  tracks: readonly BeatportScrapedTrack[],
-  _chartAlbum: DownloadModalAlbum,
-): DownloadModalTrack[] {
-  return tracks.map((track, index) => {
-    const id = beatportTrackId(track);
-    const hasRelease = Boolean(track.release_name && track.release_name.length > 0);
-    const trackAlbum: DownloadModalAlbum = hasRelease
-      ? {
-          id: `beatport_release_${track.release_id || index}`,
-          name: cleanTrackText(track.release_name) as string,
-          album_type: 'single',
-          images: track.release_image ? [{ url: track.release_image }] : [],
-          release_date: track.release_date || '',
-          total_tracks: 1,
-        }
-      : {
-          id: `${id}_single`,
-          name: buildChartTrackName(track),
-          album_type: 'single',
-          images: [],
-          release_date: track.release_date || '',
-          total_tracks: 1,
-        };
-
-    return {
-      id,
-      name: buildChartTrackName(track),
-      artists: splitBeatportArtists(track.artist),
-      duration_ms: parseBeatportDuration(track.duration),
-      track_number: index + 1,
-      disc_number: 1,
-      album: trackAlbum,
-    };
-  });
-}
-
-/** 2050: every chart is credited to the same synthetic artist. */
-export const BEATPORT_COMPILATION_ARTIST = { id: 'beatport_various', name: 'Various Artists' };
+/* ── The release download (1858-1923) ────────────────────────────────────── */
 
 /**
  * The seventh argument to openDownloadMissingModalForArtistAlbum
- * (shared-helpers.js 1763: `contextType = 'artist_album'`).
- *
- * Charts pass 'playlist' EXPLICITLY (2059). Releases pass only six arguments
- * (1900-1907), so they take the default. Easy to miss precisely because the
- * release call looks complete — the difference is an argument that is not
- * there. Both pass `false` for showLoadingOverlay, because Beatport is already
- * showing its own.
+ * (shared-helpers.js 1763: `contextType = 'artist_album'`). a release is an
+ * album, so it's always 'artist_album'. charts used to pass 'playlist'; they
+ * open as playlists to identify now (-beatport.lists.ts).
  */
-export function beatportDownloadContext(kind: 'chart' | 'release'): 'playlist' | 'artist_album' {
-  return kind === 'chart' ? 'playlist' : 'artist_album';
+export function beatportDownloadContext(_kind: 'release'): 'artist_album' {
+  return 'artist_album';
 }
 
 /**
  * Which image the release's download bubble gets (1910).
  *
  * The album art the metadata endpoint returned wins; the card's own thumbnail
- * is the fallback; then the empty string. Charts do not go through this — they
- * hand registerBeatportDownload the chart image directly.
+ * is the fallback; then the empty string.
  */
 export function releaseBubbleImage(
   album: { images?: { url: string }[] } | null | undefined,
@@ -530,7 +360,7 @@ export function releaseBubbleImage(
   return fromAlbum || releaseImageUrl || '';
 }
 
-/* ── The synthetic ids (1896, 1939, 2005, 2047) ───────────────────────────── */
+/* ── The synthetic id (1896) ──────────────────────────────────────────────── */
 
 /**
  * `Math.random().toString(36).substr(2, n)` — the vanilla's id suffix.
@@ -546,33 +376,9 @@ export function beatportRandomToken(random: () => number, length: number): strin
     .slice(2, 2 + length);
 }
 
-/**
- * The four id shapes, kept together because they are NOT interchangeable:
- *
- *  - a release's virtual playlist (1896) and a chart's (2047) both carry a
- *    9-char suffix, but different prefixes,
- *  - the chart's ALBUM id (2005) has no random suffix at all — just the
- *    timestamp — so two charts opened in the same millisecond share it,
- *  - the enrichment id (1939) uses a SHORTER 6-char suffix.
- *
- * Transcribed as-is. The album-id collision is not reachable in practice (a
- * chart open costs a scrape), and widening it would change the id the download
- * engine keys on.
- */
+/** a release download's virtual playlist id */
 export function beatportReleasePlaylistId(now: () => number, random: () => number): string {
   return `beatport_release_${now()}_${beatportRandomToken(random, 9)}`;
-}
-
-export function beatportChartPlaylistId(now: () => number, random: () => number): string {
-  return `beatport_chart_${now()}_${beatportRandomToken(random, 9)}`;
-}
-
-export function beatportChartAlbumId(now: () => number): string {
-  return `beatport_chart_${now()}`;
-}
-
-export function beatportEnrichmentId(now: () => number, random: () => number): string {
-  return `enrich_${now()}_${beatportRandomToken(random, 6)}`;
 }
 
 /**

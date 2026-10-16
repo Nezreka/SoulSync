@@ -1466,6 +1466,28 @@ def get_beatport_genre_sections(genre_slug, genre_id):
             "sections": {}
         }), 500
 
+@bp.route('/api/beatport/list', methods=['GET'])
+def get_beatport_list():
+    """one beatport list by ref (or a pasted beatport url), shaped as the
+    chart_data discovery takes. every chart-type list opens through here."""
+    from core.beatport.fetch import fetch_list
+    from core.beatport.playlist import chart_data
+    from core.beatport.refs import parse_ref, ref_from_url
+
+    ref = request.args.get('ref', '')
+    parsed = parse_ref(ref) if ref else ref_from_url(request.args.get('url', ''))
+    if parsed is None:
+        return jsonify({"success": False, "error": "Not a Beatport list"}), 400
+    listed = fetch_list(parsed, genre_name=request.args.get('genre_name', ''))
+    if not listed:
+        return jsonify({
+            "success": False,
+            "error": "Beatport didn't return this list. If it keeps happening Beatport is blocking "
+                     "requests, and a FlareSolverr at localhost:8191 gets past it.",
+        }), 502
+    return jsonify({"success": True, **chart_data(listed)})
+
+
 @bp.route('/api/beatport/top-100', methods=['GET'])
 def get_beatport_top_100():
     """Get Beatport Top 100 tracks"""

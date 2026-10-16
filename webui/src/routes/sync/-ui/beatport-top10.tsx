@@ -9,9 +9,9 @@
  *  - The track lists clean their text with cleanTrackText; the RELEASES list
  *    cleans nothing (1807-1809). Same file, same shape of data.
  *  - The track cards have no click handler of their own. The whole CONTAINER is
- *    clickable, and that handler lives in sync-services.js — see
- *    openBeatportTop10List. The releases list is the other way round: per-card
- *    handlers, no container handler.
+ *    clickable and opens the list as a playlist to identify (env.openList).
+ *    The releases list is the other way round: per-card handlers, no
+ *    container handler.
  *  - The releases card paints an upscaled 500x500 background as an INLINE style
  *    with a baked gradient (1824-1827), where every slider uses a CSS custom
  *    property.
@@ -28,7 +28,7 @@ import type { BeatportRelease, BeatportTop10Track } from '../-beatport.api';
 import type { BeatportDownloadEnv } from '../-beatport.downloads';
 
 import { beatportCardBackground, cleanTrackText } from '../-beatport.core';
-import { openBeatportRelease, openBeatportTop10List } from '../-beatport.downloads';
+import { openBeatportRelease } from '../-beatport.downloads';
 import { loadBeatportTop10Lists, loadBeatportTop10Releases } from '../-beatport.loaders';
 import { useBeatportOnce } from '../-beatport.use-section';
 
@@ -44,8 +44,9 @@ const TRACK_LIST_VARIANTS = {
     placeholderIcon: '🎵',
     loadingTitle: '🎵 Loading Beatport Top 10...',
     loadingSubtitle: 'Fetching trending tracks',
-    /** The name the download is filed under (sync-services.js 4923). */
+    /** The list's name while it loads. */
     chartName: 'Beatport Top 10',
+    listRef: 'top-10',
   },
   hype: {
     slug: 'hype10',
@@ -59,6 +60,7 @@ const TRACK_LIST_VARIANTS = {
     loadingTitle: '🔥 Loading Hype Top 10...',
     loadingSubtitle: "Fetching editor's picks",
     chartName: 'Hype Top 10',
+    listRef: 'hype-10',
   },
 } as const;
 
@@ -117,6 +119,9 @@ export interface TrackTop10ListProps {
   listId?: string;
   subtitle?: string;
   chartName?: string;
+  /** which beatport list this is (core/beatport/refs.py); the homepage's by default */
+  listRef?: string;
+  genreName?: string;
 }
 
 export function TrackTop10List({
@@ -126,16 +131,22 @@ export function TrackTop10List({
   listId,
   subtitle,
   chartName,
+  listRef,
+  genreName,
 }: TrackTop10ListProps) {
   const copy = TRACK_LIST_VARIANTS[variant];
   return (
     <div
       className={`beatport-${copy.slug}-list`}
       id={listId ?? `beatport-${copy.slug}-list`}
-      // sync-services.js 3977-3992: the CONTAINER is the button. Clicking the
-      // header queues all ten tracks, which is unobvious but is the behaviour.
+      // the whole list is the button: it opens as a playlist to identify,
+      // then sync or download
       onClick={() => {
-        void openBeatportTop10List(tracks, chartName ?? copy.chartName, env);
+        env.openList?.({
+          ref: listRef ?? copy.listRef,
+          label: chartName ?? copy.chartName,
+          genreName,
+        });
       }}
     >
       <div className={`beatport-${copy.slug}-list-header`}>
