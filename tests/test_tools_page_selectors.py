@@ -60,7 +60,6 @@ TOOLS_CLOSURE_FILES = {
 # below stops finding them and the exclusion becomes inert. If you are reading
 # this and the files are gone, delete this block.
 PENDING_DELETION_FILES = {
-    "beatport-ui.js",
     "sync-services.js",
 }
 
