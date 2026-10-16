@@ -728,14 +728,17 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             resolve_playlist_folder_mode_for_batch,
             track_exists_in_playlist_folder_from_track_data,
         )
-        effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
-            db,
-            playlist_id=str(batch_playlist_id),
-            playlist_name=batch_playlist_name,
-            batch_playlist_folder_mode=batch_playlist_folder_mode,
-            profile_id=batch_profile_id,
-            source=batch_source,
-        )
+        if batch_id in download_batches and download_batches[batch_id].get("album_completion_only"):
+            effective_playlist_folder_mode, effective_playlist_name = False, batch_playlist_name
+        else:
+            effective_playlist_folder_mode, effective_playlist_name = resolve_playlist_folder_mode_for_batch(
+                db,
+                playlist_id=str(batch_playlist_id),
+                playlist_name=batch_playlist_name,
+                batch_playlist_folder_mode=batch_playlist_folder_mode,
+                profile_id=batch_profile_id,
+                source=batch_source,
+            )
         if effective_playlist_folder_mode and not batch_playlist_folder_mode:
             with tasks_lock:
                 if batch_id in download_batches:
@@ -1088,6 +1091,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             batch_album_context = batch.get('album_context')
             batch_artist_context = batch.get('artist_context')
             batch_is_album = batch.get('is_album_download', False)
+            batch_album_completion_only = bool(batch.get('album_completion_only', False))
             batch_private_album_bundle = bool(batch.get('album_bundle_private_staging'))
             batch_playlist_folder_mode = batch.get('playlist_folder_mode', False)
             batch_playlist_name = batch.get('playlist_name', 'Unknown Playlist')
@@ -1157,6 +1161,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         def _dispatch_bundle_sources(sources):
             """Try an ordered segment. Return True only for a terminal result."""
             nonlocal _album_bundle_staged
+            if batch_album_completion_only:
+                return False
             for source in sources:
                 if _album_bundle_staged:
                     break
@@ -1213,7 +1219,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         scored_albums = []
         _soulseek_bundle_plugin = (
             _configured_bundle_plugin('soulseek')
-            if _soulseek_bundle_index is not None and not batch_private_album_bundle
+            if (_soulseek_bundle_index is not None
+                and not batch_private_album_bundle
+                and not batch_album_completion_only)
             else None
         )
         soulseek_is_source = (

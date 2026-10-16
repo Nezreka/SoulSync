@@ -1611,6 +1611,56 @@ def _register_automation_handlers():
         discover_callable=_discover_callable_for_registry,
     )
 
+    # Resolve album-completion dependencies at registration time.
+    from core.automation.album_completion_queue import queue_album_completion
+    from core.automation.album_completion_scope import verify_shared_album_scope
+    from core.automation.album_completion_verify import filter_still_missing
+    from core.automation.album_completion_cooldown import claim_attempt, release_attempt
+    from core.automation.album_pin import get_current_album_pin
+    from core.search.enriched_download import fetch_release
+
+    def _queue_album_completion(**kwargs):
+        completion_deps = types.SimpleNamespace(
+            profile_id=get_current_profile_id(),
+            verify_album_scope=lambda album_id, profile_id: (
+                verify_shared_album_scope(get_database(), album_id, profile_id)
+            ),
+            verify_missing_tracks=lambda album_id, tracks, profile_id, related_album_ids: (
+                filter_still_missing(
+                    get_database(), album_id, tracks,
+                    profile_id, related_album_ids
+                )
+            ),
+            claim_completion_attempt=lambda profile_id, source, release_id: (
+                claim_attempt(get_database(), profile_id, source, release_id)
+            ),
+            release_completion_attempt=lambda profile_id, source, release_id, token: (
+                release_attempt(
+                    get_database(), profile_id, source, release_id, token
+                )
+            ),
+            download_batches=download_batches,
+            tasks_lock=tasks_lock,
+            submit=lambda batch_id, playlist_id, tracks: (
+                missing_download_executor.submit(
+                    _run_full_missing_tracks_process,
+                    batch_id, playlist_id, tracks
+                )
+            ),
+        )
+        return queue_album_completion(**kwargs, deps=completion_deps)
+
+    def _get_completion_album_pin(album_id):
+        return get_current_album_pin(get_database(), album_id)
+
+    def _fetch_completion_release(**kwargs):
+        return fetch_release(
+            kwargs["canonical_source"],
+            kwargs["canonical_album_id"],
+            kwargs["album_title"],
+            kwargs["artist"],
+        )
+
     _automation_deps = AutomationDeps(
         engine=automation_engine,
         state=_automation_state,
@@ -1651,6 +1701,10 @@ def _register_automation_handlers():
         bulk_fix_repair_findings=(
             (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
             if repair_worker else None),
+        get_repair_findings=(lambda **kw: repair_worker.get_findings(**kw)) if repair_worker else None,
+        queue_album_completion=_queue_album_completion,
+        get_current_album_pin=_get_completion_album_pin,
+        fetch_canonical_release=_fetch_completion_release,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -16080,6 +16134,27 @@ def _get_batch_lock(batch_id):
 # Batch lifecycle logic lives in core/downloads/lifecycle.py (imported above as _downloads_lifecycle).
 
 
+def _on_album_completion_finished(batch_id, album_id, imported_paths):
+    """Schedule post-import reconciliation for album-completion downloads only."""
+    if not imported_paths:
+        return
+
+    logger.info(
+        "[Album Completion] Post-import reconciliation requested: "
+        "batch=%s album=%s tracks=%d",
+        batch_id, album_id, len(imported_paths),
+    )
+
+    from core.automation.album_completion_reconcile import schedule
+
+    schedule(
+        album_id=album_id,
+        imported_paths=imported_paths,
+        scan_manager=web_scan_manager,
+        media_engine=media_server_engine,
+    )
+
+
 def _build_lifecycle_deps():
     """Build LifecycleDeps bundle from web_server.py globals on each call."""
     return _downloads_lifecycle.LifecycleDeps(
@@ -16110,6 +16185,7 @@ def _build_lifecycle_deps():
         deezer_discovery_states=deezer_discovery_states,
         spotify_public_discovery_states=spotify_public_discovery_states,
         get_global_max_concurrent=_get_global_max_concurrent,
+        on_album_completion_finished=_on_album_completion_finished,
     )
 
 
@@ -16295,14 +16371,17 @@ def _tracks_with_mirrored_quality_profile(
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     batch = download_batches.get(batch_id, {})
-    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
-        batch.get('playlist_id') or playlist_id,
-        batch.get('playlist_name'),
-        tracks_json,
-        profile_id=batch.get('profile_id', 1),
-        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
-        source=batch.get('playlist_source'),
-    )
+    if batch.get("album_completion_only"):
+        quality_profile_id = None
+    else:
+        tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+            batch.get('playlist_id') or playlist_id,
+            batch.get('playlist_name'),
+            tracks_json,
+            profile_id=batch.get('profile_id', 1),
+            explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+            source=batch.get('playlist_source'),
+        )
     if quality_profile_id is not None:
         batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
