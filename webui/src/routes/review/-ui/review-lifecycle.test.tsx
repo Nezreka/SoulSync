@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ReviewPage } from './review-page';
@@ -169,4 +169,42 @@ it('restores an operation after returning and reports its terminal result', asyn
   render(<ReviewPage />);
   await screen.findByText('2 album actions completed.');
   await waitFor(() => expect(window.sessionStorage.getItem('review-operation')).toBeNull());
+});
+
+it('keeps navigation on the new album when an earlier reanalysis request finishes late', async () => {
+  setup();
+  const read = fetchMock.getMockImplementation()!;
+  let finishReanalysis!: () => void;
+  fetchMock.mockImplementation(async (input: string, options?: RequestInit) => {
+    if (input.endsWith('/reanalyze')) {
+      await new Promise<void>((resolve) => {
+        finishReanalysis = resolve;
+      });
+      return reply({ queued: true });
+    }
+    return read(input, options);
+  });
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
+  expect(screen.getAllByText(/Reanalyzing this album\./)).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+  await screen.findByRole('heading', { name: 'Next album' });
+  expect(screen.queryByText(/Reanalyzing this album\./)).toBeNull();
+  await act(async () => {
+    finishReanalysis();
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Reanalyze album' })).not.toBeDisabled(),
+  );
+  expect(screen.queryByRole('heading', { name: 'First album' })).toBeNull();
+});
+
+it('describes a single available release without implying competing editions', async () => {
+  setup();
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+  expect(screen.getByRole('heading', { name: 'Available release' })).toBeTruthy();
+  expect(screen.queryByText(/These editions/)).toBeNull();
 });

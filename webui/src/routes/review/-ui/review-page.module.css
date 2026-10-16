@@ -1096,11 +1096,13 @@
   backdrop-filter: none;
 }
 .albumHeader {
+  flex-wrap: wrap;
   border-bottom: 1px solid #373b4d;
   padding-bottom: 20px;
   align-items: flex-start;
 }
 .albumIdentity {
+  flex: 1 1 480px;
   display: flex;
   align-items: flex-start;
   gap: 16px;
@@ -1108,6 +1110,13 @@
 }
 .albumIdentity > div {
   min-width: 0;
+}
+.albumHeader .nav {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.albumHeader .nav button {
+  white-space: nowrap;
 }
 .albumPlan {
   margin-top: 20px;
@@ -2548,12 +2557,12 @@
   border-radius: 0;
   background: transparent;
 }
-.editionNote {
+.releaseDetailHeader .editionNote {
   margin: 4px 0;
   color: #d9c8ff;
   font-size: 15px;
 }
-.editionMeta {
+.releaseDetailHeader .editionMeta {
   margin: 0;
   color: #b4bdcf;
   font-size: 13px;

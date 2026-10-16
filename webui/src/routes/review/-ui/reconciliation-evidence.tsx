@@ -547,12 +547,17 @@ export function ReleaseComparison({
           <div className={styles.sectionHeading}>
             <div>
               <h4>
-                <EvidenceIcon name="disc" /> Compare {candidates.length} release candidates
+                <EvidenceIcon name="disc" />{' '}
+                {candidates.length === 1
+                  ? 'Available release'
+                  : `Compare ${candidates.length} release candidates`}
               </h4>
               <p>
-                {allEquivalent
-                  ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
-                  : 'Select an edition to inspect its track mapping and unmatched files.'}
+                {candidates.length === 1
+                  ? 'Inspect this edition’s audio tracks and local file assignments.'
+                  : allEquivalent
+                    ? 'These editions assign the available files the same way. Choose by country, format, date, or edition.'
+                    : 'Select an edition to inspect its track mapping and unmatched files.'}
               </p>
             </div>
           </div>

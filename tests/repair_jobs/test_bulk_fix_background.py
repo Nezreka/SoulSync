@@ -209,7 +209,6 @@ def test_completed_operation_survives_restart_and_new_operation(tmp_path):
     worker = _worker(db, tmp_path)
     first = worker.start_bulk_fix(job_id='genre_cleanup')['operation_id']
     _wait_done(worker)
-    worker._bulk_fix_thread.join() if worker._bulk_fix_thread else None
     _add_genre_finding(db, 'second', 2)
     second = worker.start_bulk_fix(job_id='genre_cleanup')['operation_id']
     _wait_done(worker)

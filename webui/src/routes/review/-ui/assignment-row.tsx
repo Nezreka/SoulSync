@@ -46,7 +46,7 @@ export function AssignmentRow({
     >
       <span className={styles.rowPosition}>{position}</span>
       <span className={styles.compactLocal}>
-        <strong>{row.current_title || 'No local file'}</strong>
+        <strong>{row.current_title || row.file || 'No local file'}</strong>
         <small>
           Local {currentPosition}
           {row.file_duration_ms ? ` · ${shortDuration(row.file_duration_ms)}` : ''}

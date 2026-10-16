@@ -33,23 +33,11 @@ import { usePolledStatus } from '../../tools/-tools.polling';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
 import { ProviderReleaseId } from './provider-release-id';
-import {
-  AssignmentEvidence,
-  ReconciliationEvidence,
-  ReleaseComparison,
-  StatusChip,
-} from './reconciliation-evidence';
+import { AssignmentEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
 import { buildAlbumModel, decisionOrder } from './review-album-model';
 import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
-import {
-  assignmentKey,
-  changeFieldLabel,
-  findingHeading,
-  record,
-  records,
-  textValue,
-} from './review-presentation';
+import { assignmentKey, changeFieldLabel, record, records, textValue } from './review-presentation';
 import { SelectedActionDetail } from './selected-action-detail';
 
 const requireChoice = new Set([
@@ -318,7 +306,8 @@ export function ReviewPage() {
   const [searchInput, setSearchInput] = useState('');
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [busy, setBusy] = useState(false);
-  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzingCase, setReanalyzingCase] = useState<string | null>(null);
+  const reanalyzing = reanalyzingCase === caseId;
   const [busyDecision, setBusyDecision] = useState('');
   const [scanBusy, setScanBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
@@ -796,16 +785,18 @@ export function ReviewPage() {
 
   const reanalyzeAlbum = async () => {
     if (!reviewCase) return;
+    const requestedId = reviewCase.case_id;
     setError('');
     setNotice('');
-    setReanalyzing(true);
+    setReanalyzingCase(requestedId);
     try {
-      await reanalyzeReviewCase(reviewCase.case_id);
-      setReviewCase(await fetchReviewCase(reviewCase.case_id));
+      await reanalyzeReviewCase(requestedId);
+      const updated = await fetchReviewCase(requestedId);
+      if (selectedCaseRef.current === requestedId) setReviewCase(updated);
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === requestedId) setError((cause as Error).message);
     } finally {
-      setReanalyzing(false);
+      setReanalyzingCase((current) => (current === requestedId ? null : current));
     }
   };
 
