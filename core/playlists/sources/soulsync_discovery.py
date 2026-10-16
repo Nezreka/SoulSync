@@ -25,8 +25,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, List, Optional, Tuple
 
-logger = logging.getLogger(__name__)
-
 from core.playlists.sources.base import (
     NormalizedTrack,
     PlaylistDetail,
@@ -34,6 +32,8 @@ from core.playlists.sources.base import (
     PlaylistSource,
     SOURCE_SOULSYNC_DISCOVERY,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
@@ -62,7 +62,8 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
             return []
         try:
             records = manager.list_playlists(profile_id=self._profile_id_getter()) or []
-        except Exception:
+        except Exception as exc:
+            logger.warning("soulsync_discovery list_playlists failed: %s", exc)
             return []
         # Only surface syncable playlists: skip ones that generated empty
         # (e.g. a no-op generator) — a 0-track playlist can't be mirrored and
@@ -101,16 +102,19 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
         sid = str(playlist_id or '').strip()
         if not sid:
             return None
-        records = self._records(manager)
+        # Shape first, DB second: an ID that is neither an integer row ID
+        # nor an ssd_ mirror ID can't resolve — don't spend a query on it
+        # (the pre-ssd_ code returned None for those without listing).
         try:
             row_id = int(sid)
         except (TypeError, ValueError):
             row_id = None
+        if row_id is None and not sid.startswith('ssd_'):
+            return None
+        records = self._records(manager)
         if row_id is not None:
             return next((r for r in records if int(r.id) == row_id), None)
-        if sid.startswith('ssd_'):
-            return next((r for r in records if self._synthetic_id(r) == sid), None)
-        return None
+        return next((r for r in records if self._synthetic_id(r) == sid), None)
 
     def _parse_synthetic(self, manager: Any, playlist_id: str) -> Optional[Tuple[str, str]]:
         """Parse an ``ssd_…`` ID into ``(kind, variant)`` via the kind registry.
@@ -133,10 +137,16 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
             return None
         try:
             specs = [s for s in (all_specs() or []) if getattr(s, 'kind', None)]
+            specs.sort(key=lambda s: len(s.kind), reverse=True)
         except Exception:
             return None
-        for spec in sorted(specs, key=lambda s: len(s.kind), reverse=True):
-            if rest == spec.kind:
+        for spec in specs:
+            # A bare ssd_<kind> names a singleton only. A variant kind
+            # without its variant matches nothing (the frontend drops such
+            # rows as orphans) — returning (kind, '') would make the real
+            # manager raise in ensure_playlist and depend on that raise to
+            # stay benign.
+            if rest == spec.kind and not getattr(spec, 'requires_variant', False):
                 return (spec.kind, '')
             if getattr(spec, 'requires_variant', False) and rest.startswith(spec.kind + '_'):
                 variant = rest[len(spec.kind) + 1:]
@@ -197,6 +207,7 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
         if manager is None:
             return None
         record = self._find_record(manager, playlist_id)
+        via_fallback = record is None
         if record is not None:
             kind, variant = record.kind, record.variant
             # PlaylistRecord always carries profile_id; the getattr guard
@@ -222,7 +233,22 @@ class SoulSyncDiscoveryPlaylistSource(PlaylistSource):
             )
         except Exception:  # noqa: S110 — manager persists last_generation_error on failure; surface existing snapshot
             pass
-        return self.get_playlist(playlist_id)
+        detail = self.get_playlist(playlist_id)
+        if via_fallback and (detail is None or not detail.tracks):
+            # Fallback first generation produced nothing (generator failed
+            # or returned empty for a variant the resolver couldn't rule
+            # out). Returning a 0-track detail would let the caller REPLACE
+            # the mirror's tracks with nothing — the manager preserved no
+            # snapshot here because the row was just created. Report the
+            # refresh as failed instead so the mirror keeps its tracks.
+            # (The record-hit path above keeps the manager's semantics: a
+            # failed generation surfaces the preserved snapshot.)
+            if detail is not None:
+                logger.warning(
+                    "soulsync_discovery refresh of %s generated 0 tracks; "
+                    "reporting failure so the mirror is preserved", playlist_id)
+            return None
+        return detail
 
     # ---- projection helpers ------------------------------------------------
 
