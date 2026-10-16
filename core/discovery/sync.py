@@ -170,7 +170,8 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
 
         # the discovered id first, then the playlist's own id: Find & Add files its
         # match under the latter, which a wing-it stub never equals (#1289)
-        from core.sync.match_overrides import match_lookup_ids
+        from core.sync.match_overrides import (
+            cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
         for _match_id in match_lookup_ids(spotify_track):
             # --- Sync match cache fast-path ---
             try:
@@ -178,14 +179,45 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                 if cached:
                     db_track_check = db.get_track_by_id(cached['server_track_id'])
                     if db_track_check:
-                        class DatabaseTrackCached:
-                            def __init__(self, db_t):
-                                self.ratingKey = db_t.id
-                                self.title = db_t.title
-                                self.id = db_t.id
-                        logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
-                        return DatabaseTrackCached(db_track_check), cached['confidence']
-                    logger.warning(f"Sync cache stale for '{original_title}' — track gone")
+                        # #1721: same unchecked-cache trap as the media-server
+                        # matcher — an auto-match cached by an older, buggier
+                        # matcher (the pre-fix #1715 fallback) would pin the
+                        # wrong song forever. Revalidate auto-shaped rows;
+                        # a proven-stale row is dropped and matching falls
+                        # through to the durable manual match / fresh matcher.
+                        _artist_names = []
+                        for _a in spotify_track.artists:
+                            if isinstance(_a, str):
+                                _artist_names.append(_a)
+                            elif isinstance(_a, dict) and 'name' in _a:
+                                _artist_names.append(_a['name'])
+                            else:
+                                _artist_names.append(str(_a))
+                        if cached_match_is_stale(
+                            db,
+                            title=original_title,
+                            artists=_artist_names,
+                            album=getattr(spotify_track, 'album', None),
+                            server_source=active_server,
+                            cached_track_id=cached['server_track_id'],
+                            cached_track_row=db_track_check,
+                            threshold=0.80,
+                        ):
+                            logger.info(
+                                f"Sync cache stale for '{original_title}' — cached track "
+                                f"{cached['server_track_id']} no longer matches under "
+                                f"current rules; dropping the cached pairing")
+                            drop_stale_cached_match(db, _match_id, active_server)
+                        else:
+                            class DatabaseTrackCached:
+                                def __init__(self, db_t):
+                                    self.ratingKey = db_t.id
+                                    self.title = db_t.title
+                                    self.id = db_t.id
+                            logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                            return DatabaseTrackCached(db_track_check), cached['confidence']
+                    else:
+                        logger.warning(f"Sync cache stale for '{original_title}' — track gone")
             except Exception as e:
                 logger.debug("sync match cache fast-path failed: %s", e)
             # --- End cache fast-path ---
