@@ -182,8 +182,6 @@ def run_mirrored_playlist_pipeline(
         # M13/M14: the final status reflects a failed/timed-out discovery
         # phase instead of claiming a clean success.
         skipped = sync_summary.get('skipped', 0)
-        sync_errors = int(sync_summary.get('errors', 0) or 0)
-        sync_error_messages = list(sync_summary.get('error_messages') or [])
         if discovery_status == 'completed':
             final_log_line = f'Pipeline finished in {duration // 60}m {duration % 60}s'
             final_log_type = 'success'
@@ -195,11 +193,11 @@ def run_mirrored_playlist_pipeline(
         if skipped > 0:
             final_log_line += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             final_log_type = 'warning'
-        # a failed sync used to vanish here: it was counted, then dropped, and
-        # the run read as a clean "Completed / Synced 0".
-        if sync_errors > 0:
-            final_log_line += f' — {sync_errors} playlist sync{"s" if sync_errors != 1 else ""} failed'
-            final_log_type = 'warning'
+        # imported here: core.automation.handlers imports this module
+        from core.automation.handlers._pipeline_shared import apply_sync_errors
+        result_errors: Dict[str, Any] = {}
+        final_log_line, final_log_type = apply_sync_errors(
+            sync_summary, result_errors, final_log_line, final_log_type)
         deps.update_progress(
             automation_id,
             status='finished',
@@ -217,13 +215,10 @@ def run_mirrored_playlist_pipeline(
             'discovery_error': discovery_error,
             'tracks_synced': str(sync_summary['synced']),
             'sync_skipped': str(sync_summary['skipped']),
-            'sync_errors': str(sync_errors),
             'wishlist_queued': str(sync_summary['wishlist_queued']),
             'duration_seconds': str(duration),
+            **result_errors,
         }
-        if sync_errors > 0:
-            # the history card renders result.error as its error block
-            result['error'] = 'Sync failed: ' + '; '.join(sync_error_messages or [f'{sync_errors} playlist(s)'])
         try:
             _record_playlist_pipeline_history(
                 db,

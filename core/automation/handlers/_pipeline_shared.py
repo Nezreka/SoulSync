@@ -206,6 +206,29 @@ def run_sync_and_wishlist(
     }
 
 
+def apply_sync_errors(
+    sync_summary: Dict[str, Any],
+    result: Dict[str, Any],
+    log_line: str,
+    log_type: str,
+) -> tuple:
+    """Stitch the SYNC phase's failures into a pipeline's final result and
+    completion log line. A failed sync used to be counted, then dropped, so
+    the run read as a clean "Completed / Synced 0".
+
+    Sets ``result['sync_errors']`` always, and ``result['error']`` (the
+    history card's error block) when something failed. Returns the possibly
+    downgraded ``(log_line, log_type)``."""
+    errors = int(sync_summary.get('errors', 0) or 0)
+    result['sync_errors'] = str(errors)
+    if errors <= 0:
+        return log_line, log_type
+    messages = list(sync_summary.get('error_messages') or []) or [f'{errors} playlist(s)']
+    result['error'] = 'Sync failed: ' + '; '.join(messages)
+    log_line += f' — {errors} playlist sync{"s" if errors != 1 else ""} failed'
+    return log_line, 'warning'
+
+
 def run_wishlist_phase(
     deps: AutomationDeps,
     automation_id: Optional[str],
@@ -263,4 +286,4 @@ def run_wishlist_phase(
         return 0
 
 
-__all__ = ['run_sync_and_wishlist', 'run_wishlist_phase']
+__all__ = ['apply_sync_errors', 'run_sync_and_wishlist', 'run_wishlist_phase']

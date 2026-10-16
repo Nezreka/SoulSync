@@ -45,7 +45,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
-from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
+from core.automation.handlers._pipeline_shared import apply_sync_errors, run_sync_and_wishlist
 
 
 # Sync state key prefix so personalized syncs don't collide with
@@ -172,6 +172,9 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
         if skipped > 0:
             complete_log += f' — {skipped} track{"s" if skipped != 1 else ""} need identification'
             complete_type = 'warning'
+        result_errors: Dict[str, Any] = {}
+        complete_log, complete_type = apply_sync_errors(
+            sync_summary, result_errors, complete_log, complete_type)
         deps.update_progress(
             automation_id,
             status='finished', progress=100,
@@ -189,6 +192,7 @@ def auto_personalized_pipeline(config: Dict[str, Any], deps: AutomationDeps) -> 
             'sync_skipped': str(sync_summary['skipped']),
             'wishlist_queued': str(sync_summary['wishlist_queued']),
             'duration_seconds': str(duration),
+            **result_errors,
         }
 
     except Exception as e:  # noqa: BLE001 — automation handlers must never raise into engine
