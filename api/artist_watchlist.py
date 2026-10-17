@@ -643,7 +643,9 @@ def add_to_watchlist():
                             if dc_data:
                                 image_url = dc_data.get('image_url')
                                 logger.info(f"Discogs artist image: {image_url[:60] if image_url else 'None'}")
-                        elif source == 'deezer' or fallback_source == 'deezer':
+                        elif source == 'deezer':
+                            # source, not the fallback: #1761 an itunes id sent with its
+                            # source looked up on deezer fetched another artist's photo
                             # Deezer: fetch artist image directly from API
                             # shared deezer budget — this call used to bypass it entirely
                             from core.deezer_throttle import wait_for_slot
@@ -672,11 +674,11 @@ def add_to_watchlist():
 
                         if image_url:
                             database.update_watchlist_artist_image(artist_id, image_url)
-                            logger.warning(f"Cached {fallback_source} artist image for {artist_name}")
+                            logger.warning(f"Cached {source} artist image for {artist_name}")
                         else:
-                            logger.warning(f"No artwork found for {fallback_source} artist {artist_name}")
+                            logger.warning(f"No artwork found for {source} artist {artist_name}")
                     except Exception as fb_error:
-                        logger.error(f"Error fetching {fallback_source} artwork: {fb_error}")
+                        logger.error(f"Error fetching {source} artwork: {fb_error}")
                 elif _spotify_client() and _spotify_client().is_authenticated():
                     # For Spotify artists, fetch from Spotify API
                     artist_data = _spotify_client().get_artist(artist_id)
