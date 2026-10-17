@@ -3,6 +3,7 @@ import type {
   WishlistAlbumWorkflowInput,
 } from '@/platform/workflows/album-workflows';
 import type { IssueDomainBridge } from '@/routes/issues/-issues.types';
+import type { MirroredPipelineState } from '@/routes/sync/-sync.pipeline';
 
 import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './bridge';
 
@@ -360,15 +361,16 @@ declare global {
      * it cannot reproduce. See autoSyncFormatTrigger.
      */
     _autoFormatTrigger?: (type: string, config: unknown) => string;
-    /**
-     * downloads.js — runs a mirrored playlist through the pipeline engine.
-     * The engine stays vanilla for this port, so Auto-Sync's 'Run now' calls
-     * across to it (auto-sync.js 2336).
-     */
+    /** Root AutoSyncHost: legacy dialogs delegate to the native pipeline controller. */
     runMirroredPlaylistPipeline?: (
       playlistId: number,
       playlistName: string,
+      skipWishlist?: boolean,
     ) => Promise<void> | void;
+    pollMirroredPipelineStatus?: (playlistId: number, playlistName: string) => void;
+    /** Classic mirrored cards still need their script-scoped state painted. */
+    applyMirroredPipelineState?: (playlistId: number, state: MirroredPipelineState) => void;
+    loadMirroredPlaylists?: () => Promise<void>;
     /**
      * manual-library-match.js — the Library Match tool. Stays vanilla: its
      * file is untouched by the sync flip (index.html header button, 2239).
