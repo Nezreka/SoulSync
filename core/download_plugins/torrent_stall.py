@@ -40,7 +40,14 @@ DEFAULT_STALL_ACTION = "abandon"
 # lack of it counts toward the stall clock. Mirrors the adapter-uniform set
 # in core/torrent_clients/base.py. Notably EXCLUDES seeding/completed (done)
 # and paused (the user's own choice) — neither is a stall.
-STALLABLE_STATES = frozenset(("queued", "downloading", "stalled", "error"))
+#
+# queued is excluded too. it's the client holding the torrent back on purpose
+# (its max-active-downloads queue, a recheck, a move), not a dead swarm. it used
+# to count, so a torrent waiting its turn in qbit got failed after 10 min and
+# when it finally ran nothing was polling it any more. the poll deadline still
+# caps a torrent that never leaves the queue. metaDL maps to downloading, so a
+# dead magnet still stalls out.
+STALLABLE_STATES = frozenset(("downloading", "stalled", "error"))
 
 
 def get_stall_timeout() -> float:

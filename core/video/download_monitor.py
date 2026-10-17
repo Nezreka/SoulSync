@@ -1450,7 +1450,11 @@ def _tick(db) -> None:
         # server had restarted inside the window. The longer something was stuck, the
         # less likely the old design was to catch it.
         _st = upd.get("status")
-        if stall.tracks_stall(_st):
+        if upd.get("_client_queued"):
+            # waiting in the torrent client's own queue. hold the clock at now so
+            # the half hour starts when it actually begins downloading
+            upd["progress_at"] = _now()
+        elif stall.tracks_stall(_st):
             # A completed-but-unplaceable row carries progress and NO status; the old
             # branch only looked at queued/downloading, so it fell through every guard
             # and spun at 100% forever. That is what a path-mapping failure looks like.
