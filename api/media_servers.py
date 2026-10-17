@@ -32,6 +32,13 @@ def configure(*, config_manager_, engine_getter=None):
         _engine = engine_getter
 
 
+def _capabilities(name: str):
+    """Declared capabilities from the live client, [] when none is wired."""
+    engine = _engine()
+    client = engine.client(name) if engine is not None else None
+    return sorted(getattr(client, 'CAPABILITIES', None) or ())
+
+
 def _connected(name: str):
     """Connection state from the engine when one is wired, else None."""
     engine = _engine()
@@ -54,6 +61,7 @@ def describe_all(include_state: bool = True):
             item['configured'] = d.is_configured_in(config_manager)
             item['active'] = (d.name == active)
             item['connected'] = _connected(d.name)
+            item['capabilities'] = _capabilities(d.name)
         out.append(item)
     return {'active': active, 'servers': out}
 

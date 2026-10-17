@@ -17,7 +17,8 @@ import time
 # XPlaylistInfo. Lifted to one canonical type so consumers (matching
 # engine, sync service, etc.) get a single import.
 from core.media_server.types import TrackInfo, PlaylistInfo
-from core.media_server.contract import MediaServerClient
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
 
 logger = get_logger("plex_client")
 
@@ -48,7 +49,14 @@ def _plex_track_path(track) -> str:
     return ''
 
 
-class PlexClient(MediaServerClient):
+class PlexClient(MediaServerBase):
+    CAPABILITIES = frozenset({
+        Capability.SEARCH, Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER,
+        Capability.LIBRARY_STATS, Capability.PLAYLISTS, Capability.PLAYLIST_IMAGE,
+        Capability.PLAY_HISTORY, Capability.CURATION_SIGNALS, Capability.METADATA_WRITE,
+        Capability.TRACK_METADATA_WRITE, Capability.PER_USER_VIEWS,
+    })
+
     def __init__(self):
         self.server: Optional[PlexServer] = None
         self.music_library: Optional[MusicSection] = None
@@ -147,6 +155,11 @@ class PlexClient(MediaServerClient):
         with self._user_servers_lock:
             self._user_servers[token] = server
         return server
+
+    def user_view(self, identity):
+        """``as_home_user`` under the shared hook name (see MediaServerBase)."""
+        token = (identity or {}).get('token')
+        return self.as_home_user(token, (identity or {}).get('title', '')) if token else None
 
     def as_home_user(self, token: str, title: str = '') -> Optional['PlexUserView']:
         """this client, connected as a Home user (see PlexUserView). None when

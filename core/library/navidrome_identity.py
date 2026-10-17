@@ -230,6 +230,26 @@ def repair_rekeyed_tracks(db, songs):
 _active_write = ContextVar('navidrome_validated_write', default=None)
 
 
+def has_same_path_duplicates(db):
+    """Whether any two Navidrome rows share a file path, the only case the
+    rekey repair has work for. The one place that knows which table holds
+    the server's rows: a catalogue with a different layout changes this
+    query and nothing else."""
+    with db._get_connection() as conn:
+        return conn.execute(
+            "SELECT 1 FROM tracks WHERE server_source='navidrome' AND file_path IS NOT NULL "
+            "AND file_path!='' GROUP BY file_path HAVING COUNT(*) > 1 LIMIT 1").fetchone() is not None
+
+
+def repair_if_needed(db, client):
+    """The post-scan repair as one call: no inventory fetch unless same-path
+    duplicates need investigation, then merge the rekeyed rows. Returns the
+    number of rows merged (0 when nothing was needed)."""
+    if not has_same_path_duplicates(db):
+        return 0
+    return repair_rekeyed_tracks(db, read_inventory(client))
+
+
 def validated_playlist_write(method):
     """Validate once across nested update/create calls; verify server contents."""
     @wraps(method)
