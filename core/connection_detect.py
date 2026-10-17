@@ -15,6 +15,16 @@ import requests
 logger = logging.getLogger(__name__)
 
 
+def default_port(server_type):
+    """The port auto-detect probes for a server: the media server
+    descriptor's detection port, or slskd's fixed one."""
+    if server_type == 'slskd':
+        return 5030
+    from core.media_server import specs
+    descriptor = specs.describe(server_type)
+    return descriptor.detection.port if descriptor and descriptor.detection else None
+
+
 def run_detection(server_type):
     """
     Performs comprehensive network detection for a given server type (plex, jellyfin, slskd).
@@ -62,7 +72,8 @@ def run_detection(server_type):
             network = ipaddress.IPv4Network(f"{local_ip}/24", strict=False)
             return str(network.network_address), "255.255.255.0", local_ip, network
 
-    def test_plex_server(ip, port=32400):
+    def test_plex_server(ip, port=None):
+        port = port or default_port('plex')
         """Test if a Plex server is running at the given IP and port"""
         try:
             url = f"http://{ip}:{port}/web/index.html"
@@ -84,7 +95,8 @@ def run_detection(server_type):
             logger.debug("plex probe %s: %s", ip, e)
         return None
 
-    def test_jellyfin_server(ip, port=8096):
+    def test_jellyfin_server(ip, port=None):
+        port = port or default_port('jellyfin')
         """Test if a Jellyfin server is running at the given IP and port"""
         try:
             # Try the system info endpoint first
@@ -106,7 +118,8 @@ def run_detection(server_type):
             logger.debug("jellyfin probe %s: %s", ip, e)
         return None
 
-    def test_slskd_server(ip, port=5030):
+    def test_slskd_server(ip, port=None):
+        port = port or default_port('slskd')
         """Test if a slskd server is running at the given IP and port"""
         try:
             # slskd specific API endpoint
@@ -121,7 +134,8 @@ def run_detection(server_type):
             logger.debug("slskd probe %s: %s", ip, e)
         return None
 
-    def test_navidrome_server(ip, port=4533):
+    def test_navidrome_server(ip, port=None):
+        port = port or default_port('navidrome')
         """Test if a Navidrome server is running at the given IP and port"""
         try:
             # Try Navidrome's ping endpoint (part of Subsonic API)
