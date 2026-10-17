@@ -2403,13 +2403,14 @@ def validate_and_heal_batch_states():
                     if not completion_time:
                         # Set completion time if not set
                         batch_data['completion_time'] = current_time
-                    else:
-                        # Check if batch has been complete for >5 minutes
+                    elif _downloads_lifecycle.terminal_batch_is_stale(batch_data, current_time):
+                        # 5 minutes after completion AND after the modal last
+                        # polled it. an open modal is someone still picking
+                        # candidates for the not-found rows.
                         time_since_completion = current_time - completion_time
-                        if time_since_completion > 300:  # 5 minutes
-                            logger.warning(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
-                            batches_to_cleanup.append(batch_id)
-                            continue  # Skip other healing logic for this batch
+                        logger.warning(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
+                        batches_to_cleanup.append(batch_id)
+                        continue  # Skip other healing logic for this batch
 
                 # Count actually active tasks
                 actually_active = 0
@@ -7875,6 +7876,7 @@ def get_task_candidates(task_id):
             task = download_tasks.get(task_id)
             if not task:
                 return jsonify({"error": "Task not found"}), 404
+            _downloads_lifecycle.stamp_batches_watched([task.get('batch_id')])
 
             candidates = task.get('cached_candidates', [])
             track_info = task.get('track_info', {})
@@ -7925,6 +7927,7 @@ def download_selected_candidate(task_id):
 
             batch_id = task.get('batch_id')
             track_info = task.get('track_info', {})
+            _downloads_lifecycle.stamp_batches_watched([batch_id])
 
             # Reset task state
             task['status'] = 'downloading'
@@ -8143,6 +8146,7 @@ def manual_search_for_task(task_id):
             if not task:
                 return jsonify({"error": "Task not found"}), 404
             track_info = dict(task.get('track_info', {}))
+            _downloads_lifecycle.stamp_batches_watched([task.get('batch_id')])
 
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
@@ -17030,11 +17034,28 @@ def get_batched_download_statuses():
     """Returns status for multiple download batches in one request."""
     try:
         requested_batch_ids = request.args.getlist('batch_ids')
+        # batches whose modal is open on screen; keeps them past the auto-cleanup
+        watching = request.args.getlist('watching')
+        if watching:
+            with tasks_lock:
+                _downloads_lifecycle.stamp_batches_watched(watching)
         return jsonify(_downloads_status.build_batched_status(requested_batch_ids, _build_status_deps()))
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/download_status/watch', methods=['POST'])
+def watch_download_batches():
+    """keepalive from a backgrounded tab: its open modals still count as watched."""
+    data = request.get_json(silent=True) or {}
+    batch_ids = data.get('batch_ids')
+    if not isinstance(batch_ids, list):
+        return jsonify({"success": False, "error": "batch_ids must be a list"}), 400
+    with tasks_lock:
+        _downloads_lifecycle.stamp_batches_watched([b for b in batch_ids if isinstance(b, str)])
+    return jsonify({"success": True})
 
 
 @app.route('/api/downloads/all', methods=['GET'])
@@ -17678,6 +17699,14 @@ def cleanup_batch():
                         "error": "Batch cleanup deferred - wishlist processing in progress",
                         "deferred": True
                     }), 202  # 202 = Accepted but not yet processed
+
+                # a manual candidate pick is still downloading: closing the modal
+                # must not pull the task out from under it. the healer drops the
+                # batch once it settles.
+                if _downloads_lifecycle.batch_has_in_flight_tasks(batch):
+                    logger.info(f"[Cleanup] Batch {batch_id} cleanup deferred - a task is still in flight")
+                    return jsonify({"success": True, "deferred": True,
+                                    "message": "Batch still has a download in flight; it will be cleaned up when done."})
 
                 # Get the list of task IDs before deleting the batch
                 task_ids_to_remove = batch.get('queue', [])

@@ -2223,6 +2223,42 @@ let globalDownloadStatusPoller = null;
 let globalPollingFailureCount = 0; // Track consecutive failures for exponential backoff
 let globalPollingBaseInterval = 2000; // Base polling interval in ms - MATCHES sync.py exactly
 
+// open modals ride along as watching=, so the server keeps a finished batch
+// alive while someone is still picking candidates for its not-found rows.
+function _modalIsOpen(modal) {
+    return !!(modal && modal.isConnected && modal.style.display !== 'none');
+}
+
+function _batchStatusQuery(batchIds, batchToPlaylistMap) {
+    const parts = batchIds.map(id => `batch_ids=${encodeURIComponent(id)}`);
+    batchIds.forEach((id) => {
+        if (_modalIsOpen(activeDownloadProcesses[batchToPlaylistMap[id]]?.modalElement)) {
+            parts.push(`watching=${encodeURIComponent(id)}`);
+        }
+    });
+    return parts.join('&');
+}
+
+// a backgrounded tab skips the status poll, so its open modals send a small
+// keepalive instead. once a minute is well inside the server's 5 minute grace,
+// and browsers throttle hidden-tab timers to about that anyway.
+const _HIDDEN_KEEPALIVE_MS = 60000;
+let _lastHiddenKeepalive = 0;
+
+function _keepWatchedBatchesAlive(now = Date.now()) {
+    if (now - _lastHiddenKeepalive < _HIDDEN_KEEPALIVE_MS) return;
+    const batchIds = Object.values(activeDownloadProcesses)
+        .filter(p => p.batchId && !p.batchGone && _modalIsOpen(p.modalElement))
+        .map(p => p.batchId);
+    if (batchIds.length === 0) return;
+    _lastHiddenKeepalive = now;
+    fetch('/api/download_status/watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch_ids: batchIds }),
+    }).catch(() => {});
+}
+
 function startGlobalDownloadPolling() {
     // Always run HTTP polling as a fallback — WebSocket connections can silently
     // stop delivering messages (room subscription lost, server emit error, proxy
@@ -2236,7 +2272,7 @@ function startGlobalDownloadPolling() {
     console.log('🔄 [Global Polling] Starting batched download status polling');
 
     globalDownloadStatusPoller = setInterval(async () => {
-        if (document.hidden) return; // Skip polling when tab is not visible
+        if (document.hidden) { _keepWatchedBatchesAlive(); return; } // no full poll while hidden
         // Get all active processes that need polling
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
@@ -2284,7 +2320,7 @@ function startGlobalDownloadPolling() {
 
         try {
             // Single batched API call for all active processes
-            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const queryParams = _batchStatusQuery(activeBatchIds, batchToPlaylistMap);
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
 
             if (!response.ok) {
@@ -2399,7 +2435,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         }
 
         try {
-            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const queryParams = _batchStatusQuery(activeBatchIds, batchToPlaylistMap);
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
 
             if (!response.ok) {
