@@ -1,15 +1,13 @@
-**SoulSync 3.5.6 is out** :musical_note:
+**SoulSync 3.5.7 is out** :musical_note:
 
-A quick follow-up to 3.5.5.
+Beatport charts are real playlists now. Every chart opens to be identified instead of downloading as a fake "Various Artists" compilation, tracks match by ISRC, mirrored charts refresh and can join the pipeline, and you can save a dated snapshot of a chart. Beatport is also an enrichment source for BPM, key, label and catalog number.
 
-Playlist sync stops grabbing the wrong song. The album fallback now needs the artist to match, so a same-titled song on a same-named album can't stand in for the real one. One song your server no longer has also stops blocking the whole playlist: it's skipped and everything else gets written (thanks @kevin2xk).
+Playlist sync gives Spotify tracks your primary source misses a second pass by their own Spotify id instead of turning them into Wing It, every track of a mirrored playlist shows where it stands, and a stale cached match can't pin the wrong song (thanks @kevin2xk). Scheduled auto-sync regenerates Discovery Shuffle (thanks @Bloopser), and failed Navidrome writes are reported properly (thanks @zikasak).
 
-Library reorganize resumes where it stopped instead of starting from the first album every run, and a stopped run keeps the moves it already planned (thanks @QT3496).
+New automatic album completion finishes incomplete albums in your library (thanks @kiwijar). Chosen spoken-word artists can route to the audiobook library (thanks @SimpleSimonLA).
 
-Auto-import runs the same library check as the import page, so staging drops skip what you already own. Each import in history says what it did, and a new opt-in Clear finished folders switch tidies staging once everything is in.
+Video wishlist episodes find releases named by TVDB's episode numbering, and stop rejecting shows with a year in the name. There's a new video stats API endpoint (thanks @hilburn).
 
-The album modal shows found and missing tracks as soon as it opens.
-
-Run Now on the Update Discovery automation always refreshes instead of waiting out the 6 hour cooldown (thanks @mikedaf). YouTube imports onto NFS shares stop failing on file metadata the share refuses (thanks @hilburn).
+Importing albums you already own no longer fails every track: they count as already in library (thanks SeadogsBooty). Plex paths resolve when a folder differs only by case.
 
 Full notes on GitHub.
