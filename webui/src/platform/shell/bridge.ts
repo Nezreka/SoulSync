@@ -19,6 +19,8 @@ export interface ShellProfileContext {
   name?: string;
   avatarColor?: string;
   avatarUrl?: string;
+  /** Resolved allowed_sides from the profile payload ('music'|'video'|'both'). */
+  allowedSides?: string | null;
 }
 
 export interface ShellContext {

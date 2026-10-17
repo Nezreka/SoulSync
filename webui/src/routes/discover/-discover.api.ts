@@ -309,7 +309,11 @@ export function fetchSeasonalCurrent(): Promise<SeasonalResponse> {
 
 export const fetchReleaseRadar = () => section<Record<string, unknown>>('discover/release-radar');
 export const fetchDiscoveryWeekly = () =>
-  section<Record<string, unknown>>('discover/discovery-weekly');
+  // The route is /api/discover/weekly — 'discover/discovery-weekly' never
+  // existed server-side, so this section 404'd on every Discover load
+  // (#1763). The MSW stub in the use-mixes test mirrored the wrong URL,
+  // which is why no test caught it.
+  section<Record<string, unknown>>('discover/weekly');
 
 export function fetchSeasonalPlaylist(
   seasonKey: string,

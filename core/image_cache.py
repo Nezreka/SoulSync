@@ -242,7 +242,21 @@ class ImageCache:
                         [(key, url, ts, ts, ts, variant) for key, (url, variant, ts) in pending.items()])
         except Exception as e:
             logger.debug("image cache registration flush failed (%d entries): %s", len(pending), e)
-            # a lost registration only costs a 404 until the page registers it again
+            # Do NOT drop the batch: a lost registration 404s every serve of
+            # that image, and a page registers its artwork in ONE batch, so a
+            # single transient failure (e.g. "database is locked" under load)
+            # used to turn a whole page of first-load artwork into a burst of
+            # 404s (#1763) — and the 60s registration coalesce in
+            # cache_url_for then suppressed re-registration on top of it.
+            # Put the entries back (newer registrations for the same key
+            # win) and clear their coalesce marks, so the next render or
+            # serve — _get_row flushes pending keys — retries the write.
+            with self._pending_touches_lock:
+                for key, entry in pending.items():
+                    self._pending_registrations.setdefault(key, entry)
+                    self._registrations.pop(key, None)
+                if self._pending_registrations and not self._pending_registrations_since:
+                    self._pending_registrations_since = time.time()
             if _is_corruption(e):
                 self._rebuild_index(str(e))
 

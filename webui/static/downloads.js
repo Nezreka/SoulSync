@@ -4971,6 +4971,11 @@ function updateOverlayTask(data) {
 // Pull current state on demand (panel open / page load) so we're accurate even if
 // a socket event was missed or a job was already running before we connected.
 function _seedOverlayTask() {
+    // The bell seeds video job state on every page load. The overlays and
+    // collections status endpoints are admin-only for every method in the
+    // video blueprint's gate, so for anyone else these seeds only earn a
+    // 403 (#1763). Fail open when the profile helpers aren't loaded yet.
+    if (typeof isAdminProfile === 'function' && !isAdminProfile()) return;
     fetch('/api/video/overlays/apply/status')
         .then(r => r.ok ? r.json() : null)
         .then(s => { if (s) updateOverlayTask(s); })
@@ -5575,6 +5580,7 @@ function updateCollectionArtTask(data) {
 }
 
 function _seedCollectionArtTask() {
+    if (typeof isAdminProfile === 'function' && !isAdminProfile()) return;
     fetch('/api/video/collections/posters/regenerate/status')
         .then(r => r.ok ? r.json() : null)
         .then(s => { if (s) updateCollectionArtTask(s); })
@@ -5625,6 +5631,7 @@ function updateVideoBulkTask(data) {
 }
 
 function _seedVideoBulkTask() {
+    if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
     fetch('/api/video/bulk/status')
         .then(r => r.ok ? r.json() : null)
         .then(s => { if (s) updateVideoBulkTask(s); })
@@ -5676,6 +5683,7 @@ function updateCollectionSyncTask(data) {
 }
 
 function _seedCollectionSyncTask() {
+    if (typeof isAdminProfile === 'function' && !isAdminProfile()) return;
     fetch('/api/video/collections/sync/status')
         .then(r => r.ok ? r.json() : null)
         .then(s => { if (s) updateCollectionSyncTask(s); })
@@ -5823,6 +5831,10 @@ function _notifHealthHTML() {
 }
 
 function _seedNotifHealth() {
+    // /api/video/health sits behind the video side gate; a music-only
+    // profile would only earn a 403 here, and the panel already tolerates
+    // having no health data (#1763).
+    if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return Promise.resolve();
     return fetch('/api/video/health', { headers: { Accept: 'application/json' } })
         .then(r => (r.ok ? r.json() : null))
         .then(h => {

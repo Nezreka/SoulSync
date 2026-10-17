@@ -128,9 +128,20 @@ export function shouldGiveUp(notFoundCount: number): boolean {
   return notFoundCount >= MAX_NOT_FOUND_ATTEMPTS;
 }
 
-/** Any successful response resets the counter (11673). */
-export function nextNotFoundCount(current: number, responseOk: boolean, status: number): number {
-  if (responseOk) return 0;
+/**
+ * Any successful response resets the counter (11673) — with one exception:
+ * since #1763 the status endpoint answers an idle/unknown id with 200 and
+ * `{"status": "not_found"}` instead of a 404, so a 200 carrying that body
+ * still counts as a miss. Without this, a download whose sync never started
+ * would poll forever instead of giving up.
+ */
+export function nextNotFoundCount(
+  current: number,
+  responseOk: boolean,
+  status: number,
+  bodyStatus?: string,
+): number {
+  if (responseOk) return bodyStatus === 'not_found' ? current + 1 : 0;
   if (status === 404) return current + 1;
   return current;
 }

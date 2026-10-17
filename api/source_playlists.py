@@ -5445,7 +5445,13 @@ def get_sync_status(playlist_id):
     with sync_lock:
         state = sync_states.get(playlist_id)
         if not state:
-            return jsonify({"status": "not_found"}), 404
+            # No sync state is the IDLE state, not an error: every dashboard
+            # load polls the discover_* ids before any sync has run. Answer
+            # 200 with the not_found body (#1763) — a 404 here made normal
+            # page loads look like probing bursts to CrowdSec / fail2ban.
+            # Consumers that counted 404s to detect a never-started sync now
+            # read the body's status field instead.
+            return jsonify({"status": "not_found"})
 
         # If the task is finished but the state hasn't been updated, check the future
         if state['status'] not in ['finished', 'error'] and playlist_id in active_sync_workers:

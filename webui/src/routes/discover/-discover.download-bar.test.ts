@@ -153,6 +153,15 @@ describe('monitoring', () => {
     expect(nextNotFoundCount(3, false, 404)).toBe(4);
   });
 
+  it('counts a 200 with a not_found body as a miss (#1763)', () => {
+    // Idle answers 200 + {"status": "not_found"} now; a download whose sync
+    // never started must still accumulate toward removal, not poll forever.
+    expect(nextNotFoundCount(0, true, 200, 'not_found')).toBe(1);
+    expect(nextNotFoundCount(3, true, 200, 'not_found')).toBe(4);
+    expect(nextNotFoundCount(4, true, 200, 'syncing')).toBe(0);
+    expect(nextNotFoundCount(4, true, 200, undefined)).toBe(0);
+  });
+
   it('leaves the counter alone for a non-404 failure', () => {
     // A 500 is the server being unwell, not the sync being absent.
     expect(nextNotFoundCount(2, false, 500)).toBe(2);

@@ -260,6 +260,15 @@ export async function fetchMetadataStatus(): Promise<MetadataStatus> {
  * twice.
  */
 export async function fetchConfigStatus(): Promise<ConfigStatus> {
+  // config-status is admin-only. For a profile the shell already knows is
+  // not an admin, the answer is a guaranteed 403 — and the caller treats an
+  // empty result exactly like a failed read (falls back to /status plus
+  // optimistic defaults). Skip the call rather than eat the 403 on every
+  // search-page load (#1763). Unknown context fails open, as before.
+  const profileCtx = window.getCurrentProfileContext?.();
+  if (profileCtx && !profileCtx.isAdmin) {
+    return { configured: {}, enabledExperimental: new Set() };
+  }
   try {
     const data = await readJson<
       Record<string, { configured?: boolean; metadata_available?: boolean }>

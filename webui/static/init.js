@@ -409,7 +409,12 @@ async function bootstrapServerAppearanceSettings() {
     }
 }
 
-bootstrapServerAppearanceSettings();
+// NOTE: bootstrapServerAppearanceSettings() is NOT called here any more.
+// It reads /api/settings, which is admin-only, so firing it at parse time —
+// before any profile is known — guaranteed a 403 on every page load for
+// every non-admin member (and a 401 on the login screen), the burst in
+// #1763. _continueAppInit calls it once the profile is resolved, and only
+// for profiles that may actually read settings.
 
 // ── Password-manager autofill suppression ──────────────────────────────
 // Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
@@ -624,6 +629,33 @@ function canDownload() {
     return currentProfile.can_download !== false && currentProfile.can_download !== 0;
 }
 
+// Mirrors the video blueprint's server gate (api/video/__init__.py): a
+// non-admin profile may call /api/video/* only when its resolved
+// allowed_sides — which /api/profiles/current already sends — includes the
+// video side. Fails open exactly like canDownload: no profile context (or a
+// payload without the field) keeps today's behavior. Shell code that seeds
+// video state in the background checks this first, so a music-only member's
+// page load stops producing the 403s in #1763.
+function canAccessVideoSide() {
+    if (!currentProfile) return true;
+    if (currentProfile.id === 1 || currentProfile.is_admin) return true;
+    const sides = currentProfile.allowed_sides;
+    if (!sides) return true;
+    return sides === 'video' || sides === 'both';
+}
+
+// Admin in the server's sense (the video gate reads g.is_admin, which is the
+// profile's real is_admin flag, with profile 1 as the standing fallback).
+// Some /api/video/* families — overlays, collections, import, repair — are
+// admin-only for EVERY method, so background callers of those need this
+// stricter check, not canAccessVideoSide. Fails open with no profile, like
+// the helpers above: with the profile system off the server treats the
+// caller as admin anyway.
+function isAdminProfile() {
+    if (!currentProfile) return true;
+    return currentProfile.id === 1 || !!currentProfile.is_admin;
+}
+
 function getCurrentProfileContext() {
     if (!currentProfile) return null;
     return {
@@ -633,6 +665,8 @@ function getCurrentProfileContext() {
         name: currentProfile.name || '',
         avatarColor: currentProfile.avatar_color || '',
         avatarUrl: currentProfile.avatar_url || '',
+        // resolved server-side; mirrors the /api/video/* gate (#1763)
+        allowedSides: currentProfile.allowed_sides || null,
     };
 }
 
@@ -4081,6 +4115,15 @@ async function _continueAppInit() {
     if (!profileReady) {
         console.log('Waiting for profile selection...');
         return; // App init deferred until profile is selected via picker
+    }
+
+    // Server appearance (accent / particles) lives behind admin-only
+    // /api/settings. Only profiles that may read it fetch it; a member's
+    // load no longer eats the 403 (#1763). No profile at all (profile
+    // system off) keeps the historical behavior — settings are readable
+    // there. Quick profile switches don't re-run this, same as before.
+    if (!currentProfile || currentProfile.is_admin || currentProfile.id === 1) {
+        bootstrapServerAppearanceSettings();
     }
 
     initApp();

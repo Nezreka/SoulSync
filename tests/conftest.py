@@ -729,7 +729,8 @@ def test_app():
     def sync_status_endpoint(playlist_id):
         status = _build_sync_status(playlist_id)
         if status.get('status') == 'not_found':
-            return jsonify({'error': 'Sync not found'}), 404
+            # Mirrors the real endpoint since #1763: idle is 200, not 404.
+            return jsonify({'status': 'not_found'})
         return jsonify(status)
 
     @app.route('/api/tidal/discovery/status/<playlist_id>')

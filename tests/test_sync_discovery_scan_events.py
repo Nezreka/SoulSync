@@ -410,10 +410,11 @@ class TestScanHttpParity:
 
 class TestHttpStillWorks:
     """HTTP endpoints return 200 with expected structure."""
-    def test_sync_http_404_unknown(self, flask_client):
-        """GET /api/sync/status/:id returns 404 for unknown playlist."""
+    def test_sync_http_idle_unknown(self, flask_client):
+        """GET /api/sync/status/:id answers 200 + not_found for unknown (#1763)."""
         resp = flask_client.get('/api/sync/status/nonexistent')
-        assert resp.status_code == 404
+        assert resp.status_code == 200
+        assert resp.get_json()['status'] == 'not_found'
 
     def test_discovery_http_not_found(self, flask_client):
         """GET /api/tidal/discovery/status/:id returns error for unknown ID."""

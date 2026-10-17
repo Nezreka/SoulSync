@@ -111,9 +111,14 @@ function startMonitor(playlistId: string) {
       try {
         const res = await fetch(`/api/sync/status/${playlistId}`);
         if (res.ok) {
-          notFound = nextNotFoundCount(notFound, true, res.status);
           const data = (await res.json()) as { status?: string };
-          if (restStatusIsTerminal(data.status)) {
+          // Idle now answers 200 + status 'not_found' (#1763); that body is
+          // the old 404 for give-up purposes — the sync never started.
+          notFound = nextNotFoundCount(notFound, true, res.status, data.status);
+          if (shouldGiveUp(notFound)) {
+            stopMonitor(playlistId);
+            remove(playlistId);
+          } else if (restStatusIsTerminal(data.status)) {
             stopMonitor(playlistId);
             complete(playlistId);
           }

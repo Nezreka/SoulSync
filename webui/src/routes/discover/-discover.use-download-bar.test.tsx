@@ -116,6 +116,16 @@ describe('the download store', () => {
     expect(result.current.state['discover_x']).toBeUndefined();
   });
 
+  it('REMOVES after five consecutive 200 not_found answers — the sync never started (#1763)', async () => {
+    syncStatus['discover_x'] = { status: 200, body: { status: 'not_found' } };
+    const { result } = renderHook(() => useDownloadBar());
+    act(() => result.current.add('discover_x', 'Mix X', 'popular_picks'));
+    await act(() => vi.advanceTimersByTimeAsync(4 * 2000 + 100));
+    expect(result.current.state['discover_x']).toBeDefined();
+    await act(() => vi.advanceTimersByTimeAsync(2100));
+    expect(result.current.state['discover_x']).toBeUndefined();
+  });
+
   it('a found poll RESETS the 404 counter', async () => {
     const { result } = renderHook(() => useDownloadBar());
     act(() => result.current.add('discover_x', 'Mix X', 'popular_picks'));

@@ -49,7 +49,7 @@ function stub({
       if (radar === 'error') return HttpResponse.json({}, { status: 500 });
       return json({ tracks: radar });
     }),
-    http.get('/api/discover/discovery-weekly', () => json({ tracks: weekly })),
+    http.get('/api/discover/weekly', () => json({ tracks: weekly })),
     http.get('/api/discover/seasonal/current', () => {
       hits.push('seasonal-current');
       return json({

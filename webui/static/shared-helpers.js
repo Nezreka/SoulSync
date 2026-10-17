@@ -183,6 +183,16 @@ function visibleSourceOrder(enabledExperimental = new Set()) {
 // configured so the picker doesn't dim always-available sources.
 async function fetchSourceConfiguredMap(enabledExperimental = new Set()) {
     const map = {};
+    // config-status is admin-only: for a known non-admin profile the fetch
+    // is a guaranteed 403, and the failure path below already answers with
+    // the permissive default. Skip straight to it (#1763).
+    const _profileCtx = (typeof getCurrentProfileContext === 'function') ? getCurrentProfileContext() : null;
+    if (_profileCtx && !_profileCtx.isAdmin) {
+        for (const src of visibleSourceOrder(enabledExperimental)) {
+            map[src] = true;
+        }
+        return map;
+    }
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
