@@ -95,10 +95,52 @@ class NavidromeTrack(MediaTrack):
             artist_ids=[navidrome_data.get('artistId', '')],
         )
 
-from core.media_server.contract import MediaServerClient
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
 
 
-class NavidromeClient(MediaServerClient):
+class NavidromeClient(MediaServerBase):
+    # update_artist_* and update_album_poster exist but only log "not
+    # implemented", so METADATA_WRITE is not declared. Navidrome picks up
+    # tag changes on disk by itself (TAGS_AUTODETECTED).
+    CAPABILITIES = frozenset({
+        Capability.SEARCH, Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER,
+        Capability.LIBRARY_STATS, Capability.PLAYLISTS, Capability.PLAYLIST_IMAGE,
+        Capability.PLAY_HISTORY, Capability.CURATION_SIGNALS, Capability.PER_USER_VIEWS,
+        Capability.TAGS_AUTODETECTED,
+    })
+
+    def scan_hints(self):
+        return {'preparing_message': 'Connecting to Navidrome server...'}
+
+    def post_scan(self, database) -> bool:
+        """Merge same-path duplicate rows a rescan rekeyed (see
+        core.library.navidrome_identity). Same work as the scan worker's
+        ``_repair_navidrome_identities``, under the shared hook name so
+        the worker can stop branching on the server type."""
+        if database is None:
+            return False
+        try:
+            with database._get_connection() as conn:
+                duplicate = conn.execute(
+                    "SELECT 1 FROM tracks WHERE server_source='navidrome' AND file_path IS NOT NULL "
+                    "AND file_path!='' GROUP BY file_path HAVING COUNT(*) > 1 LIMIT 1").fetchone()
+            if not duplicate:
+                return True
+            from core.library.navidrome_identity import read_inventory, repair_rekeyed_tracks
+            repaired = repair_rekeyed_tracks(database, read_inventory(self))
+            logger.info("Navidrome identity repair: %s obsolete same-path rows merged", repaired)
+            return True
+        except Exception as exc:
+            logger.warning("Navidrome identity repair skipped: %s", exc)
+            return False
+
+    def user_view(self, identity):
+        """``as_user`` under the shared hook name (see MediaServerBase)."""
+        username = (identity or {}).get('username')
+        password = (identity or {}).get('password')
+        return self.as_user(username, password) if username and password else None
+
     def __init__(self):
         self.base_url: Optional[str] = None
         self.username: Optional[str] = None

@@ -241,10 +241,16 @@ class SoulSyncArtist(MediaArtist):
         return self._albums
 
 
-from core.media_server.contract import MediaServerClient
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
 
 
-class SoulSyncClient(MediaServerClient):
+class SoulSyncClient(MediaServerBase):
+    # Reads the files itself, so a tag write is visible on the next scan.
+    CAPABILITIES = frozenset({
+        Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER, Capability.TAGS_AUTODETECTED,
+    })
+
     """Filesystem-based media server client for standalone SoulSync operation.
 
     Scans the Transfer folder recursively, reads audio file tags, and
