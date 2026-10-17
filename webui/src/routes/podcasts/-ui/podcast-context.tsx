@@ -233,22 +233,20 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
     if (!ep.enclosure_url) return;
 
     const tempId = `temp-${Date.now()}-${ep.guid || ep.title}`;
-    setDownloads((prev) => ({
-      ...prev,
-      [tempId]: {
-        download_id: tempId,
-        title: ep.title,
-        show_title: showTitle,
-        artwork_url: ep.artwork_url || showArtwork || undefined,
-        enclosure_url: ep.enclosure_url,
-        duration_seconds: ep.duration_seconds,
-        status: 'queued',
-        progress_bytes: 0,
-        total_bytes: 0,
-        percent: 0,
-        started_at: Date.now() / 1000,
-      },
-    }));
+    const queuedRecord = (downloadId: string): PodcastDownloadItem => ({
+      download_id: downloadId,
+      title: ep.title,
+      show_title: showTitle,
+      artwork_url: ep.artwork_url || showArtwork || undefined,
+      enclosure_url: ep.enclosure_url,
+      duration_seconds: ep.duration_seconds,
+      status: 'queued',
+      progress_bytes: 0,
+      total_bytes: 0,
+      percent: 0,
+      started_at: Date.now() / 1000,
+    });
+    setDownloads((prev) => ({ ...prev, [tempId]: queuedRecord(tempId) }));
 
     try {
       const res = await downloadPodcastEpisode(ep, showTitle);
@@ -256,19 +254,7 @@ export function PodcastProvider({ children }: { children: ReactNode }) {
         setDownloads((prev) => {
           const next = { ...prev };
           delete next[tempId];
-          next[res.download_id!] = {
-            download_id: res.download_id!,
-            title: ep.title,
-            show_title: showTitle,
-            artwork_url: ep.artwork_url || showArtwork || undefined,
-            enclosure_url: ep.enclosure_url,
-            duration_seconds: ep.duration_seconds,
-            status: 'queued',
-            progress_bytes: 0,
-            total_bytes: 0,
-            percent: 0,
-            started_at: Date.now() / 1000,
-          };
+          next[res.download_id!] = queuedRecord(res.download_id!);
           return next;
         });
         window.showToast?.(`Downloading "${ep.title}"`, 'info');
