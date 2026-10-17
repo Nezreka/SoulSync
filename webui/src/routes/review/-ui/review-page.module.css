@@ -1022,8 +1022,7 @@
   box-shadow: inset 3px 0 #547db5;
 }
 .matrixRow[data-status='extra'],
-.matrixRow[data-status='missing'],
-.matrixRow[data-status='duplicate'] {
+.matrixRow[data-status='missing'] {
   background: #221a1e;
 }
 .matrixRow[data-status='not_owned'] {
@@ -1664,11 +1663,11 @@
   cursor: pointer;
 }
 .changesCard {
-  border-color: #3c6f5b;
-  background: #18251f;
+  border-color: #547db5;
+  background: #182d40;
 }
 .changesCard h4 {
-  color: #bff5d8;
+  color: #c1d7f4;
   margin-bottom: 12px;
 }
 .changeList {
@@ -1714,7 +1713,7 @@
 .technicalGrid {
   display: grid;
   gap: 12px;
-  padding: 0 14px 14px;
+  padding: 0;
 }
 .technicalCard {
   min-width: 0;
@@ -2694,4 +2693,42 @@
 .folderContext li {
   padding: 6px 0;
   overflow-wrap: anywhere;
+}
+
+/* Inspector controls respond to their available column width. */
+.findingDetail {
+  container-type: inline-size;
+}
+@container (max-width: 650px) {
+  .assignmentCorrection {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .assignmentCorrection button {
+    white-space: normal;
+  }
+}
+.scanStatus[data-running] {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px;
+  border-color: #7560b1;
+}
+.scanStatus progress {
+  width: 140px;
+  accent-color: #a58bf5;
+}
+.moreMenu > div {
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  min-width: 200px;
+  box-shadow: 0 8px 24px #0006;
+}
+
+.matrixRow[data-status='duplicate'] {
+  background: #292318;
+  box-shadow: inset 3px 0 #b98a35;
 }

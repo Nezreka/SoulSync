@@ -45,6 +45,16 @@ from utils.logging_config import get_logger
 
 logger = get_logger('repair_job.library_reconciliation')
 
+
+def _read_reconciliation_tags(path):
+    from core.library.release_identity import read_release_identity
+    tags = dict(_read_file_tags(path))
+    tags['musicbrainz_release_id'], tags['release_disambiguation'] = read_release_identity(path)
+    return tags
+
+
+_read_reconciliation_tags.required_cache_keys = ('musicbrainz_release_id',)
+
 _SOURCES = {
     'musicbrainz_release_id': 'musicbrainz',
     'spotify_album_id': 'spotify',
@@ -1235,6 +1245,14 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
                 numbering_mode, release_slots).get('track_number'),
             'confidence': pair.get('confidence') or '',
         } for pair in candidate_plan['pairs']],
+        'missing_slots': [{
+            'slot_title': release_slots[index].get('title') or '',
+            'disc_number': release_slots[index].get('disc_number') or 1,
+            'track_number': release_slots[index].get('track_number'),
+            'display_track_number': _numbered_slot(release_slots[index], index,
+                numbering_mode, release_slots).get('track_number'),
+            'missing': True,
+        } for index in candidate_plan['missing_slots']],
         'missing_tracks': [release_slots[index].get('title') or ''
                            for index in candidate_plan['missing_slots']],
         'extra_files': [os.path.basename(files[index]['path'])
@@ -1855,7 +1873,7 @@ class LibraryReconciliationJob(RepairJob):
             try:
                 folders = _group_unassigned_downloads(
                     folders, tracks, albums, trusted_logical_groups,
-                    lambda path: discovery_cache.read_tags(path, _read_file_tags))
+                    lambda path: discovery_cache.read_tags(path, _read_reconciliation_tags))
             finally:
                 discovery_cache.close()
         target_member_folders: set[str] = set()
@@ -1937,7 +1955,7 @@ class LibraryReconciliationJob(RepairJob):
                         # and surface only this track as uncertain.
                     playlists = (list(playlist_membership.get(str(db_row['id']), []))
                                  if db_row else [])
-                    files.append(cache.file_evidence(path, _read_file_tags, audio=audio,
+                    files.append(cache.file_evidence(path, _read_reconciliation_tags, audio=audio,
                         library_fields={'db': db_row, 'playlists': playlists,
                                         'size_bytes': stat.st_size, 'mtime_ns': stat.st_mtime_ns}))
                     result.scanned += 1
@@ -2494,6 +2512,13 @@ class LibraryReconciliationJob(RepairJob):
                         changed['musicbrainz_recording_id'] = {
                             'old': tags.get('mbid') or '', 'new': confirmed_mbid}
                         tag_plan['db_data']['musicbrainz_recording_id'] = confirmed_mbid
+                    # A database album assignment alone cannot unite the album
+                    # in a player that groups by the embedded release identity.
+                    if (source == 'musicbrainz' and tags.get('musicbrainz_release_id') and
+                            tags['musicbrainz_release_id'] != release_id):
+                        changed['musicbrainz_release_id'] = {
+                            'old': tags['musicbrainz_release_id'], 'new': release_id}
+                        tag_plan['db_data']['musicbrainz_release_id'] = release_id
                     db_updates = {}
                     row = file.get('db') or {}
                     if (row and not display_title_compatible(
@@ -2599,6 +2624,8 @@ class LibraryReconciliationJob(RepairJob):
                                'match_reasons': pair['reasons'],
                                'confidence': pair['confidence'],
                                'title_difference_kind': title_kind,
+                               'assignment_options': assignment_options,
+                               'saved_assignment': file['path'] in {files[i]['path'] for i in forced_pairs},
                                'changes': changed, 'db_data': tag_plan['db_data'],
                                'db_track_updates': db_updates,
                                'db_album_title': db_album_title,

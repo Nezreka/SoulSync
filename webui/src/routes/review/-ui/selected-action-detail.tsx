@@ -83,6 +83,22 @@ export function SelectedActionDetail({
           <span className={styles.severity}>{finding.severity}</span>
         </div>
       )}
+      <nav className={styles.actions} aria-label="Decision navigation">
+        <button
+          type="button"
+          disabled={busy || previousId == null}
+          onClick={() => onSelect(previousId ?? null)}
+        >
+          ← Previous decision
+        </button>
+        <button
+          type="button"
+          disabled={busy || nextId == null}
+          onClick={() => onSelect(nextId ?? null)}
+        >
+          Next decision →
+        </button>
+      </nav>
       <h3>{findingHeading(finding)}</h3>
       <p className={styles.description}>
         {versionConflict
@@ -206,7 +222,7 @@ export function SelectedActionDetail({
               disabled={busy}
               onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
             >
-              Confirm current assignment to {textValue(proposedSlot.title)}
+              Use assignment in plan: {textValue(proposedSlot.title)}
             </button>
           )}
           <label>
@@ -234,9 +250,17 @@ export function SelectedActionDetail({
             disabled={busy || !assignmentSlot}
             onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
           >
-            Save assignment
+            Save plan assignment
           </button>
-          <small>The album will be rescanned before any metadata edit is offered.</small>
+          {details.saved_assignment === true && (
+            <button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
+              Reset plan assignment
+            </button>
+          )}
+          <small>
+            This saves your plan choice and recalculates proposed edits. Files stay unchanged until
+            you apply them.
+          </small>
         </div>
       )}
       {waitingForDownload && (
@@ -288,17 +312,6 @@ export function SelectedActionDetail({
             </>
           ) : (
             <>
-              {finding.finding_type === 'reconciliation_unresolved' &&
-                Boolean(details.replacement_available && replacement.source_track_id) && (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    className={styles.primary}
-                    onClick={() => onAct('fix', 'request_missing')}
-                  >
-                    Request release version for comparison
-                  </button>
-                )}
               {canApply &&
                 finding.finding_type !== 'reconciliation_release' &&
                 finding.finding_type !== 'reconciliation_duplicate' &&
@@ -326,26 +339,11 @@ export function SelectedActionDetail({
             disabled={busy || numberingPreview}
             onClick={() => onAct('dismiss')}
           >
-            {versionConflict ? 'Keep local version' : 'Accept as-is'}
+            {versionConflict ? 'Keep local version' : 'Keep current values'}
           </button>
         </div>
       )}
-      <nav className={styles.actions} aria-label="Decision navigation">
-        <button
-          type="button"
-          disabled={busy || previousId == null}
-          onClick={() => onSelect(previousId ?? null)}
-        >
-          ← Previous decision
-        </button>
-        <button
-          type="button"
-          disabled={busy || nextId == null}
-          onClick={() => onSelect(nextId ?? null)}
-        >
-          Next decision →
-        </button>
-      </nav>
+
       {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
         finding.file_path &&
         Boolean(details.track_id) &&

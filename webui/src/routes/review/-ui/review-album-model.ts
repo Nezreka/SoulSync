@@ -107,10 +107,23 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     .filter((row) => !(row.status === 'missing' && row.relationship === 'version_conflict'))
     .sort(
       (left, right) =>
-        Number(left.slot_disc_number || left.current_disc_number || 1) -
-          Number(right.slot_disc_number || right.current_disc_number || 1) ||
-        Number(left.slot_track_number || left.current_track_number || 0) -
-          Number(right.slot_track_number || right.current_track_number || 0) ||
+        Number(
+          left.counterpart_disc_number || left.slot_disc_number || (left.slot_title ? 1 : 9999),
+        ) -
+          Number(
+            right.counterpart_disc_number ||
+              right.slot_disc_number ||
+              (right.slot_title ? 1 : 9999),
+          ) ||
+        Number(
+          left.counterpart_track_number || left.slot_track_number || left.current_track_number || 0,
+        ) -
+          Number(
+            right.counterpart_track_number ||
+              right.slot_track_number ||
+              right.current_track_number ||
+              0,
+          ) ||
         (left.file || '').localeCompare(right.file || ''),
     );
 

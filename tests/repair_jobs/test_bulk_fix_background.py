@@ -229,3 +229,25 @@ def test_interrupted_operation_is_not_reported_as_success(tmp_path):
     assert report['stopped'] and not report['running']
     assert 'restarted' in report['error']
     assert report['fixed'] == 1
+
+
+def test_review_apply_waits_for_scan_and_rejects_changed_proposal(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _add_genre_finding(db, 'AR1', 1)
+    worker = _worker(db, tmp_path)
+    worker._reconciliation_scan_lock.acquire()
+    try:
+        result = worker.start_bulk_fix(review_approved=True)
+        assert result['started']
+        deadline = time.monotonic() + 2
+        while worker.get_bulk_fix_status()['phase'] != 'waiting_for_scan':
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        with db._get_connection() as conn:
+            conn.execute("UPDATE repair_findings SET details_json = '{}' WHERE status = 'pending'")
+            conn.commit()
+    finally:
+        worker._reconciliation_scan_lock.release()
+    status = _wait_done(worker)
+    assert status['fixed'] == 0 and status['failed'] == 1
+    assert 'changed during reconciliation' in status['errors'][0]['error']

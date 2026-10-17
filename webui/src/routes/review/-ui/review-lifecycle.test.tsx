@@ -208,3 +208,18 @@ it('describes a single available release without implying competing editions', a
   expect(screen.getByRole('heading', { name: 'Available release' })).toBeTruthy();
   expect(screen.queryByText(/These editions/)).toBeNull();
 });
+
+it('returns to Plan when another queue album is selected from Tracks', async () => {
+  setup();
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  const nav = screen.getByRole('navigation', { name: 'Album review views' });
+  fireEvent.click(within(nav).getByRole('button', { name: /^Tracks/ }));
+  fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
+  await screen.findByRole('heading', { name: 'Next album' });
+  expect(
+    within(screen.getByRole('navigation', { name: 'Album review views' }))
+      .getByRole('button', { name: /^Plan/ })
+      .getAttribute('aria-current'),
+  ).toBe('page');
+});

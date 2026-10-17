@@ -1386,7 +1386,7 @@ class RepairWorker:
                         except (TypeError, ValueError):
                             prior = {}
                         signals = ('fingerprint_key', 'source', 'release_id',
-                                   'evidence_signature', 'fulfillment_state')
+                                   'evidence_signature', 'fulfillment_state', 'changes')
                         changed_reconciliation_evidence = any(
                             prior.get(key) != (details or {}).get(key) for key in signals)
                     if existing_status == 'dismissed' and not changed_reconciliation_evidence:
@@ -1834,6 +1834,14 @@ class RepairWorker:
                 return {'success': ok, 'action': 'dismiss',
                         'refresh_queued': queued,
                         'error': None if ok else 'Could not dismiss this finding'}
+            if action == 'fix' and fix_action and fix_action.startswith('assign:'):
+                details = {**item.get('details', {}), '_fix_action': fix_action}
+                result = self._fix_reconciliation_assignment(
+                    'track', item.get('entity_id'), item.get('file_path'), details)
+                if result.get('success'):
+                    result['refresh_queued'] = self._schedule_review_refresh(
+                        case_id, case.get('folder') or '', case)
+                return result
             if action == 'fix':
                 result = self.fix_finding(finding_id, fix_action=fix_action,
                                           review_approved=True)
@@ -1931,6 +1939,13 @@ class RepairWorker:
         findings = [item for item in case['items'] if item.get('category') == category]
         if not findings:
             return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
+        if action == 'fix':
+            result = self.start_bulk_fix(
+                finding_ids=[item['id'] for item in findings],
+                allow_review_ids=True, review_approved=True,
+                review_case_folders=[(case_id, case.get('folder') or '')],
+            )
+            return {**result, 'success': bool(result.get('started'))}
         applied = 0
         scope = 'album'
         for item in findings:
@@ -4580,8 +4595,8 @@ class RepairWorker:
             return {'success': False, 'error': 'Choose a release track for this file'}
         slot_key = choice[len('assign:'):]
         options = details.get('assignment_options') or []
-        if not slot_key or slot_key not in {row.get('key') for row in options
-                                            if isinstance(row, dict)}:
+        if not slot_key or (slot_key != 'auto' and slot_key not in {row.get('key') for row in options
+                                            if isinstance(row, dict)}):
             return {'success': False, 'error': 'That release track is no longer available'}
         album_id = details.get('album_id')
         source = details.get('source')
@@ -4603,6 +4618,13 @@ class RepairWorker:
                     PRIMARY KEY (album_id, source, release_id, file_path)
                 )
             ''')
+            if slot_key == 'auto':
+                conn.execute('''DELETE FROM reconcile_track_assignment
+                    WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
+                    (str(album_id), source, release_id, file_path))
+                conn.commit()
+                return {'success': True, 'action': 'reconciliation_assignment',
+                        'message': 'Plan assignment reset to automatic matching.'}
             other = conn.execute('''
                 SELECT file_path FROM reconcile_track_assignment
                 WHERE album_id = ? AND source = ? AND release_id = ?
@@ -7266,6 +7288,15 @@ class RepairWorker:
                         "KEEP). Narrow the run to a single type, or run it without an "
                         "action.")}
 
+            reviewed_details = None
+            if review_approved:
+                conn = self.db._get_connection()
+                try:
+                    placeholders = ','.join('?' for _ in ids)
+                    reviewed_details = dict(conn.execute(
+                        f'SELECT id, details_json FROM repair_findings WHERE id IN ({placeholders})', ids))
+                finally:
+                    conn.close()
             self._bulk_fix_stop_event.clear()
             # Every key the runner will ever touch is seeded here so later
             # writes are value updates, never key insertions — get_bulk_fix_status
@@ -7299,7 +7330,7 @@ class RepairWorker:
                 target=self._run_bulk_fix,
                 args=(list(ids), fix_action, review_approved,
                       list(organize_album_ids or []),
-                      list(review_case_folders or [])),
+                      list(review_case_folders or []), reviewed_details),
                 daemon=True, name='repair-bulk-fix')
             self._bulk_fix_thread.start()
             logger.info("Background bulk fix started: %d finding(s)%s",
@@ -7331,10 +7362,24 @@ class RepairWorker:
     def _run_bulk_fix(self, ids: List[int], fix_action: str = None,
                       review_approved: bool = False,
                       organize_album_ids: List[str] = None,
-                      review_case_folders: List[Tuple[str, str]] = None):
+                      review_case_folders: List[Tuple[str, str]] = None,
+                      reviewed_details: dict = None):
         state = self._bulk_fix_state
         types = self._types_for_findings(ids)
+        scan_lock = getattr(self, '_reconciliation_scan_lock', None) if review_approved else None
+        acquired = False
         try:
+            if scan_lock:
+                state['phase'] = 'waiting_for_scan'
+                self._save_bulk_fix_report()
+                while not self._bulk_fix_stop_event.is_set() and not self.should_stop:
+                    if scan_lock.acquire(timeout=0.25):
+                        acquired = True
+                        break
+                if not acquired:
+                    state['stopped'] = True
+                    return
+                state['phase'] = 'metadata'
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
                     state['stopped'] = True
@@ -7342,6 +7387,14 @@ class RepairWorker:
                                 state['done'], state['total'])
                     break
                 try:
+                    if reviewed_details is not None:
+                        conn = self.db._get_connection()
+                        try:
+                            current = conn.execute('SELECT details_json FROM repair_findings WHERE id = ?', (fid,)).fetchone()
+                        finally:
+                            conn.close()
+                        if not current or current[0] != reviewed_details.get(fid):
+                            raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
                         result = self.fix_finding(
                             fid, fix_action=fix_action, review_approved=True)
@@ -7438,6 +7491,8 @@ class RepairWorker:
             # loop raises, and if start_bulk_fix re-assigns the reference after
             # a very fast run it can only store an already-dead thread, which
             # the guard reads as not-running anyway.
+            if acquired:
+                scan_lock.release()
             state['phase'] = 'finished'
             self._save_bulk_fix_report({**state, 'running': False})
             self._bulk_fix_thread = None

@@ -1523,3 +1523,18 @@ def test_release_tracks_preserve_video_and_medium_identity():
     assert tracks[1]['disc_number'] == 2
     assert tracks[1]['release_track_id'] == 'audio-slot'
     assert tracks[0]['medium_format'] == 'Blu-ray'
+
+
+def test_release_track_title_preserves_session_name_separately_from_recording():
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release.return_value = {
+        'id': 'edition', 'title': 'Bad Blood X', 'media': [{
+            'position': 2, 'format': 'CD', 'tracks': [{
+                'id': 'slot', 'number': '4', 'title': 'Laura Palmer (Abbey Road Sessions)',
+                'recording': {'id': 'recording', 'title': 'Laura Palmer',
+                              'disambiguation': 'live, Abbey Road Studios'}}]}]}
+    track = client.get_release_album_tracks('edition')['items'][0]
+    assert track['name'] == 'Laura Palmer (Abbey Road Sessions)'
+    assert track['recording_title'] == 'Laura Palmer'
+    assert track['id'] == 'recording'

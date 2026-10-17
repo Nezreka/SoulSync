@@ -1258,7 +1258,8 @@ class MusicBrainzSearchClient:
 
                 tracks.append({
                     'id': recording.get('id', track.get('id', '')),
-                    'name': recording.get('title', track.get('title', '')),
+                    'name': track.get('title') or recording.get('title', ''),
+                    'recording_title': recording.get('title', ''),
                     'disambiguation': (recording.get('disambiguation') or '').strip(),
                     'artists': [{'name': a} for a in track_artists],
                     'duration_ms': recording.get('length', 0) or track.get('length', 0) or 0,

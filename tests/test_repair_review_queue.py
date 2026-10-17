@@ -931,19 +931,15 @@ def test_grouped_title_convention_decision_applies_every_current_action():
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
     worker._review_apply_lock = threading.Lock()
-    applied = []
-    worker.fix_finding = lambda finding_id, **_kwargs: (
-        applied.append(finding_id) or {'success': True})
-    refreshes = []
-    worker._schedule_album_refresh = lambda key, folder: (
-        refreshes.append((key, folder)) or True)
-
+    calls = []
+    worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {
+        'started': True, 'operation_id': 'durable-operation', 'total': 2}
     result = worker.apply_review_decision_group(case_id, 'title_conventions', action='fix')
-
-    assert result == {'success': True, 'applied': 2, 'total': 2,
-                      'refresh_queued': True}
-    assert applied == [1, 2]
-    assert refreshes == [(case_id, '/music/Album')]
+    assert result == {'success': True, 'started': True, 'total': 2,
+                      'operation_id': 'durable-operation'}
+    assert calls == [{'finding_ids': [1, 2], 'allow_review_ids': True,
+                      'review_approved': True,
+                      'review_case_folders': [(case_id, '/music/Album')]}]
 
 
 def test_accepted_reconciliation_exception_reopens_when_audio_evidence_changes(tmp_path):

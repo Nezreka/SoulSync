@@ -649,7 +649,7 @@ describe('library reconciliation review queue', () => {
     await screen.findByText(/Last reconciliation stopped/);
     expect(screen.getByText(/2539 files checked/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Scan library' }));
-    await waitFor(() => expect(screen.getByText(/Library reconciliation was queued/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Library reconciliation queued/)).toBeTruthy());
   });
 
   it('separates ready album changes and applies only the planned subset', async () => {

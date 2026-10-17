@@ -314,6 +314,8 @@ export function ReviewPage() {
   const [applyProgress, setApplyProgress] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [globalNotice, setGlobalNotice] = useState('');
+  const [reloadBusy, setReloadBusy] = useState(false);
   const [scanStatus, setScanStatus] = useState<ReconciliationScanStatus | null>(null);
   const [lastRun, setLastRun] = useState<ReconciliationRun | null>(null);
   const wasScanning = useRef(false);
@@ -517,7 +519,7 @@ export function ReviewPage() {
     () => groupReadyChanges(reviewCase?.items || [], false),
     [reviewCase?.items],
   );
-  const matchingFilter = (row: AlbumAssignment) =>
+  const matchesTrackFilter = (row: AlbumAssignment, trackFilter: string) =>
     !trackFilter ||
     (trackFilter.startsWith('decision:')
       ? row.finding_id != null &&
@@ -539,6 +541,9 @@ export function ReviewPage() {
                     : Object.keys(row.changes || {}).some(
                         (field) => readyFieldGroup(field).key === trackFilter,
                       ));
+  const matchingFilter = (row: AlbumAssignment) => matchesTrackFilter(row, trackFilter);
+  const filterCount = (filter: string) =>
+    assignments.filter((row) => matchesTrackFilter(row, filter)).length;
   const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
   const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
@@ -661,7 +666,7 @@ export function ReviewPage() {
           updatedQueue.items[Math.max(0, previousIndex)] ||
           updatedQueue.items[0];
         setReviewCase(null);
-        setCaseId(next?.case_id || '');
+        selectCase(next?.case_id || '');
         if (!next && updatedQueue.total > 0 && page > 0) setPage(page - 1);
         setNotice('Album review completed.');
       } else {
@@ -732,11 +737,13 @@ export function ReviewPage() {
         } else if (status.running) {
           setApplyBusy(true);
           setApplyProgress(
-            status.phase === 'queueing_organization'
-              ? 'Queueing folder organization…'
-              : status.phase === 'queueing_reanalysis'
-                ? 'Queueing album reanalysis…'
-                : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
+            status.phase === 'waiting_for_scan'
+              ? 'Waiting for reconciliation to finish before applying…'
+              : status.phase === 'queueing_organization'
+                ? 'Queueing folder organization…'
+                : status.phase === 'queueing_reanalysis'
+                  ? 'Queueing album reanalysis…'
+                  : `Processing ${status.done || 0} of ${status.total || 0} album actions…`,
           );
           return;
         } else if (status.error || status.failed || status.stopped) {
@@ -775,7 +782,7 @@ export function ReviewPage() {
     setError('');
     try {
       await runReconciliationScan();
-      setNotice('Library reconciliation was queued. Refresh the queue after the scan finishes.');
+      setGlobalNotice('Library reconciliation queued. Progress will appear here.');
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -1020,6 +1027,10 @@ export function ReviewPage() {
     setError('');
     try {
       const result = await applyReviewDecisionGroup(caseId, decision.category, action);
+      if (result.started) {
+        rememberOperation(result.operation_id);
+        return;
+      }
       if (!result.success) {
         setError(
           `${result.applied || 0} of ${result.total || decision.action_count} changes completed. ${result.error || 'The remaining change failed.'}`,
@@ -1195,7 +1206,10 @@ export function ReviewPage() {
               <button
                 type="button"
                 disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
-                onClick={() => void runScan()}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  void runScan();
+                }}
               >
                 {scanBusy
                   ? 'Queuing…'
@@ -1203,8 +1217,20 @@ export function ReviewPage() {
                     ? 'Scanning…'
                     : 'Scan library'}
               </button>
-              <button type="button" onClick={() => void refresh()}>
-                Refresh queue
+              <button
+                type="button"
+                disabled={reloadBusy}
+                onClick={(event) => {
+                  event.currentTarget.closest('details')?.removeAttribute('open');
+                  setReloadBusy(true);
+                  void refresh()
+                    .then((ok) => {
+                      if (ok) setGlobalNotice('Queue updated.');
+                    })
+                    .finally(() => setReloadBusy(false));
+                }}
+              >
+                {reloadBusy ? 'Reloading…' : 'Reload queue'}
               </button>
             </div>
           </details>
@@ -1214,6 +1240,11 @@ export function ReviewPage() {
       {error && (
         <div className={styles.error} role="alert">
           {error}
+        </div>
+      )}
+      {globalNotice && (
+        <div className={styles.notice} role="status">
+          {globalNotice}
         </div>
       )}
       {notice && !reviewCase && (
@@ -1229,7 +1260,21 @@ export function ReviewPage() {
         </div>
       )}
       {(scanStatus?.current_job?.job_id === 'library_reconciliation' || lastRun) && (
-        <div className={styles.scanStatus} role="status">
+        <div
+          className={styles.scanStatus}
+          role="status"
+          data-running={scanStatus?.current_job?.job_id === 'library_reconciliation' || undefined}
+        >
+          {scanStatus?.current_job?.job_id === 'library_reconciliation' && (
+            <>
+              <span className={styles.loadingSpinner} aria-hidden="true" />
+              <progress
+                aria-label="Library reconciliation progress"
+                max={100}
+                value={scanStatus.current_job.progress?.percent || 0}
+              />
+            </>
+          )}
           {scanStatus?.current_job?.job_id === 'library_reconciliation'
             ? `Reconciliation running: ${scanStatus.current_job.progress?.scanned ?? 0} of ${scanStatus.current_job.progress?.total ?? '?'} folders (${scanStatus.current_job.progress?.percent ?? 0}%).`
             : lastRun?.status === 'completed'
@@ -1990,7 +2035,7 @@ export function ReviewPage() {
                               value={trackFilter}
                               onChange={(event) => setTrackFilter(event.target.value)}
                             >
-                              <option value="">All tracks</option>
+                              <option value="">All tracks ({filterCount('')})</option>
                               {trackFilter.startsWith('decision:') && (
                                 <option value={trackFilter}>
                                   {decisions.find(
@@ -1998,11 +2043,21 @@ export function ReviewPage() {
                                   )?.label || 'Selected decision'}
                                 </option>
                               )}
-                              <option value="uncertain">Uncertain assignments</option>
-                              <option value="duplicate">Duplicate files</option>
-                              <option value="extra">Unassigned files</option>
-                              <option value="change">All proposed changes</option>
-                              <option value="settled">Settled tracks</option>
+                              <option value="uncertain">
+                                Uncertain assignments ({filterCount('uncertain')})
+                              </option>
+                              <option value="duplicate">
+                                Duplicate files ({filterCount('duplicate')})
+                              </option>
+                              <option value="extra">
+                                Unassigned files ({filterCount('extra')})
+                              </option>
+                              <option value="change">
+                                All proposed changes ({filterCount('change')})
+                              </option>
+                              <option value="settled">
+                                Settled tracks ({filterCount('settled')})
+                              </option>
                               {proposedChangeGroups.map((group) => (
                                 <option value={group.key} key={group.key}>
                                   {group.label} ({group.count})

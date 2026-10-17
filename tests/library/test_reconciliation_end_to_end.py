@@ -1872,7 +1872,8 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     root.mkdir()
     path = root / '01 - Laid to Rest.flac'
     _minimal_flac(path, {'title': 'Laid to Rest', 'artist': 'Lamb of God',
-                         'album': 'Ashes of the Wake', 'tracknumber': '1'})
+                         'album': 'Ashes of the Wake', 'tracknumber': '1',
+                         'musicbrainz_albumid': 'old-pressing'})
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _album(db, path)
     assert db.set_album_canonical(10, 'musicbrainz', 'ashes-mb-release', 0.9, locked=True)
@@ -1930,6 +1931,7 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     applied = worker.apply_review_decision(case_id, finding['id'],
                                            evidence_token=finding['evidence_token'], action='fix')
     assert applied['success'], applied
+    assert FLAC(str(target_path))['musicbrainz_albumid'][0] == 'ashes-mb-release'
     assert not path.exists()
     assert FLAC(str(target_path))['title'][0] == 'Hourglass'
     with db._get_connection() as conn:
@@ -2240,3 +2242,31 @@ def test_unassigned_download_grouping_requires_one_exact_album_owner():
     tracks['/artist/another/c'] = {'album_id': 'other'}
     albums['other'] = dict(albums['deluxe'])
     assert _group_unassigned_downloads(folders, tracks, albums, {}, lambda _: tags) == folders
+
+
+def test_candidate_preview_keeps_missing_slot_positions():
+    from core.repair_jobs.library_reconciliation import candidate_preview
+    slots = [{'title': 'Mrs. Rita', 'disc_number': 2, 'track_number': 13}]
+    preview = candidate_preview([], (0, 0, 0, 'musicbrainz', 'release', slots,
+        {'pairs': [], 'missing_slots': [0], 'extra_files': []}), {})
+    assert preview['missing_slots'][0] == {
+        'slot_title': 'Mrs. Rita', 'disc_number': 2, 'track_number': 13,
+        'display_track_number': 13, 'missing': True}
+
+
+def test_embedded_release_identity_refreshes_old_tag_cache(tmp_path):
+    from core.repair_jobs.library_reconciliation import _read_reconciliation_tags
+    path = tmp_path / 'track.flac'
+    _minimal_flac(path, {'title': 'Song'})
+    audio = FLAC(path)
+    audio['musicbrainz_albumid'] = 'file-release'
+    audio.save()
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    cache = ReconciliationEvidence(db, None)
+    try:
+        # The old reader cached no release ID; the new reader must re-read it.
+        cache.read_tags(str(path), lambda _: {'title': 'Song'})
+        tags = cache.read_tags(str(path), _read_reconciliation_tags)
+        assert tags['musicbrainz_release_id'] == 'file-release'
+    finally:
+        cache.close()

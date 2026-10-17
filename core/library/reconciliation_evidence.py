@@ -133,7 +133,8 @@ class ReconciliationEvidence:
         if row:
             try:
                 tags = json.loads(row[0])
-                if isinstance(tags, dict):
+                if (isinstance(tags, dict) and
+                        all(key in tags for key in getattr(loader, 'required_cache_keys', ()))):
                     self.metrics['tag_hits'] += 1
                     return tags
             except (TypeError, ValueError):

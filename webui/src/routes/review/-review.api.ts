@@ -253,6 +253,8 @@ export async function applyReviewDecisionGroup(
   action: 'fix' | 'dismiss',
 ): Promise<{
   success: boolean;
+  started?: boolean;
+  operation_id?: string;
   applied?: number;
   total?: number;
   error?: string;
@@ -277,6 +279,8 @@ export async function applyReviewDecisionGroup(
   }
   return JSON.parse(raw) as {
     success: boolean;
+    started?: boolean;
+    operation_id?: string;
     applied?: number;
     total?: number;
     error?: string;

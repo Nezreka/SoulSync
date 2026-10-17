@@ -118,6 +118,31 @@ export function ReviewAudio({
           </button>
         )}
       </div>
+      <div className={styles.inlineActions} aria-label="Find this recording online">
+        {previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '') && (
+          <a
+            href={`https://www.deezer.com/track/${previewTrackId}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Listen on Deezer ↗
+          </a>
+        )}
+        <a
+          href={`https://open.spotify.com/search/${encodeURIComponent(comparisonTitle || localTitle)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Search Spotify ↗
+        </a>
+        <a
+          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(comparisonTitle || localTitle)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Search YouTube ↗
+        </a>
+      </div>
       <div className={styles.reviewAudioTimeline}>
         <strong>
           {selected === 'local' ? localTitle : comparisonTitle || 'Release recording'}

@@ -512,7 +512,7 @@ export function ReleaseComparison({
   useEffect(() => setInspectedPair(null), [selected]);
   if (!candidates.length) return null;
   const active = candidates[Math.min(selected, candidates.length - 1)];
-  const pairs = objects(active.pairs).sort(
+  const pairs = [...objects(active.pairs), ...objects(active.missing_slots)].sort(
     (left, right) =>
       count(left.disc_number) - count(right.disc_number) ||
       count(left.track_number || left.slot_number) - count(right.track_number || right.slot_number),
@@ -527,11 +527,6 @@ export function ReleaseComparison({
     : Array.isArray(active.extra_files)
       ? active.extra_files.map(label)
       : [];
-  const possibleVersionPairs = missing.flatMap((releaseName) =>
-    extra
-      .filter((file) => baseVersionTitle(file) === baseVersionTitle(releaseName))
-      .map((file) => ({ releaseName, file })),
-  );
   const firstShape = candidateAssignments(candidates[0]);
   const allEquivalent = candidates.every(
     (candidate) => candidateAssignments(candidate) === firstShape,
@@ -667,10 +662,12 @@ export function ReleaseComparison({
                   <span>
                     <strong>{label(pair.slot_title)}</strong>
                     <small>
-                      {label(pair.file)}
+                      {pair.missing
+                        ? 'No local file assigned to this release slot'
+                        : label(pair.file)}
                       {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
                     </small>
-                    {label(pair.confidence) !== 'clear' && (
+                    {!pair.missing && label(pair.confidence) !== 'clear' && (
                       <small className={styles.reason}>
                         {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
                           ? label(pair.ambiguity_reasons[0])
@@ -679,12 +676,22 @@ export function ReleaseComparison({
                     )}
                   </span>
                   <StatusChip
-                    tone={label(pair.confidence) === 'clear' ? 'good' : 'warning'}
+                    tone={
+                      pair.missing
+                        ? 'danger'
+                        : label(pair.confidence) === 'clear'
+                          ? 'good'
+                          : 'warning'
+                    }
                     icon={label(pair.confidence) === 'clear' ? 'check' : 'warning'}
                   >
-                    {label(pair.confidence) === 'clear' ? 'Strong match' : 'Needs review'}
+                    {pair.missing
+                      ? 'Missing'
+                      : label(pair.confidence) === 'clear'
+                        ? 'Strong match'
+                        : 'Needs review'}
                   </StatusChip>
-                  {label(pair.confidence) !== 'clear' && (
+                  {!pair.missing && label(pair.confidence) !== 'clear' && (
                     <button type="button" onClick={() => setInspectedPair(index)}>
                       Inspect match
                     </button>
@@ -718,18 +725,8 @@ export function ReleaseComparison({
           )}
           {(missing.length > 0 || extra.length > 0) && (
             <div>
-              {possibleVersionPairs.length > 0 && (
-                <div className={styles.versionPairNotice}>
-                  <strong>Possible version difference</strong>
-                  {possibleVersionPairs.map(({ releaseName, file }) => (
-                    <span key={`${releaseName}-${file}`}>
-                      {file} may be a different version of the release track “{releaseName}”.
-                    </span>
-                  ))}
-                </div>
-              )}
               <div className={styles.candidateExceptions}>
-                {missing.length > 0 && (
+                {missing.length > 0 && !objects(active.missing_slots).length && (
                   <section>
                     <strong>
                       {missing.length} audio track{missing.length === 1 ? '' : 's'} missing
