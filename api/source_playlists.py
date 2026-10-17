@@ -5445,6 +5445,12 @@ def get_sync_status(playlist_id):
     with sync_lock:
         state = sync_states.get(playlist_id)
         if not state:
+            # a page-load probe asking "is anything running?" gets a 200. idle
+            # is the normal answer, and a burst of 404s on every load trips
+            # crowdsec / fail2ban probing rules (#1763). pollers keep the 404,
+            # they give up on it.
+            if request.args.get('probe') == '1':
+                return jsonify({"status": "idle"})
             return jsonify({"status": "not_found"}), 404
 
         # If the task is finished but the state hasn't been updated, check the future

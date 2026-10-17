@@ -273,7 +273,7 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
         if (virtualPlaylistId === 'discover_release_radar') {
             apiEndpoint = '/api/discover/release-radar';
         } else if (virtualPlaylistId === 'discover_discovery_weekly') {
-            apiEndpoint = '/api/discover/discovery-weekly';
+            apiEndpoint = '/api/discover/weekly';
         } else if (virtualPlaylistId === 'discover_seasonal_playlist') {
             apiEndpoint = '/api/discover/seasonal-playlist';
         } else if (virtualPlaylistId === 'discover_popular_picks') {

@@ -248,7 +248,7 @@ export function DeezerArlTab() {
       for (const row of list) {
         const arlId = deezerArlId(row.id);
         try {
-          const status = await fetchAccountSyncStatus(arlId);
+          const status = await fetchAccountSyncStatus(arlId, { probe: true });
           if (status.status === 'syncing') {
             window.updateCardToSyncing?.(arlId, status.progress?.progress ?? 0, status.progress);
             window.startSyncPolling?.(arlId);

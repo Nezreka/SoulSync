@@ -272,8 +272,11 @@ async function pollDeezerPlaylistLoad<T>(
 /** GET /api/sync/status/<id> — the ACCOUNT sync engine's status, not a vertical's. */
 export async function fetchAccountSyncStatus(
   playlistId: string,
+  { probe = false }: { probe?: boolean } = {},
 ): Promise<SourceSyncStatusResponse> {
-  return readJson(await fetch(`/api/sync/status/${playlistId}`));
+  // probe: idle answers 200 instead of 404, for load-time checks (#1763)
+  const query = probe ? '?probe=1' : '';
+  return readJson(await fetch(`/api/sync/status/${playlistId}${query}`));
 }
 
 /** POST /api/mirror-playlist — the payload comes from buildMirrorPayload. */

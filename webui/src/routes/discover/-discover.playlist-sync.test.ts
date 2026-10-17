@@ -223,7 +223,9 @@ describe('resuming after a refresh', () => {
   });
 
   it('builds the discover_-prefixed status url', () => {
-    expect(resumeStatusUrl('release_radar')).toBe('/api/sync/status/discover_release_radar');
+    expect(resumeStatusUrl('release_radar')).toBe(
+      '/api/sync/status/discover_release_radar?probe=1',
+    );
   });
 
   it('treats "starting" as active, not just "syncing"', () => {

@@ -554,7 +554,8 @@ describe('DeezerArlTab', () => {
         : { status: 'syncing', progress: { progress: 42 } };
     render(<DeezerArlTab />);
     await waitFor(() => expect(updateCardToSyncing).toHaveBeenCalled());
-    expect(calls.some((c) => c.url === '/api/sync/status/deezer_arl_7')).toBe(true);
+    // probe=1: an idle playlist answers 200, not a 404 per row (#1763)
+    expect(calls.some((c) => c.url === '/api/sync/status/deezer_arl_7?probe=1')).toBe(true);
     expect(updateCardToSyncing).toHaveBeenCalledWith('deezer_arl_7', 42, { progress: 42 });
     expect(startSyncPolling).toHaveBeenCalledWith('deezer_arl_7');
   });

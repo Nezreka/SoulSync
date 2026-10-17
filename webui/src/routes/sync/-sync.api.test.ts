@@ -207,9 +207,11 @@ describe('page-level endpoints', () => {
   it('account sync status + arl status hit the account endpoints', async () => {
     stubFetch({ status: 'syncing' });
     await fetchAccountSyncStatus('deezer_arl_9');
+    await fetchAccountSyncStatus('deezer_arl_9', { probe: true });
     await fetchDeezerArlStatus();
     expect(calls.map((c) => c.url)).toEqual([
       '/api/sync/status/deezer_arl_9',
+      '/api/sync/status/deezer_arl_9?probe=1',
       '/api/deezer/arl-status',
     ]);
   });
