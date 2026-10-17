@@ -137,42 +137,11 @@ export async function fetchPodcastDownloads(): Promise<PodcastDownloadItem[]> {
   }
 }
 
-interface WatchlistCheckResponse {
+interface WatchlistResponse {
   success?: boolean;
   is_watching?: boolean;
   podcast?: any;
   error?: string;
-}
-
-interface WatchlistMutationResponse {
-  success?: boolean;
-  is_watching?: boolean;
-  podcast?: any;
-  error?: string;
-}
-
-export async function checkPodcastWatchlist(
-  feedUrl?: string | null,
-  itunesId?: number | null,
-): Promise<{ isWatching: boolean; podcast?: any }> {
-  if (!feedUrl && !itunesId) return { isWatching: false };
-  try {
-    const data = await readJson<WatchlistCheckResponse>(
-      apiClient.post('podcasts/watchlist/check', {
-        json: {
-          feed_url: feedUrl || undefined,
-          itunes_id: itunesId || undefined,
-        },
-      }),
-    );
-    return {
-      isWatching: Boolean(data?.is_watching),
-      podcast: data?.podcast,
-    };
-  } catch (err) {
-    console.warn('Failed to check podcast watchlist status:', err);
-    return { isWatching: false };
-  }
 }
 
 export async function addPodcastToWatchlist(
@@ -180,7 +149,7 @@ export async function addPodcastToWatchlist(
   options?: { auto_download?: boolean; retention_days?: number },
 ): Promise<{ success: boolean; isWatching: boolean; podcast?: any }> {
   try {
-    const data = await readJson<WatchlistMutationResponse>(
+    const data = await readJson<WatchlistResponse>(
       apiClient.post('podcasts/watchlist/add', {
         json: {
           feed_url: show.feed_url,
@@ -212,7 +181,7 @@ export async function removePodcastFromWatchlist(
   itunesId?: number | null,
 ): Promise<{ success: boolean; isWatching: boolean }> {
   try {
-    const data = await readJson<WatchlistMutationResponse>(
+    const data = await readJson<WatchlistResponse>(
       apiClient.post('podcasts/watchlist/remove', {
         json: {
           feed_url: feedUrl || undefined,
@@ -227,29 +196,6 @@ export async function removePodcastFromWatchlist(
   } catch (err) {
     console.error('Failed to remove podcast from watchlist:', err);
     return { success: false, isWatching: true };
-  }
-}
-
-export async function updatePodcastWatchlistSettings(
-  feedUrl: string,
-  settings: { auto_download?: boolean; retention_days?: number },
-): Promise<{ success: boolean; podcast?: any }> {
-  try {
-    const data = await readJson<WatchlistMutationResponse>(
-      apiClient.post('podcasts/watchlist/settings', {
-        json: {
-          feed_url: feedUrl,
-          ...settings,
-        },
-      }),
-    );
-    return {
-      success: Boolean(data?.success),
-      podcast: data?.podcast,
-    };
-  } catch (err) {
-    console.error('Failed to update podcast watchlist settings:', err);
-    return { success: false };
   }
 }
 
