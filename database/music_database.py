@@ -13325,6 +13325,9 @@ class MusicDatabase:
             album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id, strip_single_kind=strip_single_kind)
 
             if not album:
+                routed = self._routed_library_album(title, artist, expected_track_count)
+                if routed:
+                    return routed
                 return None, 0.0, 0, 0, False, []
 
             if completeness_cache is None and candidate_albums is not None and candidate_tracks is not None:
@@ -13339,6 +13342,27 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
+    def _routed_library_album(self, title: str, artist: str, expected_track_count: Optional[int] = None):
+        """Ownership for a routed artist's album, from the audiobook library.
+
+        The files never reach the media server, so ``albums`` cannot know them.
+        The audiobook library index can. Presence counts as complete: a book
+        merged into one m4b has one file, not one per streaming track, so
+        comparing file counts would call a whole book partial.
+        Returns the same tuple as check_album_exists_with_completeness, or None.
+        """
+        from core.audiobook_routing import routed_library_match
+        book = routed_library_match(title, artist, self)
+        if not book:
+            return None
+        files = int(book.get("file_count") or 0)
+        expected = int(expected_track_count or files or 1)
+        album = DatabaseAlbum(
+            id=f"routed:{book.get('id')}", artist_id=None, title=str(book.get("title") or title),
+            track_count=files or None)
+        formats = [f.upper() for f in str(book.get("audio_format") or "").split("/") if f]
+        return album, 1.0, expected, expected, True, formats
+
     def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
