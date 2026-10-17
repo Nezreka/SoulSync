@@ -21168,18 +21168,29 @@ class MusicDatabase:
             logger.error(f"Error saving sync match cache: {e}")
             return False
 
-    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str) -> int:
+    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str,
+                                server_track_id: str = None) -> int:
         """Delete ONE sync match cache row. Returns rows deleted.
 
         Used when a cached pairing is proven stale under the current
         matcher (#1721): the row must not survive to poison the next sync,
-        but the rest of the cache (other tracks, other servers) is fine."""
+        but the rest of the cache (other tracks, other servers) is fine.
+        With ``server_track_id`` given, the delete only lands when the
+        row actually points at that server track — proof about one
+        pairing must not delete a different, live one filed under the
+        same source id (#1754)."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(
-                "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
-                (str(spotify_track_id), server_source))
+            if server_track_id is None:
+                cursor.execute(
+                    "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
+                    (str(spotify_track_id), server_source))
+            else:
+                cursor.execute(
+                    "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?"
+                    " AND server_track_id = ?",
+                    (str(spotify_track_id), server_source, str(server_track_id)))
             conn.commit()
             return cursor.rowcount
         except Exception as e:
