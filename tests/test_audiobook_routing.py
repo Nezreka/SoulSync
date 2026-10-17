@@ -564,3 +564,46 @@ def test_only_admins_can_change_routes_or_move_folders(db, folders, monkeypatch)
     # reading stays open: every card asks which artists are routed
     assert client.post("/api/audiobook-routes/check", json={"names": ["Bobby & Max"]}).status_code == 200
     assert client.get("/api/audiobook-routes").status_code == 200
+
+
+BOOKS = [
+    {"id": 7, "title": "Folge 93: Dämonen aus der Unterwelt", "author": "Bobby & Max",
+     "file_count": 27, "audio_format": "mp3"},
+    {"id": 8, "title": "Folge 9: Der Anfang", "author": "Bobby & Max",
+     "file_count": 10, "audio_format": "mp3"},
+    {"id": 9, "title": "Folge 93: Dämonen aus der Unterwelt", "author": "Someone Else",
+     "file_count": 5, "audio_format": "mp3"},
+]
+
+
+def test_library_match_finds_the_routed_artists_book(db):
+    routing.add_route("Bobby & Max", db)
+    hit = routing.routed_library_match("Folge 93: Dämonen aus der Unterwelt", "Bobby & Max", db, BOOKS)
+    assert hit and hit["id"] == 7
+
+
+def test_library_match_ignores_other_authors_and_unrouted_artists(db):
+    assert routing.routed_library_match("Folge 93: Dämonen aus der Unterwelt", "Bobby & Max", db, BOOKS) is None
+    routing.add_route("Bobby & Max", db)
+    assert routing.routed_library_match("Folge 93: Dämonen aus der Unterwelt", "Bobby & Max", db, BOOKS)["author"] == "Bobby & Max"
+    assert routing.routed_library_match("Folge 93: Dämonen aus der Unterwelt", "Nobody", db, BOOKS) is None
+
+
+def test_library_match_keeps_episode_numbers_apart(db):
+    routing.add_route("Bobby & Max", db)
+    assert routing.routed_library_match("Folge 90: Der Anfang", "Bobby & Max", db, BOOKS) is None
+    assert routing.routed_library_match("Folge 9: Der Anfang!", "Bobby & Max", db, BOOKS)["id"] == 8
+
+
+def test_discography_counts_a_routed_album_as_owned(db, monkeypatch):
+    routing.add_route("Bobby & Max", db)
+    monkeypatch.setattr("core.audiobook_database.get_audiobook_db",
+                        lambda: type("D", (), {"get_library": lambda self: BOOKS})())
+    album, conf, owned, expected, complete, formats = db.check_album_exists_with_completeness(
+        "Folge 93: Dämonen aus der Unterwelt", "Bobby & Max", expected_track_count=27)
+    assert album is not None and conf == 1.0
+    assert (owned, expected, complete) == (27, 27, True)
+    assert formats == ["MP3"]
+    # an album the library does not hold stays missing
+    none = db.check_album_exists_with_completeness("Folge 95: Gibt es nicht", "Bobby & Max")
+    assert none[0] is None
