@@ -139,6 +139,30 @@ class MediaServerEngine:
             logger.warning("%s is_connected raised: %s", self.active_server, exc)
             return False
 
+    # ------------------------------------------------------------------
+    # Capabilities — the replacement for ``active_server == 'x'`` at
+    # call sites that really mean "can this server do X".
+    # ------------------------------------------------------------------
+
+    def supports(self, name: str, capability: str) -> bool:
+        """Whether server ``name`` declares ``capability``. False for an
+        unknown or failed-init server and for a client without a
+        declaration (a legacy client that predates ``MediaServerBase``)."""
+        client = self.client(name)
+        if client is None:
+            return False
+        caps = getattr(client, 'CAPABILITIES', None)
+        return bool(caps) and capability in caps
+
+    def active_supports(self, capability: str) -> bool:
+        return self.supports(self.active_server, capability)
+
+    def clients_with(self, capability: str) -> Dict[str, MediaServerClient]:
+        """``{name: client}`` for every initialized server declaring
+        ``capability``, connected or not."""
+        return {name: client for name, client in self.registry.all_clients()
+                if capability in (getattr(client, 'CAPABILITIES', None) or ())}
+
     def configured_clients(self) -> Dict[str, MediaServerClient]:
         """Return ``{name: client}`` for every server that's both
         registered AND reports ``is_connected() == True``. Replaces

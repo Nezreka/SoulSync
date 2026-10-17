@@ -1432,43 +1432,29 @@ class ConfigManager:
         return self.get('active_media_server', 'plex')
 
     def set_active_media_server(self, server: str):
-        """Set the active media server (plex, jellyfin, navidrome, or soulsync)"""
-        if server not in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
+        """Set the active media server. Valid names come from the
+        server descriptors (core.media_server.specs)."""
+        from core.media_server import specs
+        if not specs.is_known(server):
             raise ValueError(f"Invalid media server: {server}")
         self.set('active_media_server', server)
 
     def get_active_media_server_config(self) -> Dict[str, str]:
         """Get configuration for the currently active media server"""
-        active_server = self.get_active_media_server()
-        if active_server == 'plex':
-            return self.get_plex_config()
-        elif active_server == 'jellyfin':
-            return self.get_jellyfin_config()
-        elif active_server == 'navidrome':
-            return self.get_navidrome_config()
-        elif active_server == 'soulsync':
-            return {'transfer_path': self.get('soulseek.transfer_path', './Transfer')}
-        else:
-            return {}
+        from core.media_server import specs
+        descriptor = specs.describe(self.get_active_media_server())
+        return descriptor.config_from(self) if descriptor else {}
 
     def is_configured(self) -> bool:
         spotify = self.get_spotify_config()
         active_server = self.get_active_media_server()
         soulseek = self.get_soulseek_config()
 
-        # Check active media server configuration
-        media_server_configured = False
-        if active_server == 'plex':
-            plex = self.get_plex_config()
-            media_server_configured = bool(plex.get('base_url')) and bool(plex.get('token'))
-        elif active_server == 'jellyfin':
-            jellyfin = self.get_jellyfin_config()
-            media_server_configured = bool(jellyfin.get('base_url')) and bool(jellyfin.get('api_key'))
-        elif active_server == 'navidrome':
-            navidrome = self.get_navidrome_config()
-            media_server_configured = bool(navidrome.get('base_url')) and bool(navidrome.get('username')) and bool(navidrome.get('password'))
-        elif active_server == 'soulsync':
-            media_server_configured = True  # SoulSync standalone is always configured
+        # Check active media server configuration. The descriptor knows
+        # which keys make a server configured.
+        from core.media_server import specs
+        descriptor = specs.describe(active_server)
+        media_server_configured = bool(descriptor) and descriptor.is_configured_in(self)
 
         return (
             bool(spotify.get('client_id')) and
@@ -1486,10 +1472,9 @@ class ConfigManager:
         }
 
         # Validate all server types but mark active one
-        validation['plex'] = bool(self.get('plex.base_url')) and bool(self.get('plex.token'))
-        validation['jellyfin'] = bool(self.get('jellyfin.base_url')) and bool(self.get('jellyfin.api_key'))
-        validation['navidrome'] = bool(self.get('navidrome.base_url')) and bool(self.get('navidrome.username')) and bool(self.get('navidrome.password'))
-        validation['soulsync'] = True  # Standalone mode is always valid
+        from core.media_server import specs
+        for descriptor in specs.iter_descriptors():
+            validation[descriptor.name] = descriptor.is_configured_in(self)
         validation['active_media_server'] = active_server
 
         return validation
