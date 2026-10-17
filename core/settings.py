@@ -719,6 +719,7 @@ class ConfigManager:
                 "username": "",
                 "password": "",
                 "category": "soulsync",
+                "acquisition_monitor_interval_seconds": 15,
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
@@ -899,6 +900,10 @@ class ConfigManager:
                 # the artist instead of guessing by name. Off by default —
                 # the Artist NFO Backfill repair job covers existing folders.
                 "write_artist_nfo": False,
+                # Library v2: a monitored track whose file was deleted outside
+                # SoulSync is downloaded again (Lidarr behaviour). Off, the
+                # deletion counts as "don't download again" for that track.
+                "redownload_externally_deleted": True,
             },
             "file_organization": {
                 "enabled": True,

@@ -26,6 +26,7 @@ import {
   wishlistTracksQueryOptions,
 } from '../-wishlist.api';
 import {
+  buildArtistImageFallbackMap,
   buildArtistImageMap,
   filterWishlistGroups,
   groupWishlistArtists,
@@ -109,6 +110,13 @@ export function WishlistPage() {
         photosQuery.data ?? [],
       ),
     [albumsQuery.data, singlesQuery.data, photosQuery.data],
+  );
+
+  // Painted only when a primary photo fails to load, which for a Library-v2
+  // artist means the local artwork build is still cold.
+  const artistImageFallbacks = useMemo(
+    () => buildArtistImageFallbackMap([albumsQuery.data ?? {}, singlesQuery.data ?? {}]),
+    [albumsQuery.data, singlesQuery.data],
   );
 
   const allGroups = useMemo(() => {
@@ -676,6 +684,7 @@ export function WishlistPage() {
                           group={group}
                           index={index}
                           artistImages={artistImages}
+                          artistImageFallbacks={artistImageFallbacks}
                           currentCycle={currentCycle}
                           processing={processing}
                           expanded={expandedArtist === group.name}

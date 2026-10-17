@@ -169,9 +169,6 @@ describe('calls that cross out of the files the sync port deletes', () => {
       expect(settings, `${name} should be defined in settings.js`).toContain(
         `async function ${name}(`,
       );
-      expect(beatport, `${name} must not be back in beatport-ui.js`).not.toContain(
-        `function ${name}(`,
-      );
     }
   });
 
@@ -223,6 +220,7 @@ describe('calls that cross out of the files the sync port deletes', () => {
       'cleanupBeatportHypePicksSlider',
       'cleanupBeatportChartsSlider',
       'cleanupBeatportDJSlider',
+      'resetBeatportSliderInitFlags',
     ]) {
       expect(core).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
     }

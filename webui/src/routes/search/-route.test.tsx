@@ -446,14 +446,20 @@ describe('where a result card points', () => {
     });
   }
 
-  it('links a library artist to /artist-detail/library/<id> and a found one to its source', async () => {
+  it('sends an owned artist to its Library V2 page and a found one to the artist page', async () => {
     // The href IS the feature. The first version guessed `/artist-detail/<id>`,
     // which matches no route and resolves to nothing — clicking an artist did
     // nothing at all, and no test noticed.
+    //
+    // An owned artist links straight to Library V2; `releases`, `releaseView`
+    // and `header` are what make an arrival from search show the full
+    // discography as cards under the rich header (ldp-05) instead of the
+    // in-library defaults. A found one opens upstream's artist page under the
+    // source it came from, which checks the catalogue itself.
     server.use(
       http.post('/api/enhanced-search', () =>
         HttpResponse.json({
-          db_artists: [{ id: 7, name: 'Owned Artist' }],
+          db_artists: [{ id: 7, name: 'Owned Artist', library_v2_id: 7 }],
           spotify_artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
         }),
       ),
@@ -470,15 +476,43 @@ describe('where a result card points', () => {
     await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
     const faces = document.querySelectorAll('#enh-spotify-artists-section a');
     expect(faces[0].textContent).toContain('Owned Artist');
-    expect(faces[0].getAttribute('href')).toBe('/artist-detail/library/7');
+    expect(faces[0].getAttribute('href')).toBe(
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
+    );
     expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
       'href',
-      '/artist-detail/library/7',
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
-      '/artist-detail/spotify/sp1?name=Found%20Artist',
+      '/library?view=discovery&immersive=true&discover=spotify%3Asp1&discoverName=Found+Artist',
+    );
+  });
+
+  it('falls back to the redirect route when an owned card has no catalogue id', async () => {
+    // _build_db_artists always sets library_v2_id, so this is the shape that
+    // should not happen — but inventing a v2 id would 404 the page, and the
+    // legacy route still resolves it, so the fallback has to stay reachable.
+    server.use(
+      http.post('/api/enhanced-search', () =>
+        HttpResponse.json({ db_artists: [{ id: 42, name: 'Idless Artist' }] }),
+      ),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+      http.get('/api/artist/:id/image', () => HttpResponse.json({ success: false })),
+    );
+
+    renderRoute('/search');
+    await settled();
+    type('idless');
+
+    await screen.findAllByText('Idless Artist', undefined, { timeout: 3000 });
+    const faces = document.querySelectorAll('#enh-spotify-artists-section a');
+    expect(faces[0].getAttribute('href')).toBe('/library?view=discovery&immersive=true&artist=42');
+    expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
+      'href',
+      '/library?view=discovery&immersive=true&artist=42',
     );
   });
 

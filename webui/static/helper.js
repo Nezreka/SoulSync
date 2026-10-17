@@ -625,12 +625,12 @@ const HELPER_CONTENT = {
     },
 
     '[id^="add-to-wishlist-btn"]': {
-        title: 'Add to Wishlist',
-        description: 'Adds all missing tracks from this batch to your Wishlist for later download. Useful when you want to queue tracks but not download them right now.',
+        title: 'Monitor',
+        description: 'Marks the selected tracks as wanted in your library and starts downloading them right away. A track that is not found stays wanted and is searched again on the next wishlist run.',
         tips: [
-            'Only missing tracks are added (already-owned tracks are skipped)',
-            'Tracks appear in the Wishlist modal under the appropriate category',
-            'The Wishlist auto-processes on a schedule via the Automations system'
+            'The Library Status column shows what you already have as soon as the dialog opens',
+            'Monitored tracks appear in the Wishlist and under Wanted in the Library',
+            'Begin Analysis downloads once without monitoring, with Force Download and Skip AcoustID'
         ]
     },
     '.download-control-btn.primary': {
@@ -2387,8 +2387,8 @@ const HELPER_TOURS = {
 
             // Controls
             { page: 'library', selector: '#library-search-input', title: 'Search Artists', description: 'Type to filter your library by artist name. Results update instantly as you type.' },
-            { page: 'library', selector: '#watchlist-filter', title: 'Watchlist Filter', description: 'Filter by watchlist status: All, Watched (artists you follow for new releases), or Unwatched. The "Watch All Unwatched" button adds every remaining artist to your watchlist in one click.' },
-            { page: 'library', selector: '#alphabet-selector', title: 'Alphabet Jump', description: 'Click any letter to jump directly to artists starting with that letter. Great for navigating large libraries.' },
+            { page: 'library', selector: '#watchlist-filter', title: 'Monitoring Filter', description: 'Show all artists, monitored artists, or unmonitored artists.' },
+            { page: 'library', selector: '#library-view-toggle', title: 'Library View', description: 'Switch between the visual card grid and the detailed table view.' },
 
             // Grid
             { page: 'library', selector: '#library-artists-grid', title: 'Artist Grid', description: 'Your artists as cards with photos, track counts, and service badges (Spotify, MusicBrainz, etc.). Click any card to open their artist detail page with full discography.' },

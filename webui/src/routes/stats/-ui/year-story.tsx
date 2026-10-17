@@ -60,7 +60,6 @@ import styles from './year-story.module.css';
  */
 
 /** Artist detail is reached through the library source, same as the page. */
-const ARTIST_DETAIL_SOURCE = 'library' as const;
 
 interface YearStoryProps {
   onClose: () => void;
@@ -295,8 +294,8 @@ function ArtistLink({
   }
   return (
     <Link
-      to="/artist-detail/$source/$id"
-      params={{ source: ARTIST_DETAIL_SOURCE, id: String(id) }}
+      to="/library"
+      search={{ artist: Number(id), view: 'discovery', immersive: true }}
       className={className}
       // The story is an overlay over /stats. Navigating away has to drop the
       // ?story=year param too, or coming Back lands the reader in the middle

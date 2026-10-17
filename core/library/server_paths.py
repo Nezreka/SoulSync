@@ -14,9 +14,9 @@ The first file under a mount goes through the path resolver (a suffix walk over
 the configured library folders). Once that finds it, the two prefixes are
 remembered, so every later file under the same mount costs one stat instead of
 a walk. After a long run of misses (the library, or part of it, isn't mounted
-here, or Navidrome reports made-up paths with Report Real Path off), the walk
-is skipped for the rest of the scan so a big library doesn't pay for one per
-track. Learned mounts keep working after that.
+here, or Navidrome reports made-up paths with Report Real Path off), the lookup
+skips expensive album-directory scans in that namespace. Cheap exact suffix
+probes keep working, including flat layouts that cannot teach a mount.
 """
 
 from __future__ import annotations
@@ -32,25 +32,30 @@ logger = get_logger("library.server_paths")
 # a shared tail this long is artist/album/file: a real match, not two files
 # that only share a name
 _MIN_SHARED_SEGMENTS = 3
-# resolver misses in a row before we stop walking for this scan
+# misses in one reported namespace before disabling expensive fuzzy scans
 _GIVE_UP_AFTER = 200
 
 _lock = threading.Lock()
 _learned: Dict[str, str] = {}  # server prefix -> local prefix
-_misses = 0
+_misses: Dict[str, int] = {}
 
 
 def reset() -> None:
     """forget learned mounts. a scan calls this at start, the user may have
     changed a mount or a library path since the last one"""
-    global _misses
     with _lock:
         _learned.clear()
-        _misses = 0
+        _misses.clear()
 
 
 def _segments(path: str) -> list:
     return path.replace('\\', '/').split('/')
+
+
+def _namespace(normalized: str) -> str:
+    """The reported mount prefix before artist/album/file, or its first part."""
+    parts = [part for part in normalized.split('/') if part]
+    return '/'.join(parts[:-3] or parts[:1])
 
 
 def _learn(server_path: str, local_path: str) -> None:
@@ -86,28 +91,32 @@ def _from_learned(normalized: str) -> Optional[str]:
 def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str]:
     """SoulSync's own path for a file the server reported, or None when it
     can't be found from here. Never raises."""
-    global _misses
     if not isinstance(server_path, str) or not server_path:
         return None
     try:
         if os.path.exists(server_path):
-            return server_path
+            return os.path.abspath(server_path)
         normalized = server_path.replace('\\', '/')
         hit = _from_learned(normalized)
         if hit:
-            return hit
+            return os.path.abspath(hit)
+        namespace = _namespace(normalized)
         with _lock:
-            if _misses >= _GIVE_UP_AFTER:
-                return None
+            allow_fuzzy = _misses.get(namespace, 0) < _GIVE_UP_AFTER
         from core.library.path_resolver import resolve_library_file_path
-        resolved = resolve_library_file_path(server_path, config_manager=config_manager)
+        resolved = resolve_library_file_path(
+            server_path, config_manager=config_manager, allow_fuzzy=allow_fuzzy,
+        )
         if resolved:
+            # Configured roots may be ./Transfer while imports store /app/Transfer.
+            # Return one path identity for exact catalogue/file comparisons.
+            resolved = os.path.abspath(resolved)
             with _lock:
-                _misses = 0
+                _misses.pop(namespace, None)
             _learn(normalized, resolved)
             return resolved
         with _lock:
-            _misses += 1
+            _misses[namespace] = min(_misses.get(namespace, 0) + 1, _GIVE_UP_AFTER)
         return None
     except Exception as e:  # noqa: BLE001 - a lookup must never cost the scan a track
         logger.debug("local path lookup failed for %r: %s", server_path, e)

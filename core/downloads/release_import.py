@@ -211,7 +211,8 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
     wishlist request when a guard rejects this already downloaded file.
     """
     from core.imports.context import get_import_context_artist
-    from core.imports.paths import import_profile_id
+    from core.imports.paths import import_owner_id, import_profile_id
+    from core.library_scope import BATCH_OWNER_KEY
 
     artists = track.get("artists") or [get_import_context_artist(parent)]
     artist = deepcopy(artists[0] if isinstance(artists, list) else artists)
@@ -227,6 +228,10 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         "track_info": info,
         "source": source,
         "profile_id": import_profile_id(parent),
+        # Ours (E-04): the library the request was filed in, decided once for
+        # its batch. Without the stamp the extra track would fall back to the
+        # profile's own library while the request sits in another one.
+        BATCH_OWNER_KEY: import_owner_id(parent),
         "is_album_download": True,
         "_album_import_extra": {
             "album": album.get("name") or "",
@@ -234,6 +239,7 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
         },
         "has_clean_metadata": True,
         "has_full_metadata": True,
+        "_monitor_album_extra": True,
         "original_search_result": {
             "id": info.get("id") or "",
             "source": source,
@@ -266,16 +272,17 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
     return ctx
 
 
-def _owned_in_library(track: dict, album_name: str, profile_id=None) -> bool:
-    """Ownership in the requester's library, as the missing-track analysis decides it."""
-    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
+def _owned_in_library(track: dict, album_name: str, owner=None) -> bool:
+    """Ownership in the library the request was filed in (``owner``: its
+    profile id, None for the shared one), as the missing-track analysis decides it."""
+    from core.library_scope import reset_library_scope, scope_for_owner, set_library_scope
     from core.settings import config_manager
     from database.music_database import MusicDatabase
 
     title = str(track.get("name") or track.get("title") or "")
     artists = track.get("artists") or []
     names = [a.get("name") if isinstance(a, dict) else a for a in (artists if isinstance(artists, list) else [artists])]
-    token = set_library_scope(library_scope_for_profile(profile_id))
+    token = set_library_scope(scope_for_owner(owner))
     try:
         db = MusicDatabase()
         server = config_manager.get_active_media_server()
@@ -349,12 +356,9 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
         _active_albums.add(identity)
     imported = 0
     try:
-        if lookup_album is None:
-            from core.metadata.album_tracks import get_artist_album_tracks
-
-            lookup_album = get_artist_album_tracks
-        payload = lookup_album(album["id"], artist_name=artist_name, album_name=name,
-                               source_override=get_import_source(context) or None)
+        from core.library2.download_catalogue import hydrate_download_album
+        catalogue_context = deepcopy(context)
+        payload = hydrate_download_album(catalogue_context, lookup_album=lookup_album)
         if not isinstance(payload, dict) or not payload.get("success"):
             logger.info("[Album Tracks] Track list for %r is unavailable", name)
             return 0
@@ -379,9 +383,9 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
         album.setdefault("total_tracks", len(tracks))
         source = payload.get("source") or get_import_source(context)
         if is_owned is None:
-            from core.imports.paths import import_profile_id
+            from core.imports.paths import import_owner_id
 
-            is_owned = partial(_owned_in_library, profile_id=import_profile_id(context))
+            is_owned = partial(_owned_in_library, owner=import_owner_id(context))
         for index, (track, item) in enumerate(pairs):
             key = f"{identity}::{source}:{track.get('id') or ''}:{track.get('disc_number')}:{track.get('track_number')}"
             if _recently_imported(key) or is_owned(track, name):
@@ -391,6 +395,8 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
             if not path:
                 continue
             ctx = _album_track_context(context, track, album, source)
+            if catalogue_context.get('_album_catalogue_id'):
+                ctx['lib2_entity'] = {'album_id': catalogue_context['_album_catalogue_id']}
             track_key = f"{context_key}::album-track:{index}"
             try:
                 process_file(track_key, ctx, path)

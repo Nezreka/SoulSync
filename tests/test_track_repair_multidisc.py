@@ -95,12 +95,13 @@ def test_correct_ddtt_file_is_not_flagged(tmp_path):
     assert plan is None
 
 
-def test_legacy_whole_album_total_is_not_flagged(tmp_path):
-    """Files the OLD job repaired carry '13/40' (whole-album total). Accepted —
-    otherwise the fix would re-flag every previously-repaired library."""
+def test_legacy_whole_album_total_is_corrected_per_disc(tmp_path):
+    """A confirmed full release lets old whole-album totals converge per disc."""
     f = tmp_path / "0213 - Thirteen Lights.flac"
     _make_flac(f, {'title': 'Thirteen Lights', 'tracknumber': '13/40', 'discnumber': '2/3'})
-    assert _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8) is None
+    plan = _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8)
+    assert not plan['tag_ok'] and plan['disc_total'] == 14
+    assert plan['new_basename'] is None
 
 
 # ── the mangler is dead: repairs rebuild DDTT, never splice digits ───────────
@@ -113,7 +114,7 @@ def test_wrong_ddtt_prefix_is_rebuilt_not_spliced(tmp_path):
     plan = _plan_track_repair(str(f), f.name, _box_set_tracklist(), 0.8)
     assert plan is not None
     assert plan['new_basename'] == "0213 - Thirteen Lights"
-    assert plan['tag_ok'] is True          # the tag itself was fine
+    assert plan['tag_ok'] is False         # the old whole-album total needs correction
     assert plan['correct_disc'] == 2 and plan['correct_num'] == 13
 
 
@@ -169,10 +170,10 @@ def test_single_disc_all_01_bug_is_still_detected(tmp_path):
         str(tmp_path), sorted(p.name for p in tmp_path.iterdir()),
         anomaly_threshold=3, context=_ctx(findings, tmp_path),
         scan_state={'album_tracks_cache': {}, 'title_similarity': 0.8, 'dry_run': True})
-    # Alpha (track 1) is correct; Beta -> 2 and Gamma -> 3 get findings
-    assert len(findings) == 2
+    # All totals are missing; Beta and Gamma also need their positions fixed.
+    assert len(findings) == 3
     fixed = {f['details']['correct_track_num'] for f in findings}
-    assert fixed == {2, 3}
+    assert fixed == {1, 2, 3}
     # and the proposed renames are plain 2-digit track prefixes
     changes = "\n".join("\n".join(f['details']['changes']) for f in findings)
     assert "02 - Beta Song.flac" in changes and "03 - Gamma Song.flac" in changes
@@ -233,22 +234,29 @@ def test_approving_a_legacy_finding_never_mangles_a_ddtt_name(tmp_path):
     assert not g.exists()
 
 
-def test_approving_a_finding_writes_the_number_for_a_text_track_id(tmp_path):
-    """#1574: track ids are TEXT. int('1Brn5V...') raised, the debug log
-    swallowed it, and the DB kept the wrong number while the file was fixed."""
+def test_approving_a_finding_writes_the_number_for_a_text_native_id(tmp_path):
+    """#1574: textual finding IDs must reach the native catalogue update."""
+    from tests.lib2_seed import track
+    from core.library2.editions import backfill_editions
+
     w = _worker(tmp_path)
-    with w.db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('ar-1', 'Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al-1', 'ar-1', 'Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_number) "
-            "VALUES ('1Brn5VRAOwLXeKdKaj6gwu', 'al-1', 'ar-1', 'Beta Song', 1)")
     f = Path(w.transfer_folder) / "01 - Beta Song.flac"
     _make_flac(f, {'title': 'Beta Song', 'tracknumber': '1/3'})
+    with w.db._get_connection() as conn:
+        track(conn, 'Artist', 'Album', 'Alpha Song', track_number=1,
+              album_cols={'track_count': 3})
+        track_id = track(conn, 'Artist', 'Album', 'Beta Song', track_number=2, path=str(f))
+        track(conn, 'Artist', 'Album', 'Gamma Song', track_number=3)
+        album_id = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()[0]
+        backfill_editions(conn.cursor())
+        # The edition is authoritative; the catalogue row has drifted.
+        conn.execute('UPDATE lib2_tracks SET track_number=1 WHERE id=?', (track_id,))
+        conn.commit()
 
     details = {'correct_track_num': 2, 'total_tracks': 3, 'new_filename': '02 - Beta Song.flac'}
-    res = w._fix_track_number('track', '1Brn5VRAOwLXeKdKaj6gwu', str(f), details)
+    res = w._fix_track_number('track', f'lib2:{track_id}', str(f), details)
     assert res['success'] is True
     with w.db._get_connection() as conn:
-        row = conn.execute("SELECT track_number FROM tracks WHERE id = '1Brn5VRAOwLXeKdKaj6gwu'").fetchone()
+        row = conn.execute('SELECT track_number FROM lib2_tracks WHERE id=?', (track_id,)).fetchone()
     assert row['track_number'] == 2
+    assert FLAC(str(Path(w.transfer_folder) / '02 - Beta Song.flac'))['tracknumber'] == ['2/3']

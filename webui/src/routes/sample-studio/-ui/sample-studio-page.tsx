@@ -131,7 +131,10 @@ export function SampleStudioPage() {
     }
     void (async () => {
       try {
-        const track = await lookupStudioTrack(entry.track_id, entry.track_title, entry.artist_name);
+        const track =
+          entry.track_id === null
+            ? null
+            : await lookupStudioTrack(entry.track_id, entry.track_title, entry.artist_name);
         if (!track) {
           setStashError(
             `Couldn’t find “${entry.track_title}” in your library — it may have been removed.`,

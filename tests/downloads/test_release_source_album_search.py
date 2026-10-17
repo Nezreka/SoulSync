@@ -48,6 +48,7 @@ def _release(title, guid='album', protocol='usenet', categories=(3040,)):
 def local_http(monkeypatch):
     from core import prowlarr_client
     calls, answers, throttle_calls = [], {}, []
+    monkeypatch.setattr('core.library2.download_catalogue.hydrate_download_album', lambda context: None)
 
     def get(url, headers=None, params=None, timeout=None):
         if url.endswith('/indexer'):
@@ -227,6 +228,23 @@ def test_album_query_is_cached_when_it_was_already_the_main_query(monkeypatch, l
         second, _ = asyncio.run(plugin.search('Pink Floyd Money'))
     assert calls.count('Pink Floyd The Dark Side of the Moon') == 1
     assert first[0].filename == second[0].filename
+
+
+def test_album_hydration_uses_shared_io_pool_and_task_context_once(monkeypatch, local_http):
+    import threading
+    from core.downloads.track_hint import current_track_hint, track_hint_context
+
+    client, _, _, _ = local_http
+    context, calls = {'album_name': 'Album'}, []
+    hint = {'title': 'Money', 'artist': 'Pink Floyd', 'album': 'Album', 'catalogue_context': context}
+    monkeypatch.setattr('core.library2.download_catalogue.hydrate_download_album',
+                        lambda value: calls.append((value, current_track_hint(), threading.current_thread().name)))
+    with track_hint_context(hint):
+        for _ in range(2):
+            asyncio.run(_plugin(monkeypatch, client).search('Pink Floyd Money'))
+    assert len(calls) == 1
+    assert calls[0][:2] == (context, hint)
+    assert calls[0][2].startswith('soulsync-slow-io')
 
 
 @pytest.mark.parametrize('release_title', [

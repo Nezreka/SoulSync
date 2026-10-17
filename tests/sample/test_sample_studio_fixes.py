@@ -15,6 +15,7 @@ Covered here:
   fills; results are merged/deduped.
 """
 
+from tests.lib2_seed import file_track
 import queue
 import subprocess
 import time
@@ -59,12 +60,9 @@ def db_only(tmp_path, monkeypatch):
 def _seed_track(db, track_id, file_path):
     conn = db._get_connection()
     try:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (1, 'R')")
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (1, 1, 'A')")
-        conn.execute(
-            "INSERT INTO tracks (id, artist_id, album_id, title, file_path) VALUES (?, 1, 1, 'T', ?)",
-            (track_id, file_path),
-        )
+        conn.execute("INSERT OR IGNORE INTO lib2_artists (id, name) VALUES (1, 'R')")
+        conn.execute("INSERT OR IGNORE INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'A')")
+        file_track(conn, track_id, 1, 'T', file_path)
         conn.commit()
     finally:
         conn.close()
@@ -109,12 +107,12 @@ def test_retry_clears_recorded_error(db_only):
 
     # Without retry: sticky error, no re-queue.
     assert sample_api.fetch_analysis(4243)[0]["status"].startswith("error:")
-    assert "4243" not in sample_worker._pending
+    assert ('shared', '4243') not in sample_worker._pending
 
     # With retry: re-queued to pending, then fails again (it really re-ran).
     payload, _ = sample_api.fetch_analysis(4243, retry=True)
     assert payload["status"] == "pending"
-    assert "4243" in sample_worker._pending
+    assert ('shared', '4243') in sample_worker._pending
     _wait_for_status(4243, "error:")
 
 

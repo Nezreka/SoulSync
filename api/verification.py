@@ -14,7 +14,7 @@ import os
 
 from flask import Blueprint, jsonify
 
-from core.profile_context import admin_only
+from core.profile_context import admin_only, get_current_profile_id
 from core.search import stream as _search_stream
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
@@ -79,7 +79,10 @@ def _resolve_history_audio_path(row):
             conn = get_database()._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND LOWER(title) = LOWER(?)",
+                "SELECT f.path AS file_path FROM lib2_track_files f"
+                "  JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE f.path IS NOT NULL AND LOWER(t.title) = LOWER(?)"
+                "   AND COALESCE(f.file_state, 'active') <> 'deleted'",
                 (title,))
             return [r[0] for r in cursor.fetchall() if r[0]]
         except Exception as e:
@@ -266,11 +269,40 @@ def approve_verification_item(history_id):
             # The tracks row may carry either the recorded or the resolved path.
             for p in {p for p in (file_path, on_disk) if p}:
                 conn.execute(
-                    "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
+                    "UPDATE lib2_track_files SET verification_status = ? WHERE path = ?",
                     (HUMAN_VERIFIED, p))
             conn.commit()
+        # iss29-E06: the resolver-backed lib2 update runs on its OWN
+        # transaction, after the write above is committed. It may still have to
+        # consult the path resolver for a mapped-path setup, and the resolver
+        # touches the filesystem — doing that inside the transaction above held
+        # the single SQLite writer across network stats on a NAS-backed library.
+        from core.library2.verification import mark_file_verification_status
+        with db._get_connection() as conn:
+            lib2_updated = mark_file_verification_status(
+                conn,
+                {p for p in (file_path, on_disk) if p},
+                HUMAN_VERIFIED,
+                config_manager=config_manager,
+            )
+            conn.commit()
         tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
-        return jsonify({"success": True, "tag_written": tag_written})
+        # F-10: the human step of the pipeline story. Fail-open — a history row
+        # without acquisition correlation (ordinary library import) writes
+        # nothing and never blocks the approval itself.
+        try:
+            from core.acquisition.pipeline_callback import notify_verification_decision
+            notify_verification_decision(
+                history_id, decision="human_verified",
+                actor=f"profile:{get_current_profile_id()}",
+            )
+        except Exception as journal_error:  # noqa: BLE001
+            logger.debug("[Verification] approve journal skipped: %s", journal_error)
+        return jsonify({
+            "success": True,
+            "tag_written": tag_written,
+            "lib2_files_updated": lib2_updated,
+        })
     except Exception as e:
         logger.error(f"[Verification] Approve failed for {history_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -293,6 +325,17 @@ def delete_verification_item(history_id):
             os.remove(on_disk)
             file_deleted = True
             logger.info(f"[Verification] Deleted rejected file: {on_disk}")
+        # F-10: journal the rejection BEFORE the row (and with it the stored
+        # acquisition correlation) is deleted — afterwards there is nothing
+        # left to correlate against. Fail-open as everywhere else.
+        try:
+            from core.acquisition.pipeline_callback import notify_verification_decision
+            notify_verification_decision(
+                history_id, decision="rejected", reason_code="human_rejected",
+                actor=f"profile:{get_current_profile_id()}",
+            )
+        except Exception as journal_error:  # noqa: BLE001
+            logger.debug("[Verification] reject journal skipped: %s", journal_error)
         db.delete_library_history_rows([history_id])
         return jsonify({"success": True, "file_deleted": file_deleted})
     except Exception as e:

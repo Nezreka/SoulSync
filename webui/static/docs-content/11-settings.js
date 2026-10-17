@@ -135,7 +135,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 
 ![Quality profiles](dl-quality-profiles.jpg)
 
-Quality profiles are checked during downloads and auto-import, and by the **Quality Upgrade Finder** repair job, which finds files that fall below your standards and proposes replacements.
+Quality profiles are checked during downloads and auto-import. Library v2 evaluates monitored tracks against their upgrade cutoff and sends missing or upgrade-eligible tracks to the Wishlist through **Monitoring List Reconcile**. The retired Quality Upgrade Finder is not a separate repair job.
 `
         },
         {

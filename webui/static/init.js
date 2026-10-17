@@ -559,6 +559,9 @@ const PF_BOOT_PATH = (window.SoulSyncURL?.strip(window.location.pathname) ?? win
 const LEGACY_PROFILE_PAGE_ALIASES = {
     downloads: 'search',
     artists: 'search',
+    // Library v2 became the Library; anything still naming the old route id
+    // resolves to the same permission rather than to an unknown page.
+    'library-v2': 'library',
 };
 
 function normalizeProfilePageId(pageId) {
@@ -2352,6 +2355,7 @@ async function loadProfileManageList() {
     _pfManageState = {
         profiles, loginMode,
         librarySupported: data.own_library_supported !== false,
+        libraryAvailable: data.own_library_available !== false,
         libraryHint: data.own_library_root_hint || '',
     };
 
@@ -3154,6 +3158,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const p = profile || {};
     const loginMode = _pfManageState ? _pfManageState.loginMode : profileLoginMode;
     const librarySupported = _pfManageState ? _pfManageState.librarySupported : true;
+    const libraryAvailable = _pfManageState ? _pfManageState.libraryAvailable !== false : true;
     const libraryHint = _pfManageState
         ? _pfManageState.libraryHint.replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'))
         : '';
@@ -3495,12 +3500,17 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
                 pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex or Jellyfin and pick that library under their account.' }),
             ]);
             const inactive = !librarySupported;
+            // parked beats unsupported in the message: the server can be the
+            // right one and the feature still be off, and a control that
+            // cannot succeed has to say so rather than fail on save
+            const parked = !libraryAvailable;
             const ownSwitch = pfSwitch({
                 title: 'Own library',
-                desc: inactive ? 'Needs Plex or Jellyfin. With Navidrome or standalone their downloads go to the shared folder.'
+                desc: parked ? 'Not available in this build yet.'
+                    : inactive ? 'Needs Plex or Jellyfin. With Navidrome or standalone their downloads go to the shared folder.'
                     : 'Their downloads go to their own folder and their own server library.',
                 checked: st.library_mode === 'own',
-                disabled: inactive && st.library_mode !== 'own',
+                disabled: parked || (inactive && st.library_mode !== 'own'),
                 onChange: (on) => { st.library_mode = on ? 'own' : 'shared'; folderBox.style.display = on ? '' : 'none'; },
             });
             folderBox.style.display = st.library_mode === 'own' ? '' : 'none';
@@ -4164,7 +4174,12 @@ function initializeNavigation() {
 
 const _DEEPLINK_VALID_PAGES = new Set([
     'dashboard', 'sync', 'search', 'discover', 'automations',
-    'library', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
+    // iss29-B07: '/library-v2' is a live alias that redirects to '/library'
+    // (query string preserved). It was missing here, so this fallback resolved
+    // a bookmark to it as 'dashboard'. React usually wins the race and the
+    // right page appears anyway — which is exactly what makes the gap easy to
+    // miss and unreliable to depend on.
+    'library', 'library-v2', 'import', 'settings', 'help', 'issues', 'stats', 'watchlist',
     'wishlist', 'active-downloads', 'artist-detail', 'playlist-explorer',
     'hydrabase', 'tools', 'chat', 'podcasts', 'audiobooks', 'requests',
     'sample-studio'
@@ -4182,6 +4197,9 @@ function _getPageFromPath() {
     if (!_DEEPLINK_VALID_PAGES.has(basePage)) return 'dashboard';
     // Context-dependent pages fall back to a sensible parent
     if (basePage === 'playlist-explorer') return 'library';
+    // The alias and its target are the same page as far as the shell chrome
+    // is concerned (iss29-B07).
+    if (basePage === 'library-v2') return 'library';
     return basePage;
 }
 

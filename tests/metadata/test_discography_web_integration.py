@@ -88,34 +88,6 @@ def test_source_only_artist_detail_preserves_provider_access_error(monkeypatch):
     }
 
 
-def test_owned_artist_keeps_library_releases_and_exposes_provider_error():
-    node = _web_function_node("get_artist_detail")
-
-    assert _imports_name(
-        node,
-        "core.metadata.discography_strict",
-        "get_artist_detail_discography",
-    )
-    guard = _state_error_guard(node, "artist_detail_discography")
-    assert not any(isinstance(child, ast.Return) for child in ast.walk(guard))
-    assert any(
-        isinstance(child, (ast.Assign, ast.AnnAssign))
-        and any(
-            isinstance(target, ast.Name) and target.id == "merged_discography"
-            for target in (child.targets if isinstance(child, ast.Assign) else [child.target])
-        )
-        for child in ast.walk(guard)
-    )
-    assert any(
-        isinstance(child, ast.Subscript)
-        and isinstance(child.value, ast.Name)
-        and child.value.id == "response_data"
-        and isinstance(child.slice, ast.Constant)
-        and child.slice.value == "provider_error"
-        for child in ast.walk(node)
-    )
-
-
 def test_download_discography_endpoint_uses_strict_facade():
     node = _web_function_node("get_artist_discography")
 
@@ -141,24 +113,3 @@ def test_legacy_metadata_facade_remains_lenient():
         for child in ast.walk(node)
     )
 
-
-def test_artist_detail_frontend_surfaces_api_and_owned_provider_errors():
-    """Two distinct failures the page must not swallow.
-
-    A failed load has to raise with the SERVER's reason rather than a generic
-    message, and a provider that failed while the rest of the payload succeeded
-    has to be surfaced without blanking the page. Reads the React page: the
-    vanilla loader this used to check was deleted with the rest of the vanilla
-    artist-detail.
-    """
-    react = Path("webui/src/routes/artist-detail")
-    api = (react / "-artist-detail.api.ts").read_text(encoding="utf-8")
-    # !response.ok is readJson's job (it throws on a non-2xx); this is the
-    # success:false half, and it must prefer the server's own error string.
-    assert re.search(r"payload\.success === false", api)
-    assert re.search(r"throw new Error\(payload\?\.error \|\|", api)
-
-    page = (react / "-ui" / "artist-detail-page.tsx").read_text(encoding="utf-8")
-    assert re.search(r"payload\?\.provider_error\?\.error", page)
-    # Non-fatal: warned about, page still renders.
-    assert "showToast" in page

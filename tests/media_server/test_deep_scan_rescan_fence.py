@@ -20,6 +20,15 @@ import pytest
 import core.database_update_worker as duw
 from core.database_update_worker import DatabaseUpdateWorker
 
+import core.library2.migration_gate as _migration_gate
+
+
+@pytest.fixture(autouse=True)
+def _upgrade_barrier_open(monkeypatch):
+    """this branch aborts a deep scan while a Library v2 upgrade is pending;
+    the stand-in database has no catalogue to ask"""
+    monkeypatch.setattr(_migration_gate, "migration_required", lambda db: False)
+
 
 class _FakeMediaClient:
     """Plex/Jellyfin-shaped client: mid-rescan, incomplete listings, and a
@@ -52,7 +61,7 @@ class _FakeDB:
     def get_track_ids_under_scopes(self, server_type, artist_ids, album_ids):
         return set()
 
-    def delete_stale_tracks(self, stale, server_type):
+    def delete_stale_tracks(self, stale, server_type, owner_profile_id=None):
         self.deleted = (set(stale), server_type)
         return len(stale)
 

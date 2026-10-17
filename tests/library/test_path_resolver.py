@@ -159,8 +159,7 @@ def test_finds_file_via_library_music_paths(tmp_path: Path) -> None:
 
 
 def test_library_music_paths_handles_multiple_dirs(tmp_path: Path) -> None:
-    """Users can configure multiple music paths — first existing
-    suffix-match wins."""
+    """Find the unique matching copy across configured music paths."""
     lib_a = tmp_path / "LibA"
     lib_b = tmp_path / "LibB"
     (lib_a / "Artist").mkdir(parents=True)
@@ -304,9 +303,8 @@ def test_dedupe_avoids_duplicate_probes(tmp_path: Path) -> None:
     assert result == str(actual)
 
 
-def test_explicit_transfer_takes_priority_over_config(tmp_path: Path) -> None:
-    """Explicit transfer kwarg is added before config-derived paths so
-    the worker's already-cached transfer_folder always wins ties."""
+def test_explicit_transfer_cannot_override_an_independent_equal_suffix(tmp_path: Path) -> None:
+    """Root order cannot establish which of two independent copies was meant."""
     explicit = tmp_path / "Explicit"
     config_dir = tmp_path / "FromConfig"
     (explicit / "Artist").mkdir(parents=True)
@@ -327,7 +325,7 @@ def test_explicit_transfer_takes_priority_over_config(tmp_path: Path) -> None:
         config_manager=cm,
     )
 
-    assert result == str(actual_explicit)
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

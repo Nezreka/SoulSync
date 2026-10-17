@@ -146,7 +146,18 @@ def test_set_shutdown_check_assigns_callable(tmp_dl: Path) -> None:
 
 def _run(coro):
     """Tiny helper — we have async methods to exercise but no async test runner."""
-    return asyncio.run(coro)
+    loop = asyncio.new_event_loop()
+
+    async def _drain_with_heartbeat():
+        task = loop.create_task(coro)
+        while not task.done():
+            await asyncio.sleep(0.01)
+        return task.result()
+
+    try:
+        return loop.run_until_complete(_drain_with_heartbeat())
+    finally:
+        loop.close()
 
 
 def test_search_returns_empty_when_unavailable(tmp_dl: Path, monkeypatch) -> None:
@@ -374,6 +385,10 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
     completed_path = tmp_dl / "track.mp3"
     completed_path.write_bytes(b"x" * (200 * 1024))  # > MIN_AUDIO_SIZE
 
+    # download() only dispatches the worker. Keep the replacement alive until
+    # that worker reaches its terminal state; otherwise a busy full-suite run
+    # can leave this block before the thread calls _download_sync and the
+    # supposedly offline test contacts real SoundCloud.
     with patch.object(client, '_download_sync', return_value=str(completed_path)):
         download_id = _run(client.download(
             'soundcloud',
@@ -381,13 +396,13 @@ def test_download_starts_thread_and_returns_id(tmp_dl: Path) -> None:
             file_size=0,
         ))
 
-    assert download_id is not None
-    deadline = time.time() + 2
-    while time.time() < deadline:
-        record = engine.get_record('soundcloud', download_id)
-        if record and record['state'] == 'Completed, Succeeded':
-            break
-        time.sleep(0.05)
+        assert download_id is not None
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            record = engine.get_record('soundcloud', download_id)
+            if record and record['state'] == 'Completed, Succeeded':
+                break
+            time.sleep(0.05)
 
     info = engine.get_record('soundcloud', download_id)
     assert info['state'] == 'Completed, Succeeded'

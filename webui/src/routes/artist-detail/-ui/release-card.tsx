@@ -12,6 +12,7 @@ import {
 } from '../-artist-detail.card';
 import { releaseFlags } from '../-artist-detail.filters';
 import { gapSourceLabel } from '../-artist-detail.gap-fill';
+import { ReleaseMonitorButton } from '../../library/-ui/artist-page-release-actions';
 
 interface Props {
   release: DiscographyRelease;
@@ -59,6 +60,7 @@ export function ReleaseCard({ release, isMusicBrainz, isSourceArtist, onOpen, on
       {/* data-bg-src, not a style: an IntersectionObserver swaps it in, so a
           75-card grid does not fetch 75 images up front. */}
       <div className="album-card-image" data-bg-src={bg ?? undefined} />
+      <ReleaseMonitorButton release={release} />
 
       <button
         type="button"

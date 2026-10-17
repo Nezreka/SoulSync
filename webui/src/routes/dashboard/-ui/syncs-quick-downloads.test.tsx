@@ -33,7 +33,7 @@ afterEach(() => {
   delete window.showLoginScreen;
   delete window.showLaunchPinScreen;
   delete window.openAutoSyncScheduleModal;
-  delete window.navigateToPage;
+  delete (window as Partial<Window>).navigateToPage;
   delete window.checkForActiveProcesses;
   delete window.updateDashboardDownloads;
 });

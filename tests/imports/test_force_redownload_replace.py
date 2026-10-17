@@ -87,3 +87,12 @@ def test_force_replace_still_behind_the_length_guard():
     guard = src.index("_replacement_length_is_safe(final_path, file_path)")
     force_branch = src.index("elif is_enhance_download or force_replace:")
     assert guard < force_branch
+
+
+def test_a_same_path_replacement_retires_the_old_file_first():
+    # library-overhaul: every removal goes to the deleted-files folder; a forced
+    # or approved replacement at the same path used to overwrite it outright
+    src = Path(pipeline.__file__).read_text(encoding="utf-8", errors="replace")
+    retire = src.index("if _replace_reason in ('force', 'enhance') and os.path.exists(final_path):")
+    assert "_retire_replaced_library_file(final_path, _replace_reason, context)" in src[retire:retire + 600]
+    assert retire < src.index("safe_move_file(file_path, final_path)")

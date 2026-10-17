@@ -189,3 +189,86 @@ def test_mp3_date_and_label_live_in_their_native_frames(tmp_path):
     assert str(tags.getall('TDRC')[0].text[0]) == '2002'
     assert tags.getall('TPUB')[0].text == ['Geffen']
     assert not tags.getall('TXXX:CATALOGNUMBER')
+
+
+@pytest.mark.parametrize("mode", ["loose", "batch"])
+@pytest.mark.parametrize("protection", ["hand_tagged", "manual_date", "pinned_release"])
+def test_album_adoption_preserves_native_manual_choices(tmp_path, monkeypatch, mode, protection):
+    from database.music_database import MusicDatabase
+    from core.library2.metadata_overrides import set_field_override
+    from tests.lib2_seed import track
+
+    db = MusicDatabase(str(tmp_path / 'native.db'))
+    monkeypatch.setattr('database.music_database.get_database', lambda: db)
+    folder = _folder_with_siblings(tmp_path)
+    new = folder / '11.flac'
+    _make_flac(new, dict(SINGLE_TAGS, title='Manual Song'))
+    with db._get_connection() as conn:
+        tid = track(conn, 'Nirvana', 'Nirvana', 'Manual Song', path=str(new))
+        aid = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (tid,)).fetchone()[0]
+        if protection == 'manual_date':
+            set_field_override(conn, entity_type='release_group', entity_id=aid,
+                               field_name='release_date', value='1980')
+        if protection == 'pinned_release':
+            conn.execute('UPDATE lib2_albums SET canonical_locked=1, musicbrainz_id=? WHERE id=?', (SINGLE, aid))
+        conn.commit()
+    if protection == 'hand_tagged':
+        db.record_manual_metadata_file(str(new))
+    before = new.read_bytes()
+    infos = [{'path': str(new), 'track_number': 11, 'title': 'Manual Song'}]
+    if mode == 'loose':
+        out = ac.adopt_sibling_tags_for_loose_tracks(infos)
+        assert out['written'] == (1 if protection == 'manual_date' else 0)
+    else:
+        out = ac.run_album_consistency(infos, 'Nirvana', 'Nirvana', _NoNetwork(), total_tracks=14)
+        assert out['tags_written'] == (1 if protection == 'manual_date' else 0)
+    if protection == 'manual_date':
+        assert FLAC(str(new))['date'] == ['1980']
+        assert FLAC(str(new))['musicbrainz_albumid'] == [OURS]
+        assert FLAC(str(new))['label'] == ['Geffen']
+    else:
+        assert new.read_bytes() == before
+
+
+def test_a_manual_track_title_does_not_disable_album_adoption(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from core.library2.metadata_overrides import set_field_override
+    from tests.lib2_seed import track
+
+    db = MusicDatabase(str(tmp_path / 'native.db'))
+    monkeypatch.setattr('database.music_database.get_database', lambda: db)
+    folder = _folder_with_siblings(tmp_path)
+    new = folder / '11.flac'
+    _make_flac(new, dict(SINGLE_TAGS, title='Manual Song'))
+    with db._get_connection() as conn:
+        tid = track(conn, 'Nirvana', 'Nirvana', 'Song', path=str(new))
+        set_field_override(conn, entity_type='track', entity_id=tid, field_name='title', value='Manual Song')
+        conn.commit()
+    out = ac.adopt_sibling_tags_for_loose_tracks([{'path': str(new)}])
+    assert out['written'] == 1
+    assert FLAC(str(new))['title'] == ['Manual Song']
+    assert FLAC(str(new))['date'] == ['2002-10-29']
+
+
+def test_an_inner_failure_also_releases_the_temporary_batch_context(monkeypatch):
+    def fail(*a, **kw):
+        raise RuntimeError('test import failure')
+    monkeypatch.setattr(pipeline, 'post_process_matched_download', fail)
+    context = {'batch_id': 'B1', 'task_id': 'T1', 'profile_id': 1}
+    try:
+        pipeline.post_process_matched_download_with_verification('k', context, '/nowhere.flac', 'T1', 'B1', runtime=object())
+    except Exception:
+        pass
+    assert '_owning_batch_id' not in context
+
+
+def test_adoption_does_not_clear_an_album_tag_disabled_in_settings(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    folder = _folder_with_siblings(tmp_path)
+    new = folder / '11.flac'
+    _make_flac(new, dict(SINGLE_TAGS, title='Song'))
+    monkeypatch.setattr('core.metadata.common.get_config_manager',
+                        lambda: SimpleNamespace(get=lambda key, default=None: False if key == 'musicbrainz.tags.barcode' else default))
+    ac.adopt_sibling_tags_for_loose_tracks([{'path': str(new)}])
+    assert FLAC(str(new))['barcode'] == ['6417']
+    assert FLAC(str(new))['musicbrainz_albumid'] == [OURS]

@@ -29,6 +29,7 @@ from core.runtime_state import matched_downloads_context
 from core.settings import config_manager
 from core.tag_writer import read_file_tags, write_tags_to_file
 import core.wishlist.service as wishlist_service
+from core.wishlist.identity import wishlist_row_key
 import database.music_database as database
 
 
@@ -193,6 +194,11 @@ def _path(env, number):
 def _rows(env, table):
     assert table in {"tracks", "library_history", "track_downloads"}
     with env.db._get_connection() as connection:
+        if table == "tracks":
+            # Ours: the catalogue is Library v2, one row per file.
+            return [dict(row) for row in connection.execute(
+                "SELECT t.id, f.path AS file_path, t.quality_profile_id, f.owner_profile_id"
+                "  FROM lib2_tracks t JOIN lib2_track_files f ON f.track_id = t.id").fetchall()]
         return [dict(row) for row in connection.execute(f"SELECT * FROM {table}").fetchall()]
 
 
@@ -241,7 +247,9 @@ def test_library_rows_point_to_the_imported_files(album_environment):
     for table in ("tracks", "library_history", "track_downloads"):
         assert {row["file_path"] for row in _rows(env, table)} == expected, table
     assert all(row["quality_profile_id"] == env.qp_id for row in _rows(env, "tracks"))
-    assert all(row["owner_profile_id"] == env.profile_id for row in _rows(env, "tracks"))
+    # Ours: a file's owner is the library it sits in; the requester keeps no
+    # library of its own, so it is the shared one.
+    assert all(row["owner_profile_id"] is None for row in _rows(env, "tracks"))
     history = _rows(env, "library_history")
     assert all(row["download_source"] == "Usenet" for row in history)
     assert all(row["origin"] == "watchlist" and row["origin_context"] == ARTIST for row in history)
@@ -263,6 +271,9 @@ def test_failing_track_is_quarantined_alone_and_approval_imports_it(album_enviro
     assert sidecar["context"]["track_info"]["name"] == "Second"
     assert not any(key.startswith("_release") for key in sidecar["context"])
 
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE title='Second'").fetchone()[0] == 0
+        assert conn.execute("SELECT 1 FROM lib2_monitor_rules r JOIN lib2_tracks t ON r.entity_id=t.id WHERE r.entity_type='track' AND t.title='Second'").fetchone() is None
     # Approve exactly like the quarantine manager does.
     restored, context, trigger = approve_quarantine_entry(str(quarantine), sidecars[0].stem, str(env.downloads / "Transfer"))
     context["_skip_quarantine_check"] = "all"
@@ -270,6 +281,9 @@ def test_failing_track_is_quarantined_alone_and_approval_imports_it(album_enviro
     pipeline.post_process_matched_download(f"approve_{sidecars[0].stem}", context, restored, env.runtime)
     assert context.get("_pipeline_import_succeeded") is True
     assert _path(env, 2).is_file()
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT monitored FROM lib2_tracks WHERE title='Second'").fetchone()[0] == 1
+        assert conn.execute("SELECT r.monitored,r.provenance FROM lib2_monitor_rules r JOIN lib2_tracks t ON r.entity_id=t.id WHERE r.entity_type='track' AND t.title='Second'").fetchone()[:] == (1, 'file_import')
 
 
 def test_tracks_already_in_the_library_are_not_imported_again(album_environment):
@@ -302,9 +316,11 @@ def test_wishlist_row_of_an_other_track_is_settled(album_environment):
     wanted = dict(deepcopy(env.tracks[1]), source="deezer", album=deepcopy(env.album))
     assert env.db.add_to_wishlist(track_data=wanted, profile_id=env.profile_id, quality_profile_id=env.qp_id,
                                   source_type="album", user_initiated=True)
-    assert env.db.get_wishlist_track("1002", profile_id=env.profile_id)
+    # Ours: a wishlist row is keyed per release, ``<track>::<album>``.
+    key = wishlist_row_key("1002", env.album["id"])
+    assert env.db.get_wishlist_track(key, profile_id=env.profile_id)
     assert _expand(env) == 2
-    assert env.db.get_wishlist_track("1002", profile_id=env.profile_id) is None
+    assert env.db.get_wishlist_track(key, profile_id=env.profile_id) is None
 
 
 def test_a_release_without_some_tracks_imports_what_it_has(album_environment):
@@ -386,6 +402,169 @@ def test_a_second_format_of_the_requested_track_is_not_imported(album_environmen
     # The request took the MP3; the profile would pick the FLAC of the same slot.
     assert _expand(env, files=[*env.originals, mp3], requested=3) == 2
     assert [ctx["track_info"]["name"] for ctx in env.contexts] == ["Second", "Third"]
+
+
+def test_complete_catalogue_and_successful_extras_are_monitored(album_environment):
+    env = album_environment
+    _request(env)
+    assert _expand(env) == 2
+    with env.db._get_connection() as conn:
+        rows = conn.execute('SELECT id, title, monitored, quality_profile_id FROM lib2_tracks ORDER BY track_number').fetchall()
+        assert [r['title'] for r in rows] == list(TITLES)
+        assert [r['monitored'] for r in rows] == [0, 1, 1]
+        for row in rows[1:]:
+            assert row['quality_profile_id'] == env.qp_id
+            rule = conn.execute("SELECT monitored, provenance FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=? AND profile_id=1", (row['id'],)).fetchone()
+            assert rule and rule['monitored'] == 1 and rule['provenance'] == 'file_import'
+            wanted = conn.execute('SELECT wanted, reason, effective_profile_id FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=1', (row['id'],)).fetchone()
+            assert wanted['wanted'] == 1  # acquisition intent survives ownership for upgrades
+            assert wanted['effective_profile_id'] == env.qp_id
+        assert conn.execute('SELECT expected_track_count, tracklist_status FROM lib2_albums').fetchone()[:] == (3, 'ready')
+
+
+def test_missing_or_failed_extras_stay_catalogued_without_monitoring(album_environment):
+    env = album_environment
+    _request(env, required=True)
+    env.outcomes['Second'] = acoustid.VerificationResult.FAIL
+    assert _expand(env, files=env.originals[:2]) == 0
+    with env.db._get_connection() as conn:
+        rows = conn.execute('SELECT title, monitored FROM lib2_tracks ORDER BY track_number').fetchall()
+        assert [(r['title'], r['monitored']) for r in rows] == [(title, 0) for title in TITLES]
+        assert conn.execute('SELECT COUNT(*) FROM lib2_track_files').fetchone()[0] == 0
+
+
+def test_album_extra_import_preserves_manual_unmonitor(album_environment):
+    env = album_environment
+    _request(env)
+    from core.library2.download_catalogue import persist_album_payload
+    from core.library2.monitor_rules import record_rule, PROVENANCE_USER
+    payload = {'success': True, 'source': 'deezer', 'album': env.album, 'tracks': env.tracks}
+    persist_album_payload(env.db, env.context, payload)
+    with env.db._get_connection() as conn:
+        tid = conn.execute("SELECT id FROM lib2_tracks WHERE title='Second'").fetchone()[0]
+        record_rule(conn, 'track', tid, False, PROVENANCE_USER)
+        conn.commit()
+    assert _expand(env) == 2
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT monitored, provenance FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=? AND profile_id=1", (tid,)).fetchone()[:] == (0, 'user_explicit')
+        assert conn.execute('SELECT monitored FROM lib2_tracks WHERE id=?', (tid,)).fetchone()[0] == 0
+
+
+def test_album_hydration_reuses_an_existing_complete_catalogue(album_environment, monkeypatch):
+    env = album_environment
+    _request(env)
+    from core.library2.download_catalogue import persist_album_payload, hydrate_download_album
+    persist_album_payload(env.db, env.context, {'success': True, 'source': 'deezer', 'album': env.album, 'tracks': env.tracks})
+    # A new dispatch/process context, without any in-memory payload cache.
+    context = {'source': 'deezer', 'artist': {'name': ARTIST}, 'album': deepcopy(env.album)}
+    monkeypatch.setattr('core.metadata.album_tracks.get_artist_album_tracks', lambda *a, **kw: pytest.fail('complete, bound catalogue must not be fetched again'))
+    payload = hydrate_download_album(context)
+    assert payload and payload['success']
+    assert [t['name'] for t in payload['tracks']] == list(TITLES)
+    assert context['_album_catalogue_id'] == env.context['_album_catalogue_id']
+
+
+def test_imported_extras_remain_eligible_for_quality_upgrades(album_environment):
+    from core.library2.wanted_views import list_cutoff_unmet
+    env = album_environment
+    _request(env)
+    assert _expand(env) == 2
+    with env.db._get_connection() as conn:
+        assert list_cutoff_unmet(conn)[1] == 0
+        conn.execute('UPDATE quality_profiles SET ranked_targets=?, upgrade_policy=? WHERE id=?', (json.dumps([{'label': 'Hi-res FLAC', 'format': 'flac', 'bit_depth': 24}]), 'until_top', env.qp_id))
+        conn.commit()
+        rows, total = list_cutoff_unmet(conn)
+        assert total == 2
+        assert {r['title'] for r in rows} == {'Second', 'Third'}
+
+
+def test_extra_monitoring_uses_destination_library_not_requester(album_environment):
+    from core.library_scope import BATCH_OWNER_KEY
+    env = album_environment
+    _request(env)
+    env.context[BATCH_OWNER_KEY] = env.profile_id
+    assert _expand(env) == 2
+    assert {r['owner_profile_id'] for r in _rows(env, 'tracks')} == {env.profile_id}
+    with env.db._get_connection() as conn:
+        rules = conn.execute("SELECT profile_id,monitored,provenance FROM lib2_monitor_rules WHERE entity_type='track'").fetchall()
+        assert len(rules) == 2
+        assert all(r[:] == (env.profile_id, 1, 'file_import') for r in rules)
+        assert conn.execute('SELECT COUNT(*) FROM lib2_wanted_tracks WHERE profile_id=? AND wanted=1 AND effective_profile_id=?', (env.profile_id, env.qp_id)).fetchone()[0] == 2
+
+
+def test_download_uses_the_album_page_catalogue_loader(album_environment, monkeypatch):
+    from core.library2.download_catalogue import hydrate_download_album
+    from core.library2 import completeness
+    from core.library2.provider_adapters import TracklistProviderResult, TracklistTrack
+    env = album_environment
+    _request(env)
+    calls = []
+    original = completeness.resolve_tracklist
+    def resolve(config, conn, album_id, **kwargs):
+        calls.append(album_id)
+        return original(config, conn, album_id, **kwargs)
+    monkeypatch.setattr(completeness, 'resolve_tracklist', resolve)
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_album_tracklist', lambda *a, **kw: TracklistProviderResult('spotify', 'spotify-album', tuple(TracklistTrack.from_item(t, provider='spotify') for t in env.tracks)))
+    def enrich(conn, _kind, album_id, **kwargs):
+        # Enrich can fill a date or another provider ID. The final snapshot
+        # must be bound to those facts, rather than invalidated immediately.
+        conn.execute("UPDATE lib2_albums SET release_date='2024-05-06', external_ids=? WHERE id=?",
+                     (json.dumps({'deezer': 'dz-album'}), album_id))
+        conn.commit()
+        return {}
+    monkeypatch.setattr('core.library2.native_enrich.enrich_native_entity_all_services', enrich)
+    monkeypatch.setattr('core.library2.track_reconcile_trigger.schedule_album_track_reconcile', lambda *a, **kw: None)
+    monkeypatch.setattr('core.metadata.album_tracks.get_artist_album_tracks', lambda *a, **kw: {'success': False})
+    payload = hydrate_download_album(env.context)
+    assert calls  # the SAME resolver used by the album detail page
+    assert payload and len(payload['tracks']) == 3
+    assert payload['album']['id'] == 'spotify-album'
+    first = env.context['_album_catalogue_id']
+    fresh_context = {k: deepcopy(env.context[k]) for k in ('source', 'artist', 'album')}
+    monkeypatch.setattr('core.library2.provider_adapters.fetch_album_tracklist', lambda *a, **kw: pytest.fail('the common album cache must prevent a second fetch'))
+    assert hydrate_download_album(fresh_context)['album']['id'] == 'spotify-album'
+    assert fresh_context['_album_catalogue_id'] == first
+
+
+@pytest.mark.parametrize("old_date,new_date,expected", [
+    ("2008", "2008-02-08", "2008-02-08"),
+    ("2008-02", "2008-02-08", "2008-02-08"),
+    ("2008-02-08", "2008", "2008-02-08"),
+    ("2008-02-11", "2008-02-08", "2008-02-11"),
+    ("2007", "2008-02-08", "2007"),
+    ("2008", "2008-02-31", "2008"),
+    ("2008-03", "2008-02-08", "2008-03"),
+    (None, "2008-02-08", "2008-02-08"),
+])
+def test_download_catalogue_refines_only_compatible_release_dates(album_environment, old_date, new_date, expected):
+    from core.library2.download_catalogue import _ensure_album
+    env = album_environment
+    album = {**env.album, "release_date": old_date}
+    context = {"artist": {"name": ARTIST}, "album": album, "source": "deezer"}
+    album_id = _ensure_album(env.db, context, album, "deezer")
+    _ensure_album(env.db, context, {**album, "release_date": new_date}, "deezer")
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT release_date FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == expected
+
+
+@pytest.mark.parametrize("pin_source,pin_id,expected", [
+    ("musicbrainz", "other-release", "2008"),
+    ("deezer", "other-release", "2008"),
+    ("deezer", "album-dz", "2008-02-08"),
+])
+def test_download_catalogue_date_refinement_respects_manual_edition_pin(album_environment, pin_source, pin_id, expected):
+    from core.library2.download_catalogue import _ensure_album
+    env = album_environment
+    album = {**env.album, "id": "album-dz", "release_date": "2008"}
+    context = {"artist": {"name": ARTIST}, "album": album, "source": "deezer"}
+    album_id = _ensure_album(env.db, context, album, "deezer")
+    with env.db._get_connection() as conn:
+        conn.execute("UPDATE lib2_albums SET canonical_locked=1, canonical_source=?, canonical_album_id=? WHERE id=?",
+                     (pin_source, pin_id, album_id))
+        conn.commit()
+    _ensure_album(env.db, context, {**album, "release_date": "2008-02-08"}, "deezer")
+    with env.db._get_connection() as conn:
+        assert conn.execute("SELECT release_date FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == expected
 
 
 def test_only_additional_album_tracks_keep_the_album_import_provenance(album_environment):

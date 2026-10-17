@@ -7,6 +7,7 @@ import { shellStatusQueryOptions } from '@/platform/shell/status';
 
 import { VideoDownloadsBadgePoller } from './active-downloads/-vdl.use-downloads';
 import { IssueDomainHost } from './issues/-ui/issue-domain-host';
+import { MigrationBanner } from './library/-ui/migration-banner';
 import { AutoSyncHost } from './sync/-ui/autosync-host';
 
 export const Route = createRootRouteWithContext<AppRouterContext>()({
@@ -25,6 +26,7 @@ export const Route = createRootRouteWithContext<AppRouterContext>()({
       {/* the dashboard opens auto-sync through a window global, this makes
           it the same react manager the playlists page uses */}
       <AutoSyncHost />
+      <MigrationBanner />
       {/* keeps the video sidebar's downloads badge live while the unified
           page's video view isn't mounted (its own poll owns the badge then) */}
       <VideoDownloadsBadgePoller />

@@ -366,11 +366,12 @@ def _related_names(database, related: Sequence[str]) -> List[str]:
     try:
         with database._get_connection() as conn:
             cur = conn.cursor()
-            cols = [c[1] for c in cur.execute('PRAGMA table_info(artists)').fetchall()]
-            id_cols = [c for c in ('spotify_artist_id', 'itunes_artist_id', 'deezer_id',
-                                   'musicbrainz_id') if c in cols]
+            # Library v2: spotify and musicbrainz have columns, the rest live
+            # in external_ids
+            id_cols = ('spotify_id', "json_extract(external_ids, '$.itunes')",
+                       "json_extract(external_ids, '$.deezer')", 'musicbrainz_id')
             for col in id_cols:
-                cur.execute(f"SELECT {col}, name FROM artists WHERE {col} IN "
+                cur.execute(f"SELECT {col}, name FROM lib2_artists WHERE {col} IN "
                             f"({','.join('?' * len(names))})", names)
                 for id_val, name in cur.fetchall():
                     if id_val and name:
@@ -403,18 +404,26 @@ def library_pool(database, recipe: Recipe, profile_id: int, circle: Sequence[str
                  rng: random.Random) -> List[Dict[str, Any]]:
     """Owned tracks by the seeds' circle and/or in the genres, in the years;
     most-played first per artist, artists shuffled for the day."""
+    from core.library2.sql_util import owned_sql
     from core.metadata import normalize_image_url
     with database._get_connection() as conn:
         cur = conn.cursor()
+        # Library v2: the track's first credit, else the album's artist. Plays
+        # are the history rows linked to the catalogue track (indexed), not a
+        # name match against every play.
         cur.execute(
-            "SELECT t.title, t.duration, ar.name AS artist, ar.genres AS artist_genres, "
+            "SELECT t.title, t.duration, COALESCE(credited.name, ar.name) AS artist, "
+            "COALESCE(credited.genres, ar.genres) AS artist_genres, "
             "al.title AS album, al.year, al.genres AS album_genres, "
-            "COALESCE(al.thumb_url, ar.thumb_url) AS cover, "
-            "(SELECT COUNT(*) FROM listening_history lh WHERE LOWER(lh.artist) = LOWER(ar.name) "
-            " AND LOWER(lh.title) = LOWER(t.title)) AS plays "
-            "FROM tracks t JOIN artists ar ON ar.id = t.artist_id "
-            "LEFT JOIN albums al ON al.id = t.album_id "
-            "WHERE t.file_path IS NOT NULL AND t.file_path != ''")
+            "COALESCE(al.image_url, ar.image_url) AS cover, "
+            "(SELECT COUNT(*) FROM listening_history lh WHERE lh.lib2_track_id = t.id) AS plays "
+            "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+            "JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+            "LEFT JOIN lib2_artists credited ON credited.id = ("
+            " SELECT ta.artist_id FROM lib2_track_artists ta WHERE ta.track_id = t.id"
+            " ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END, ta.position, ta.artist_id"
+            " LIMIT 1) "
+            f"WHERE {owned_sql('track', 't')}")
         rows = [dict(r) for r in cur.fetchall()]
     in_circle = set(circle)
     has_seeds = bool(recipe.seeds or recipe.related_artists)

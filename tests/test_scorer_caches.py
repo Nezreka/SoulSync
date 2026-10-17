@@ -13,10 +13,20 @@ difference. these pin the pieces that keep it equivalent.
 
 import inspect
 
+import pytest
+
 import core.matching_engine as me_mod
 from core.matching_engine import MusicMatchingEngine
 from core.text.title_match import _content_tokens, titles_plausibly_same
 from database.music_database import DatabaseTrack, MusicDatabase
+
+
+@pytest.fixture(autouse=True)
+def _real_matching_engine(monkeypatch):
+    # These outcomes require the enhanced scorer. Import order can leave the
+    # DB's optional import-time engine unset through the settings/DB cycle.
+    import database.music_database as database
+    monkeypatch.setattr(database, '_matching_engine', MusicMatchingEngine())
 
 
 def _track(title, artist, track_artist=None, album=""):

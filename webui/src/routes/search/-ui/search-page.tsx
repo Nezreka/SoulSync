@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { profileAsksFirst } from '@/platform/shell/download-rights';
@@ -28,6 +29,7 @@ import { fetchLabels, lookupById } from '../-search.api';
 import {
   artistDetailPath,
   fallbackBannerText,
+  inLibraryArtistPath,
   isIdLookupQuery,
   labelDetailPath,
   loadRecentSearches,
@@ -41,6 +43,7 @@ import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
+import { libraryScopesQueryOptions } from '../../library/-library-v2.api';
 import { BasicSearch } from './basic-search';
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
@@ -48,6 +51,20 @@ import { ClockIcon } from './search-icons';
 import { FilterPills, resultCounts, SearchResults } from './search-results';
 import styles from './search.module.css';
 import { catalogSources, ModeTabs, modeOf, SourcePicker } from './source-row';
+
+/** Where a download started here lands, and which library "in your library"
+ *  means (#1199). Only on an install with more than one library, and only when
+ *  it is not simply the shared one -- or the admin can switch it. */
+function LibraryTargetNote() {
+  const { data } = useQuery(libraryScopesQueryOptions());
+  if (!data?.separated || (!data.switchable && data.target === 'shared')) return null;
+  return (
+    <p className={styles.libraryTarget} data-library-target={data.target}>
+      Downloads land in <strong>{data.targetName}</strong>
+      {data.switchable ? <span> · switch in the sidebar</span> : null}
+    </p>
+  );
+}
 
 /** the idle page's browse tiles. quiet two-stop gradients, no emoji */
 const EXPLORE_CATEGORIES = [
@@ -316,13 +333,14 @@ export function SearchPage() {
   const served = state.fallbacks[state.activeSource];
 
   /**
-   * A library artist resolves under 'library'; a found one under the source it
-   * came from, with its name in tow. Both need the source SEGMENT — the route is
-   * /artist-detail/$source/$id and a two-segment path resolves to nothing.
+   * A library artist opens in Library V2 by its catalogue id; a found one on
+   * the artist page under the source it came from, with its name in tow. That
+   * route still checks the catalogue first, so an artist this result list did
+   * not recognise lands in Library V2 all the same.
    */
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
-      ? artistDetailPath(artist.id ?? '')
+      ? inLibraryArtistPath(artist)
       : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
@@ -356,6 +374,7 @@ export function SearchPage() {
                   ? 'Music videos from YouTube, straight to your library'
                   : 'Find any artist, album or track, then download it tagged and filed'}
             </p>
+            <LibraryTargetNote />
           </div>
           <ModeTabs state={state} catalogSource={catalogSource} onSelect={setActiveSource} />
         </header>

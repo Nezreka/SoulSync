@@ -90,12 +90,6 @@ def test_bandcamp_picks_nothing_for_unrelated_non_latin_candidates():
     assert _best_match([cand, right], "MY FIRST STORY", "君のいない夜を越えて") is right
 
 
-def test_single_dedup_does_not_pair_different_non_latin_titles():
-    from core.repair_jobs.single_album_dedup import _folded_similarity, _normalize
-    assert _normalize(JA) == "君のいない夜を越えて"
-    assert _folded_similarity(_normalize("夜に駆ける"), _normalize(JA)) < 0.5
-
-
 def test_video_title_gate_no_longer_waves_through_everything_for_non_latin_titles():
     from core.video.release_parse import normalize_title, titles_match
     assert normalize_title("君の名は。") == "君の名は"

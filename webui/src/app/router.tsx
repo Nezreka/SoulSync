@@ -3,6 +3,7 @@ import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { RouterProvider } from '@tanstack/react-router';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { LibrarySearchHost } from '@/routes/library/-ui/interactive-search-host';
 import { routeTree } from '@/routeTree.gen';
 
 import { createAppQueryClient } from './query-client';
@@ -66,6 +67,7 @@ export function AppRouterProvider({
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      <LibrarySearchHost />
     </QueryClientProvider>
   );
 }

@@ -273,7 +273,8 @@ def register_routes(bp):
         try:
             db = get_database()
             # Get recently played with library track IDs for playback.
-            # Uses listening_history joined to tracks for file_path.
+            # A play is linked to the catalogue by lib2_track_id; the file is
+            # the track's primary one.
             from core.stats.queries import listening_owner, owner_clause
             scope = owner_clause(listening_owner(db, profile_id), 'lh')
             conn = db._get_connection()
@@ -282,11 +283,14 @@ def register_routes(bp):
                 cursor.execute(
                     f"""
                     SELECT lh.title, lh.artist, lh.album, lh.played_at,
-                           t.id as track_id, t.file_path, t.artist_id,
-                           t.album_id, al.thumb_url
+                           t.id as track_id, f.path, al.primary_artist_id,
+                           t.album_id, al.image_url
                     FROM listening_history lh
-                    LEFT JOIN tracks t ON t.id = CAST(lh.db_track_id AS TEXT)
-                    LEFT JOIN albums al ON al.id = t.album_id
+                    LEFT JOIN lib2_tracks t ON t.id = lh.lib2_track_id
+                    LEFT JOIN lib2_albums al ON al.id = t.album_id
+                    LEFT JOIN lib2_track_files f
+                           ON f.track_id = t.id AND f.is_primary = 1
+                          AND COALESCE(f.file_state, 'active') <> 'deleted'
                     WHERE {scope}
                     ORDER BY lh.played_at DESC
                     LIMIT ?

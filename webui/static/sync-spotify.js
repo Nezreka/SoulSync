@@ -39,7 +39,9 @@ async function ensureBeatportContentLoaded() {
             throwIfBeatportLoadAborted();
             await loadBeatportChartsFromBackend();
             throwIfBeatportLoadAborted();
-            // the sliders and top 10 lists went with beatport-ui.js
+
+            // Browsing and sliders belong to the React Beatport tab. Keep
+            // only the persisted discovery/download-state hydration here.
             showBeatportDownloadsSection();
 
             beatportContentState.loaded = true;
@@ -2123,6 +2125,9 @@ let cancelledTracks = new Set(); // Track cancelled track indices like GUI's can
 const TRACK_RENDER_BATCH_SIZE = 100;
 
 function applyProgressiveTrackRendering(playlistId, totalTrackCount) {
+    // Every download dialog calls this once its rows exist: ask the library
+    // what it already has now, not only after Begin Analysis (shell/download-modal-library.ts).
+    window.hydrateDownloadModalLibraryStatus?.(playlistId, activeDownloadProcesses[playlistId]);
     if (totalTrackCount <= TRACK_RENDER_BATCH_SIZE) return;
 
     const modal = document.getElementById(`download-missing-modal-${playlistId}`);

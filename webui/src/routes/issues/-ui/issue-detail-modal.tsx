@@ -47,16 +47,11 @@ import { ISSUE_PRIORITY_VALUES } from '../-issues.types';
 import { requestArtistEdit } from '../../artist-detail/-artist-detail.edit-focus';
 import { ArtPicker } from '../../artist-detail/-ui/art-picker';
 import { BodyPortal } from '../../artist-detail/-ui/portal';
-import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
-import { requestFindingsFocus } from '../../tools/-tools.findings-focus';
 import styles from './issue-detail-modal.module.css';
 
 /** a fix tool opened from the issue; the issue dialog steps aside while it's up */
-type OpenTool =
-  | { kind: 'reidentify' }
-  | { kind: 'art'; target: ArtPickerTarget; subtitle: string }
-  | { kind: 'redownload'; track: EnhancedTrack; album: EnhancedAlbum };
+type OpenTool = { kind: 'reidentify' } | { kind: 'art'; target: ArtPickerTarget; subtitle: string };
 
 /** where the reported item stands in the library right now */
 interface ItemPresence {
@@ -250,11 +245,9 @@ export function IssueDetailModal({
         return;
       }
       case 'redownload':
-        if (entity === 'track' && presence.track && presence.album) {
-          setTool({ kind: 'redownload', track: presence.track, album: presence.album });
-          return;
-        }
-        openArtistPage('Open the track there and pick Redownload from its menu');
+        // Library v2 finds the better copy itself (Interactive Search): the
+        // artist page's redownload modal and its endpoints are gone
+        openArtistPage('Open the track there and run Interactive Search for a better copy');
         return;
       case 'wishlist_missing':
         if (entity !== 'artist' && albumWorkflowInput.albumName) {
@@ -286,14 +279,9 @@ export function IssueDetailModal({
         return;
       }
       case 'find_duplicates':
-        // the duplicate detector's findings, searched for this item
-        requestFindingsFocus({
-          jobId: 'duplicate_detector',
-          query: getItemName(issue, snapshot).replace(/^(Track|Album|Artist) #.*/, ''),
-        });
-        notify('Showing the Duplicate Detector findings for this item', 'info');
-        onClose();
-        void navigate({ to: '/tools' });
+        // Library v2 has no Duplicate Detector job: an artist's single/album
+        // pairs live in its Manage Tracks dialog
+        openArtistPage('Open Manage Tracks there, its Duplicates tab lists the pairs');
         return;
       default:
         openArtistPage();
@@ -390,22 +378,11 @@ export function IssueDetailModal({
         />
       );
     }
-    if (open.kind === 'art') {
-      return (
-        <ArtPicker
-          target={open.target}
-          subtitle={open.subtitle}
-          onApplied={() => setOfferResolve(true)}
-          onClose={closeTool}
-        />
-      );
-    }
     return (
-      <RedownloadModal
-        track={open.track}
-        album={open.album}
-        artistName={String(snapshot.artist_name || '')}
-        onReload={refresh}
+      <ArtPicker
+        target={open.target}
+        subtitle={open.subtitle}
+        onApplied={() => setOfferResolve(true)}
         onClose={closeTool}
       />
     );

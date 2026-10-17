@@ -7,8 +7,6 @@ their track API responses, so we read it during the deep scan and
 aggregate via SQL on demand. No filesystem walk involved.
 
 Tests pin:
-- Schema migration is idempotent and backward-compatible (existing
-  rows get NULL file_size; new column doesn't break old inserts).
 - Aggregator returns the empty-shape dict for fresh installs and
   walks/sums correctly when populated.
 - Per-format breakdown handles mixed extensions correctly.
@@ -18,7 +16,6 @@ Tests pin:
 from __future__ import annotations
 
 import os
-import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
@@ -37,17 +34,26 @@ def db(tmp_path: Path) -> MusicDatabase:
 
 def _insert_track(db: MusicDatabase, *, track_id: str, file_path: str,
                   file_size, album_id: str = 'a1', artist_id: str = 'ar1') -> None:
-    """Helper: seed an artist+album+track row with the given size."""
+    """Seed a v2 track and its file row.
+
+    The size lives on the FILE in v2 (ADR-03), not on the track — the track
+    itself has no path and no bytes.
+    """
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)",
-                (artist_id, 'Test Artist'))
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                (album_id, artist_id, 'Test Album'))
+    cur.execute("INSERT OR IGNORE INTO lib2_artists (id, name, name_key)"
+                " VALUES (1, 'Test Artist', 'test artist')")
+    cur.execute("INSERT OR IGNORE INTO lib2_albums (id, primary_artist_id, title,"
+                "                                   origin)"
+                " VALUES (1, 1, 'Test Album', 'library')")
+    new_track = cur.execute(
+        "INSERT INTO lib2_tracks (album_id, title) VALUES (1, ?)",
+        (f'track-{track_id}',),
+    ).lastrowid
     cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path, file_size) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (track_id, album_id, artist_id, f'track-{track_id}', file_path, file_size),
+        "INSERT INTO lib2_track_files (track_id, path, size, is_primary)"
+        " VALUES (?, ?, ?, 1)",
+        (new_track, file_path, file_size),
     )
     conn.commit()
     conn.close()
@@ -56,86 +62,6 @@ def _insert_track(db: MusicDatabase, *, track_id: str, file_path: str,
 # ---------------------------------------------------------------------------
 # Schema migration
 # ---------------------------------------------------------------------------
-
-
-def test_file_size_column_exists_after_init(db: MusicDatabase) -> None:
-    """Fresh install should have the column from the canonical
-    CREATE TABLE."""
-    conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(tracks)")
-    cols = {row[1] for row in cur.fetchall()}
-    conn.close()
-    assert 'file_size' in cols
-
-
-def test_legacy_media_schema_repairs_required_refresh_columns(tmp_path: Path) -> None:
-    """Upgraded installs can have old library tables plus migration markers.
-    Startup must repair the columns full refresh writes later."""
-    db_path = tmp_path / 'legacy_missing_media_columns.db'
-    conn = sqlite3.connect(str(db_path))
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
-    cur.execute("INSERT INTO metadata (key, value) VALUES ('id_columns_migrated', 'true')")
-    cur.execute("""
-        CREATE TABLE artists (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE albums (
-            id TEXT PRIMARY KEY,
-            artist_id TEXT NOT NULL,
-            title TEXT NOT NULL
-        )
-    """)
-    cur.execute("""
-        CREATE TABLE tracks (
-            id TEXT PRIMARY KEY,
-            album_id TEXT NOT NULL,
-            artist_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            file_path TEXT,
-            bitrate INTEGER
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-    repaired = MusicDatabase(database_path=str(db_path))
-    conn = repaired._get_connection()
-    cur = conn.cursor()
-    cur.execute("PRAGMA table_info(tracks)")
-    track_cols = {row[1] for row in cur.fetchall()}
-    cur.execute("PRAGMA table_info(albums)")
-    album_cols = {row[1] for row in cur.fetchall()}
-    conn.close()
-
-    assert 'file_size' in track_cols
-    assert 'api_track_count' in album_cols
-
-
-def test_existing_tracks_have_null_file_size_after_migration(db: MusicDatabase) -> None:
-    """Backward-compat: rows inserted via the OLD schema (no file_size)
-    must still be readable, and querying file_size returns NULL — not
-    an error. Simulated by inserting a track without specifying
-    file_size (relies on column default = NULL)."""
-    conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'A')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('a1', 'ar1', 'Al')")
-    # Note: NOT specifying file_size — should default to NULL
-    cur.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES ('legacy_t', 'a1', 'ar1', 'L', '/x/legacy.flac')"
-    )
-    conn.commit()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'legacy_t'")
-    row = cur.fetchone()
-    conn.close()
-    # Could be sqlite3.Row or tuple; both index by 0
-    assert row[0] is None
 
 
 # ---------------------------------------------------------------------------
@@ -233,8 +159,8 @@ def test_aggregator_skips_empty_file_path(db: MusicDatabase) -> None:
     _insert_track(db, track_id='t2', file_path='/x/song.flac', file_size=10_000_000)
 
     result = db.get_library_disk_usage()
-    # Total still includes the empty-path track (it was measured)
-    assert result['total_bytes'] == 15_000_000
+    # No configured path means no physical ownership evidence.
+    assert result['total_bytes'] == 10_000_000
     # But by_format only has the one with a real extension
     assert result['by_format'] == {'flac': 10_000_000}
 
@@ -247,6 +173,18 @@ def test_aggregator_skips_implausibly_long_extension(db: MusicDatabase) -> None:
 
     result = db.get_library_disk_usage()
     assert result['by_format'] == {'flac': 10_000_000}
+
+
+def test_provider_only_catalogue_is_not_owned_or_missing_size(db: MusicDatabase) -> None:
+    with db._get_connection() as conn:
+        artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Provider')").lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id,title,origin) "
+            "VALUES(?,'Catalog','discography')", (artist,)).lastrowid
+        conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'No File')", (album,))
+
+    assert db.get_library_disk_usage()['tracks_without_size'] == 0
+    assert db.get_statistics_for_server() == {'artists': 0, 'albums': 0, 'tracks': 0}
 
 
 # ---------------------------------------------------------------------------
@@ -272,20 +210,44 @@ def test_insert_or_update_media_track_persists_size_for_object_with_file_size(db
     # Seed parent rows so FK constraints are satisfied
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar2', 'Artist')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('al2', 'ar2', 'Album')")
+    artist = cur.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist', 'artist', 'jellyfin', 'ar2')").lastrowid
+    album = cur.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al2')", (artist,)
+    ).lastrowid
+    track = cur.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,'Test Track',1)",
+        (album,),
+    ).lastrowid
+    cur.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,?,1)",
+        (track, '/library/Artist/Album/01 - track.flac'),
+    )
     conn.commit()
     conn.close()
 
-    db.insert_or_update_media_track(_FakeTrack(), album_id='al2', artist_id='ar2',
-                                    server_source='jellyfin')
+    result = db.insert_or_update_media_track(
+        _FakeTrack(), album_id='al2', artist_id='ar2', server_source='jellyfin')
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'fake_track_id_1'")
+    cur.execute("SELECT f.size FROM lib2_track_files f"
+                " JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.server_id = 'fake_track_id_1'")
     row = cur.fetchone()
+    history = cur.execute(
+        "SELECT COUNT(*) FROM library_history WHERE event_type='import'"
+    ).fetchone()[0]
     conn.close()
     assert row[0] == 42_000_000
+    # 'inserted' = the run created the server MAPPING, not a catalogue row —
+    # nothing here creates tracks. This is the first sight of this server id,
+    # so the post-scan reconcile will read its tags
+    # (tests/test_post_scan_reconcile_v2.py). What this test cares about is
+    # that the write succeeded and imported nothing.
+    assert result == 'inserted' and history == 0
 
 
 def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDatabase) -> None:
@@ -307,8 +269,21 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar3', 'Artist')")
-    cur.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('al3', 'ar3', 'Album')")
+    artist = cur.execute(
+        "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+        " VALUES ('Artist', 'artist', 'jellyfin', 'ar3')").lastrowid
+    album = cur.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin, server_source, server_id)"
+        " VALUES (?, 'Album', 'library', 'jellyfin', 'al3')", (artist,)
+    ).lastrowid
+    track = cur.execute(
+        "INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?,'Test',1)",
+        (album,),
+    ).lastrowid
+    cur.execute(
+        "INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES(?,?,1)",
+        (track, '/library/Artist/Album/02 - track.flac'),
+    )
     conn.commit()
     conn.close()
 
@@ -317,13 +292,16 @@ def test_insert_or_update_media_track_preserves_size_on_null_re_sync(db: MusicDa
                                     artist_id='ar3', server_source='jellyfin')
 
     # Second sync — server reports None (didn't include Size in MediaSources this time)
-    db.insert_or_update_media_track(_FakeTrack(size=None), album_id='al3',
-                                    artist_id='ar3', server_source='jellyfin')
+    result = db.insert_or_update_media_track(_FakeTrack(size=None), album_id='al3',
+                                             artist_id='ar3', server_source='jellyfin')
 
     conn = db._get_connection()
     cur = conn.cursor()
-    cur.execute("SELECT file_size FROM tracks WHERE id = 'fake_track_id_2'")
+    cur.execute("SELECT f.size FROM lib2_track_files f"
+                " JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.server_id = 'fake_track_id_2'")
     row = cur.fetchone()
     conn.close()
     # Original size preserved
     assert row[0] == 30_000_000
+    assert result == 'updated'

@@ -159,28 +159,25 @@ def test_resolve_album_reference_prefers_stored_external_id(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            spotify_album_id TEXT,
-            itunes_album_id TEXT,
-            deezer_id TEXT,
-            deezer_album_id TEXT,
-            discogs_id TEXT,
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
             soul_id TEXT,
-            hydrabase_album_id TEXT
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
     cursor.execute(
         """
-        INSERT INTO albums (id, title, artist_id, deezer_id)
-        VALUES (1, 'Album One', 1, 'deezer-abc')
+        INSERT INTO lib2_albums (id, title, primary_artist_id, external_ids)
+        VALUES (1, 'Album One', 1, '{"deezer": "deezer-abc"}')
         """
     )
     conn.commit()
@@ -203,25 +200,23 @@ def test_resolve_album_reference_searches_by_name_when_no_external_id_exists(mon
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            spotify_album_id TEXT,
-            itunes_album_id TEXT,
-            deezer_id TEXT,
-            deezer_album_id TEXT,
-            discogs_id TEXT,
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
             soul_id TEXT,
-            hydrabase_album_id TEXT
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
-    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_albums (id, title, primary_artist_id)"
+                   " VALUES (1, 'Album One', 1)")
     conn.commit()
 
     class _FakeDatabase:
@@ -253,22 +248,25 @@ def test_resolve_album_reference_prefers_stored_jiosaavn_id(monkeypatch):
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER,
-            jiosaavn_id TEXT
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            soul_id TEXT,
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Badshah')")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Badshah')")
     cursor.execute(
         """
-        INSERT INTO albums (id, title, artist_id, jiosaavn_id)
-        VALUES (1, 'Jugnu', 1, '30471107')
+        INSERT INTO lib2_albums (id, title, primary_artist_id, external_ids)
+        VALUES (1, 'Jugnu', 1, '{"jiosaavn": "30471107"}')
         """
     )
     conn.commit()
@@ -294,18 +292,23 @@ def test_resolve_album_reference_skips_jiosaavn_client_when_disabled(monkeypatch
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT)")
     cursor.execute(
         """
-        CREATE TABLE albums (
+        CREATE TABLE lib2_albums (
             id INTEGER PRIMARY KEY,
             title TEXT,
-            artist_id INTEGER
+            primary_artist_id INTEGER,
+            spotify_id TEXT,
+            musicbrainz_id TEXT,
+            soul_id TEXT,
+            external_ids TEXT NOT NULL DEFAULT '{}'
         )
         """
     )
-    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
-    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    cursor.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO lib2_albums (id, title, primary_artist_id)"
+                   " VALUES (1, 'Album One', 1)")
     conn.commit()
 
     class _FakeDatabase:
@@ -473,3 +476,16 @@ def test_name_guard_is_inert_without_a_requested_name(monkeypatch):
     result = metadata_album_tracks.get_artist_album_tracks("a1")
     assert result["success"] is True
     assert len(result["tracks"]) == 1
+
+
+def test_embedded_first_page_does_not_hide_the_complete_album(monkeypatch):
+    album = _album()
+    album.update(total_tracks=3, tracks={'items': [_track()]})
+    monkeypatch.setattr(metadata_registry, 'get_primary_source', lambda **kw: 'spotify')
+    monkeypatch.setattr(metadata_registry, 'get_source_priority', lambda primary: [primary])
+    monkeypatch.setattr(metadata_registry, 'get_client_for_source', lambda *a, **kw: object())
+    monkeypatch.setattr(metadata_album_tracks, 'get_album_for_source', lambda *a, **kw: album)
+    monkeypatch.setattr(metadata_album_tracks, 'get_album_tracks_for_source', lambda *a: {'items': [_track(f't{i}', f'Track {i}') for i in range(1, 4)]})
+    payload = metadata_album_tracks.get_artist_album_tracks('album-1', album_name='Album One', artist_name='Artist One')
+    assert len(payload['tracks']) == 3
+    assert payload['is_complete'] is True

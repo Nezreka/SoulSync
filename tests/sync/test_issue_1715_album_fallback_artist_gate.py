@@ -40,20 +40,32 @@ from database.music_database import MusicDatabase
 
 
 def _make_db(tmp_path, artists, albums, tracks):
+    """Library v2 port of the legacy fixture rows. The legacy ids become each
+    row's server id, so a match still reports the id the test names."""
     db = MusicDatabase(str(tmp_path / "music.db"))
     conn = db._get_connection()
     c = conn.cursor()
-    for r in artists:
-        c.execute("INSERT INTO artists (id, name, server_source) VALUES (?,?,?)", r)
-    for r in albums:
-        c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?,?,?,?)", r)
-    for r in tracks:
-        c.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_artist, server_source)"
-            " VALUES (?,?,?,?,?,?)", r)
+    artist_ids, album_ids = {}, {}
+    for legacy_id, name, source in artists:
+        artist_ids[legacy_id] = c.execute(
+            "INSERT INTO lib2_artists (name, name_key, server_source, server_id) VALUES (?,?,?,?)",
+            (name, name.lower(), source, legacy_id)).lastrowid
+    for legacy_id, artist, title, source in albums:
+        album_ids[legacy_id] = c.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, server_source, server_id, origin)"
+            " VALUES (?,?,?,?, 'library')",
+            (artist_ids[artist], title, source, legacy_id)).lastrowid
+    for legacy_id, album, artist, title, track_artist, source in tracks:
+        track_id = c.execute(
+            "INSERT INTO lib2_tracks (album_id, title, track_artist, server_source, server_id)"
+            " VALUES (?,?,?,?,?)",
+            (album_ids[album], title, track_artist, source, legacy_id)).lastrowid
+        c.execute("INSERT INTO lib2_track_artists (track_id, artist_id) VALUES (?, ?)",
+                  (track_id, artist_ids[artist]))
+        c.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                  (track_id, f"/music/{legacy_id}.flac"))
     conn.commit()
     conn.close()
-    db.ensure_norm_backfilled()
     return db
 
 

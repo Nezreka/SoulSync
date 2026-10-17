@@ -28,9 +28,9 @@ from .ids import track_key
 
 logger = get_logger("sample.worker")
 
-_task_queue: "queue.Queue[str]" = queue.Queue()
-_pending: set = set()  # track_ids queued or running (dedupe)
-_status: Dict[str, str] = {}  # track_id -> pending|running|done|error: ...
+_task_queue: "queue.Queue[object]" = queue.Queue()
+_pending: set = set()  # (library scope, track_id) queued or running
+_status: Dict[tuple, str] = {}  # (scope, track_id) -> pending|running|done|error
 _lock = threading.Lock()
 _thread: Optional[threading.Thread] = None
 
@@ -155,7 +155,7 @@ def track_source(track_id: str) -> tuple:
 
 def _process_one(track_id: str) -> None:
     from . import store
-    from .analyze import ANALYZER_VERSION, analyze_track
+    from .isolated import analyze_track_isolated
 
     if store.is_current(track_id):
         return
@@ -166,30 +166,52 @@ def _process_one(track_id: str) -> None:
     if not path:
         raise RuntimeError(unreachable_message(stored))
     t0 = time.perf_counter()
-    result = analyze_track(path)
+    result = analyze_track_isolated(path)
     store.save_analysis(track_id, result, source_sig=store.source_signature(path))
     logger.info(
         "Analyzed track %s: %.1f BPM, %d onsets, %.1fs (%.1fs)", track_id, result["bpm"], len(result["onsets"]), result["duration_s"], time.perf_counter() - t0
     )
 
 
+def _job_key(track_id: str) -> tuple:
+    from core.library_scope import current_library_scope
+
+    return current_library_scope(), track_key(track_id)
+
+
 def _run() -> None:
     while True:
-        track_id = _task_queue.get()
+        queued = _task_queue.get()
+        if isinstance(queued, tuple):
+            track_id, scope = queued
+            has_scope = True
+        else:
+            track_id, scope = queued, None
+            has_scope = False
+        token = None
+        key = None
         try:
+            if has_scope:
+                from core.library_scope import set_library_scope
+                token = set_library_scope(scope)
+            key = _job_key(track_id)
             with _lock:
-                _status[track_id] = "running"
+                _status[key] = "running"
             _process_one(track_key(track_id))
             with _lock:
-                _status[track_id] = "done"
+                _status[key] = "done"
         except Exception as exc:  # noqa: BLE001 — a bad file must not kill the worker
             logger.warning("Sample analysis failed for track %s: %s", track_id, exc)
             logger.debug(traceback.format_exc())
             with _lock:
-                _status[track_id] = f"error: {exc}"
+                if key is not None:
+                    _status[key] = f"error: {exc}"
         finally:
+            if token is not None:
+                from core.library_scope import reset_library_scope
+                reset_library_scope(token)
             with _lock:
-                _pending.discard(track_key(track_id))
+                _pending.discard(key)
             _task_queue.task_done()
 
 
@@ -225,20 +247,21 @@ def enqueue_analysis(track_id: str, retry: bool = False) -> str:
         if store.is_current(track_id):
             return "done"
         _ensure_started()
+        key = _job_key(track_id)
         with _lock:
-            current = _status.get(track_id)
+            current = _status.get(key)
             if current and current.startswith("error"):
                 if not retry:
                     return current
                 # Explicit retry: clear the recorded failure so the track
                 # actually re-queues instead of deduping onto the error.
-                _status.pop(track_id, None)
-                _pending.discard(track_id)
-            if track_id in _pending:
-                return _status.get(track_id, "pending")
-            _pending.add(track_id)
-            _status[track_id] = "pending"
-        _task_queue.put(track_id)
+                _status.pop(key, None)
+                _pending.discard(key)
+            if key in _pending:
+                return _status.get(key, "pending")
+            _pending.add(key)
+            _status[key] = "pending"
+        _task_queue.put((track_id, key[0]))
         return "pending"
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not enqueue sample analysis for %s: %s", track_id, exc)
@@ -255,4 +278,4 @@ def get_status(track_id: str) -> str:
     except Exception as exc:
         logger.debug("status check fell back to queue state: %s", exc)
     with _lock:
-        return _status.get(track_key(track_id), "idle")
+        return _status.get(_job_key(track_id), "idle")

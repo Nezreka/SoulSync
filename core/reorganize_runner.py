@@ -39,6 +39,7 @@ def build_runner(
     get_download_path: Callable[[], str],
     get_transfer_path: Callable[[], str],
     build_final_path_fn: Optional[Callable] = None,
+    get_config_manager: Optional[Callable[[], object]] = None,
 ) -> Callable[[object], dict]:
     """Return the closure the queue worker invokes per item.
 
@@ -56,6 +57,9 @@ def build_runner(
         get_download_path: Resolves the user's configured download
             path *at call time* (so config changes apply live).
         get_transfer_path: Same, for the transfer path.
+        get_config_manager: Optional live config accessor. When supplied, a
+            successful path update is reconciled through the strictly gated
+            Library-v2 maintenance boundary and appears in entity history.
 
     Returns:
         A callable ``runner(item)`` suitable for
@@ -113,69 +117,131 @@ def build_runner(
         except Exception as e:    # noqa: BLE001 — never break a reorganize
             logger.debug("[Reorganize] Could not re-point findings: %s", e)
 
-    def _update_track_path(track_id, new_path):
-        """Repoint the catalogue at ``new_path``.
+    def _update_track_path(track_id, new_path, *, file_id=None, source_db_path=None,
+                           current_path_abs=None, sibling_files=(), moved_paths=None):
+        """Repoint the native catalogue at ``new_path``.
 
-        This MUST raise when the catalogue was not updated. ``_finalize_track``
-        detects a failed path update SOLELY by catching an exception out of this
-        callback, and on success it goes on to ``os.remove`` the original.
-        Swallowing the error here therefore deleted the user's only copy while
-        the catalogue still pointed at the old path — reported as "moved", read
-        by the library as MISSING, and re-downloaded later as if it had never
-        been there.
+        The audio has already moved. A catalogue write failure must propagate
+        so the executor restores it; otherwise the old path becomes a false
+        missing-file finding and the new location is lost to the catalogue.
 
-        The realistic trigger is the SQLite write lock being held elsewhere (an
-        import commit, ``recompute_wanted``): the connection raises ``database
-        is locked``, the whole transaction rolls back, and the file is destroyed
-        anyway. Reported against a fresh library — songs downloaded, Reorganize
-        run straight afterwards, tracks came back missing.
-
-        A 0-row UPDATE is NOT an SQLite error — it is silent success — so the
-        rowcount is checked explicitly: an id the catalogue does not know has to
-        fail just as loudly as a locked database.
+        The planner supplies file identity and the mover supplies successful
+        paths. A stale file row fails the whole transaction so the caller can
+        undo exactly those filesystem moves.
         """
+        lib2_links = {"track_ids": [], "file_ids": []}
+        config_manager = get_config_manager() if get_config_manager is not None else None
         db = get_database()
         with db._get_connection() as conn:
-            # Read the old path BEFORE overwriting it — it is the only key
-            # the findings rows can be matched on.
-            row = conn.execute(
-                "SELECT file_path FROM tracks WHERE id = ?", (str(track_id),)
-            ).fetchone()
-            old_path = row[0] if row else None
-            cursor = conn.execute(
-                "UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (new_path, str(track_id)),
-            )
-            if cursor.rowcount != 1:
-                raise RuntimeError(
-                    f"track {track_id} was not repointed — the UPDATE matched "
-                    f"{cursor.rowcount} rows, so the catalogue still names the "
-                    f"old path"
+            has_v2_files = bool(conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='lib2_track_files'"
+            ).fetchone())
+            if (not has_v2_files or file_id is None or not source_db_path
+                    or not current_path_abs or not moved_paths
+                    or moved_paths.get(current_path_abs) != new_path):
+                raise RuntimeError(f"track {track_id} has no unambiguous file row")
+
+            from core.library2.sql_util import owner_clause
+            owner = owner_clause(column="owner_profile_id")
+            planned_files = [{
+                'file_id': file_id, 'source_db_path': source_db_path,
+                'current_path_abs': current_path_abs,
+            }, *sibling_files]
+            planned_paths = {f['current_path_abs'] for f in planned_files}
+            if set(moved_paths) - planned_paths:
+                raise RuntimeError(f"track {track_id} contains an unplanned file move")
+            repointed_ids = []
+            for planned_file in planned_files:
+                row_new_path = moved_paths.get(planned_file['current_path_abs'])
+                if row_new_path is None:
+                    continue
+                old_row_path = planned_file['source_db_path']
+                changed = conn.execute(
+                    f"""UPDATE lib2_track_files
+                           SET path=?, updated_at=CURRENT_TIMESTAMP
+                         WHERE id=? AND track_id=? AND path=?
+                           AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')
+                           {owner}""",
+                    (row_new_path, int(planned_file['file_id']), int(track_id), old_row_path),
                 )
-            _repoint_findings(conn, old_path, new_path)
+                if changed.rowcount != 1:
+                    raise RuntimeError(f"track {track_id} file {planned_file['file_id']} changed since planning")
+                _repoint_findings(conn, old_row_path, row_new_path)
+                repointed_ids.append(int(planned_file['file_id']))
+            lib2_links = {"track_ids": [int(track_id)], "file_ids": sorted(repointed_ids)}
+            # Findings carry their own path snapshot. Move those snapshots in
+            # the same transaction as the native file row so future fixes do
+            # not keep retrying a path that the reorganize just removed.
             conn.commit()
 
+        # Repair bounded, known dependants only after the audio paths and DB
+        # agree. Legacy M3Us beside a moved original and manifest-owned
+        # materialized links are the sources of reference evidence.
+        try:
+            from core.playlists.path_repair import repair_playlist_references
+
+            repair_playlist_references(moved_paths, config_manager=config_manager)
+        except Exception as reference_err:
+            logger.warning("[Reorganize] Playlist path repair failed: %s", reference_err)
+
+        # A lib2-imported track keeps a legacy_track_id back-reference. Route
+        # the update through the common boundary so path, file snapshot,
+        # artwork state and History stay coherent under the native-catalogue
+        # cutover contract.
+        try:
+            if config_manager is not None:
+                from core.library2.maintenance_sync import sync_repair_change
+
+                sync_repair_change(
+                    db,
+                    config_manager,
+                    job_id="library_reorganize",
+                    finding_type="path_mismatch",
+                    action="moved_file",
+                    entity_type="track",
+                    entity_id=(
+                        f"lib2:{lib2_links['track_ids'][0]}"
+                        if len(lib2_links["track_ids"]) == 1 else str(track_id)
+                    ),
+                    file_path=new_path,
+                    details={
+                        "to_abs": new_path,
+                        "library_v2": {
+                            "track_ids": lib2_links["track_ids"],
+                            "file_ids": lib2_links["file_ids"],
+                        },
+                    },
+                    result={"success": True, "action": "moved_file"},
+                )
+        except Exception as lib2_err:
+            logger.debug(
+                "[Reorganize] Library-v2 path sync skipped for %s: %s",
+                track_id, lib2_err,
+            )
+
     def runner(item):
+        """Reorganize one album inside the library it was queued for (#1199).
+
+        Every library is its own folder, and a reorganize moves files WITHIN
+        one: building the destination under the shared folder would carry
+        another library's files into the shared one. An item queued with no
+        library (nothing separates libraries, or "all libraries") runs once
+        per library that holds files of the album."""
         # Read config per-run so the user changing their download path
         # in Settings takes effect on the next reorganize without a
         # server restart.
-        download_dir = get_download_path()
-        transfer_dir = get_transfer_path()
-        # #1504: resolve the owning profile so the run targets the right
-        # library root instead of the shared folder.
-        profile_id = None
-        try:
-            from core.library_reorganize import resolve_album_profile_id
-            from core.imports.paths import library_root_for_profile
-            profile_id = resolve_album_profile_id(
-                get_database(), item.album_id,
-                resolve_file_path_fn=resolve_file_path_fn)
-            own_root = library_root_for_profile(profile_id, announce=False)
-            if own_root:
-                transfer_dir = own_root
-        except Exception as e:
-            logger.debug("[Reorganize] profile resolution failed: %s", e)
+        libraries = _libraries_for(get_database(), item)
+        if libraries is None:
+            return _run_in(item, get_transfer_path())
+        from core.library_scope import library_scope
+        results = []
+        for scope, root in libraries:
+            with library_scope(scope):
+                results.append(_run_in(item, root))
+        return _merge_results(results)
 
+    def _run_in(item, transfer_dir):
         def _cleanup_empty(src_dir):
             try:
                 cleanup_empty_directories_fn(transfer_dir, os.path.join(src_dir, '_'))
@@ -189,58 +255,92 @@ def build_runner(
                 # Progress fan-out failures must never break a run.
                 logger.debug("reorganize progress fan-out: %s", e)
 
-        # Rename-only mode (#875): just move files to the current scheme — no staging,
-        # no copy, no post-processing. Falls through to the full pipeline otherwise.
-        if getattr(item, 'rename_only', False):
-            if build_final_path_fn is None:
-                return {
-                    'status': 'setup_failed', 'source': None,
-                    'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
-                    'errors': [{'error': 'Rename-only mode unavailable (no path builder)'}],
-                }
-            return reorganize_album_rename_only(
-                album_id=item.album_id,
-                db=get_database(),
-                transfer_dir=transfer_dir,
-                resolve_file_path_fn=resolve_file_path_fn,
-                build_final_path_fn=build_final_path_fn,
-                update_track_path_fn=_update_track_path,
-                cleanup_empty_dir_fn=_cleanup_empty,
-                on_progress=_on_progress,
-                primary_source=item.source,
-                strict_source=bool(item.source),
-                metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
-                stop_check=is_shutting_down_fn,
-                profile_id=profile_id,
-            )
-
-        staging_root = os.path.join(download_dir, 'ssync_staging')
-        try:
-            os.makedirs(staging_root, exist_ok=True)
-        except OSError as mk_err:
-            logger.error(f"[Reorganize] Cannot create staging dir {staging_root}: {mk_err}")
+        # A reorganize moves files. It used to have a second mode that copied
+        # each one into staging and sent it back through the download
+        # post-processing pipeline -- an ADMISSION check, run against a file
+        # the user already owns. That mode fingerprinted a library file and
+        # quarantined it over its own audio (Kanji artist vs the Romaji the
+        # catalogue held), and it collected four opt-outs, one per bug report,
+        # each disabling a gate that had no business running here.
+        #
+        # Re-tagging did not live in there alone: it is a job of its own, with
+        # a preview, findings and a rule about hand-set fields. So nothing is
+        # left for the staging path to contribute, and every item takes the
+        # mover -- `rename_only` included, which is why the flag is no longer
+        # read.
+        if build_final_path_fn is None:
             return {
-                'status': 'setup_failed',
-                'source': None,
+                'status': 'setup_failed', 'source': None,
                 'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
-                'errors': [{'error': f'Could not create staging dir: {mk_err}'}],
+                'errors': [{'error': 'Reorganize unavailable (no path builder)'}],
             }
+        from core.library2.reorganize_bridge import catalogue_preview_fn
 
-        return reorganize_album(
+        return reorganize_album_rename_only(
             album_id=item.album_id,
             db=get_database(),
-            staging_root=staging_root,
+            transfer_dir=transfer_dir,
             resolve_file_path_fn=resolve_file_path_fn,
-            post_process_fn=post_process_fn,
+            build_final_path_fn=build_final_path_fn,
             update_track_path_fn=_update_track_path,
             cleanup_empty_dir_fn=_cleanup_empty,
-            transfer_dir=transfer_dir,
             on_progress=_on_progress,
             primary_source=item.source,
             strict_source=bool(item.source),
-            stop_check=is_shutting_down_fn,
             metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
-            profile_id=profile_id,
+            stop_check=is_shutting_down_fn,
+            # The catalogue is the source for a destination path -- no provider
+            # call, no source-id requirement, and the filename matches what the
+            # Library page shows because both read the same override layer.
+            preview_fn=catalogue_preview_fn,
         )
 
     return runner
+
+
+def _libraries_for(db, item):
+    """``[(scope, folder)]`` an album is reorganized in, or None when nothing
+    separates libraries (the one shared folder, as before #1199)."""
+    from core.library_scope import any_own_library_exists, own_library_ids, scope_for_owner
+    if not any_own_library_exists():
+        return None
+    if item.library is not None:
+        scopes = [item.library]
+    else:
+        live = own_library_ids()
+        with db._get_connection() as conn:
+            owners = {row[0] for row in conn.execute(
+                "SELECT DISTINCT f.owner_profile_id FROM lib2_track_files f"
+                "  JOIN lib2_tracks t ON t.id = f.track_id"
+                " WHERE t.album_id = ? AND COALESCE(f.file_state,'active') = 'active'",
+                (str(item.album_id),))}
+        # a file of a library that is not active right now stays where it is
+        scopes = [scope_for_owner(o) for o in sorted(owners, key=lambda o: (o is not None, o or 0))
+                  if o is None or int(o) in live] or ['shared']
+    from core.imports.paths import library_root_for_profile, shared_transfer_root
+    out = []
+    for scope in scopes:
+        root = (shared_transfer_root() if scope == 'shared'
+                else library_root_for_profile(scope, announce=False))
+        if root:
+            out.append((scope, root))
+    return out
+
+
+def _merge_results(results):
+    """One summary for an album reorganized in several libraries."""
+    if not results:
+        return {'status': 'no_tracks', 'source': None, 'total': 0, 'moved': 0,
+                'skipped': 0, 'failed': 0, 'errors': []}
+    if len(results) == 1:
+        return results[0]
+    merged = {'status': 'completed', 'source': None, 'total': 0, 'moved': 0,
+              'skipped': 0, 'failed': 0, 'errors': []}
+    for result in results:
+        for key in ('total', 'moved', 'skipped', 'failed'):
+            merged[key] += int(result.get(key) or 0)
+        merged['errors'].extend(result.get('errors') or [])
+        merged['source'] = merged['source'] or result.get('source')
+        if merged['status'] == 'completed' and result.get('status') != 'completed':
+            merged['status'] = result.get('status')
+    return merged

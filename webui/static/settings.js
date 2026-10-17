@@ -3465,6 +3465,10 @@ async function loadSettingsData() {
         const _nfoEl = document.getElementById('write-artist-nfo');
         if (_nfoEl) _nfoEl.checked = settings.library?.write_artist_nfo === true;
 
+        // Library v2: re-download files deleted outside SoulSync (default on)
+        const _redlEl = document.getElementById('redownload-externally-deleted');
+        if (_redlEl) _redlEl.checked = settings.library?.redownload_externally_deleted !== false;
+
         // Populate Content Filter settings
         document.getElementById('allow-explicit').checked = settings.content_filter?.allow_explicit !== false;
         document.getElementById('prefer-explicit').checked = settings.content_filter?.prefer_explicit === true;
@@ -4238,7 +4242,7 @@ function populateQualityProfileUI(profile) {
     if (upgradePolicySelect) {
         upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
             ? 'until_cutoff'
-            : 'acceptable';
+            : profile.upgrade_policy === 'acceptable' ? 'acceptable' : 'none';
     }
     renderUpgradeCutoffOptions(profile.upgrade_cutoff_index);
 
@@ -4272,7 +4276,7 @@ function renderUpgradeCutoffOptions(selectedIndex = null) {
 }
 
 function onUpgradePolicyChange() {
-    const policy = document.getElementById('quality-upgrade-policy')?.value || 'acceptable';
+    const policy = document.getElementById('quality-upgrade-policy')?.value || 'none';
     const cutoffGroup = document.getElementById('quality-upgrade-cutoff-group');
     if (cutoffGroup) cutoffGroup.style.display = policy === 'until_cutoff' ? '' : 'none';
     renderUpgradeCutoffOptions();
@@ -4470,6 +4474,8 @@ async function applyQualityPreset(presetName) {
                 ...preset,
                 search_mode: uiState.search_mode,
                 rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+                upgrade_policy: uiState.upgrade_policy,
+                upgrade_cutoff_index: uiState.upgrade_cutoff_index,
                 release_import_mode: uiState.release_import_mode,
             };
             currentQualityProfile = merged;
@@ -4574,7 +4580,9 @@ function collectQualityProfileFromUI() {
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
         release_import_mode: document.getElementById('quality-release-import-mode')?.value === 'album_tracks' ? 'album_tracks' : 'requested_tracks',
-        upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
+        upgrade_policy: ['none', 'acceptable', 'until_cutoff'].includes(
+            document.getElementById('quality-upgrade-policy')?.value)
+            ? document.getElementById('quality-upgrade-policy').value : 'none',
         upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
     };
@@ -4704,10 +4712,14 @@ function qpProfileSummary(profile) {
             ? `retain ${codec} only (acquisition remembered)`
             : `lossless + ${codec} companion`);
     }
-    if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
+    if (profile.upgrade_policy === 'acceptable') {
+        parts.push('upgrade until any accepted target');
+    } else if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
         const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
         const cutoff = targets[cutoffIndex]?.label || 'top target';
         parts.push(`upgrade until ${cutoff}`);
+    } else {
+        parts.push('upgrades off');
     }
     return parts.join(' · ');
 }
@@ -6625,7 +6637,8 @@ async function saveSettings(quiet = false) {
             podcasts_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
             audiobooks_path: _cfgStr('audiobooks-path', { fallback: './audiobooks' }),
             reorganize_preserve_casing: _cfgBool('reorganize-preserve-casing'),
-            write_artist_nfo: _cfgBool('write-artist-nfo')
+            write_artist_nfo: _cfgBool('write-artist-nfo'),
+            redownload_externally_deleted: _cfgBool('redownload-externally-deleted')
         },
         podcasts: {
             download_path: _cfgStr('podcasts-path', { fallback: './podcasts' }),
@@ -8891,7 +8904,16 @@ async function loadImageCacheStatus() {
         if (!data.success) return;
         const entries = document.getElementById('imgcache-entries');
         const size = document.getElementById('imgcache-size');
-        if (entries) entries.textContent = (data.entries || 0).toLocaleString();
+        if (entries) {
+            // A "pending" row is a registered URL nothing ever loaded. When it
+            // dominates the count, the URLs being handed out are changing
+            // between renders (a media-server auth salt used to rotate on every
+            // call), and the entry count alone hides that completely.
+            const pending = data.pending || 0;
+            entries.textContent = pending
+                ? `${(data.entries || 0).toLocaleString()} (${pending.toLocaleString()} pending)`
+                : (data.entries || 0).toLocaleString();
+        }
         if (size) {
             size.textContent = data.max_bytes
                 ? `${_imgCacheBytes(data.bytes)} of ${_imgCacheBytes(data.max_bytes)}`

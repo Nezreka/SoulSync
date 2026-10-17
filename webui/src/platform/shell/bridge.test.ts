@@ -7,8 +7,44 @@ import type { ShellProfileContext } from './bridge';
 import {
   SHELL_PROFILE_CONTEXT_CHANGED_EVENT,
   bindWindowWebRouter,
+  getProfileHomePath,
   waitForShellContext,
 } from './bridge';
+
+describe('getProfileHomePath', () => {
+  it('returns the profile home page when it is allowed', () => {
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'wishlist' as const),
+    });
+
+    expect(getProfileHomePath(bridge)).toBe('/wishlist');
+  });
+
+  it('never returns a home path the profile is not allowed to open (iss29-B10)', () => {
+    // Every React route guard redirects here when it denies access. A home page
+    // the profile may not open therefore sends the router straight back to the
+    // page that just refused it. `library` is the reachable case: the legacy
+    // `library-v2` page id normalizes to `library`, so a profile whose home is
+    // the old id lands on a page its allowed_pages may well not contain.
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'library' as const),
+      isPageAllowed: vi.fn((pageId) => pageId !== 'library'),
+    });
+
+    expect(getProfileHomePath(bridge)).not.toBe('/library');
+  });
+
+  it('falls back to a page every profile may open when nothing else is allowed', () => {
+    const bridge = createShellBridge({
+      getProfileHomePage: vi.fn(() => 'library' as const),
+      isPageAllowed: vi.fn(() => false),
+    });
+
+    // `help` and `issues` are unconditionally permitted by the shell's own
+    // gate, so one of them is always a truthful landing place.
+    expect(['/help', '/issues']).toContain(getProfileHomePath(bridge));
+  });
+});
 
 describe('waitForShellContext', () => {
   beforeEach(() => {
@@ -60,7 +96,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/spotify/2YZyLoL8N0Wb9xBt1NhZWg',
+      href: '/library?view=discovery&immersive=true&discover=spotify%3A2YZyLoL8N0Wb9xBt1NhZWg',
       replace: false,
     });
   });
@@ -77,7 +113,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/bandcamp/3957198221?name=Radiohead',
+      href: '/library?view=discovery&immersive=true&discover=bandcamp%3A3957198221&discoverName=Radiohead',
       replace: false,
     });
   });
@@ -94,7 +130,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/library/570658?album=123',
+      href: '/library?view=discovery&immersive=true&artist=570658&album=123',
       replace: false,
     });
   });
@@ -112,7 +148,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/bandcamp/3957198221?name=Radiohead&album=123',
+      href: '/library?view=discovery&immersive=true&discover=bandcamp%3A3957198221&discoverName=Radiohead&album=123',
       replace: false,
     });
   });
@@ -128,7 +164,7 @@ describe('bindWindowWebRouter', () => {
     });
 
     expect(navigate).toHaveBeenCalledWith({
-      href: '/artist-detail/library/42',
+      href: '/library?view=discovery&immersive=true&artist=42',
       replace: true,
     });
   });

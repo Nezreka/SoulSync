@@ -15,25 +15,28 @@ import type { RecentPlay } from './-dash.listening';
 
 import { resolveLibraryTrack } from '../../features/playback/play-track';
 import { openAddToPlaylist } from '../../features/playlists/add-to-playlist';
-import { loadAlbumTracks } from '../library/-library.api';
-import { albumQueueTrack } from '../library/-library.helpers';
+import { fetchLibraryV2Album } from '../library/-library-v2.api';
+import { albumQueueRows } from '../library/-library-v2.play';
 
 export type QueueTrack = Record<string, unknown> & { title: string };
 
 /** the tracks a Recently Added card stands for, ready for the player. */
 export async function recentAlbumTracks(album: RecentlyAddedAlbum): Promise<QueueTrack[]> {
-  if (album.albumId !== null && album.albumId !== '') {
-    const tracks = await loadAlbumTracks(album.albumId);
-    if (tracks.length) {
-      return tracks.map((track) =>
-        albumQueueTrack(track, {
-          id: album.albumId as string | number,
-          title: album.albumName,
-          artist_name: album.artistName,
-          artist_id: album.artistId ?? '',
-          thumb_url: album.cover || null,
-        }),
-      );
+  const albumId = Number(album.albumId);
+  if (album.albumId !== null && album.albumId !== '' && Number.isInteger(albumId)) {
+    // the Library v2 album's files on disk, through the same queue-row
+    // builder the Library page's play button uses
+    const rows = albumQueueRows(await fetchLibraryV2Album(albumId), album.artistName).filter(
+      (row) => row.is_library,
+    );
+    if (rows.length) {
+      return rows.map((row) => ({
+        ...row,
+        playback_status: 'ready',
+        image_url: row.image_url || album.cover || null,
+        album_id: album.albumId,
+        artist_id: album.artistId ?? '',
+      }));
     }
   }
   if (!album.playFilePath) return [];

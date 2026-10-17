@@ -3992,7 +3992,6 @@ function initializeSyncPage() {
 
     // Logic for Rebuild page Hero Slider - individual slide click handlers will be set up in populateBeatportSlider
     // Container-level click handler removed to allow individual slide clicks like top 10 releases
-
     // Logic for the Start Sync button
     const startSyncBtn = document.getElementById('start-sync-btn');
     if (startSyncBtn) {
@@ -4374,7 +4373,6 @@ async function clearBeatportPlaylists() {
     }
 }
 
-
 async function loadGenreImagesProgressively(genres) {
     // Load genre images with 2 concurrent workers for faster loading
 
@@ -4453,7 +4451,6 @@ async function loadGenreImagesProgressively(genres) {
 
     console.log(`✅ Progressive image loading complete: ${imagesLoaded}/${genres.length} images loaded`);
 }
-
 
 async function openBeatportDiscoveryModal(chartHash, chartData) {
     console.log(`🎵 Opening Beatport discovery modal (reusing YouTube modal): ${chartData.name}`);
@@ -4700,10 +4697,8 @@ let rebuildPageTrackData = {
     // hero_slider removed - now uses individual slide click handlers
 };
 
-
 // Hero slider now uses individual slide click handlers instead of container-level clicking
 // The old handleRebuildHeroSliderClick function has been removed in favor of individual release discovery
-
 
 async function getRebuildPageTrackData(trackDataKey) {
     // First check if we have cached data from when the rebuild page was loaded
@@ -5498,7 +5493,6 @@ async function startBeatportDownloadMissing(urlHash) {
     }
 }
 
-
 function showBeatportGenresView() {
     // Hide genre detail view and show genres view
     document.querySelectorAll('.beatport-sub-view').forEach(view => {
@@ -5511,7 +5505,6 @@ function showBeatportGenresView() {
     }
 }
 
-
 function showBeatportGenreDetailViewFromBack() {
     // Show genre detail view (used by charts list back button)
     document.querySelectorAll('.beatport-sub-view').forEach(view => {
@@ -5523,7 +5516,6 @@ function showBeatportGenreDetailViewFromBack() {
         genreDetailView.classList.add('active');
     }
 }
-
 
 // ===============================
 // SPOTIFY PUBLIC LINK FUNCTIONALITY

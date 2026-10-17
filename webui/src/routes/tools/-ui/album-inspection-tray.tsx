@@ -4,7 +4,13 @@ import type { FindingAlbumGroup } from '../-tools.api';
 import type { RepairFinding } from '../-tools.types';
 
 import { fetchRepairFindings, fixFinding, dismissFinding, reopenFinding } from '../-tools.api';
-import { findingFixLabel, findingSeverityIcon, findingTypeLabel } from '../-tools.core';
+import {
+  findingFixLabel,
+  findingRedownloadTrackId,
+  findingRowFixLabel,
+  findingSeverityIcon,
+  findingTypeLabel,
+} from '../-tools.core';
 import { VinylCoverFallback } from './album-cover-fallback';
 
 export interface AlbumInspectionTrayProps {
@@ -348,11 +354,12 @@ export function AlbumInspectionTray({
           <div className="album-tray-tracks-list">
             {findings.map((f, idx) => {
               const details = (f.details as Record<string, any>) || {};
-              const fixLabel = findingFixLabel(f.finding_type);
+              const fixLabel = findingRowFixLabel(f);
               const busy = busyIds.has(f.id);
-              // the re-download search needs the track behind the finding; a
-              // finding without one (fake lossless reports a file) keeps its fix
-              const isRedl = isRedownloadFinding(f.finding_type) && Boolean(f.entity_id);
+              // Only a finding with a catalogue track behind it can open the
+              // redownload search; the rest fall back to their row fix.
+              const isRedl =
+                isRedownloadFinding(f.finding_type) && Boolean(findingRedownloadTrackId(f));
 
               // Never display database row ID (f.entity_id) as track number!
               const rawNum = details.track_number;

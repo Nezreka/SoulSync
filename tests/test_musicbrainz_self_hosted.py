@@ -331,7 +331,7 @@ def test_settings_endpoint_rejects_invalid_values_before_saving(settings):
     ('http://mirror:5000', '0.1', 0.1),
     ('https://musicbrainz.org', '0', 1.05),
 ])
-def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, expected_interval):
+def test_mbid_mismatch_detector_uses_client_pacing(tmp_path, monkeypatch, url, interval, expected_interval):
     """The repair job must not add a public-API delay on top of client pacing."""
     from types import SimpleNamespace
     from unittest.mock import Mock
@@ -352,27 +352,15 @@ def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, e
     monkeypatch.setattr(mb, '_wait_for_musicbrainz_slot',
                         lambda interval, base_url: intervals.append(interval))
 
-    class FakeConnection:
-        def cursor(self):
-            return self
-
-        def execute(self, *args):
-            pass
-
-        def fetchall(self):
-            return [(1, 'Example', 'Artist', 'Album', '/music/example.flac', None, None, 2)]
-
-        def close(self):
-            pass
-
-    class FakeDatabase:
-        def _get_connection(self):
-            return FakeConnection()
-
-    context = JobContext(db=FakeDatabase(), transfer_folder='/music', config_manager=None,
+    from database.music_database import MusicDatabase
+    from tests.lib2_seed import track
+    database = MusicDatabase(str(tmp_path / "music.db"))
+    with database._get_connection() as conn:
+        track(conn, "Artist", "Album", "Example", path="/music/example.flac")
+        conn.commit()
+    context = JobContext(db=database, transfer_folder='/music', config_manager=None,
                          mb_client=client)
     context.sleep_or_stop = Mock(side_effect=AssertionError('unexpected fixed delay'))
-    monkeypatch.setattr(detector, '_resolve_file_path', lambda *args, **kwargs: '/music/example.flac')
     monkeypatch.setattr(detector, '_read_file_tags', lambda path: ('a' * 36, 'Example', 'flac'))
     monkeypatch.setattr(detector.MbidMismatchDetectorJob, '_scan_album_mbid_consistency',
                         lambda *args: None)
@@ -386,7 +374,7 @@ def test_mbid_mismatch_detector_uses_client_pacing(monkeypatch, url, interval, e
 
 
 @pytest.mark.parametrize('lookup_outcome', ['outage', 'mirror_404'])
-def test_mbid_scan_stops_retryably_without_false_missing_finding(monkeypatch, lookup_outcome):
+def test_mbid_scan_stops_retryably_without_false_missing_finding(tmp_path, monkeypatch, lookup_outcome):
     from types import SimpleNamespace
     from unittest.mock import Mock
     from core.repair_jobs import mbid_mismatch_detector as detector
@@ -402,16 +390,15 @@ def test_mbid_scan_stops_retryably_without_false_missing_finding(monkeypatch, lo
             raise requests.HTTPError('503 Service Unavailable', response=response)
         return None
 
-    cursor = SimpleNamespace(execute=lambda *args: None,
-                             fetchall=lambda: [(1, 'Example', 'Artist', 'Album',
-                                                '/music/example.flac', None, None, 2)],
-                             close=lambda: None)
-    cursor.cursor = lambda: cursor
-    database = SimpleNamespace(_get_connection=lambda: cursor)
+    from database.music_database import MusicDatabase
+    from tests.lib2_seed import track
+    database = MusicDatabase(str(tmp_path / "music.db"))
+    with database._get_connection() as conn:
+        track(conn, "Artist", "Album", "Example", path="/music/example.flac")
+        conn.commit()
     context = JobContext(db=database, transfer_folder='/music', config_manager=None,
                          mb_client=SimpleNamespace(get_recording=lookup))
     context.report_progress = Mock()
-    monkeypatch.setattr(detector, '_resolve_file_path', lambda *args, **kwargs: '/music/example.flac')
     monkeypatch.setattr(detector, '_read_file_tags', lambda path: ('a' * 36, 'Example', 'flac'))
     monkeypatch.setattr(detector.MbidMismatchDetectorJob, '_create_mismatch_finding',
                         Mock(side_effect=AssertionError('false missing finding')))

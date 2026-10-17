@@ -82,22 +82,56 @@ def _install_query_counter(db):
     return counter, restore
 
 
+# The catalogue rows these paths read, keyed by the media server's own ids —
+# ``track_id``/``artist_id``/``album_id`` are what the server calls them
+# (§50.4.4.25), and the tests below assert against those, while the catalogue's
+# own ids are handed back through ``_ids``.
+_ids: dict = {}
+
+
 def _insert_track(db, track_id, title, artist_id, artist_name, album_id, album_title):
+    from core.library2.importer import normalize_name
+
     with db._get_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM lib2_artists WHERE server_source='plex' AND server_id=?",
+            (artist_id,),
+        ).fetchone()
+        if row:
+            lib2_artist = row[0]
+        else:
+            lib2_artist = conn.execute(
+                "INSERT INTO lib2_artists (name, name_key, server_source, server_id)"
+                " VALUES (?, ?, 'plex', ?)",
+                (artist_name, normalize_name(artist_name), artist_id),
+            ).lastrowid
+        row = conn.execute(
+            "SELECT id FROM lib2_albums WHERE server_source='plex' AND server_id=?",
+            (album_id,),
+        ).fetchone()
+        if row:
+            lib2_album = row[0]
+        else:
+            lib2_album = conn.execute(
+                "INSERT INTO lib2_albums (primary_artist_id, title, image_url, origin,"
+                "                         server_source, server_id)"
+                " VALUES (?, ?, ?, 'library', 'plex', ?)",
+                (lib2_artist, album_title, f"http://img/{album_id}.jpg", album_id),
+            ).lastrowid
+        lib2_track = conn.execute(
+            """INSERT INTO lib2_tracks (album_id, title, track_number, duration,
+                                        server_source, server_id)
+               VALUES (?, ?, 1, 180, 'plex', ?)""",
+            (lib2_album, title, track_id),
+        ).lastrowid
         conn.execute(
-            "INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)",
-            (artist_id, artist_name),
-        )
-        conn.execute(
-            "INSERT OR IGNORE INTO albums (id, title, artist_id, thumb_url) VALUES (?, ?, ?, ?)",
-            (album_id, album_title, artist_id, f"http://img/{album_id}.jpg"),
-        )
-        conn.execute(
-            """INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path)
-               VALUES (?, ?, ?, ?, 1, 180, ?)""",
-            (track_id, album_id, artist_id, title, f"/music/{title}.mp3"),
+            "INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+            (lib2_track, f"/music/{title}.mp3"),
         )
         conn.commit()
+    _ids[artist_id] = lib2_artist
+    _ids[album_id] = lib2_album
+    _ids[track_id] = lib2_track
 
 
 # ---------------------------------------------------------------------------
@@ -119,9 +153,9 @@ class TestResolveDbTrackIdsBatch:
 
         id_map = worker._resolve_db_track_ids_batch(events)
 
-        assert id_map[("alpha", "band one")] == "t1"
-        assert id_map[("bravo", "band one")] == "t2"
-        assert id_map[("alpha", "band two")] == "t3"
+        assert id_map[("alpha", "band one")] == _ids["t1"]
+        assert id_map[("bravo", "band one")] == _ids["t2"]
+        assert id_map[("alpha", "band two")] == _ids["t3"]
         assert ("nonexistent", "nobody") not in id_map
 
     def test_is_case_insensitive(self, db, worker):
@@ -130,7 +164,7 @@ class TestResolveDbTrackIdsBatch:
         id_map = worker._resolve_db_track_ids_batch(
             [{"title": "GREAT SONG", "artist": "SOME BAND"}]
         )
-        assert id_map[("great song", "some band")] == "t1"
+        assert id_map[("great song", "some band")] == _ids["t1"]
 
     def test_empty_list_returns_empty_dict(self, worker):
         assert worker._resolve_db_track_ids_batch([]) == {}
@@ -140,7 +174,7 @@ class TestResolveDbTrackIdsBatch:
         id_map = worker._resolve_db_track_ids_batch(
             [{"title": "", "artist": "Band"}, {"title": "Song", "artist": "Band"}]
         )
-        assert id_map == {("song", "band"): "t1"}
+        assert id_map == {("song", "band"): _ids["t1"]}
 
     def test_runs_single_query_regardless_of_event_count(self, db, worker):
         """The whole point: 50 events must not trigger 50 queries."""
@@ -189,7 +223,10 @@ class TestMapPlayCountsToDb:
             restore()
 
         assert len(updates) == 30
-        assert counter["n"] == 1
+        # Two statements per chunk: the authoritative mapping, then the
+        # compatibility snapshot for whatever it did not answer. What matters is
+        # that it does not scale with the number of tracks.
+        assert counter["n"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -213,19 +250,19 @@ class TestEnrichStatsItems:
         worker._enrich_stats_items(cache)
 
         by_name = {a["name"]: a for a in cache["top_artists"]}
-        assert by_name["Band One"]["id"] == "a1"
-        assert by_name["Band Two"]["id"] == "a2"
+        assert by_name["Band One"]["id"] == _ids["a1"]
+        assert by_name["Band Two"]["id"] == _ids["a2"]
 
         album_by_name = {a["name"]: a for a in cache["top_albums"]}
-        assert album_by_name["First Album"]["id"] == "al1"
+        assert album_by_name["First Album"]["id"] == _ids["al1"]
         # image_url is normalized at build time now (#935) — it's enriched (truthy);
         # exact form depends on the image-cache config, so don't pin the raw value.
         assert album_by_name["First Album"]["image_url"]
 
         track_by_name = {t["name"]: t for t in cache["top_tracks"]}
-        assert track_by_name["Alpha"]["id"] == "t1"
-        assert track_by_name["Bravo"]["id"] == "t2"
-        assert track_by_name["Alpha"]["artist_id"] == "a1"
+        assert track_by_name["Alpha"]["id"] == _ids["t1"]
+        assert track_by_name["Bravo"]["id"] == _ids["t2"]
+        assert track_by_name["Alpha"]["artist_id"] == _ids["a1"]
 
     def test_image_urls_normalized_at_build_time(self, db, worker, monkeypatch):
         """#935: image URLs are run through the fixer HERE, at cache-build time, so the

@@ -74,6 +74,28 @@ afterEach(() => {
 });
 
 describe('the list url', () => {
+  it('refuses an empty list before it can seed a discovery', async () => {
+    stubFetch({ ...CHART, tracks: [] });
+    await expect(fetchBeatportList({ ref: CHART.ref, label: 'chart' })).rejects.toThrow(
+      'No tracks found',
+    );
+  });
+
+  it('saves a dated snapshot by ref and preserves the backend result', async () => {
+    const request = vi.fn(
+      async () => new Response(JSON.stringify({ success: true, playlist_id: 7 })),
+    );
+    vi.stubGlobal('fetch', request);
+    expect(await saveBeatportSnapshot(CHART.ref)).toEqual({ success: true, playlist_id: 7 });
+    expect(request).toHaveBeenCalledWith(
+      '/api/beatport/snapshot',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ref: CHART.ref }),
+      }),
+    );
+  });
+
   it('asks by ref, or by url for a chart card', () => {
     expect(beatportListUrl({ ref: 'top-100', label: 'x' })).toBe('/api/beatport/list?ref=top-100');
     expect(beatportListUrl({ ref: 'genre:house:5:hype-10', label: 'x', genreName: 'House' })).toBe(

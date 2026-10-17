@@ -24,22 +24,12 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
         },
         {
             id: 'lib-enhanced',
-            title: 'Enhanced Library Manager',
-            lede: 'A pro-grade management view with inline editing, sortable tracks, and service matching.',
+            title: 'Library Management',
+            lede: 'Manage catalogue metadata and physical file versions in Library v2.',
             body: `
-Toggle **Enhanced** on any library artist's detail page to access the professional library management tool.
+The Library route opens **Library v2** directly. Management actions are part of that page; there is no separate Enhanced toggle.
 
-> [!NOTE]
-> The Enhanced view is **admin-only** — non-admin profiles see the Standard view. It's also only offered for artists already in your library.
-
-![Enhanced Library Manager](lib-enhanced.jpg)
-
-- **Accordion layout** — albums as expandable rows showing full track tables
-- **Inline editing** — click any track title, track number, or BPM to edit in place (Enter saves, Escape cancels)
-- **Artist meta panel** — editable name, genres, label, style, mood, and summary
-- **Sortable columns** — sort by title, duration, format, bitrate, BPM, disc, or track number
-- **Play tracks** — queue button adds tracks to the media player
-- **Delete** — opens the Smart Delete dialog with two choices: **Remove from Library** (database entry only, files on disk untouched) or **Delete File Too** (also deletes the audio file from disk — irreversible)
+Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
 `
         },
         {
@@ -47,7 +37,7 @@ Toggle **Enhanced** on any library artist's detail page to access the profession
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
-In the Enhanced view, each artist, album, and track shows **match status chips** — the service set differs by level: 12 on artists (adding Tidal, Qobuz and Amazon), 10 on albums, and 9 on tracks (Spotify, MusicBrainz, Deezer, JioSaavn, AudioDB, iTunes, Last.fm, Genius, Bandcamp — no Discogs, Tidal or Qobuz chip at track level).
+Library v2 exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - Run per-service **enrichment** from the Enrich dropdown to pull in metadata from a specific source
@@ -99,15 +89,15 @@ From any album card showing missing tracks, click **Download Missing** to open a
         },
         {
             id: 'lib-smart-delete',
-            title: 'Smart Delete',
+            title: 'Remove Entries and Files',
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
-Right-click or use the delete action on any track to open the Smart Delete dialog — it offers exactly two options:
+Library v2 previews the affected entries and file paths before removal:
 
-- **Remove from Library** — removes the track from SoulSync's database only. The audio file on disk is untouched. Use this to clean up the database without losing files.
-- **Delete File Too** — removes the database entry AND deletes the audio file from disk. Irreversible.
+- **Remove from library database only** — removes the selected library records and keeps the physical files on disk.
+- **Permanently delete files** — removes the corresponding records and disk files after explicit confirmation. Paths outside configured Music Library Paths, or on unavailable storage, are blocked.
 
-There is no blacklist option here — blacklisting lives in **Source Info**, where the real download-source data is.
+File-removal operations are recorded in the deletion journal. Permanent deletion cannot be undone by reopening a finding. Maintenance fixes that move files into the deleted-files quarantine are recorded as quarantine operations instead; the confirmation for that action describes the move.
 `
         },
         {

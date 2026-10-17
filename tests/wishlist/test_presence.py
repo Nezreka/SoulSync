@@ -33,7 +33,7 @@ def test_load_wishlist_keys_uses_profile_specific_query():
 
     keys = presence.load_wishlist_keys(cursor, profile_id=7)
 
-    assert keys == {"song one|||artist one"}
+    assert keys == {"songone|||artistone"}
     assert cursor.calls == [
         ("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (7,)),
     ]
@@ -49,7 +49,7 @@ def test_load_wishlist_keys_falls_back_to_legacy_schema():
 
     keys = presence.load_wishlist_keys(cursor, profile_id=3)
 
-    assert keys == {"song two|||artist two"}
+    assert keys == {"songtwo|||artisttwo"}
     assert cursor.calls == [
         ("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (3,)),
         ("SELECT spotify_data FROM wishlist_tracks", None),

@@ -1,11 +1,13 @@
 """Short-lived Soulseek peer observations never become permanent bans."""
 
+from types import SimpleNamespace
+
 from core.downloads import peer_observation as observations
 
 
 def test_observation_requires_moving_sample_and_expires(monkeypatch):
     now = [1000.0]
-    monkeypatch.setattr(observations.time, 'monotonic', lambda: now[0])
+    monkeypatch.setattr(observations, 'time', SimpleNamespace(monotonic=lambda: now[0]))
     peer = 'observed-test-peer'
     observations._observations.pop(peer, None)
 

@@ -53,6 +53,13 @@ interface LibraryPlayableTrack {
   sample_rate?: number;
   artist_id?: number;
   album_id?: number;
+  /** Library v2 ids. A v2 row's `id` is a v2 id and means nothing to the legacy
+   *  resolve-track lookup or to the media server - the typed ids below say which
+   *  of the three namespaces a caller actually holds. */
+  lib2_track_id?: number | string | null;
+  legacy_track_id?: number | string | null;
+  server_track_id?: number | string | null;
+  lib2_artist_id?: number | string | null;
   artist_name?: string;
   _stats_image?: string | null;
   /** Play THIS file, skipping the title+artist refresh below. See playLibraryTrack. */
@@ -304,6 +311,10 @@ export function navigateToArtistDetail(
   navigateToPage?.('artist-detail', {
     artistId,
     artistSource: normalizedSource,
+    // Without it the URL this builds drops ?name=, which is all a Bandcamp
+    // artist has to resolve by. Bit whenever boot adopted a redirect onto the
+    // artist page, e.g. an old /library?discover= link.
+    artistName,
     skipRouteChange: options.skipRouteChange === true,
   });
 }
@@ -328,9 +339,14 @@ export async function playLibraryTrack(
   // for two copies of the same song it hands BOTH the same file_path - a caller
   // auditioning duplicates would play identical audio twice and think it had
   // compared them. Callers that already hold the exact file say so.
+  //
+  // Library v2 rows carry a `lib2_track_id` and address the legacy row (if it
+  // still exists) as `legacy_track_id`. `track.id` is then a v2 id, which
+  // resolve-track cannot look up - running it would overwrite good metadata
+  // with a miss, so a v2-only row skips the refresh entirely.
   if (
     !track.exact_path &&
-    track.id &&
+    (track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
     (track.title || track.name) &&
     (artistName || track.artist_name)
   ) {
@@ -407,7 +423,14 @@ export async function playLibraryTrack(
       is_library: true,
       image_url: albumArt,
       id: track.id,
+      lib2_track_id: track.lib2_track_id || null,
+      legacy_track_id: track.legacy_track_id || null,
+      server_track_id: track.server_track_id || null,
       artist_id: track.artist_id,
+      // iss29-B08: a V2-native track has no legacy artist id, so the player's
+      // "Go to artist" needs the lib2 one to route to /library?artist=.
+      // setTrackInfo drops anything it isn't handed.
+      lib2_artist_id: track.lib2_artist_id || null,
       album_id: track.album_id,
       bitrate: track.bitrate,
       sample_rate: track.sample_rate,
@@ -430,8 +453,17 @@ export async function playLibraryTrack(
         artist: artistName || '',
         album: albumTitle || '',
         // Server song id so playback can stream via the media server
-        // when the file isn't on SoulSync's disk (#809).
-        track_id: track.id || null,
+        // when the file isn't on SoulSync's disk (#809). A Library v2 row's
+        // `id` is a v2 id and means nothing to the media server, so only a
+        // server/legacy id may be sent as `track_id`; the typed ids ride
+        // alongside for the v2-aware endpoints.
+        track_id:
+          track.server_track_id ||
+          track.legacy_track_id ||
+          (track.lib2_track_id ? null : track.id || null),
+        lib2_track_id: track.lib2_track_id || null,
+        legacy_track_id: track.legacy_track_id || null,
+        server_track_id: track.server_track_id || null,
       }),
     });
 

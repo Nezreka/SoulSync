@@ -85,10 +85,9 @@ def test_manual_search_opens_the_file_inspector():
 def test_both_track_surfaces_get_the_search_button():
     assert "wl-tile-track-search" in _ORB
     assert "wl-moon-search-btn" in _ORB
-    # both open the inspector with the row id, the track and the artist
-    assert _ORB.count("openWishlistInspector({") == 2
-    assert _ORB.count("name: single.track") + _ORB.count("name: track.track") == 2
-    assert _ORB.count("artist: single.artist") + _ORB.count("artist: track.artist") == 2
+    # both open the shared search with the whole row: id, track, artist and its
+    # library link (the library's Interactive Search, else the inspector)
+    assert _ORB.count("openWishlistSearch(single)") + _ORB.count("openWishlistSearch(track)") == 2
 
 
 # ── deliberately dropped when the page moved to React ────────────────────────

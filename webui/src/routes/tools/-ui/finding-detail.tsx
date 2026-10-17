@@ -24,7 +24,7 @@
  *   that has changed shape before.
  */
 
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 
 import type { FindingDetailRow } from '../-tools.core';
 import type { RepairFinding } from '../-tools.types';
@@ -44,7 +44,9 @@ import {
 // tracks.duration is stored in MILLISECONDS (music_database.py:424); this
 // panel used to print it raw with an "s" suffix, so a 3:58 song read
 // "238000s" (#1210).
-import { formatDurationMs } from '../../artist-detail/-artist-detail.enhanced';
+// The artist-detail `enhanced` family is gone on this branch (Library v2
+// replaced it); the same helper still lives beside the sync server view.
+import { formatDurationMs } from '../../sync/-sync.server';
 
 type Details = Record<string, unknown>;
 
@@ -292,12 +294,224 @@ export interface FindingDetailProps {
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
 }
 
+const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
+  manual_primary: 'Your chosen primary file',
+  hand_tagged: 'Hand-tagged file',
+  intentional_format: 'Intentional additional format',
+  derivative_source: 'Source of a retained companion',
+  retention_policy: 'Retained by your quality settings',
+  manual_metadata: 'Metadata edited by hand',
+  pinned_release: 'Pinned release',
+  canonical_reference: 'Referenced by another recording entry',
+  shared_file_reference: 'Shared file reference',
+  playlist_reference: 'Used in a playlist',
+  media_server_reference: 'Referenced by a media server',
+  file_unavailable: 'File currently unavailable',
+};
+
+function NativeDuplicateReview({
+  finding,
+  onKeepDuplicate,
+}: Pick<FindingDetailProps, 'finding' | 'onKeepDuplicate'>) {
+  const [confirmedRecording, setConfirmedRecording] = useState(false);
+  const details = finding.details || {};
+  const tracks = list<{
+    file_id: number;
+    track_id: number;
+    title?: string;
+    artist?: string;
+    album?: string;
+    file_path?: string;
+    format?: string;
+    bitrate?: number;
+    duration?: number;
+    playlists?: string[];
+    protected_reasons?: string[];
+  }>(details.tracks);
+  const needsConfirmation = Boolean(details.requires_recording_confirmation);
+  const approvedRecording = !needsConfirmation || confirmedRecording;
+  const choose = (action: string) =>
+    onKeepDuplicate(
+      finding.id,
+      `${action}${needsConfirmation && confirmedRecording ? ':confirmed' : ''}`,
+    );
+  if (details.schema !== 'native_duplicate_review/v1' || !tracks.length) {
+    return <p>This duplicate review needs a fresh native scan before it can be applied.</p>;
+  }
+  return (
+    <>
+      <FindingMedia details={details} />
+      <p>
+        Compare the copies, then keep a file. Redundant copies move to recoverable quarantine;
+        protected files stay.
+      </p>
+      {needsConfirmation ? (
+        <label>
+          <input
+            type="checkbox"
+            checked={confirmedRecording}
+            onChange={(event) => setConfirmedRecording(event.target.checked)}
+          />{' '}
+          I confirm these files contain the same recording
+        </label>
+      ) : null}
+      <div className="repair-detail-sublist">
+        {tracks.map((track) => {
+          const isBest = track.file_id === details.recommended_file_id;
+          const protectedReasons = track.protected_reasons || [];
+          const protectedCopy = protectedReasons.length > 0;
+          return (
+            <div
+              className={`repair-detail-subitem ${isBest ? 'best' : protectedCopy ? 'protected' : 'removable'}`}
+              key={track.file_id}
+            >
+              <div className="repair-subitem-body">
+                <strong>
+                  <span
+                    className={
+                      isBest || protectedCopy ? 'repair-keep-badge' : 'repair-remove-badge'
+                    }
+                  >
+                    {isBest ? 'KEEP' : protectedCopy ? 'PROTECTED' : 'QUARANTINE'}
+                  </span>{' '}
+                  {text(track.title)} by {text(track.artist)}
+                </strong>
+                <span>
+                  Album: {text(track.album) || 'Unknown'}
+                  {track.format ? ` · ${track.format.toUpperCase()}` : ''}
+                  {track.bitrate ? ` · ${track.bitrate} kbps` : ''}
+                  {track.duration ? ` · ${formatDurationMs(track.duration)}` : ''}
+                </span>
+                {track.file_path ? <span className="mono">{track.file_path}</span> : null}
+                {protectedReasons.length ? (
+                  <span>
+                    Preserved:{' '}
+                    {protectedReasons
+                      .map((reason) => DUPLICATE_PROTECTION_LABELS[reason] || 'Protected copy')
+                      .join(', ')}
+                  </span>
+                ) : null}
+                {track.playlists?.length ? (
+                  <span className="repair-in-playlist">
+                    In playlist: {track.playlists.join(', ')}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="repair-btn repair-btn-fix"
+                  disabled={!approvedRecording || protectedReasons.includes('file_unavailable')}
+                  onClick={() => choose(`file-${track.file_id}`)}
+                >
+                  Keep this file
+                </button>
+              </div>
+              <SubitemPlayButton
+                filePath={track.file_path}
+                trackId={`lib2:${track.track_id}`}
+                title={track.title}
+                artist={track.artist}
+                album={track.album}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        className="repair-btn repair-btn-fix"
+        disabled={!approvedRecording}
+        onClick={() => choose('keep_best')}
+      >
+        Keep Best
+      </button>
+    </>
+  );
+}
+
+function CatalogueDuplicateReview({
+  finding,
+  onKeepDuplicate,
+}: Pick<FindingDetailProps, 'finding' | 'onKeepDuplicate'>) {
+  const details = finding.details || {};
+  const albums = list<{
+    album_id: number;
+    title: string;
+    artist_name: string;
+    release_date?: string;
+    file_count: number;
+    provider_ids?: Record<string, string>;
+    tracks?: {
+      id: number;
+      title: string;
+      duration?: number;
+      isrc?: string;
+      evidence_source?: string;
+    }[];
+  }>(details.albums);
+  if (details.schema !== 'native_duplicate_releases/v1' || albums.length !== 2) {
+    return <p>This release review needs a fresh scan before it can be applied.</p>;
+  }
+  return (
+    <>
+      <p>
+        Select the release group to keep. Both provider editions, all audio files and monitoring are
+        retained under that release.
+      </p>
+      {list<string>(details.blocked_reasons).map((reason) => (
+        <p key={reason}>{reason}</p>
+      ))}
+      {albums.map((album) => (
+        <section className="repair-detail-subitem" key={album.album_id}>
+          <strong>
+            {album.title} · {album.artist_name} · #{album.album_id}
+          </strong>
+          <p>
+            {album.release_date || 'Date unknown'} · {album.file_count} files
+          </p>
+          {Object.entries(album.provider_ids || {}).map(([provider, id]) => (
+            <p key={provider}>
+              {provider}: {id}
+            </p>
+          ))}
+          {list<NonNullable<typeof album.tracks>[number]>(album.tracks).map((track) => (
+            <p key={track.id}>
+              {track.title}
+              {track.duration ? ' · ' + formatDurationMs(track.duration) : ''}
+              {track.isrc ? ' · ISRC ' + track.isrc : ' · Recording identity unavailable'}
+              {track.evidence_source?.startsWith('cache:') ? ' · Confirmed provider cache' : ''}
+            </p>
+          ))}
+          <button
+            type="button"
+            className="repair-btn"
+            aria-label={'Merge into release #' + album.album_id}
+            disabled={details.merge_eligible !== true}
+            onClick={() => onKeepDuplicate(finding.id, 'merge-' + album.album_id)}
+          >
+            Merge into release #{album.album_id}
+          </button>
+        </section>
+      ))}
+    </>
+  );
+}
+
 export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
   const media = <FindingMedia details={d} />;
 
   switch (finding.finding_type) {
+    case 'native_duplicate_releases':
+      return <CatalogueDuplicateReview finding={finding} onKeepDuplicate={onKeepDuplicate} />;
+    case 'native_duplicate_tracks':
+      return (
+        <NativeDuplicateReview
+          key={finding.id}
+          finding={finding}
+          onKeepDuplicate={onKeepDuplicate}
+        />
+      );
     case 'genre_cleanup': {
       // #1057 — show exactly what stays and what goes; the fix applies
       // kept_genres verbatim, so this IS the contract.
@@ -476,6 +690,13 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
 
     case 'library_retag': {
+      if (d.validation && typeof d.validation === 'object' && 'checks' in d.validation) {
+        const checks = d.validation.checks;
+        if (checks && typeof checks === 'object')
+          return (
+            <DetailGrid rows={Object.entries(checks).map(([key, value]) => [key, text(value)])} />
+          );
+      }
       const retag = libraryRetagDetail(d);
       if (!retag.meta && !retag.coverOnly && !retag.tracks.length && !retag.unmatched.length) {
         return <div className="repair-finding-desc">No changes.</div>;
@@ -763,6 +984,14 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
     }
 
     case 'missing_cover_art': {
+      for (const [key, label] of [
+        ['db_missing', 'Database image'],
+        ['embed_missing', 'Embedded image'],
+        ['sidecar_missing', 'Cover file'],
+      ]) {
+        if (typeof d[key] === 'boolean')
+          pushIf(rows, d[key] ? 'Missing' : 'Present / not required', label);
+      }
       pushIf(rows, d.artist, 'Artist');
       pushIf(rows, d.album_title, 'Album');
       pushIf(rows, d.spotify_album_id, 'Spotify ID');

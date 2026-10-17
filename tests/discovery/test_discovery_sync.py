@@ -27,6 +27,8 @@ class _FakeSyncResult:
     def __post_init__(self):
         if self.match_details is None:
             self.match_details = []
+        if self.errors is None:
+            self.errors = []
 
 
 class _FakeMediaClient:
@@ -252,6 +254,13 @@ def test_records_sync_history_for_new_sync(patched_db):
     assert history_calls[0]['source_page'] == 'sync'
 
 
+@pytest.mark.parametrize('automation, explicit, expected', [(None, None, True), ('job', None, False), ('job', True, True), (None, False, False)])
+def test_sync_worker_forwards_manual_or_automatic_wishlist_intent(patched_db, automation, explicit, expected):
+    deps = _build_deps()
+    ds.run_sync_task('p1', 'Playlist', [_track()], automation_id=automation, user_initiated=explicit, deps=deps)
+    assert deps.sync_service.user_initiated is expected
+
+
 def test_resync_skips_history_record(patched_db):
     """Re-sync playlist_id (resync_<id>_<ts>) skips record_sync_history_start."""
     history_calls = []
@@ -303,6 +312,36 @@ def test_setup_error_with_automation_id_updates_progress(patched_db, monkeypatch
 # ---------------------------------------------------------------------------
 # Sync service errors
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize('automation_id', [None, 'automation-1'])
+def test_playlist_write_failure_is_not_reported_as_synced(patched_db, automation_id):
+    """A returned SyncResult error must not persist a successful sync fingerprint."""
+    status_calls = []
+    automation_calls = []
+    deps = _build_deps(
+        sync_service=_FakeSyncService(
+            media_client=_FakeMediaClient(),
+            sync_result=_FakeSyncResult(
+                synced_tracks=0, errors=['Navidrome playlist write failed'],
+            ),
+        ),
+        update_and_save_sync_status=lambda *a, **kw: status_calls.append((a, kw)),
+        update_automation_progress=lambda *a, **kw: automation_calls.append(kw),
+    )
+
+    ds.run_sync_task('failed-playlist', 'Playlist', [_track()],
+                     automation_id=automation_id, deps=deps)
+
+    state = deps.sync_states['failed-playlist']
+    assert state['status'] == 'error'
+    assert 'Navidrome playlist write failed' in state['error']
+    assert state['result']['errors'] == ['Navidrome playlist write failed']
+    assert status_calls == []
+    assert deps.automation_engine.events == []
+    if automation_id:
+        assert any(call.get('status') == 'error' for call in automation_calls)
+        assert not any(call.get('status') == 'finished' for call in automation_calls)
 
 def test_no_sync_service_marks_error(patched_db):
     """sync_service None → caught by outer except, sync_states marked error."""
@@ -797,8 +836,11 @@ def test_user_initiated_reaches_the_sync_service(patched_db):
                      user_initiated=True)
     assert svc.user_initiated is True
 
+    # Ours: a sync without an automation is a click too (Sync buttons on the
+    # source pages); only a run an automation started keeps the ignore-list.
     svc = _FakeSyncService(media_client=_FakeMediaClient())
-    ds.run_sync_task('sched_pl', 'Scheduled', [_track()], deps=_build_deps(sync_service=svc))
+    ds.run_sync_task('sched_pl', 'Scheduled', [_track()], automation_id='auto-1',
+                     deps=_build_deps(sync_service=svc))
     assert svc.user_initiated is False
 
 
@@ -862,6 +904,15 @@ class TestRecordLibraryMembership:
         # Both stamped, so "checked and absent" is distinguishable from
         # "never looked at" — the page must not report the second as the first.
         assert writes[11]['library_checked_at'] == writes[22]['library_checked_at']
+
+    def test_owned_file_counts_without_server_recognition(self, monkeypatch):
+        from core.discovery.sync import _record_library_membership
+        writes = self._db(monkeypatch)
+        _record_library_membership([{'db_track_id': 11}], [
+            {'index': 0, 'status': 'not_found', 'owned_in_library': True},
+        ])
+        assert writes[11]['in_library'] is True
+        assert writes[11]['library_track_id'] is None
 
     def test_ignores_tracks_that_are_not_mirrored_rows(self, monkeypatch):
         # Only the mirrored sync handler attaches db_track_id; every other

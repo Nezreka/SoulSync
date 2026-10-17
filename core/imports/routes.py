@@ -804,6 +804,15 @@ def _get_import_db(runtime) -> Any:
         return None
 
 
+def _import_profile_id():
+    """The profile a manual import runs for; its library decides ownership."""
+    try:
+        from core.profile_context import get_current_profile_id
+        return get_current_profile_id()
+    except Exception:  # noqa: BLE001 - outside a request: the shared library
+        return None
+
+
 def _annotate_library_status(runtime: ImportRouteRuntime,
                              payload: Dict[str, Any], source: str,
                              album_name: str = "") -> Dict[str, Any]:
@@ -844,6 +853,7 @@ def _annotate_library_status(runtime: ImportRouteRuntime,
             album_name=resolved_album_name,
             quality_profile=quality_profile,
             quiet=True,  # presentation only; enforcement re-checks and logs
+            profile_id=_import_profile_id(),
         )
     return payload
 
@@ -1310,6 +1320,7 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                 source_hint=source,
                 album_name=album_name,
                 quality_profile=gate_profile,
+                profile_id=_import_profile_id(),
             )
             decision = status["decision"]
             if decision == DECISION_SKIP_OWNED:

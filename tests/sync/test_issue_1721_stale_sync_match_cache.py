@@ -54,22 +54,7 @@ from database.music_database import MusicDatabase
 # Real-DB seeding (mirrors the #1715 suite's harness)
 # ---------------------------------------------------------------------------
 
-def _make_db(tmp_path, artists, albums, tracks):
-    db = MusicDatabase(str(tmp_path / "music.db"))
-    conn = db._get_connection()
-    c = conn.cursor()
-    for r in artists:
-        c.execute("INSERT INTO artists (id, name, server_source) VALUES (?,?,?)", r)
-    for r in albums:
-        c.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?,?,?,?)", r)
-    for r in tracks:
-        c.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, track_artist, server_source)"
-            " VALUES (?,?,?,?,?,?)", r)
-    conn.commit()
-    conn.close()
-    db.ensure_norm_backfilled()
-    return db
+from tests.sync.test_issue_1715_album_fallback_artist_gate import _make_db
 
 
 def _wrong_song_db(tmp_path):
@@ -223,9 +208,12 @@ class TestMediaServerMatcher:
         db = _wrong_song_db(tmp_path)
         _poison_cache(db)
         from core.library import manual_library_match as mlm
-        assert mlm.save_match(db, 1, 'spotify', 'sp-123', 't-met',
+        with db._get_connection() as conn:
+            native_id = conn.execute("SELECT id FROM lib2_tracks WHERE server_id='t-met'").fetchone()[0]
+        assert mlm.save_match(db, 1, 'spotify', 'sp-123', str(native_id),
                               source_title='Blue Sky', source_artist='Taylor Swift',
-                              server_source='navidrome', library_file_path='/m/blue.flac')
+                              server_source='navidrome', library_file_path='/m/blue.flac',
+                              library_track_id_kind='lib2')
         match, conf = _media_match(db, _track())
         assert match is not None and str(match.id) == 't-met'
         assert conf == 1.0

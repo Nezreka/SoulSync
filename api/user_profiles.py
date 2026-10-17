@@ -455,7 +455,10 @@ def list_profiles():
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
                         'own_library_root_hint': _own_library_root_hint(),
-                        'own_library_supported': config_manager.get_active_media_server() in ('plex', 'jellyfin')})
+                        'own_library_supported': config_manager.get_active_media_server() in ('plex', 'jellyfin'),
+                        # supported != available: the server may be right and the
+                        # feature still parked, and the UI must say which
+                        'own_library_available': not _own_library_parked()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -657,8 +660,8 @@ def update_profile(profile_id):
                 if problem:
                     return jsonify({'success': False, 'error': problem}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
-            from core.library_scope import invalidate_library_scope_cache
-            invalidate_library_scope_cache()
+            from core.library_scope import library_config_changed
+            library_config_changed()
             try:
                 from core.imports.paths import reset_own_library_fallback_notifications
                 reset_own_library_fallback_notifications()
@@ -711,6 +714,9 @@ def delete_profile(profile_id):
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
             _audit('profile_deleted', profile_id, target.get('name'))
+            # its folder is no library any more (#1199)
+            from core.library_scope import library_config_changed
+            library_config_changed()
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1305,6 +1311,15 @@ def save_profile_server_library():
 
 def _is_docker() -> bool:
     return os.path.exists('/.dockerenv')
+
+
+def _own_library_parked() -> bool:
+    """Whether own libraries are switched off in this build (SCOPE_PARKED)."""
+    try:
+        from core.library_scope import SCOPE_PARKED
+        return bool(SCOPE_PARKED)
+    except Exception:  # noqa: BLE001 - unreadable means treat it as off
+        return True
 
 
 def _own_library_root_hint(name: str = '<name>') -> str:

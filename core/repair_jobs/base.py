@@ -50,6 +50,136 @@ def deleted_quarantine_root(transfer_folder: str) -> str:
     return canonical
 
 
+def get_scope_artist(context: Any) -> Optional[str]:
+    """The artist a user-triggered run is scoped to, or None for library-wide.
+
+    Free function (not a JobContext method) so jobs stay compatible with the
+    SimpleNamespace context fakes the test suite builds.
+    """
+    scope = getattr(context, "scope", None)
+    if isinstance(scope, dict):
+        name = str(scope.get("artist_name") or "").strip()
+        return name or None
+    return None
+
+
+def _file_scope_key(path: Any) -> Optional[str]:
+    value = str(path or "").strip().replace("\\", "/")
+    if not value:
+        return None
+    return os.path.normcase(os.path.normpath(value))
+
+
+def get_scope_file_paths(context: Any) -> Optional[frozenset[str]]:
+    """Exact file allowlist for a scoped run; None means library-wide.
+
+    An explicitly empty list remains an empty scope and must never widen into
+    a full-library run. Exact paths are used because an artist-name SQL filter
+    is not a safe boundary for jobs that move or delete files.
+    """
+    scope = getattr(context, "scope", None)
+    if not isinstance(scope, dict) or "file_paths" not in scope:
+        return None
+    values = scope.get("file_paths")
+    if not isinstance(values, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(
+        key for value in values if (key := _file_scope_key(value)) is not None
+    )
+
+
+def file_path_in_scope(path: Any, allowed_paths: Optional[frozenset[str]]) -> bool:
+    """Return whether ``path`` is inside an exact per-run file allowlist."""
+    if allowed_paths is None:
+        return True
+    key = _file_scope_key(path)
+    return key is not None and key in allowed_paths
+
+
+def scoped_file_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Narrow a ``active_file_subjects`` list to this run's file allowlist.
+
+    ``None`` scope is library-wide and returns the list untouched; an explicitly
+    empty allowlist returns nothing, never everything. This is the single place
+    the file scope is actually applied for the subject-driven jobs -- before it
+    existed the scope was resolved, stored, logged, and read by nobody, so
+    running a destructive job "for one artist" produced library-wide findings
+    that were one "Fix All" away from touching files outside the request.
+    """
+    allowed = get_scope_file_paths(context)
+    if allowed is None:
+        return subjects
+    if not allowed:
+        return []
+    return [
+        subject for subject in subjects
+        if file_path_in_scope(subject.get("path"), allowed)
+    ]
+
+
+def artist_scoped_subjects(context: Any, subjects: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The file allowlist when the run has one, else the name-only scope.
+
+    The allowlist already holds the alias group and every track credit; an
+    exact lead-credit name check on top of it drops guest and alias tracks.
+    """
+    artist = get_scope_artist(context)
+    if get_scope_file_paths(context) is not None or not artist:
+        return scoped_file_subjects(context, subjects)
+    return [s for s in subjects if str(s.get("artist_name") or "").casefold() == artist.casefold()]
+
+
+def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> Dict[str, Any]:
+    """Resolve a lib2 artist to exact linked file paths for repair jobs.
+
+    The scope has to be the artist the user is looking at, which is the merged
+    alias group the detail page shows — not one row of it (L2-015). It also has
+    to be the files that exist: a tombstoned path is not something a scoped
+    AcoustID/corruption/ReplayGain/reorganize run can do anything with except
+    report errors about. Track credits count as well as album credits, for the
+    same reason the detail page lists those releases.
+    """
+    artist_id = int(artist_id)
+    if artist_id <= 0:
+        raise ValueError("artist_id must be positive")
+    conn = db._get_connection()
+    try:
+        artist = conn.execute(
+            "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
+        ).fetchone()
+        if artist is None:
+            raise ValueError("Library v2 artist not found")
+        from core.library2.artist_aliases import resolve_alias_group
+        group = resolve_alias_group(conn, artist_id)
+        marks = ",".join("?" for _ in group)
+        paths = [
+            row[0]
+            for row in conn.execute(
+                f"""SELECT DISTINCT tf.path
+                      FROM lib2_track_files tf
+                      JOIN lib2_tracks t ON t.id=tf.track_id
+                     WHERE tf.path IS NOT NULL AND TRIM(tf.path)<>''
+                       AND COALESCE(tf.file_state,'active')='active'
+                       AND (EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                     WHERE aa.album_id=t.album_id
+                                       AND aa.artist_id IN ({marks}))
+                            OR EXISTS (SELECT 1 FROM lib2_track_artists ta
+                                        WHERE ta.track_id=t.id
+                                          AND ta.artist_id IN ({marks})))
+                     ORDER BY tf.path""",
+                [*group, *group],
+            ).fetchall()
+        ]
+        resolved_name = str(artist_name or artist[0] or "").strip()
+        return {
+            "artist_id": artist_id,
+            "artist_name": resolved_name,
+            "file_paths": paths,
+        }
+    finally:
+        conn.close()
+
+
 def is_internal_transfer_dir(path: str, transfer_folder: str) -> bool:
     """True for a SoulSync-owned folder inside the library that no maintenance
     job may treat as library content.
@@ -172,6 +302,23 @@ def is_hand_tagged_path(path, keys) -> bool:
     return MusicDatabase.manual_path_key(path) in keys
 
 
+def drop_hand_tagged(context, subjects, path_key: str = 'path') -> list:
+    """``subjects`` without the files the user hand-tagged.
+
+    Library v2 keeps no ``metadata_locked`` column on its rows; the lock is the
+    remembered file (``manual_metadata_files``), which is also what survives a
+    rescan. A job that would retag, renumber, rematch or delete from a service's
+    view of the release filters its subjects through this -- the service's view
+    is the studio album the user deliberately did not want.
+    """
+    subjects = list(subjects or [])
+    keys = hand_tagged_path_keys(getattr(context, 'db', None))
+    if not keys:
+        return subjects
+    return [s for s in subjects
+            if not is_hand_tagged_path((s or {}).get(path_key), keys)]
+
+
 def has_metadata_locked(cursor, table: str) -> bool:
     """does this table carry metadata_locked yet. very old schemas don't, and
     a missing column just means nothing there is locked"""
@@ -228,6 +375,11 @@ class JobContext:
     transfer_folder: str             # Resolved transfer folder path
     config_manager: Any              # ConfigManager instance
 
+    # Optional run scope for user-triggered runs (e.g. {'artist_name': 'Drake'}
+    # from a Library artist page). Only jobs declaring supports_artist_scope
+    # honor it; scheduled runs never carry one.
+    scope: Optional[Dict[str, Any]] = None
+
     # API clients (may be None if unavailable)
     spotify_client: Any = None
     itunes_client: Any = None
@@ -242,6 +394,11 @@ class JobContext:
     is_paused: Optional[Callable[[], bool]] = None
     update_progress: Optional[Callable[[int, int], None]] = None
     report_progress: Optional[Callable] = None  # Rich progress: (phase, log_line, log_type, scanned, total)
+    # Successful in-scan mutations report their concrete subject here.  The
+    # worker coalesces these reports and runs the optional Library-v2 bridge
+    # after the job releases its own DB/file handles.  Finding-based fixes use
+    # the same bridge centrally from RepairWorker.fix_finding().
+    report_change: Optional[Callable[..., None]] = None
     # {track_id: [server playlist titles]}, read lazily by jobs that care
     # (duplicate detector keeps the copy a playlist points at). None = unknown
     playlist_membership: Optional[Callable[[], Dict[str, List[str]]]] = None
@@ -251,6 +408,10 @@ class JobContext:
         if self.stop_event and self.stop_event.is_set():
             return True
         return self.should_stop() if self.should_stop else False
+
+    def scope_artist_name(self) -> Optional[str]:
+        """The artist this run is scoped to, or None for a full-library run."""
+        return get_scope_artist(self)
 
     def is_spotify_rate_limited(self) -> bool:
         """Check if Spotify is currently under a global rate limit ban.
@@ -303,6 +464,10 @@ class RepairJob(ABC):
     description: str = ''
     help_text: str = ''  # Extended explanation shown in the info modal
     icon: str = ''
+    # Authoritative data source used by the scan. Assigned by the registry's
+    # exhaustive manifest so a newly registered job cannot silently omit it.
+    data_basis: str = ''
+    library_v2_effects: frozenset[str] = frozenset()
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}
@@ -310,6 +475,21 @@ class RepairJob(ABC):
     # these instead of a free-text box. Keys not listed render by value type.
     setting_options: Dict[str, list] = {}
     auto_fix: bool = False
+    # Whether this job's scan honors JobContext.scope['artist_name'] (user-
+    # triggered runs from a Library artist page). Library-wide otherwise.
+    supports_artist_scope: bool = False
+    # Whether this job's scan honors JobContext.scope['file_paths'] -- the
+    # exact allowlist `build_artist_file_scope` resolves for a user-triggered
+    # run from a Library artist page.
+    #
+    # This exists because the scope used to be built, passed, logged and read
+    # by NOBODY: `get_scope_file_paths`/`file_path_in_scope` had zero
+    # production callers, so "run Library Reorganize for this artist" walked
+    # and moved the WHOLE library while the API response and the log line both
+    # claimed 180 files. A job that does not declare this now has the scope
+    # REFUSED rather than silently widened -- the same fail-closed posture
+    # `get_scope_file_paths` already takes for an empty list.
+    supports_file_scope: bool = False
     # True for jobs that MOVE or REWRITE real library files based on catalogue
     # paths (reorganize, retag, track numbers, unknown-artist moves, artist
     # splits). When such a job runs LIVE (dry_run off), the worker first proves
@@ -337,3 +517,35 @@ class RepairJob(ABC):
     def get_config_key(self, setting: str) -> str:
         """Get the full config key path for a job setting."""
         return f"repair.jobs.{self.job_id}.{setting}"
+
+    # -- resume after a stop (upstream #1709/#1716) --------------------------
+    # A long library-wide pass saves the last item it finished under its own
+    # config key, resumes right after it, and clears it at the end. ``scan_key``
+    # names what the pass ran under (mode, naming...); a different one starts
+    # over, and so does a checkpoint item that is gone.
+
+    def resume_index(self, context: JobContext, ids: List[Any], scan_key: str = '') -> int:
+        try:
+            saved = (context.config_manager.get(self.get_config_key('scan_checkpoint'), None)
+                     if context.config_manager else None)
+        except Exception as exc:  # noqa: BLE001 - a broken store starts at the top
+            logger.warning("[%s] could not read checkpoint: %s", self.job_id, exc)
+            return 0
+        if not isinstance(saved, dict) or saved.get('scan') != scan_key:
+            return 0
+        keys = [str(i) for i in ids]
+        if str(saved.get('id')) in keys:
+            index = keys.index(str(saved.get('id'))) + 1
+            return index if index < len(keys) else 0
+        return 0
+
+    def save_checkpoint(self, context: JobContext, last_id: Any, scan_key: str = '') -> None:
+        """``last_id=None`` clears it: the pass reached the end."""
+        if not context.config_manager or not hasattr(context.config_manager, 'set'):
+            return
+        try:
+            context.config_manager.set(
+                self.get_config_key('scan_checkpoint'),
+                None if last_id is None else {'id': last_id, 'scan': scan_key})
+        except Exception as exc:  # noqa: BLE001 - losing it must not fail the scan
+            logger.warning("[%s] could not save checkpoint: %s", self.job_id, exc)

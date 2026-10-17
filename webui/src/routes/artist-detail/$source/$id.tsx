@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useLayoutEffect } from 'react';
 
 import { useShellBridge } from '@/platform/shell/route-controllers';
@@ -6,6 +6,11 @@ import { getShellRouteByPageId } from '@/platform/shell/route-manifest';
 
 import { artistDetailSearchSchema } from '../-artist-detail.types';
 import { ArtistDetailPage } from '../-ui/artist-detail-page';
+import {
+  LIBRARY_V2_QUERY_KEY,
+  resolveLibraryV2DiscoveryArtist,
+} from '../../library/-library-v2.api';
+import { ArtistPageLibraryProvider } from '../../library/-ui/artist-page-release-actions';
 
 /**
  * Whether the shell has handed artist detail over to React yet.
@@ -26,14 +31,62 @@ function isReactOwned(): boolean {
 
 export const Route = createFileRoute('/artist-detail/$source/$id')({
   validateSearch: artistDetailSearchSchema,
+  beforeLoad: async ({ params, search, context }) => {
+    const source = params.source.toLowerCase();
+    const isLibrary = source === 'library';
+    const known =
+      isLibrary && /^\d+$/.test(params.id)
+        ? Number(params.id)
+        : await context.queryClient
+            .fetchQuery({
+              queryKey: [
+                ...LIBRARY_V2_QUERY_KEY,
+                'discovery-resolve',
+                source,
+                params.id,
+                search.name,
+              ],
+              queryFn: () =>
+                resolveLibraryV2DiscoveryArtist({
+                  source,
+                  providerId: params.id,
+                  name: search.name,
+                }),
+            })
+            .catch(() => null);
+    if (known) {
+      throw redirect({
+        to: '/library',
+        search: {
+          artist: known,
+          album:
+            isLibrary && search.album && /^\d+$/.test(search.album)
+              ? Number(search.album)
+              : undefined,
+          view: 'discovery',
+          immersive: true,
+        },
+        replace: true,
+      });
+    }
+    // Unknown provider artists retain the original page. Media-server ids
+    // without a catalogue match have no provider page to fall back to.
+    if (isLibrary) throw redirect({ to: '/library', search: {}, replace: true });
+  },
   component: ArtistDetailRouteComponent,
 });
 
 function ArtistDetailRouteComponent() {
+  const { source, id } = Route.useParams();
+  const { name } = Route.useSearch();
   if (!isReactOwned()) {
     return <LegacyArtistDetailHandoff />;
   }
-  return <ArtistDetailPage />;
+  return (
+    <ArtistPageLibraryProvider source={source} id={id} name={name}>
+      <ArtistDetailPage />
+    </ArtistPageLibraryProvider>
+  );
 }
 
 /**

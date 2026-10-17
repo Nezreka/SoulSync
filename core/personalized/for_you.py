@@ -1,7 +1,7 @@
 """on repeat, repeat rewind, flow and blend: mixes read straight off what you play.
 
 every one of these is owned tracks only. a play in listening_history carries
-db_track_id when it matched a library track (125k of boulder's 162k do), so
+lib2_track_id when it matched a library track (125k of boulder's 162k do), so
 these mixes play the moment you press play, nothing to download first.
 
 - on repeat: what you've played most in the last 30 days.
@@ -56,30 +56,42 @@ def _chunks(items: Sequence[Any], n: int) -> Iterable[Sequence[Any]]:
 # ── reading ─────────────────────────────────────────────────────────────────
 
 def _plays(conn, owner: int, since: str, until: Optional[str] = None) -> Dict[str, int]:
-    """library track id -> plays in [since, until)."""
-    sql = ("SELECT db_track_id, COUNT(*) FROM listening_history "
-           "WHERE profile_id = ? AND db_track_id IS NOT NULL AND played_at >= ?")
+    """library track id -> plays in [since, until). Library v2: the catalogue
+    link is ``lib2_track_id``; ``db_track_id`` is the media server's own id."""
+    sql = ("SELECT lib2_track_id, COUNT(*) FROM listening_history "
+           "WHERE profile_id = ? AND lib2_track_id IS NOT NULL AND played_at >= ?")
     args: List[Any] = [owner, since]
     if until:
         sql += " AND played_at < ?"
         args.append(until)
-    sql += " GROUP BY db_track_id"
+    sql += " GROUP BY lib2_track_id"
     return {str(tid): n for tid, n in conn.execute(sql, args).fetchall()}
+
+
+# Library v2: a track's artist is its first credit, else its album's artist.
+_TRACK_ROW_SQL = """
+    SELECT t.id, t.title, t.duration, COALESCE(credited.name, ar.name), al.title,
+           COALESCE(al.image_url, ar.image_url)
+    FROM lib2_tracks t
+    JOIN lib2_albums al ON al.id = t.album_id
+    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+    LEFT JOIN lib2_artists credited ON credited.id = (
+         SELECT ta.artist_id FROM lib2_track_artists ta
+          WHERE ta.track_id = t.id
+          ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                   ta.position, ta.artist_id LIMIT 1)
+"""
 
 
 def _owned(conn, track_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
     """library rows for these ids that are actually on disk, mix-track ready."""
+    from core.library2.sql_util import owned_sql
     from core.metadata import normalize_image_url
     out: Dict[str, Dict[str, Any]] = {}
     for chunk in _chunks(list(track_ids), 900):
         rows = conn.execute(
-            f"""
-            SELECT t.id, t.title, t.duration, ar.name, al.title,
-                   COALESCE(al.thumb_url, ar.thumb_url)
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE t.file_path IS NOT NULL AND t.file_path != ''
+            f"""{_TRACK_ROW_SQL}
+            WHERE {owned_sql('track', 't')}
               AND t.id IN ({','.join('?' * len(chunk))})
             """,
             list(chunk),
@@ -196,19 +208,20 @@ def _artists_named(conn, names: Sequence[str]) -> List[tuple]:
     names. exact names go through the name index; only the ones that miss
     (scrobbled casing, say) cost a case-insensitive pass over artists.
     joining a LOWER(name) filter onto tracks scanned every track (9+ min)."""
-    cols = "id, name, spotify_artist_id, deezer_id, itunes_artist_id, musicbrainz_id"
+    cols = ("id, name, spotify_id, json_extract(external_ids, '$.deezer'),"
+            " json_extract(external_ids, '$.itunes'), musicbrainz_id")
     names = [n for n in dict.fromkeys(names) if n]
     if not names:
         return []
     found: List[tuple] = []
     for chunk in _chunks(names, 900):
         found += conn.execute(
-            f"SELECT {cols} FROM artists WHERE name IN ({','.join('?' * len(chunk))})",
+            f"SELECT {cols} FROM lib2_artists WHERE name IN ({','.join('?' * len(chunk))})",
             list(chunk)).fetchall()
     have = {(r[1] or '').lower() for r in found}
     missing = {n.lower() for n in names} - have
     if missing:
-        found += [r for r in conn.execute(f"SELECT {cols} FROM artists WHERE name IS NOT NULL")
+        found += [r for r in conn.execute(f"SELECT {cols} FROM lib2_artists WHERE name IS NOT NULL")
                   if (r[1] or '').lower() in missing]
     return found
 
@@ -216,23 +229,23 @@ def _artists_named(conn, names: Sequence[str]) -> List[tuple]:
 def _library_by_artists(conn, artist_names: Sequence[str], max_plays: int,
                         artist_rows: Optional[List[tuple]] = None) -> List[Dict[str, Any]]:
     """owned tracks by these artists that you've played at most max_plays times."""
+    from core.library2.sql_util import owned_sql
     from core.metadata import normalize_image_url
     out: List[Dict[str, Any]] = []
     rows_for = artist_rows if artist_rows is not None else _artists_named(conn, artist_names)
     ids = [r[0] for r in rows_for]
-    for chunk in _chunks(ids, 900):
+    for chunk in _chunks(ids, 450):
+        marks = ','.join('?' * len(chunk))
+        # credited on the track, or the album's artist
         rows = conn.execute(
-            f"""
-            SELECT t.id, t.title, t.duration, ar.name, al.title,
-                   COALESCE(al.thumb_url, ar.thumb_url)
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            LEFT JOIN albums al ON al.id = t.album_id
-            WHERE t.artist_id IN ({','.join('?' * len(chunk))})
-              AND t.file_path IS NOT NULL AND t.file_path != ''
+            f"""{_TRACK_ROW_SQL}
+            WHERE (al.primary_artist_id IN ({marks})
+                   OR t.id IN (SELECT ta.track_id FROM lib2_track_artists ta
+                                WHERE ta.artist_id IN ({marks})))
+              AND {owned_sql('track', 't')}
               AND COALESCE(t.play_count, 0) <= ?
             """,
-            [*chunk, max_plays],
+            [*chunk, *chunk, max_plays],
         ).fetchall()
         for tid, title, duration, artist, album, cover in rows:
             if title and artist:

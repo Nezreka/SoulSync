@@ -476,30 +476,9 @@ def track_already_owned(
 def _stored_release_kind_for_gate(db: Any, album_id: Any) -> str:
     """The library row's known release kind, '' when unknown.
 
-    Mirrors completion._stored_release_kind: ``record_type`` first (the
-    populated column), legacy ``album_type`` as fallback — queried
-    separately so a missing column can't hide the other.
-    """
-    for col in ("record_type", "album_type"):
-        try:
-            conn = db._get_connection()
-            try:
-                row = conn.execute(
-                    f"SELECT {col} FROM albums WHERE id = ?", (str(album_id),)
-                ).fetchone()
-            finally:
-                try:
-                    conn.close()
-                except Exception:  # noqa: S110 - cleanup only
-                    pass
-        except Exception:
-            continue
-        # Strip before the truthiness check: a whitespace-only value is
-        # unknown and must fall through to the next column, not return "".
-        val = str(row[0]).strip() if row and row[0] else ""
-        if val:
-            return val.lower()
-    return ""
+    Mirrors completion._stored_release_kind (ours: on Library v2)."""
+    from core.metadata.completion import _stored_release_kind
+    return _stored_release_kind(db, album_id)
 
 
 def owned_release_tracks(
