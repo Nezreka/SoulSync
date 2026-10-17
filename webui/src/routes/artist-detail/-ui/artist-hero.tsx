@@ -50,7 +50,7 @@ interface Props {
   /** Per-service coverage payload; the panel hides itself when absent. */
   enrichment?: Record<string, unknown>;
   /** Canonical identity for the watchlist button; null hides its behavior. */
-  watchlist?: { id: unknown; name: string } | null;
+  watchlist?: { id: unknown; name: string; source?: string } | null;
   /** Admin on a library artist: shows the "Wrong match?" button beside DB Record. */
   canFixMatches?: boolean;
   /** Admin on a library artist: shows Delete Artist. Never for a source artist —
@@ -300,6 +300,7 @@ export function ArtistHero({
         const { watching: next, message } = await toggleWatchlistRequest(
           watchlist.id,
           watchlist.name,
+          watchlist.source,
         );
         setWatching(next);
         window.showToast?.(message, 'success');
@@ -325,7 +326,7 @@ export function ArtistHero({
           discography={discography}
           editionSuperseded={editionSuperseded}
           onClose={() => setDownloadingDiscog(false)}
-          watchlistIdentity={watchlist ? { id: watchlist.id, name: watchlist.name } : null}
+          watchlistIdentity={watchlist}
         />
       ) : null}
       {watchlistAddOpen && watchlist ? (
@@ -333,6 +334,7 @@ export function ArtistHero({
           artist={{
             id: watchlist.id,
             name: watchlist.name,
+            source: watchlist.source,
             imageUrl: appliedPhoto || image.primary || '',
           }}
           onClose={() => setWatchlistAddOpen(false)}

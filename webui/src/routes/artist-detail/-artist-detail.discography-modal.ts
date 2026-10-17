@@ -2,6 +2,7 @@ import type { Discography } from './-artist-detail.types';
 
 import { classifyReleaseContent } from './-artist-detail.filters';
 import { type ReleaseSectionType } from './-artist-detail.open-release';
+import { addToWatchlistRequest } from './-artist-detail.watchlist-button';
 
 /**
  * Download Discography (library.js: openDiscographyModal 580, filters 798,
@@ -368,6 +369,7 @@ export async function watchArtistWithSettings(
   artistId: unknown,
   artistName: string,
   settings: FutureReleases,
+  source?: string,
 ): Promise<{ watching: boolean; message: string }> {
   const checkResponse = await fetch('/api/watchlist/check', {
     method: 'POST',
@@ -382,15 +384,8 @@ export async function watchArtistWithSettings(
   let message = '';
 
   if (!watching) {
-    const addResponse = await fetch('/api/watchlist/add', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artist_id: artistId, artist_name: artistName }),
-    });
-    const addData = await addResponse.json();
-    if (!addData.success) throw new Error(addData.error || 'Failed to add to watchlist');
+    message = await addToWatchlistRequest(artistId, artistName, source);
     watching = true;
-    message = String(addData.message ?? '');
     if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
   }
 

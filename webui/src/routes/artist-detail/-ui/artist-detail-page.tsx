@@ -474,7 +474,7 @@ export function ArtistDetailPage() {
         streamCounts={stream.counts}
         streamCompleted={stream.completed}
         enrichment={payload.enrichment_coverage}
-        watchlist={watchlistIdentity(payload)}
+        watchlist={watchlistIdentity(payload, source)}
         canFixMatches={canEnhance}
         // same gate as the Enhanced toggle: admin, on a LIBRARY artist. a
         // source-only artist has no library rows to remove.
