@@ -515,6 +515,7 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
             "batch_complete",
             {
                 "playlist_name": "Import: Album",
+                "artist": "Artist",
                 "total_tracks": "2",
                 "completed_tracks": "1",
                 "failed_tracks": "1",
@@ -723,6 +724,7 @@ def test_singles_process_aggregates_worker_results_and_side_effects():
             "batch_complete",
             {
                 "playlist_name": "Import: Singles",
+                "artist": "Various",
                 "total_tracks": "2",
                 "completed_tracks": "1",
                 "failed_tracks": "1",
