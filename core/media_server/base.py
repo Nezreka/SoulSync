@@ -77,6 +77,20 @@ class MediaServerBase(MediaServerClient):
         return True
 
     # ------------------------------------------------------------------
+    # Artwork. Each server stores a relative or server-local image
+    # reference on artists and albums; turning it into something a
+    # browser can load needs the server's base URL and auth, which only
+    # the client knows. core.metadata.artwork used to rebuild all three
+    # shapes itself from config.
+    # ------------------------------------------------------------------
+
+    def image_url(self, thumb: Optional[str]) -> Optional[str]:
+        """A loadable URL for a server image reference, or None when the
+        reference is not this server's or the client is not configured.
+        Default: no server rule."""
+        return None
+
+    # ------------------------------------------------------------------
     # Per-user view. Plex, Jellyfin and Navidrome each have a method
     # that returns "this client, acting as one server user", with a
     # different signature. ``user_view`` is the one name for it.

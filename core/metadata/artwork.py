@@ -128,6 +128,19 @@ def _redact_url_secrets(url: str | None) -> str:
     return out
 
 
+def _active_client_image_url(thumb_url: str) -> str | None:
+    """The active media server client's rebuilt URL, None when there is no
+    engine yet, no client, no hook, or the reference is not the server's."""
+    try:
+        from core.media_server.engine import get_media_server_engine
+        client = get_media_server_engine().active_client()
+        hook = getattr(client, 'image_url', None)
+        return hook(thumb_url) if callable(hook) else None
+    except Exception as exc:  # noqa: BLE001 - artwork must never fail a page
+        logger.debug("active client image_url failed: %s", exc)
+        return None
+
+
 def normalize_image_url(thumb_url: str | None) -> str | None:
     """Convert media-server image URLs into browser-safe URLs."""
     if not thumb_url:
@@ -157,6 +170,14 @@ def normalize_image_url(thumb_url: str | None) -> str | None:
             cfg = get_config_manager()
             active_server = cfg.get_active_media_server()
             logger.debug("Fixing URL: %s, Active server: %s", thumb_url, active_server)
+
+            # The active client knows its own base URL and auth; ask it
+            # first. The per-server branches below stay for a client
+            # without the hook.
+            rebuilt = _active_client_image_url(thumb_url)
+            if rebuilt:
+                logger.debug("Fixed URL: %s", _redact_url_secrets(rebuilt))
+                return rebuilt if is_image_proxy_url(rebuilt) else _browser_safe_image_url(rebuilt)
 
             if active_server == 'plex':
                 plex_config = cfg.get_plex_config()

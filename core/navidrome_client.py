@@ -131,6 +131,30 @@ class NavidromeClient(MediaServerBase):
             logger.warning("Navidrome identity repair skipped: %s", exc)
             return False
 
+    def image_url(self, thumb):
+        """A getCoverArt reference becomes the SoulSync proxy path
+        /api/navidrome/cover/<id>: the proxy authenticates and caches when
+        the image is requested, so no salted auth URL is built here or
+        stored in library JSON. Any other /rest/ path gets Subsonic auth."""
+        if not thumb:
+            return None
+        from urllib.parse import parse_qs, quote, urlparse
+        parsed = urlparse(thumb)
+        cover_id = parse_qs(parsed.query).get('id', [''])[0]
+        if parsed.path.rstrip('/').endswith('/getCoverArt') and cover_id:
+            return '/api/navidrome/cover/' + quote(cover_id, safe='')
+        if not (self.base_url and self.username and self.password):
+            return None
+        path = thumb if thumb.startswith('/rest/') else parsed.path
+        if not path.startswith('/rest/'):
+            return None
+        import hashlib
+        import secrets
+        salt = secrets.token_hex(6)
+        token = hashlib.md5((self.password + salt).encode()).hexdigest()
+        separator = '&' if '?' in path else '?'
+        return f"{self.base_url.rstrip('/')}{path}{separator}u={self.username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
+
     def user_view(self, identity):
         """``as_user`` under the shared hook name (see MediaServerBase)."""
         username = (identity or {}).get('username')
