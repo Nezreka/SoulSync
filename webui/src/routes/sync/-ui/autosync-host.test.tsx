@@ -21,6 +21,11 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete window.openAutoSyncScheduleModal;
+  delete window.runMirroredPlaylistPipeline;
+  delete window.pollMirroredPipelineStatus;
+  delete window.applyMirroredPipelineState;
+  delete window.loadMirroredPlaylists;
+  delete window.reloadMirroredTab;
 });
 
 describe('AutoSyncHost', () => {
@@ -44,11 +49,47 @@ describe('AutoSyncHost', () => {
     expect(container.querySelector('#auto-sync-schedule-modal')).toBeNull();
   });
 
-  it('hands the global back when it unmounts', () => {
+  it.each([false, true])(
+    'delegates legacy runs and preserves skipWishlist: %s',
+    async (skipWishlist) => {
+      const apply = vi.fn();
+      const reload = vi.fn();
+      window.applyMirroredPipelineState = apply;
+      window.reloadMirroredTab = reload;
+      window.loadMirroredPlaylists = vi.fn();
+      const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/pipeline/run')) {
+          expect(JSON.parse(init?.body as string)).toEqual({ skip_wishlist: skipWishlist });
+          return new Response(JSON.stringify({ state: { status: 'running', progress: 0 } }));
+        }
+        return new Response(JSON.stringify({ status: 'finished', progress: 100 }));
+      });
+      vi.stubGlobal('fetch', fetch);
+      render(<AutoSyncHost />);
+      await act(async () => {
+        await window.runMirroredPlaylistPipeline?.(42, 'Evening mix', skipWishlist);
+      });
+      expect(apply).toHaveBeenCalledWith(42, { status: 'finished', progress: 100 });
+      expect(reload).toHaveBeenCalledOnce();
+      expect(window.loadMirroredPlaylists).not.toHaveBeenCalled();
+      // A closed manager does not refetch its five endpoints after a legacy job.
+      expect(fetch).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('hands the globals back when it unmounts', () => {
     const vanilla = vi.fn();
+    const run = vi.fn();
+    const poll = vi.fn();
     window.openAutoSyncScheduleModal = vanilla;
+    window.runMirroredPlaylistPipeline = run;
+    window.pollMirroredPipelineStatus = poll;
     const { unmount } = render(<AutoSyncHost />);
+    expect(window.runMirroredPlaylistPipeline).not.toBe(run);
+    expect(window.pollMirroredPipelineStatus).not.toBe(poll);
     unmount();
     expect(window.openAutoSyncScheduleModal).toBe(vanilla);
+    expect(window.runMirroredPlaylistPipeline).toBe(run);
+    expect(window.pollMirroredPipelineStatus).toBe(poll);
   });
 });

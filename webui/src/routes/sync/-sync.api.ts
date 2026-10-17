@@ -630,20 +630,26 @@ export function recordServerLink(
   }).catch(() => undefined);
 }
 
-/**
- * POST .../pipeline/run — an empty JSON body, as the vanilla sends (2468-2472).
- * `refreshOnly` pulls the source and discovers the new tracks, nothing pushed
- * or downloaded (#1413).
- */
+export interface PipelineRunOptions {
+  /** Pull and identify source tracks without pushing or downloading (#1413). */
+  refreshOnly?: boolean;
+  /** Explicit legacy per-click choice: sync without queuing missing tracks. */
+  skipWishlist?: boolean;
+}
+
+/** POST .../pipeline/run, preserving omitted options and explicit false values. */
 export async function runMirroredPipeline(
   playlistId: number | string,
-  opts: { refreshOnly?: boolean } = {},
+  opts: PipelineRunOptions = {},
 ): Promise<{ state?: MirroredPipelineState }> {
   return readPipelineResponse(
     await fetch(`/api/mirrored-playlists/${playlistId}/pipeline/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(opts.refreshOnly ? { refresh_only: true } : {}),
+      body: JSON.stringify({
+        ...(opts.refreshOnly ? { refresh_only: true } : {}),
+        ...(opts.skipWishlist !== undefined ? { skip_wishlist: opts.skipWishlist } : {}),
+      }),
     }),
     PIPELINE_RUN_FAILED,
   );

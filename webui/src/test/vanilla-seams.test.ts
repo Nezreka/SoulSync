@@ -77,10 +77,16 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     usedBy: "openSyncDetailModal's '→ Wishlist' button, via inline onclick",
   },
   {
-    file: 'static/auto-sync.js',
+    file: 'src/routes/sync/-ui/autosync-host.tsx',
     symbol: 'openAutoSyncScheduleModal',
-    pattern: /async function openAutoSyncScheduleModal\b/,
-    usedBy: "the dashboard's Quick Actions hero tile",
+    pattern: /window\.openAutoSyncScheduleModal = openManager/,
+    usedBy: "the dashboard's Auto Sync manager entry point",
+  },
+  {
+    file: 'static/auto-sync.js',
+    symbol: 'applyMirroredPipelineState',
+    pattern: /function applyMirroredPipelineState\b/,
+    usedBy: 'the native pipeline controller bridge, to update classic mirrored cards',
   },
   {
     file: 'static/sync-spotify.js',

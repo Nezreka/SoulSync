@@ -2,21 +2,12 @@
  * The mirrored playlist's TRACKS detail modal — openMirroredPlaylistModal
  * (stats-automations.js 1066-1165) ported React-native.
  *
- * WHY PORTED AND NOT ADOPTED (the pools were adopted; this is not the same):
- * the vanilla modal's primary button, Discover, calls discoverMirroredPlaylist
- * → openYouTubeDiscoveryModal, which lives in sync-services.js and the flip
- * deletes. Adoption's whole premise — "it keeps working untouched" — is false
- * for its main action. Three of its remaining four buttons (Edit Source,
- * Auto-Sync, Delete) already have React implementations from P5g/P5e, so
- * adopting would also run the same action two ways depending on where it was
- * clicked, including two pipeline pollers unaware of each other.
+ * Discovery, source editing, pipeline and delete actions are supplied by
+ * the native tab, rather than routed through classic dialog globals.
  *
- * The vanilla function STAYS ALIVE in stats-automations.js: auto-sync.js calls
- * it three times (the board's Details button at 1180 and the rename /
- * source-ref reopen tails at 2403/2437) and shared-helpers.js once at 1755
- * (already typeof-guarded). Those die with the auto-sync board phase, and the
- * vanilla copy dies with them. stats-automations.js survives the flip anyway —
- * the two pool modals live there.
+ * The classic detail function remains in stats-automations.js for the root
+ * Auto Sync manager, classic rename/source-ref reopen paths and the shared
+ * playlist helper. Those consumers must migrate before it can be retired.
  *
  * Markup is transcribed class for class and label for label from 1120-1157;
  * every .mm-* class already exists in style.css (verified), so there is no new

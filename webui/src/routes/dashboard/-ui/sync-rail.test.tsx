@@ -294,8 +294,28 @@ describe('the split sync buttons (#1455)', () => {
         posts.push({ url: u, body: JSON.parse(String((init as { body?: string })?.body)) });
         return { ok: true, json: async () => ({}) };
       }
-      if (u === '/api/mirrored-playlists') return { ok: true, json: async () => [] };
-      if (u === '/api/automations') return { ok: true, json: async () => [] };
+      if (u === '/api/mirrored-playlists')
+        return {
+          ok: true,
+          json: async () => [
+            { id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 },
+          ],
+        };
+      if (u === '/api/automations')
+        return {
+          ok: true,
+          json: async () => [
+            {
+              id: 1,
+              owned_by: 'auto_sync',
+              action_type: 'playlist_pipeline',
+              action_config: { playlist_id: '7' },
+              trigger_type: 'schedule',
+              trigger_config: { interval: 24, unit: 'hours' },
+              enabled: true,
+            },
+          ],
+        };
       if (u === '/api/playlist-pipeline/history?limit=40')
         return { ok: true, json: async () => ({}) };
       if (u.startsWith('/api/sync/history'))
@@ -303,21 +323,12 @@ describe('the split sync buttons (#1455)', () => {
       return { ok: true, json: async () => ({}) };
     });
     vi.stubGlobal('fetch', fetchMock);
-    (window as unknown as Record<string, unknown>).buildAutoSyncScheduleState = () => ({
-      playlists: [
-        { id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 },
-      ],
-      playlistSchedules: { '7': { automation_id: 1, hours: 24, enabled: true } },
-      weeklySchedules: {},
-      runHistory: [],
-    });
     (window as unknown as Record<string, unknown>).showToast = vi.fn();
   });
 
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
-    delete (window as unknown as Record<string, unknown>).buildAutoSyncScheduleState;
     delete (window as unknown as Record<string, unknown>).showToast;
   });
 

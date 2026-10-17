@@ -450,6 +450,12 @@ describe('Auto-Sync pipeline endpoints (auto-sync.js 2467-2497)', () => {
     expect(calls[0]).toMatchObject({ method: 'POST', body: { refresh_only: true } });
   });
 
+  it.each([false, true])('preserves the explicit skipWishlist choice: %s', async (skipWishlist) => {
+    stubFetch({ state: { status: 'running' } });
+    await runMirroredPipeline(7, { skipWishlist });
+    expect(calls[0]).toMatchObject({ method: 'POST', body: { skip_wishlist: skipWishlist } });
+  });
+
   it('status GETs, and the whole body IS the state', async () => {
     stubFetch({ status: 'finished', progress: 100 });
     await expect(fetchMirroredPipelineStatus(7)).resolves.toEqual({
