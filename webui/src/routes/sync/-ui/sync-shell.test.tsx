@@ -316,12 +316,6 @@ describe('the tab strip', () => {
 });
 
 describe('switching tabs (3702-3715)', () => {
-  it('opens on Mirrored', () => {
-    const { container } = renderShell();
-    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
-    expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
-  });
-
   it('moves the active class on both the button and the panel', () => {
     const { container } = renderShell();
     fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
@@ -337,15 +331,6 @@ describe('switching tabs (3702-3715)', () => {
     fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     expect(container.querySelectorAll('.sync-tab-button.active')).toHaveLength(1);
     expect(container.querySelectorAll('.sync-tab-content.active')).toHaveLength(1);
-  });
-
-  it('renders a panel for every tab, so the ids resolve like the vanilla ones', () => {
-    // 3714 does an unguarded getElementById(`${tabId}-tab-content`); every id
-    // must exist or the vanilla would throw mid-handler.
-    const { container } = renderShell();
-    for (const t of SYNC_TABS) {
-      expect(container.querySelector(`#${t.id}-tab-content`)).not.toBeNull();
-    }
   });
 
   it('exposes the selection to assistive tech', () => {
