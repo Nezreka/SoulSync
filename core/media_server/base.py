@@ -65,7 +65,9 @@ class MediaServerBase(MediaServerClient):
         Keys read by the worker:
           ``max_workers_cap``   upper bound on parallel workers (int)
           ``preparing_message`` phase text shown before the first fetch
-        Absent key means no constraint / no message."""
+          ``caches_listings``   the client keeps album/track listings on a
+                                process-wide cache the scan must clear
+        Absent key means no constraint / no message / no cache."""
         return {}
 
     def post_scan(self, database) -> bool:

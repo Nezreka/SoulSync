@@ -111,7 +111,8 @@ class NavidromeClient(MediaServerBase):
     })
 
     def scan_hints(self):
-        return {'preparing_message': 'Connecting to Navidrome server...'}
+        return {'preparing_message': 'Connecting to Navidrome server...',
+                'caches_listings': True}
 
     def post_scan(self, database) -> bool:
         """Merge same-path duplicate rows a rescan rekeyed. The pre-check and
