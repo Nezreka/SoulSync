@@ -64,6 +64,9 @@ export function WishlistPage() {
   const queryClient = useQueryClient();
 
   const [abReloadKey, setAbReloadKey] = useState(0);
+  // The audiobook search box lives in WishlistAudiobooks; the audio plays listed
+  // beneath it follow the same text.
+  const [abQuery, setAbQuery] = useState('');
 
   // Only one orb open at a time, matching the vanilla accordion which cleared
   // `.expanded` from every group before setting it on the clicked one.
@@ -149,8 +152,13 @@ export function WishlistPage() {
     [groups, search.q, search.failing],
   );
   const visibleRoutedGroups = useMemo(
-    () => filterWishlistGroups(routedGroups, search.q, search.failing),
-    [routedGroups, search.q, search.failing],
+    () =>
+      filterWishlistGroups(
+        routedGroups,
+        media === 'audiobooks' ? abQuery : search.q,
+        search.failing,
+      ),
+    [routedGroups, media, abQuery, search.q, search.failing],
   );
 
   const nebulaGroups = useMemo(() => {
@@ -381,8 +389,9 @@ export function WishlistPage() {
             key={abReloadKey}
             onClearAll={() => void onClearAudiobooks()}
             onSearchAlso={searchRouted}
+            onQueryChange={setAbQuery}
           />
-          {routedGroups.length > 0 && (
+          {routedGroups.length > 0 && (visibleRoutedGroups.length > 0 || !abQuery.trim()) && (
             <section className="wlp-routed" aria-label="Music releases filed as audiobooks">
               <h2 className="wlp-routed-title">Audio plays from the music search</h2>
               <p className="wlp-routed-note">
@@ -392,7 +401,7 @@ export function WishlistPage() {
               <WishlistList
                 groups={visibleRoutedGroups}
                 artistImages={artistImages}
-                filterActive={Boolean(search.q?.trim()) || search.failing}
+                filterActive={Boolean(abQuery.trim()) || search.failing}
                 onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
                 onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
                 onGrabArtist={onGrabArtist}

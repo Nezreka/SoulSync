@@ -82,8 +82,14 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 26;
 export function WishlistAudiobooks({
   onClearAll,
   onSearchAlso,
+  onQueryChange,
 }: {
   onClearAll?: () => void;
+  /**
+   * Reports the search box text, so the page can apply the same filter to the
+   * audio plays it lists below (they are not part of this list).
+   */
+  onQueryChange?: (query: string) => void;
   /**
    * Also search whatever else is filed as an audiobook but wanted elsewhere (audio
    * plays from the music search). Resolves to a sentence for the notice, or ''.
@@ -96,6 +102,9 @@ export function WishlistAudiobooks({
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AudiobookWishlistStatus | 'all'>('all');
   const [query, setQuery] = useState('');
+  useEffect(() => {
+    onQueryChange?.(query);
+  }, [query, onQueryChange]);
   const [searching, setSearching] = useState(false);
   const [searchingAsin, setSearchingAsin] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
