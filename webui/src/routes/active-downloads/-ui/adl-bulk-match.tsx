@@ -11,7 +11,13 @@ import { useEffect, useRef, useState } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 
-import { AdlMatchModal, guessMatch, type MatchTarget, type PickedMatch } from './adl-match-modal';
+import {
+  AdlMatchModal,
+  guessMatch,
+  initials,
+  type MatchTarget,
+  type PickedMatch,
+} from './adl-match-modal';
 import styles from './adl-match.module.css';
 
 type RowStatus = 'guessing' | 'ready' | 'none' | 'importing' | 'done' | 'failed';
@@ -26,15 +32,6 @@ interface Row {
 
 /** guesses run a few at a time: each is a catalogue search */
 const GUESS_CONCURRENCY = 3;
-
-function initials(text: string): string {
-  return text
-    .split(/\s+/)
-    .filter((w) => /^[A-Za-z0-9]/.test(w))
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase())
-    .join('');
-}
 
 export function AdlBulkMatchModal({
   targets,
