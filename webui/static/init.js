@@ -409,7 +409,17 @@ async function bootstrapServerAppearanceSettings() {
     }
 }
 
-bootstrapServerAppearanceSettings();
+// runs from setCurrentProfile, admins only. /api/settings is admin-only, so a
+// member's boot fetch was a guaranteed 403, and those 4xx bursts get members
+// banned by crowdsec / fail2ban (#1763). members lose nothing: the page
+// template already injects the same appearance values.
+let _serverAppearanceBootstrapped = false;
+function bootstrapServerAppearanceForAdmin(profile) {
+    if (_serverAppearanceBootstrapped || !profile) return;
+    if (!(profile.is_admin || profile.id === 1)) return;
+    _serverAppearanceBootstrapped = true;
+    bootstrapServerAppearanceSettings();
+}
 
 // ── Password-manager autofill suppression ──────────────────────────────
 // Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
@@ -510,6 +520,8 @@ function setCurrentProfile(profile) {
     // mirrored (the window._socketConnected pattern). The dashboard's
     // hello strip greets by it.
     window._currentProfileName = (profile && profile.name) || '';
+    window.SoulSyncProfileGate?.setProfile(profile);
+    bootstrapServerAppearanceForAdmin(profile);
     updateProfileIndicator();
     notifyProfileContextChanged();
 }
@@ -755,6 +767,8 @@ async function initProfileSystem() {
         return false; // App init deferred until profile selected
     } catch (e) {
         console.error('Profile init error:', e);
+        // no profile to judge by: let gated api calls through as before
+        window.SoulSyncProfileGate?.setProfile(null);
         return true; // Fall through to normal init
     }
 }

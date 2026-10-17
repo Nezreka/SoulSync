@@ -12562,6 +12562,10 @@
     <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
          so all frameworks share one wire request per identical GET burst. -->
     <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
+    <!-- profile-api-gate: answers api calls this profile can't have with a local
+         403, so a member's page load doesn't send a burst of 4xx (#1763). after
+         fetch-dedupe so refused calls never reach it. -->
+    <script src="{{ url_for('static', filename='profile-api-gate.js', v=static_v) }}"></script>
     <!-- scrollbar-fade: toggles .is-scrolling on whatever element is scrolling
          so scrollbars.css section 4 can brighten/fade thumbs. Standalone,
          dependency-free, safe to load before every other module. -->
