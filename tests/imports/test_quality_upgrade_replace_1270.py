@@ -330,3 +330,36 @@ def test_real_encoded_mp3_128_is_replaced_by_mp3_320(import_case, monkeypatch):
     assert c.context.get("_pipeline_import_succeeded"), c.context.get("_context_failure_msg")
     assert real_quality_probe(str(c.existing)).bitrate == 320
     assert not c.incoming.exists()
+
+
+# SeadogsBooty: importing albums you already own. the library check can't
+# always prove it's the same track, so the file reaches the pipeline, which
+# finds it already at its library path and keeps that copy. that outcome has
+# to be told apart from a failure, or every track of the album "fails".
+
+
+def test_kept_library_copy_on_replace_lower_is_flagged(import_case):
+    c = import_case
+    c.context["track_info"].pop("source_info")
+    c.profile["replace_lower_quality"] = True
+    c.new_quality = c.old_quality
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+    assert c.incoming.exists(), "the staged copy is left where it was"
+    assert pipeline.kept_existing_library_file(c.context)
+    assert pipeline.import_rejection_reason(c.context) is None
+
+
+def test_kept_tagged_library_copy_is_flagged(import_case):
+    c = import_case
+    c.context["track_info"].pop("source_info")
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+    assert pipeline.kept_existing_library_file(c.context)
+
+
+def test_a_real_upgrade_is_not_flagged_as_kept(import_case):
+    c = import_case
+    c.run()
+    assert c.existing.read_bytes() == b"better audio"
+    assert not pipeline.kept_existing_library_file(c.context)

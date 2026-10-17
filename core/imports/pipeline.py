@@ -368,6 +368,14 @@ def import_rejection_reason(context: dict) -> str | None:
     return None
 
 
+def kept_existing_library_file(context: dict) -> bool:
+    """the pipeline found this track already at its library path and left
+    that copy alone (not an improvement, or already tagged). nothing was
+    imported, but nothing went wrong either: for an import that means
+    "already in library", not a failure and not a fresh import."""
+    return bool(context.get('_kept_existing_library_file'))
+
+
 def build_import_pipeline_runtime(
     *,
     automation_engine: Any | None = None,
@@ -1544,6 +1552,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     reason = 'Incoming file is not a verified improvement under the quality profile'
                     logger.info("[Protection] %s: %s", reason, existing_path)
                     context['_context_failure_msg'] = reason
+                    context['_kept_existing_library_file'] = True
                     return
             if upgrade_original and os.path.normpath(upgrade_original) != os.path.normpath(final_path):
                 if not _replacement_length_is_safe(upgrade_original, file_path):
@@ -1617,6 +1626,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         context['_pipeline_import_succeeded'] = not os.path.exists(file_path)
                         if not context['_pipeline_import_succeeded']:
                             context['_context_failure_msg'] = 'could not remove redundant import source'
+                        context['_kept_existing_library_file'] = True
                         return
                 elif is_enhance_download or force_replace:
                     if is_enhance_download:
