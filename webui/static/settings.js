@@ -3105,6 +3105,7 @@ async function loadSettingsData() {
                 ? defaultPodcastPath
                 : (currentPodcastsVal || defaultPodcastPath);
         }
+        loadAudiobookRoutes();
         const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
         const audiobooksEl = document.getElementById('audiobooks-path');
         if (audiobooksEl) {
@@ -5530,6 +5531,69 @@ function renderSamplePaths(paths) {
     container.querySelectorAll('.sample-path-input').forEach(input => {
         input.addEventListener('change', () => { if (typeof debouncedAutoSaveSettings === 'function') debouncedAutoSaveSettings(); });
     });
+}
+
+// --- Spoken-word artists: music downloads filed in the audiobook library ---
+// The artist page and watchlist own the toggle (React); this is only the list.
+
+async function loadAudiobookRoutes() {
+    const list = document.getElementById('audiobook-routes-list');
+    if (!list) return;
+    try {
+        const { artists = [] } = await (await fetch('/api/audiobook-routes')).json();
+        list.innerHTML = artists.length
+            ? artists.map(a => `<div class="abr-row"><span>${escapeHtml(a.label || a.route_key)}</span>
+                <button class="test-button" type="button" data-route="${escapeHtml(a.route_key)}" data-action="move">Move existing…</button>
+                <button class="test-button abr-remove" type="button" data-route="${escapeHtml(a.route_key)}" data-action="remove">&times;</button></div>`).join('')
+            : '<div class="abr-empty">No artists routed. Use “Treat as audiobook” on an artist’s page.</div>';
+        list.onclick = e => {
+            const btn = e.target.closest('button[data-action]');
+            if (btn) audiobookRouteAction(btn.dataset.action, btn.dataset.route);
+        };
+    } catch (e) {
+        list.textContent = 'Could not load the list.';
+    }
+}
+
+async function audiobookRouteAction(action, key) {
+    const url = '/api/audiobook-routes/' + encodeURIComponent(key);
+    const call = (path, init) => fetch(url + path, init).then(async r => {
+        const data = await r.json();
+        if (!data.success) throw new Error(data.error || 'failed');
+        return data;
+    });
+    const post = apply => call('/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply }),
+    });
+    try {
+        if (action === 'remove') {
+            await call('', { method: 'DELETE' });
+            await loadAudiobookRoutes();
+            return;
+        }
+        const items = (await post(false)).items || [];
+        const todo = items.filter(i => i.action === 'move').length;
+        const clash = items.filter(i => i.action === 'exists').length;
+        if (!todo) {
+            showToast(clash ? `Nothing to move: ${clash} album(s) already exist in the audiobook folder.`
+                            : 'No albums of this artist in the music library.', 'info');
+            return;
+        }
+        if (!await showConfirmDialog({
+            title: 'Move albums',
+            message: `Move ${todo} album folder(s) from the music library to the audiobook folder? `
+                + `${clash ? `${clash} album(s) already exist there and stay as they are. ` : ''}`
+                + 'Your media server needs a library scan afterwards.',
+            confirmText: 'Move',
+        })) return;
+        const done = await post(true);
+        showToast(`Moved ${done.moved} album(s)` + (done.failed ? `, ${done.failed} failed` : ''),
+                  done.failed ? 'error' : 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
 }
 
 function addSamplePathRow() {

@@ -1465,11 +1465,17 @@ describe('the run-history pure core (1574-1882)', () => {
         sync_skipped: null,
         wishlist_queued: '',
         tracks_discovered: 'completed',
+        // ...except sync errors: a clean run carries no error pill.
+        sync_errors: '0',
       }),
     ).toEqual([
       { label: 'Refreshed', value: '1' },
       // Zero is a real count and stays.
       { label: 'Synced', value: '0' },
+    ]);
+    expect(autoSyncHistoryResultPills({ tracks_synced: '0', sync_errors: '1' })).toEqual([
+      { label: 'Synced', value: '0' },
+      { label: 'Sync errors', value: '1' },
     ]);
     expect(autoSyncHistoryResultPills({})).toEqual([]);
   });

@@ -1076,6 +1076,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
 
+            # Artists whose music downloads are filed in the audiobook library
+            # instead (core/audiobook_routing.py). Keyed on the normalized
+            # artist name: every download path knows the artist, none of them
+            # reliably knows the playlist.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_routes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL DEFAULT 'artist',
+                    route_key TEXT NOT NULL,
+                    label TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(kind, route_key)
+                )
+            """)
+
             # #652 again. the "don't pick this same bad upload again" list used
             # to be built by reading the sidecars sitting in ss_quarantine. so
             # the review queue WAS the blocklist, and emptying the queue (approve,
@@ -11144,7 +11159,7 @@ class MusicDatabase:
             logger.debug(f"artist presence probe failed for {forms}: {e}")
             return forms
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -11430,12 +11445,59 @@ class MusicDatabase:
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
+            # Only callers that ask "do we already have this file" opt in. A sync
+            # asks "is it on the media server", and a ``routed:`` id means nothing there.
+            if include_downloads:
+                routed = self._routed_download_match(title, artist, confidence_threshold)
+                if routed is not None:
+                    return routed
+
             logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
             
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
+
+    def _routed_download_match(self, title: str, artist: str, confidence_threshold: float):
+        """Ownership for artists routed to the audiobook library.
+
+        Their files never reach the media server's library, so the ``tracks``
+        table can't know them and every sync would fetch them again. The
+        download ledger can: a completed download whose file still exists
+        counts as owned. Returns ``(track, confidence)`` or None.
+        """
+        from core.audiobook_routing import existing_download_path, is_routed_artist, route_key
+        if not is_routed_artist(artist, self):
+            return None
+        key = route_key(artist)
+        from core.library2.sql_util import ambient_scope, owner_clause
+        ownership = owner_clause(ambient_scope(), column='f.owner_profile_id')
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT DISTINCT d.id, d.file_path, d.track_title, d.track_artist, d.track_album "
+                "FROM track_downloads d LEFT JOIN lib2_track_files f ON f.path=d.file_path "
+                "WHERE d.status = 'completed' AND d.file_path IS NOT NULL "
+                "AND d.track_artist IS NOT NULL "
+                "AND (f.id IS NULL OR COALESCE(f.file_state,'active')<>'deleted')"
+                + ownership).fetchall()
+        best, best_confidence = None, 0.0
+        for row in rows:
+            if route_key(row['track_artist']) != key:
+                continue
+            candidate = DatabaseTrack(
+                id=f"routed:{row['id']}", album_id=None, artist_id=None,
+                title=row['track_title'] or '', file_path=row['file_path'])
+            candidate.artist_name = row['track_artist']
+            candidate.album_title = row['track_album'] or ''
+            confidence = self._calculate_track_confidence(title, artist, candidate)
+            if confidence <= best_confidence or confidence < confidence_threshold:
+                continue
+            found = existing_download_path(row['file_path'])
+            if found:
+                candidate.file_path = found
+                best, best_confidence = candidate, confidence
+        return (best, best_confidence) if best else None
     
     def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
         """
@@ -14624,6 +14686,49 @@ class MusicDatabase:
     # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
     # user-cancelled tracks are not auto-re-queued. All methods fail-open
     # (an error here must never block a legitimate wishlist add).
+
+    def has_audiobook_route(self, kind: str, route_key: str) -> bool:
+        """True when this artist/key is routed to the audiobook library."""
+        with self._get_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT 1 FROM audiobook_routes WHERE kind = ? AND route_key = ? LIMIT 1",
+                (kind, route_key)).fetchone()
+        return row is not None
+
+    def add_audiobook_route(self, kind: str, route_key: str, label: str = "") -> bool:
+        """Route a key to the audiobook library. Re-adding refreshes the label."""
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute(
+                    "INSERT INTO audiobook_routes (kind, route_key, label) VALUES (?, ?, ?) "
+                    "ON CONFLICT(kind, route_key) DO UPDATE SET label = excluded.label",
+                    (kind, route_key, label or ""))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def remove_audiobook_route(self, kind: str, route_key: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM audiobook_routes WHERE kind = ? AND route_key = ?",
+                    (kind, route_key))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def list_audiobook_routes(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT kind, route_key, label, created_at FROM audiobook_routes "
+                "ORDER BY label COLLATE NOCASE, route_key")
+            return [dict(zip([c[0] for c in cursor.description], row, strict=True)) for row in cursor.fetchall()]
 
     def add_to_wishlist_ignore(self, track_id: str, track_name: str = "",
                                artist_name: str = "", reason: str = "removed",

@@ -822,15 +822,26 @@ class PlaylistSyncService:
                         self._resolve_mirrored_server_playlist_id(
                             playlist, server_type, media_client, profile_id)
 
-                if not sync_success:
-                    return self._create_error_result(playlist.name, [
-                        f"{server_type.title()} playlist write failed or could not be verified; sync is incomplete. Check the server connection and run a library scan."
-                    ])
-                synced_tracks = len(plex_tracks)
+                if sync_success:
+                    synced_tracks = len(plex_tracks)
+                else:
+                    # The write failed, the matching did not. Returning early
+                    # here used to report 0 matched for the run (the dashboard
+                    # read "0% in library" against 2652 owned) and skipped the
+                    # wishlist for every missing track. Keep the counts, record
+                    # the failure, and still wishlist what is missing.
+                    write_error = (
+                        f"{server_type.title()} playlist write failed or could not be verified; "
+                        "sync is incomplete. Check the server connection and run a library scan."
+                    )
+                    logger.error("Playlist '%s': %s", playlist.name, write_error)
+                    errors.append(write_error)
+                    synced_tracks = 0
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
-            
-            self._update_progress(playlist.name, "Sync completed", "", 100, 5, 5,
+
+            self._update_progress(playlist.name,
+                                "Sync completed" if not errors else "Playlist write failed", "", 100, 5, 5,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks,

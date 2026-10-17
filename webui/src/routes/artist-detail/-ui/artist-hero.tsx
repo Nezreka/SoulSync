@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { StreamCounts } from '../-artist-detail.completion';
@@ -452,6 +453,12 @@ export function ArtistHero({
                 {watchlistBusy ? 'Loading...' : watching ? 'Watching...' : 'Add to Watchlist'}
               </span>
             </button>
+            {artist.name ? (
+              <AudiobookRouteToggle
+                name={String(artist.name)}
+                className="library-artist-watchlist-btn"
+              />
+            ) : null}
             {/* Only shown when there is something to download. */}
             <div
               className="discog-download-wrap"

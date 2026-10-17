@@ -19,6 +19,7 @@ import {
 } from 'react';
 
 import { DialogFrame, DialogHeader } from '@/components/dialog';
+import { AudiobookRouteToggle } from '@/features/audiobook-routes/audiobook-route-toggle';
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { thumb } from '@/platform/artwork-thumb';
 import { getShellBridge } from '@/platform/shell/bridge';
@@ -6726,11 +6727,17 @@ function CatalogueArtistHero({
             📻 Artist Radio
           </button>
           {downloadAction}
+          <NativeAudiobookRouteToggle name={artist.name} />
           <ArtistAliases artistId={artist.id} artistName={artist.name} />
         </>
       }
     />
   );
+}
+
+function NativeAudiobookRouteToggle({ name }: { name: string }) {
+  const canWrite = useLibraryV2CanWrite();
+  return canWrite ? <AudiobookRouteToggle name={name} /> : null;
 }
 
 function ArtistDetailView({ artistId }: { artistId: number }) {
@@ -7093,6 +7100,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   </h1>
                   {headerToggle}
                   {downloadAction}
+                  <NativeAudiobookRouteToggle name={artist.name} />
                 </div>
                 <p className={styles.subtitle}>
                   {artist.album_count} albums · {artist.single_count} singles

@@ -19,18 +19,31 @@ def _request(client, endpoint, params=None):
     return client._make_request(endpoint, params, timeout=(3.05, 10))
 
 
-def _scan_stamp(client):
-    response = _request(client, 'getScanStatus')
-    state = (response or {}).get('scanStatus')
-    if not isinstance(state, dict) or state.get('scanning') is not False:
-        raise IdentityError('Navidrome scan state is unavailable or a scan is running')
-    return state.get('count')
+# How long a playlist write waits out a running library scan. Downloads
+# trigger scans, so a pipeline that just fetched tracks routinely reaches its
+# write mid-scan; refusing outright threw away a whole sync's matching.
+PLAYLIST_WRITE_SCAN_WAIT = 180
+_SCAN_POLL_SECONDS = 5
 
 
-def read_inventory(client, page_size=500):
+def _scan_stamp(client, wait=0):
+    """The scan counter once Navidrome is idle. ``wait`` seconds of polling
+    ride out a running (or briefly unreachable) scan before giving up."""
+    deadline = time.monotonic() + wait
+    while True:
+        response = _request(client, 'getScanStatus')
+        state = (response or {}).get('scanStatus')
+        if isinstance(state, dict) and state.get('scanning') is False:
+            return state.get('count')
+        if time.monotonic() >= deadline:
+            raise IdentityError('Navidrome scan state is unavailable or a scan is running')
+        time.sleep(_SCAN_POLL_SECONDS)
+
+
+def read_inventory(client, page_size=500, scan_wait=0):
     """A fresh, complete OpenSubsonic search3 inventory; never return partial data."""
+    before = _scan_stamp(client, wait=scan_wait)
     deadline = time.monotonic() + 60
-    before = _scan_stamp(client)
     songs = {}
     offset = 0
     while offset < 1000000:
@@ -321,7 +334,8 @@ def validated_playlist_write(method):
                           or (t.get('id', '') if isinstance(t, dict) else '')) for t in tracks}
             # An unchanged/subset playlist already supplies live song evidence.
             # Only new or stale IDs require a complete catalogue read.
-            songs = current if wanted <= current.keys() else read_inventory(client)
+            songs = (current if wanted <= current.keys()
+                     else read_inventory(client, scan_wait=PLAYLIST_WRITE_SCAN_WAIT))
             skipped = []
             tracks = resolve_tracks(tracks, songs, get_database(), skipped)
             expected = {str(t.ratingKey) for t in tracks}

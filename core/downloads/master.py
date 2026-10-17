@@ -327,7 +327,7 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
         for artist in artists:
             db_track, track_confidence = db.check_track_exists(
                 track_name, _artist_name_of(artist), confidence_threshold=0.7,
-                server_source=active_server, album=fallback_album,
+                server_source=active_server, album=fallback_album, include_downloads=True,
             )
             if db_track and track_confidence >= 0.7:
                 # Re-release gate (5BILLION round 3): the hit came from the
@@ -347,7 +347,7 @@ def match_track_in_library(db, track_data, *, album_tracks_map, album_context,
     for artist in artists:
         db_track, track_confidence = db.check_track_exists(
             track_name, _artist_name_of(artist), confidence_threshold=0.7,
-            server_source=active_server,
+            server_source=active_server, include_downloads=True,
         )
         if db_track and track_confidence >= 0.7:
             return True, track_confidence, db_track

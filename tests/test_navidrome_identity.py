@@ -54,6 +54,23 @@ def test_inventory_rejects_scanning():
     assert client._make_request.call_count == 1
 
 
+def test_playlist_write_waits_out_a_running_scan(monkeypatch):
+    """A scan running when the write starts (downloads trigger them) is waited
+    out, not a refusal that throws the whole sync away."""
+    import core.library.navidrome_identity as identity
+    monkeypatch.setattr(identity.time, 'sleep', lambda s: None)
+    client, current, writes = _server(monkeypatch)
+    request = client._make_request
+    scans = iter([True, True])
+    def scanning_at_first(endpoint, params=None, timeout=None):
+        if endpoint == 'getScanStatus' and next(scans, False):
+            return {'scanStatus': {'scanning': True, 'count': 1}}
+        return request(endpoint, params, timeout)
+    client._make_request = scanning_at_first
+    assert client.create_playlist(name='P', tracks=[SimpleNamespace(ratingKey='old')], playlist_id='pl')
+    assert current == ['new']
+
+
 def test_resolve_stale_id_by_unique_exact_path():
     db = _old_db('/music/song.opus')
     result = resolve_tracks([SimpleNamespace(ratingKey='old')], {'new': {'id': 'new', 'title': 'Song', 'path': '/music/song.opus'}}, db)

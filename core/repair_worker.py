@@ -201,6 +201,7 @@ JOB_CATEGORIES = {
     # Filling gaps in what you own, rather than repairing what you have.
     'monitored_discography_refresh': 'Collection gaps',
     'album_catalogue_backfill': 'Collection gaps',
+    'album_completeness': 'Collection gaps',
     'album_edition_review': 'Tags & metadata',
     'native_duplicate_detector': 'Files & storage',
     'cache_evictor': 'System',
@@ -1387,6 +1388,7 @@ class RepairWorker:
                     'status': 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished',
                     'scanned': result.scanned,
                     'findings_created': result.findings_created,
+                    'run_status': run_status,
                     'errors': result.errors})
             except Exception:   # noqa: BLE001 - events never disturb the scan
                 logger.debug("repair scan event emit failed", exc_info=True)

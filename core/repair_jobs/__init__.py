@@ -35,6 +35,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'skip_audit_cleanup': 'lib2',
     'monitored_discography_refresh': 'lib2',
     'album_catalogue_backfill': 'lib2',
+    'album_completeness': 'lib2',
     'album_edition_review': 'lib2',
     'native_duplicate_detector': 'lib2',
     'audio_corruption_detector': 'lib2',
@@ -105,6 +106,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
     'album_catalogue_backfill': frozenset({'metadata', 'artwork', 'discography', 'wanted'}),
     'album_edition_review': frozenset({'observe', 'metadata', 'wanted'}),
+    'album_completeness': frozenset({'metadata', 'artwork', 'discography', 'wanted'}),
     'native_duplicate_detector': frozenset({'observe', 'metadata', 'delete', 'wanted'}),
     'audio_corruption_detector': frozenset({'observe', 'delete', 'wanted'}),
     'monitoring_list_reconcile': frozenset({'wanted'}),
@@ -153,7 +155,6 @@ RETIRED_JOB_IDS = frozenset({
     'quality_upgrade',
     'discography_backfill',
     'duplicate_detector',
-    'album_completeness',
     # NOT 'library_reorganize': unlike the other entries here, nothing native
     # regenerates its 'path_mismatch' findings (core.library2.maintenance_sync
     # .sync_repair_change only mirrors lib2 file/path state under this same
@@ -274,6 +275,7 @@ _JOB_MODULES = [
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
     'core.repair_jobs.album_catalogue_backfill',
+    'core.repair_jobs.album_completeness',
     'core.repair_jobs.monitoring_list_reconcile',
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.library_reorganize',

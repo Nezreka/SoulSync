@@ -75,3 +75,27 @@ def test_a_user_cancel_is_still_cancelled(tmp_path):
     w._jobs['quality_upgrade'].scan = scan
     w._run_job('quality_upgrade', forced=True)
     assert _last_run(w)[0] == 'cancelled'
+
+
+def test_scan_completion_event_reports_actual_run_status(tmp_path):
+    """Automation events must distinguish completed and stopped scans."""
+    for stopped_early, expected_status in [
+        ('', 'completed'),
+        ('Provider rate limit reached', 'stopped'),
+    ]:
+        result = JobResult(scanned=10, stopped_early=stopped_early)
+        worker, _ = _worker(tmp_path, result)
+
+        events = []
+        worker._event_emit = lambda name, data: events.append((name, data))
+
+        worker._run_job('quality_upgrade', forced=True)
+
+        matching = [
+            data for name, data in events
+            if name == 'music_repair_scan_completed'
+        ]
+
+        assert len(matching) == 1
+        assert matching[0]['run_status'] == expected_status
+        assert matching[0]['errors'] == 0

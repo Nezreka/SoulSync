@@ -314,6 +314,10 @@ def transfer_root_for_context(context) -> str:
     decide, and with neither it is the configured transfer folder -- which is
     every download on an install without own directories.
     """
+    from core.audiobook_routing import routed_root_for_context
+    routed = routed_root_for_context(context)
+    if routed:
+        return routed
     owner = import_owner_id(context)
     if owner is None:
         # a profile whose own library the media server cannot isolate lands in

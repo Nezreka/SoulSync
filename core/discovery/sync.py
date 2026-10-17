@@ -52,6 +52,8 @@ class SyncDeps:
     process_wishlist_automatically: Callable[..., Any] | None = None
     run_playlist_organize_download: Callable[..., Any] | None = None
     is_wishlist_actually_processing: Callable[[], bool] | None = None
+    # Drops a playlist's stored smart-skip fingerprint after a failed sync.
+    invalidate_sync_fingerprint: Callable[[str], None] | None = None
 
 
 def _post_sync_automation_followup(
@@ -357,6 +359,24 @@ def _record_library_membership(tracks_json, match_details) -> None:
             logger.info(f"[Sync] Recorded library membership for {written} mirrored tracks")
     except Exception as e:  # noqa: BLE001 - never fail a completed sync over bookkeeping
         logger.warning(f"Failed to record library membership: {e}")
+
+def _fingerprint_sync_id(playlist_id, resync_entry_id):
+    """The sync id a scheduled run reads this playlist's fingerprint under.
+
+    A re-sync from history runs as ``resync_<entry>_<ts>``, but the scheduled
+    run checks the playlist's own id (``auto_mirror_<id>``), recorded on the
+    history entry. Falls back to ``playlist_id`` when that can't be read."""
+    if not resync_entry_id:
+        return playlist_id
+    try:
+        from database.music_database import MusicDatabase
+        entry = MusicDatabase().get_sync_history_entry(resync_entry_id)
+        if entry and entry.get('playlist_id'):
+            return str(entry['playlist_id'])
+    except Exception as e:  # noqa: BLE001 - bookkeeping must never fail a sync
+        logger.debug("resync fingerprint lookup failed: %s", e)
+    return playlist_id
+
 
 def _sync_is_user_playlist(playlist_id, profile_id) -> bool:
     """True when the synced mirror is a user-made playlist (source 'soulsync').
@@ -686,8 +706,11 @@ def run_sync_task(
             ]
             if unmatched_summary:
                 result_dict['unmatched_tracks'] = unmatched_summary
-        sync_errors = getattr(result, 'errors', None) or []
-        sync_error = '; '.join(str(error) for error in sync_errors)
+        # A result carrying errors did not reach the server (a refused or
+        # unverified playlist write). It used to land as "finished" with
+        # 0 matched, so the pipeline counted it as a clean sync.
+        sync_errors = [str(e) for e in (getattr(result, 'errors', None) or [])]
+        sync_error = '; '.join(sync_errors)
         with sync_lock:
             current_status = sync_states.get(playlist_id, {}).get("status")
             if current_status == "cancelled":
@@ -700,9 +723,11 @@ def run_sync_task(
                 "result": result_dict
             }
             if sync_errors:
-                sync_states[playlist_id]['error'] = sync_error
-        logger.info(f"Sync {'failed' if sync_errors else 'finished'} for {playlist_id} - state updated")
-
+                sync_states[playlist_id]["error"] = '; '.join(sync_errors)
+        if sync_errors:
+            logger.warning(f"Sync for {playlist_id} ended with errors: {'; '.join(sync_errors)}")
+        else:
+            logger.info(f"Sync finished for {playlist_id} - state updated")
         # Set playlist poster image if available (Plex, Jellyfin, Emby).
         # Don't log the URL itself — it may carry an auth token (Plex
         # X-Plex-Token / Jellyfin X-Emby-Token / Subsonic auth) that we
@@ -821,6 +846,9 @@ def run_sync_task(
                     automation_id, status='error', progress=100, phase='Error',
                     log_line=f'Sync failed: {sync_error}', log_type='error',
                 )
+            if deps.invalidate_sync_fingerprint:
+                deps.invalidate_sync_fingerprint(
+                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
             return
 
         # Record which tracks are actually IN THE LIBRARY, per track.
@@ -844,13 +872,20 @@ def run_sync_task(
             total = getattr(result, 'total_tracks', 0)
             failed = getattr(result, 'failed_tracks', 0)
             wishlist_added = getattr(result, 'wishlist_added_count', 0) or 0
-            deps.update_automation_progress(automation_id, status='finished', progress=100,
-                phase='Sync complete',
-                log_line=(
-                    f'Done: {matched}/{total} in library, {failed} missing'
-                    + (f', {wishlist_added} added to wishlist' if wishlist_added else '')
-                ),
-                log_type='success')
+            summary = (
+                f'{matched}/{total} in library, {failed} missing'
+                + (f', {wishlist_added} added to wishlist' if wishlist_added else '')
+            )
+            if sync_errors:
+                deps.update_automation_progress(automation_id, status='error', progress=100,
+                    phase='Sync failed',
+                    log_line=f'Sync failed ({summary}): {"; ".join(sync_errors)}',
+                    log_type='error')
+            else:
+                deps.update_automation_progress(automation_id, status='finished', progress=100,
+                    phase='Sync complete',
+                    log_line=f'Done: {summary}',
+                    log_type='success')
             _post_sync_automation_followup(
                 deps,
                 automation_id=automation_id,

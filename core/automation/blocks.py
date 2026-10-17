@@ -149,8 +149,8 @@ TRIGGERS: list[dict] = [
     {"type": "music_repair_scan_completed", "label": "Maintenance Scan Done", "icon": "tool",
      "description": "When a Library Maintenance job finishes a scan", "available": True,
      "has_conditions": True,
-     "condition_fields": ["job_id", "status"],
-     "variables": ["job_id", "job_name", "status", "scanned", "findings_created", "errors"]},
+     "condition_fields": ["job_id", "status", "run_status"],
+     "variables": ["job_id", "job_name", "status", "run_status", "scanned", "findings_created", "errors"]},
     # Signal trigger
     {"type": "signal_received", "label": "Signal Received", "icon": "zap", "scope": "both",
      "description": "When another automation fires a named signal", "available": True,
@@ -412,6 +412,14 @@ ACTIONS: list[dict] = [
      "description": "Full library comparison without losing enrichment data", "available": True},
     {"type": "run_script", "label": "Run Script", "icon": "terminal", "scope": "both",
      "description": "Execute a script from the scripts folder", "available": True},
+    {"type": "complete_incomplete_albums", "label": "Complete Incomplete Albums", "icon": "disc",
+     "description": "Monitor missing tracks in owned albums. The existing Wanted/Wishlist pipeline handles downloads. Requires Album Completeness to be enabled in Tools.",
+     "available": True, "scope": "music",
+     "config_fields": [
+         {"key": "max_albums", "type": "number", "label": "Maximum albums per run", "default": 3},
+         {"key": "target_album_id", "type": "text", "label": "Target Library Album ID (optional)",
+          "placeholder": "Native catalogue ID, e.g. lib2:42; blank checks eligible albums"}
+     ]},
     {"type": "search_and_download", "label": "Search & Download", "icon": "download",
      "description": "Search for a track and download the best match", "available": True,
      "config_fields": [

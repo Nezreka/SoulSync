@@ -75,6 +75,24 @@ function renderArtist(entry: string) {
 
 /** ldp-03/ldp-04/ldp-05 on an artist that IS in the catalogue. */
 describe('Library V2 artist detail — All Releases views', () => {
+  it.each(['/library?artist=1', '/library?artist=1&header=rich'])(
+    'offers audiobook routing on the native artist header: %s',
+    async (entry) => {
+      server.use(
+        http.get('/api/audiobook-routes', () =>
+          HttpResponse.json({ success: true, artists: [], audiobook_folder_configured: true }),
+        ),
+        http.post('/api/audiobook-routes/check', () =>
+          HttpResponse.json({ success: true, routed: [] }),
+        ),
+      );
+      renderArtist(entry);
+      expect(
+        await screen.findByRole('button', { name: /Treat as audiobook/i }),
+      ).toBeInTheDocument();
+    },
+  );
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(
