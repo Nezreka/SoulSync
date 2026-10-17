@@ -940,6 +940,24 @@ class PlaylistSyncService:
                         except Exception as _drop_err:  # noqa: BLE001 - bookkeeping
                             logger.warning(
                                 "dead-match cache drop failed: %s", _drop_err)
+                        # the library row has to go too. only a deep scan
+                        # clears rows for songs the server lost, so it stays
+                        # behind and the wishlist's owned-track sweep sees it
+                        # and pulls the track right back off the wishlist.
+                        # same delete the deep scan does.
+                        try:
+                            from database.music_database import MusicDatabase as _MDB
+                            _gone = _MDB().delete_stale_tracks(
+                                {str(getattr(r.plex_track, 'ratingKey', ''))
+                                 for r in _dead_results}, server_type)
+                            if _gone:
+                                logger.info(
+                                    "Playlist '%s': removed %d library row(s) for "
+                                    "songs the server no longer has",
+                                    playlist.name, _gone)
+                        except Exception as _row_err:  # noqa: BLE001 - bookkeeping
+                            logger.warning(
+                                "dead library row cleanup failed: %s", _row_err)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
 
