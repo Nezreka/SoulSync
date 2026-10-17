@@ -145,7 +145,7 @@ def hermetic(monkeypatch):
     monkeypatch.setattr(library_check, "_library_file_has_metadata", lambda _p: True)
 
 
-def _reidentify_into(tmp_path, library, kept_path, old_path):
+def _reidentify_into(tmp_path, library, kept_path, old_path, callback=None):
     """run one staged copy through _process_matches with a pipeline that keeps
     the library copy at ``kept_path``, then finalize the hint like the worker
     does. returns the import status."""
@@ -163,7 +163,7 @@ def _reidentify_into(tmp_path, library, kept_path, old_path):
         ctx["_context_failure_msg"] = "Incoming file is not a verified improvement under the quality profile"
         ctx["_kept_existing_library_file"] = True
 
-    w = _worker(tmp_path, db_path=library, callback=_keeps)
+    w = _worker(tmp_path, db_path=library, callback=callback or _keeps)
     from tests.imports.test_auto_import_library_precheck import _Candidate
     cand = _Candidate(path=str(staged), name=staged.name, audio_files=[str(staged)], is_single=True)
     ident = {"source": "deezer", "artist_name": "Canon", "artist_id": "a", "album_name": "Loose Canon, Vol. 2",
@@ -218,3 +218,27 @@ def test_a_different_copy_already_in_the_release_still_replaces_the_old_one(tmp_
     assert not old.exists()
     rows, _ = _rows(library)
     assert rows == []
+
+
+def test_an_exact_id_owned_skip_keeps_the_file_too(tmp_path, library, monkeypatch):
+    """the library check can skip the copy as owned before the pipeline runs
+    (exact id pairing, same release title). the copy it found is the
+    original, so replace must not delete it."""
+    from core.imports import library_check
+
+    lib = tmp_path / "Music" / "Canon" / "Canon - Loose Canon, Vol. 2" / "02 - Motivation.mp3"
+    lib.parent.mkdir(parents=True)
+    lib.write_bytes(b"the only copy")
+    monkeypatch.setattr(library_check, "check_track_library_status", lambda *a, **k: {
+        "decision": library_check.DECISION_SKIP_OWNED, "reason": "already in the library",
+        "library_path": str(lib)})
+
+    def _never(*_a):
+        raise AssertionError("a skipped track never reaches the pipeline")
+
+    assert _reidentify_into(tmp_path, library, kept_path=lib, old_path=lib, callback=_never) == "completed"
+
+    assert lib.read_bytes() == b"the only copy"
+    rows, hint_status = _rows(library)
+    assert rows == [9]
+    assert hint_status == "consumed"

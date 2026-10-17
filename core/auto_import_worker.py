@@ -2213,6 +2213,10 @@ class AutoImportWorker:
                 gate = {'decision': 'uncertain', 'reason': 'library check failed — imported'}
             match['import_reason'] = gate.get('reason')
             if gate.get('decision') == DECISION_SKIP_OWNED:
+                # same as a kept copy below: for a re-identify this is where
+                # it landed, or replace deletes it as the old track (#1567)
+                if gate.get('library_path'):
+                    reid_final_paths.append(gate['library_path'])
                 match['import_status'] = 'skipped_owned'
                 skipped += 1
                 logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
