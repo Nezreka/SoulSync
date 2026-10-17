@@ -156,3 +156,30 @@ def test_library_cleanup_block_shape():
     assert set(fields) == {'quarantine', 'recycle_bin'}
     assert all(f['type'] == 'checkbox' and f['default'] is True for f in fields.values())
     assert 'keep window' in block['description']
+
+
+def test_complete_incomplete_albums_action():
+    """Album completion is opt-in, music-only, and rate-limited."""
+    music = blocks.blocks_for_scope('music')
+    video = blocks.blocks_for_scope('video')
+
+    actions = {
+        action['type']: action
+        for action in music['actions']
+    }
+
+    assert 'complete_incomplete_albums' in actions
+    assert 'complete_incomplete_albums' not in {
+        action['type'] for action in video['actions']
+    }
+
+    action = actions['complete_incomplete_albums']
+    assert action['available'] is True
+
+    fields = {
+        field['key']: field
+        for field in action['config_fields']
+    }
+    assert set(fields) == {'max_albums', 'target_album_id'}
+    assert fields['max_albums']['type'] == 'number'
+    assert fields['max_albums']['default'] == 3

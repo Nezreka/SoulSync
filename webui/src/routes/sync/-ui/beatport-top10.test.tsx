@@ -29,13 +29,11 @@ function makeEnv(): BeatportDownloadEnv {
     showToast: vi.fn(),
     showLoadingOverlay: vi.fn(),
     hideLoadingOverlay: vi.fn(),
-    setOverlayMessage: vi.fn(),
     openDownloadModal: vi.fn(),
     registerDownload: vi.fn(),
     now: () => 1700000000000,
     random: () => 0.5,
-    schedule: vi.fn(),
-    sleep: async () => {},
+    openList: vi.fn(),
   };
 }
 
@@ -117,73 +115,21 @@ describe('the two top-10 track lists', () => {
     expect(document.querySelector('.beatport-hype10-card-placeholder')?.textContent).toBe('🔥');
   });
 
-  it('queues the whole list when the CONTAINER is clicked', async () => {
-    stubApi({
-      [LISTS_URL]: LISTS,
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'Deep House Anthem' }] },
-    });
+  it('opens the whole list as a playlist when the CONTAINER is clicked', async () => {
+    stubApi({ [LISTS_URL]: LISTS });
     const env = makeEnv();
     render(<BeatportTop10Lists env={env} />);
     await waitFor(() => expect(document.querySelector('.beatport-top10-card')).not.toBeNull());
 
-    // The cards have no handler of their own — the container is the button, and
-    // that wiring lives in sync-services.js, not beatport-ui.js.
+    // The cards have no handler of their own — the container is the button.
     fireEvent.click(document.getElementById('beatport-top10-list') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Beatport Top 10');
-    expect(args[6]).toBe('playlist');
-  });
-
-  it('sends the ENRICHED tracks to the modal, not the ones on screen', async () => {
-    stubApi({
-      [LISTS_URL]: LISTS,
-      // Deliberately different from the rendered track: an enrichment stub that
-      // echoes the input cannot tell "enriched" from "skipped enrichment".
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'ENRICHED' }] },
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'top-10',
+      label: 'Beatport Top 10',
+      genreName: undefined,
     });
-    const env = makeEnv();
-    render(<BeatportTop10Lists env={env} />);
-    await waitFor(() => expect(document.querySelector('.beatport-top10-card')).not.toBeNull());
-
-    fireEvent.click(document.getElementById('beatport-top10-list') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect((args[2] as { name: string }[])[0].name).toBe('ENRICHED');
-  });
-
-  it('swallows a second container click while the first is in flight', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let enrichCalls = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url.startsWith('/api/beatport/enrich-tracks')) {
-          enrichCalls++;
-          await gate;
-          return new Response(JSON.stringify({ success: true, tracks: [{ title: 'x' }] }), {
-            status: 200,
-          });
-        }
-        return new Response(JSON.stringify(LISTS), { status: 200 });
-      }),
-    );
-    const env = makeEnv();
-    render(<BeatportTop10Lists env={env} />);
-    await waitFor(() => expect(document.querySelector('.beatport-top10-card')).not.toBeNull());
-
-    const list = document.getElementById('beatport-top10-list') as Element;
-    fireEvent.click(list);
-    await waitFor(() => expect(enrichCalls).toBe(1));
-    // The same latch the Top 100 buttons use — an impatient double click must
-    // not queue the list twice.
-    fireEvent.click(list);
-    expect(enrichCalls).toBe(1);
-    release();
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalledTimes(1));
+    // never the download modal as a chart-named compilation
+    expect(env.openDownloadModal).not.toHaveBeenCalled();
   });
 
   it('shows the LOADED hype subtitle, not the one index.html starts with', async () => {
@@ -200,34 +146,18 @@ describe('the two top-10 track lists', () => {
     );
   });
 
-  it('files the hype list under its own name', async () => {
-    stubApi({
-      [LISTS_URL]: LISTS,
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'HypeTrack' }] },
-    });
+  it('opens the hype list as its own list', async () => {
+    stubApi({ [LISTS_URL]: LISTS });
     const env = makeEnv();
     render(<BeatportTop10Lists env={env} />);
     await waitFor(() => expect(document.querySelector('.beatport-hype10-card')).not.toBeNull());
 
     fireEvent.click(document.getElementById('beatport-hype10-list') as Element);
-    await waitFor(() => expect(env.registerDownload).toHaveBeenCalled());
-    expect(env.registerDownload).toHaveBeenCalledWith('Hype Top 10', '', expect.any(String));
-  });
-
-  it('opens the overlay with the count already in it', async () => {
-    stubApi({
-      [LISTS_URL]: LISTS,
-      '/api/beatport/enrich-tracks': { success: true, tracks: [] },
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'hype-10',
+      label: 'Hype Top 10',
+      genreName: undefined,
     });
-    const env = makeEnv();
-    render(<BeatportTop10Lists env={env} />);
-    await waitFor(() => expect(document.querySelector('.beatport-top10-card')).not.toBeNull());
-
-    fireEvent.click(document.getElementById('beatport-top10-list') as Element);
-    // 4925 — every other flow opens with a 'Scraping …' line instead.
-    await waitFor(() =>
-      expect(env.showLoadingOverlay).toHaveBeenCalledWith('Fetching track metadata... (0/1)'),
-    );
   });
 
   it('writes the SAME error block into BOTH lists', async () => {
@@ -429,6 +359,26 @@ describe('TrackTop10List on its own', () => {
     );
     // The card markup is unchanged by the overrides.
     expect(document.querySelector('.beatport-top10-card-title')?.textContent).toBe('T');
+  });
+
+  it("opens the caller's list ref, so a genre's list is the genre's", () => {
+    const env = makeEnv();
+    render(
+      <TrackTop10List
+        variant="hype"
+        tracks={[]}
+        env={env}
+        chartName="Trance (Main Floor) Hype Top 10"
+        listRef="genre:trance-main-floor:7:hype-10"
+        genreName="Trance (Main Floor)"
+      />,
+    );
+    fireEvent.click(document.getElementById('beatport-hype10-list') as Element);
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'genre:trance-main-floor:7:hype-10',
+      label: 'Trance (Main Floor) Hype Top 10',
+      genreName: 'Trance (Main Floor)',
+    });
   });
 
   it('falls back to the homepage id and copy when given none', () => {

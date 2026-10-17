@@ -3460,6 +3460,19 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.7': [
+        { date: 'October 2026 · 3.5.7' },
+        { title: 'Beatport charts are playlists', desc: 'Every chart opens to be identified, synced and downloaded instead of landing as a fake Various Artists compilation. Tracks match by ISRC, mirrored charts refresh and can join the pipeline, and Save snapshot keeps a dated copy of a chart.', page: 'sync' },
+        { title: 'Beatport enrichment', desc: 'A new last tagging step looks tracks up on Beatport by ISRC and writes the label\'s BPM, key, label and catalog number. Electronic-looking tracks only, unless Look up every track is on.', page: 'settings' },
+        { title: 'A second pass for missed tracks', desc: 'A Spotify track your primary source cannot match is looked up by its own Spotify id before it becomes Wing It, each track of a mirrored playlist shows where it stands, and a stale cached match cannot pin the wrong song (thanks @kevin2xk) (#1721).', page: 'sync' },
+        { title: 'Sync fixes', desc: 'Scheduled auto-sync regenerates Discovery Shuffle mirrors (thanks @Bloopser) (#1724). A refused Navidrome write no longer reads as 0% synced, failed syncs retry next run, and mirrored playlists stop hanging on load (thanks @zikasak) (#1726, #1698).', page: 'sync' },
+        { title: 'Automatic album completion', desc: 'A new automation finishes incomplete albums in your library, with cooldowns and retries (thanks @kiwijar) (#1711).', page: 'automations' },
+        { title: 'Spoken word to audiobooks', desc: 'Route chosen artists, like children\'s audio plays, to the audiobook library instead of music (thanks @SimpleSimonLA) (#1714).' },
+        { title: 'Video wishlist finds more', desc: 'Episodes match releases named by TVDB numbering, shows with a year in the name stop failing the title and year checks, and the dashboard download tiles read the live queue.' },
+        { title: 'Video stats API', desc: 'GET /api/v1/video/stats returns library, database and download counts, and video downloads take a status filter (thanks @hilburn) (#1723).', page: 'settings' },
+        { title: 'Imports you already own', desc: 'Albums you already have no longer fail every track on auto-import: they count as already in library (thanks SeadogsBooty on discord). Plex paths resolve when a folder differs only by case.', page: 'import' },
+        { title: 'Earlier versions', desc: '3.5.6 fixed playlist sync matching, made reorganize resumable and taught auto-import to skip what you own.' },
+    ],
     '3.5.6': [
         { date: 'October 2026 · 3.5.6' },
         { title: 'Playlist sync lands the right songs', desc: 'The album fallback needs the artist to match, so a same-titled song on a same-named album stops standing in for the real one. One song your server no longer has stops blocking the whole playlist: it is skipped and the rest are written (thanks @kevin2xk) (#1715).', page: 'sync' },
@@ -3469,25 +3482,6 @@ const WHATS_NEW = {
         { title: 'Run Now refreshes discovery', desc: 'Run Now on the Update Discovery automation always refreshes, so changed settings apply right away. Scheduled runs keep the 6 hour cooldown (thanks @mikedaf) (#1719).', page: 'automations' },
         { title: 'YouTube imports on NFS', desc: 'A share that refuses file metadata (errno 524) no longer fails a YouTube import after the file landed (thanks @hilburn) (#1713).' },
         { title: 'Earlier versions', desc: '3.5.5 brought playable and likeable playlists, per-playlist sync mode, Deezer previews and a big speed pass.' },
-    ],
-    '3.5.5': [
-        { date: 'October 2026 · 3.5.5' },
-        { title: 'Play, like and sort your playlists', desc: 'Play, shuffle and queue on every playlist. A heart in the add-to-playlist picker toggles Liked Songs, the picker ticks playlists that already have the song, and you can add songs, sort, and make a mirror your own.', page: 'sync' },
-        { title: 'Made-over playlist detail', desc: 'One row of actions with play first, sync & download and identify as pills, and everything else behind a ⋯ menu. Your playlists identify themselves in the background so the exact track gets fetched on sync.', page: 'sync' },
-        { title: 'Sync mode per playlist', desc: 'Mirrors and pipelines can append or reconcile on their own instead of one global mode. The mirror beats the pipeline, which beats the global (thanks @Tacobell444) (#1704).', page: 'sync' },
-        { title: 'Deezer 30s previews', desc: 'A song that is not in your library plays its Deezer clip right away, nothing downloaded, with YouTube as the fallback. Clips get a 30s preview badge and never log a play (thanks @cremonies) (#1312).', page: 'settings' },
-        { title: 'Play from the dashboard', desc: 'Recently added and recently played cards get queue, play and add-to-playlist buttons on the cover, and the mix modal is redesigned.', page: 'dashboard' },
-        { title: 'A big speed pass', desc: 'Fresh SQLite planner stats took a watchlist scan from 1.4 s to 32 ms per missing track. New indexes on file paths and lowercase titles, faster enrichment workers, and stats that stop walking every play.' },
-        { title: 'Read-only API keys', desc: 'Keys have a read or admin scope, picked and badged in settings. Read keys can only GET a safe allowlist (thanks @splitsec2) (#1586).', page: 'settings' },
-        { title: 'Subtitles reach Bazarr parity', desc: 'Every sidecar naming, embedded tracks and unlabeled files count as have-it, a forced-subtitles toggle, and a Missing Subtitles job on the tools page.', page: 'tools' },
-        { title: 'No more untagged downloads', desc: 'An int album id crashed enhancement after the tags were cleared. Fixed, a failure writes core tags back, and a new Untagged Downloads repair job finds the ones that already landed.', page: 'tools' },
-        { title: 'Download and import fixes', desc: 'The next quality tier gets a shot when the top one will not start (thanks @javiavid) (#1304), collab singles file under the first artist (thanks SeadogsBooty on discord), and standalone full refresh stops dropping tracks to id collisions (thanks @rijndael86) (#1696).' },
-        { title: 'Matching and repair', desc: 'Featuring-credit titles match on MusicBrainz (thanks @pm-melo) (#1705), AcoustID accepts another release\'s title (thanks @zikasak) (#1700), reorganize settles placed albums (thanks @rhyst) (#1701), and discography backfill rotates through the library (thanks @QT3496) (#1709).', page: 'tools' },
-        { title: 'Smarter repair jobs', desc: 'The AcoustID scanner can skip unchanged verified files, the Cover Art Filler can remember empty lookups, and a stopped run is recorded as stopped (thanks @splitsec2) (#1694, #1707, #1708).', page: 'tools' },
-        { title: 'Similar artists and discover', desc: 'Similar artists match by name instead of the first search hit, see all picks opens the hero\'s picks, and the discover warmer keeps shelves warm.', page: 'discover' },
-        { title: 'Connections', desc: 'Every service gets a test button, and services are grouped by what they do.', page: 'settings' },
-        { title: 'More fixes', desc: 'Pipeline syncs respect wishlist skip (thanks @Tacobell444) (#1689), m3u entries can be relative, requests and issues hide until needed, password managers fill sign-in properly, and another phone batch fixes the hamburger, drawer, mini player and mirrored playlist modal (thanks @Tacobell444) (#1691, #1699).' },
-        { title: 'Earlier versions', desc: '3.5.4 brought subtitles without Bazarr, audiobook series follows and m4b merge, and one downloads page.' },
     ],
 };
 
@@ -3517,6 +3511,24 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.7: beatport playlists, a second pass for missed tracks and album completion',
+        description: 'Beatport charts become real playlists and an enrichment source, playlist sync gets a second pass for tracks it could not match, albums can complete themselves, spoken-word artists can route to the audiobook library, and video wishlist episodes find their releases.',
+        features: [
+            'Beatport: charts open as playlists to identify, ISRC matching, mirrored charts that refresh and join the pipeline, dated snapshots, and BPM, key, label and catalog enrichment.',
+            'Playlist sync: a Spotify-id pass before Wing It, per-track status on mirrored playlists, and stale matches drop off (thanks @kevin2xk) (#1721).',
+            'Scheduled auto-sync regenerates Discovery Shuffle (thanks @Bloopser) (#1724); Navidrome write failures and mirrored playlist load fixes (thanks @zikasak) (#1726, #1698).',
+            'Automatic album completion (thanks @kiwijar) (#1711).',
+            'Route spoken-word artists to the audiobook library (thanks @SimpleSimonLA) (#1714).',
+            'Video: TVDB scene numbering, show-year fixes, live dashboard tiles, and a video stats API (thanks @hilburn) (#1723).',
+            'Albums you already own no longer fail auto-import, and Plex paths resolve across folder case changes.',
+        ],
+    },
+    {
+        title: 'Earlier in 3.5.6',
+        description: 'Playlist sync matching fixes, resumable reorganize, auto-import that skips what you own, and Run Now that refreshes discovery.',
+        features: [],
+    },
+    {
         title: '3.5.6: playlist sync fixes, reorganize resume and smarter auto-import',
         description: 'A follow-up to 3.5.5. Playlist sync stops matching the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, auto-import skips what you already own, and Run Now on Update Discovery actually runs.',
         features: [
@@ -3527,32 +3539,11 @@ const VERSION_MODAL_SECTIONS = [
             'Run Now on Update Discovery skips the 6 hour cooldown (thanks @mikedaf) (#1719), and YouTube imports survive NFS shares that refuse file metadata (thanks @hilburn) (#1713).',
         ],
     },
-    {
-        title: 'Earlier in 3.5.5',
-        description: 'Playable and likeable playlists, per-playlist sync mode, Deezer previews, a database speed pass, read-only API keys and Bazarr-level subtitles.',
-        features: [],
-    },
-    {
-        title: '3.5.5: playlists you can play and like, per-playlist sync mode, deezer previews and a speed pass',
-        description: 'Your own playlists get play buttons, Liked Songs and a made-over detail view, mirrors pick their own sync mode, songs outside your library play Deezer previews, the database gets a big speed pass, read-only API keys, subtitles reach Bazarr parity, and downloads can no longer land untagged.',
-        features: [
-            'Playlists: play, shuffle and queue everywhere, Liked Songs, picker ticks, add songs, sort, make a mirror yours, and a made-over detail view. Your playlists identify themselves for sync.',
-            'Per-playlist and per-pipeline sync mode: append or reconcile (thanks @Tacobell444) (#1704).',
-            'Deezer 30s previews for songs not in your library (thanks @cremonies) (#1312); play, queue and add-to-playlist on dashboard cards; a redesigned mix modal.',
-            'Speed: fresh planner stats, file path and lowercase title indexes, faster enrichment workers and stats.',
-            'Read-only API keys (thanks @splitsec2) (#1586).',
-            'Subtitles: Bazarr-level have-it detection, a forced toggle and a Missing Subtitles job.',
-            'Downloads cannot land untagged, and a repair job flags the ones that did. Quality tiers fall through (thanks @javiavid) (#1304); full refresh stops dropping tracks (thanks @rijndael86) (#1696).',
-            'Matching: feat. titles on MusicBrainz (thanks @pm-melo) (#1705), AcoustID across release titles (thanks @zikasak) (#1700), reorganize settles (thanks @rhyst) (#1701), discography backfill rotates (thanks @QT3496) (#1709).',
-            'Repair: skip verified files, remember empty cover lookups, stopped runs recorded as stopped (thanks @splitsec2) (#1694, #1707, #1708).',
-            'Pipeline syncs respect wishlist skip (thanks @Tacobell444) (#1689); connection test buttons; similar artists stop storing namesakes; another phone batch (#1691, #1699).',
-        ],
-    },
 ];
 
 function _getCurrentVersion() {
     const btn = document.querySelector('.version-button');
-    return btn ? btn.textContent.trim().replace('v', '') : '3.5.6';
+    return btn ? btn.textContent.trim().replace('v', '') : '3.5.7';
 }
 
 // Compare two semver-ish strings ("2.4.0" vs "2.4.1" vs "2.39"). Returns

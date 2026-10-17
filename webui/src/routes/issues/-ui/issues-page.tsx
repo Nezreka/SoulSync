@@ -19,6 +19,7 @@ import {
   bulkResultToast,
   bulkUpdateIssues,
   type IssueBulkChange,
+  type IssueListFilters,
   issueCountsQueryOptions,
   issueListQueryOptions,
   invalidateIssuesQueries,
@@ -130,26 +131,10 @@ function IssueBoard() {
       return next;
     });
 
-  const onEntityChange = (entity: IssueEntityType | 'all') => {
+  const onFiltersChange = (filters: Partial<IssueListFilters>) => {
     void navigate({
       to: Route.fullPath,
-      search: (prev) => ({ ...prev, entity: entity === 'all' ? undefined : entity }),
-      replace: true,
-    });
-  };
-
-  const onCategoryChange = (category: IssuesSearch['category']) => {
-    void navigate({
-      to: Route.fullPath,
-      search: (prev) => ({ ...prev, category }),
-      replace: true,
-    });
-  };
-
-  const onStatusChange = (status: IssuesSearch['status']) => {
-    void navigate({
-      to: Route.fullPath,
-      search: (prev) => ({ ...prev, status }),
+      search: (prev) => ({ ...prev, ...filters }),
       replace: true,
     });
   };
@@ -160,8 +145,7 @@ function IssueBoard() {
         isAdmin={isAdmin}
         category={params.category}
         status={params.status}
-        onCategoryChange={onCategoryChange}
-        onStatusChange={onStatusChange}
+        onFiltersChange={onFiltersChange}
       />
       <div className={styles.issuesRefine}>
         <TextInput
@@ -176,7 +160,10 @@ function IssueBoard() {
           id="issues-filter-entity"
           aria-label="Item type"
           value={params.entity ?? 'all'}
-          onChange={(event) => onEntityChange(event.target.value as IssueEntityType | 'all')}
+          onChange={(event) => {
+            const entity = event.target.value as IssueEntityType | 'all';
+            onFiltersChange({ entity: entity === 'all' ? undefined : entity });
+          }}
         >
           <option value="all">All items</option>
           {ISSUE_ENTITY_TYPE_VALUES.map((entity) => (
@@ -394,14 +381,12 @@ function IssueBoardHeader({
   category,
   isAdmin,
   status,
-  onCategoryChange,
-  onStatusChange,
+  onFiltersChange,
 }: {
   category: IssuesSearch['category'];
   isAdmin: boolean;
   status: IssuesSearch['status'];
-  onCategoryChange: (category: IssuesSearch['category']) => void;
-  onStatusChange: (status: IssuesSearch['status']) => void;
+  onFiltersChange: (filters: Partial<IssueListFilters>) => void;
 }) {
   return (
     <PageHeader
@@ -438,7 +423,9 @@ function IssueBoardHeader({
             id="issues-filter-status"
             aria-label="Status"
             value={status}
-            onChange={(event) => onStatusChange(event.target.value as IssuesSearch['status'])}
+            onChange={(event) =>
+              onFiltersChange({ status: event.target.value as IssuesSearch['status'] })
+            }
           >
             {ISSUE_SEARCH_STATUS_VALUES.map((option) => (
               <option key={option} value={option}>
@@ -450,7 +437,9 @@ function IssueBoardHeader({
             id="issues-filter-category"
             aria-label="Category"
             value={category}
-            onChange={(event) => onCategoryChange(event.target.value as IssuesSearch['category'])}
+            onChange={(event) =>
+              onFiltersChange({ category: event.target.value as IssuesSearch['category'] })
+            }
           >
             <option value="all">All Categories</option>
             {ISSUE_CATEGORY_FILTER_GROUPS.map((group) => (

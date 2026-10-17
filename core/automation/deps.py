@@ -177,3 +177,14 @@ class AutomationDeps:
     # findings (the "Apply Quality Upgrades" action). None when the repair
     # worker isn't running, and in fixtures that don't exercise it.
     bulk_fix_repair_findings: Optional[Callable[..., Any]] = None
+
+    # Opt-in automatic album completion. Optional so existing automation
+    # constructors remain compatible; handlers skip when unavailable.
+    # get_repair_findings(**filters) -> paginated repair findings
+    get_repair_findings: Optional[Callable[..., Any]] = None
+    # queue_album_completion(**album_details) -> {'status': 'queued' | 'skipped'}
+    queue_album_completion: Optional[Callable[..., Any]] = None
+    get_current_album_pin: Optional[Callable[..., Any]] = None
+    fetch_canonical_release: Optional[Callable[..., Any]] = None
+    # album_completion_cooling_down(source, release_id) -> bool, read-only peek
+    album_completion_cooling_down: Optional[Callable[..., Any]] = None

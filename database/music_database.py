@@ -267,6 +267,11 @@ class DatabaseTrackWithMetadata:
     duration: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Per-track credit, when the row carries one. The sync match cache
+    # revalidation (#1721) scores this row as a candidate: without the
+    # credit, compilation/soundtrack evidence was invisible to the artist
+    # scorer and legitimate cached matches failed validation.
+    track_artist: Optional[str] = None
 
 @dataclass
 class WatchlistArtist:
@@ -865,6 +870,21 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
+
+            # Artists whose music downloads are filed in the audiobook library
+            # instead (core/audiobook_routing.py). Keyed on the normalized
+            # artist name: every download path knows the artist, none of them
+            # reliably knows the playlist.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_routes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL DEFAULT 'artist',
+                    route_key TEXT NOT NULL,
+                    label TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(kind, route_key)
+                )
+            """)
 
             # #652 again. the "don't pick this same bad upload again" list used
             # to be built by reading the sidecars sitting in ss_quarantine. so
@@ -1929,6 +1949,7 @@ class MusicDatabase:
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
+            self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2030,6 +2051,7 @@ class MusicDatabase:
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
+        'beatport_positional_purged': ('table', '_beatport_positional_purged'),
     }
 
     def _record_migration(self, cursor, name):
@@ -5182,6 +5204,37 @@ class MusicDatabase:
             logger.info("similar artists rematch: requeued %s library artists", requeued)
         except Exception as e:
             logger.error(f"Error requeueing similar artists rematch: {e}")
+
+    def _purge_beatport_positional_matches(self, cursor):
+        """one-time: drop what the old beatport ids and enrichment left behind.
+
+        every beatport chart called its tracks beatport_chart_0, _1, ... by
+        position, so a sync match saved for chart A's track 1 came back for
+        every chart's track 1 (maV, oct 12 2026: a trance chart synced with
+        tracks from the beatport top 10). those rows can't be told apart, so
+        they all go, along with manual matches filed under the same ids. the
+        cached beatport track pages go too: the old enrichment stored charts
+        as tracks there, and the json reads refill them correctly."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_beatport_positional_purged' in tables:
+                return
+            counts = {}
+            if 'sync_match_cache' in tables:
+                cursor.execute("DELETE FROM sync_match_cache WHERE spotify_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['sync_match_cache'] = max(cursor.rowcount, 0)
+            if 'manual_library_track_matches' in tables:
+                cursor.execute("DELETE FROM manual_library_track_matches WHERE source_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['manual_library_track_matches'] = max(cursor.rowcount, 0)
+            if 'metadata_cache_entities' in tables:
+                cursor.execute("DELETE FROM metadata_cache_entities WHERE source = 'beatport' AND entity_type = 'track'")
+                counts['metadata_cache_entities'] = max(cursor.rowcount, 0)
+            cursor.execute("CREATE TABLE _beatport_positional_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'beatport_positional_purged')
+            logger.info("beatport positional id purge: %s", counts)
+        except Exception as e:
+            logger.error(f"Error purging beatport positional matches: {e}")
 
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
@@ -11335,8 +11388,8 @@ class MusicDatabase:
             track_id_str = str(track_id)
             scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
             cursor.execute(f"""
-                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
-                       t.duration, t.created_at, t.updated_at,
+                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number,
+                       t.duration, t.created_at, t.updated_at, t.track_artist,
                        a.name as artist_name, al.title as album_title
                 FROM tracks t
                 JOIN artists a ON t.artist_id = a.id
@@ -11356,7 +11409,8 @@ class MusicDatabase:
                     track_number=row['track_number'],
                     duration=row['duration'],
                     created_at=row['created_at'],
-                    updated_at=row['updated_at']
+                    updated_at=row['updated_at'],
+                    track_artist=row['track_artist'] if 'track_artist' in row.keys() else None
                 )
             return None
             
@@ -12285,7 +12339,7 @@ class MusicDatabase:
                        names + scope_params)
         return cursor.fetchone() is not None
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -12593,12 +12647,54 @@ class MusicDatabase:
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
 
+            # Only callers that ask "do we already have this file" opt in. A sync
+            # asks "is it on the media server", and a ``routed:`` id means nothing there.
+            if include_downloads:
+                routed = self._routed_download_match(title, artist, confidence_threshold)
+                if routed is not None:
+                    return routed
+
             logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
             
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
+
+    def _routed_download_match(self, title: str, artist: str, confidence_threshold: float):
+        """Ownership for artists routed to the audiobook library.
+
+        Their files never reach the media server's library, so the ``tracks``
+        table can't know them and every sync would fetch them again. The
+        download ledger can: a completed download whose file still exists
+        counts as owned. Returns ``(track, confidence)`` or None.
+        """
+        from core.audiobook_routing import existing_download_path, is_routed_artist, route_key
+        if not is_routed_artist(artist, self):
+            return None
+        key = route_key(artist)
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT id, file_path, track_title, track_artist, track_album "
+                "FROM track_downloads WHERE status = 'completed' AND file_path IS NOT NULL "
+                "AND track_artist IS NOT NULL").fetchall()
+        best, best_confidence = None, 0.0
+        for row in rows:
+            if route_key(row['track_artist']) != key:
+                continue
+            candidate = DatabaseTrack(
+                id=f"routed:{row['id']}", album_id=None, artist_id=None,
+                title=row['track_title'] or '', file_path=row['file_path'])
+            candidate.artist_name = row['track_artist']
+            candidate.album_title = row['track_album'] or ''
+            confidence = self._calculate_track_confidence(title, artist, candidate)
+            if confidence <= best_confidence or confidence < confidence_threshold:
+                continue
+            found = existing_download_path(row['file_path'])
+            if found:
+                candidate.file_path = found
+                best, best_confidence = candidate, confidence
+        return (best, best_confidence) if best else None
     
     def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
         """
@@ -15613,6 +15709,49 @@ class MusicDatabase:
     # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
     # user-cancelled tracks are not auto-re-queued. All methods fail-open
     # (an error here must never block a legitimate wishlist add).
+
+    def has_audiobook_route(self, kind: str, route_key: str) -> bool:
+        """True when this artist/key is routed to the audiobook library."""
+        with self._get_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT 1 FROM audiobook_routes WHERE kind = ? AND route_key = ? LIMIT 1",
+                (kind, route_key)).fetchone()
+        return row is not None
+
+    def add_audiobook_route(self, kind: str, route_key: str, label: str = "") -> bool:
+        """Route a key to the audiobook library. Re-adding refreshes the label."""
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute(
+                    "INSERT INTO audiobook_routes (kind, route_key, label) VALUES (?, ?, ?) "
+                    "ON CONFLICT(kind, route_key) DO UPDATE SET label = excluded.label",
+                    (kind, route_key, label or ""))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def remove_audiobook_route(self, kind: str, route_key: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM audiobook_routes WHERE kind = ? AND route_key = ?",
+                    (kind, route_key))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def list_audiobook_routes(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT kind, route_key, label, created_at FROM audiobook_routes "
+                "ORDER BY label COLLATE NOCASE, route_key")
+            return [dict(zip([c[0] for c in cursor.description], row, strict=True)) for row in cursor.fetchall()]
 
     def add_to_wishlist_ignore(self, track_id: str, track_name: str = "",
                                artist_name: str = "", reason: str = "removed",
@@ -21029,6 +21168,24 @@ class MusicDatabase:
             logger.error(f"Error saving sync match cache: {e}")
             return False
 
+    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str) -> int:
+        """Delete ONE sync match cache row. Returns rows deleted.
+
+        Used when a cached pairing is proven stale under the current
+        matcher (#1721): the row must not survive to poison the next sync,
+        but the rest of the cache (other tracks, other servers) is fine."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
+                (str(spotify_track_id), server_source))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error deleting sync match cache row: {e}")
+            return 0
+
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
         try:
@@ -25788,7 +25945,7 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     result[row['playlist_id']] = {
                         'total': 0, 'discovered': 0, 'wishlisted': 0,
-                        'in_library': 0, 'library_checked': 0,
+                        'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                     }
 
                 # Core counts: total + discovered, grouped per playlist
@@ -25820,12 +25977,26 @@ class MusicDatabase:
                                WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                                    AND EXISTS (SELECT 1 FROM tracks ti
-                                                WHERE ti.spotify_track_id = mpt.source_track_id
-                                                   OR ti.deezer_id = mpt.source_track_id
-                                                   OR ti.tidal_id = mpt.source_track_id
-                                                   OR ti.qobuz_id = mpt.source_track_id
-                                                   OR ti.itunes_track_id = mpt.source_track_id))
+                                    -- Separate probes avoid a multi-column OR scan.
+                                    -- IS NOT NULL skips NULL entries even on SQLite 3.45,
+                                    -- which can otherwise scan an all-NULL index after ANALYZE.
+                                    AND (
+                                        EXISTS (SELECT 1 FROM tracks ti
+                                                WHERE ti.spotify_track_id IS NOT NULL
+                                                  AND ti.spotify_track_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.deezer_id IS NOT NULL
+                                                     AND ti.deezer_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.tidal_id IS NOT NULL
+                                                     AND ti.tidal_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.qobuz_id IS NOT NULL
+                                                     AND ti.qobuz_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.itunes_track_id IS NOT NULL
+                                                     AND ti.itunes_track_id = mpt.source_track_id)
+                                    ))
                                    -- The name join stays exact (case-sensitive):
                                    -- COLLATE NOCASE would defeat idx_artists_name /
                                    -- idx_tracks_title (~18s vs ~6ms on a 300k-track
@@ -25854,7 +26025,7 @@ class MusicDatabase:
                     if pid not in result:
                         result[pid] = {
                             'total': 0, 'discovered': 0, 'wishlisted': 0,
-                            'in_library': 0, 'library_checked': 0,
+                            'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                         }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
@@ -25868,17 +26039,32 @@ class MusicDatabase:
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                         WHERE mp.profile_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
+                          AND {_WISHLISTED}
                         GROUP BY mpt.playlist_id
-                    """, (profile_id,))
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (profile_id,))
                     for row in cursor.fetchall():
                         pid = row['playlist_id']
                         if pid in result:
                             result[pid]['wishlisted'] = row['wishlisted'] or 0
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
+
+                # wing it guesses nobody fixed: what the card's "need a match"
+                # link opens, so it counts exactly what the pool lists (#1721)
+                try:
+                    cursor.execute(f"""
+                        SELECT mpt.playlist_id, COUNT(*) as needs_match
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        WHERE mp.profile_id = ? AND {self._WING_IT_ATTENTION}
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['needs_match'] = row['needs_match'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch needs-match counts failed: {e}")
 
                 # NOTE: in_library is no longer derived here. It used to be a
                 # join with two paths and both were wrong. The ID path compared
@@ -25905,6 +26091,47 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result
+
+    # a mirrored track is wishlisted under the id sync filed it under: the
+    # matched id once discovery found one (often deezer's), the playlist's own
+    # id before that. asking only for the source id read 0 for every
+    # deezer-identified spotify playlist (#1721).
+    _MIRROR_TRACK_WISHLISTED = (
+        "((mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = mpt.source_track_id)) "
+        "OR (json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = json_extract(mpt.extra_data, '$.matched_data.id'))))"
+    )
+
+    def get_wishlisted_ids(self, ids, profile_id: Optional[int] = None) -> set:
+        """which of ``ids`` have a wishlist row, for this profile when given."""
+        wanted = sorted({str(i) for i in ids or [] if i})
+        found: set = set()
+        if not wanted:
+            return found
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                scoped = profile_id is not None and any(
+                    r[1] == 'profile_id' for r in cursor.fetchall())
+                # sqlite caps bound parameters, so ask in chunks
+                for start in range(0, len(wanted), 500):
+                    chunk = wanted[start:start + 500]
+                    sql = ("SELECT spotify_track_id FROM wishlist_tracks WHERE spotify_track_id IN ("
+                           + ",".join("?" * len(chunk)) + ")")
+                    params = list(chunk)
+                    if scoped:
+                        sql += " AND profile_id = ?"
+                        params.append(int(profile_id))
+                    cursor.execute(sql, params)
+                    found.update(str(r[0]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug(f"wishlisted id lookup failed: {e}")
+        return found
 
     def get_mirrored_playlist_status_counts(self, playlist_id: int) -> dict:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
@@ -25934,10 +26161,8 @@ class MusicDatabase:
                         SELECT COUNT(*) as wishlisted
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
-                    """, (playlist_id,))
+                          AND {_WISHLISTED}
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (playlist_id,))
                     result['wishlisted'] = cursor.fetchone()['wishlisted'] or 0
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
@@ -25956,12 +26181,25 @@ class MusicDatabase:
                         WHERE mpt.playlist_id = ?
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id
-                                            OR ti.deezer_id = mpt.source_track_id
-                                            OR ti.tidal_id = mpt.source_track_id
-                                            OR ti.qobuz_id = mpt.source_track_id
-                                            OR ti.itunes_track_id = mpt.source_track_id))
+                             -- Use the same separate, non-NULL provider probes as
+                             -- the batched counts, including on SQLite 3.45.
+                             AND (
+                                 EXISTS (SELECT 1 FROM tracks ti
+                                         WHERE ti.spotify_track_id IS NOT NULL
+                                           AND ti.spotify_track_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.deezer_id IS NOT NULL
+                                              AND ti.deezer_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.tidal_id IS NOT NULL
+                                              AND ti.tidal_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.qobuz_id IS NOT NULL
+                                              AND ti.qobuz_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.itunes_track_id IS NOT NULL
+                                              AND ti.itunes_track_id = mpt.source_track_id)
+                             ))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
                                        WHERE (a.name = mpt.artist_name

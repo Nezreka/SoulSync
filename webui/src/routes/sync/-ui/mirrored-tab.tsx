@@ -1185,7 +1185,7 @@ export function MirroredTab({
               const exportStatus = exportJobs.statuses[row.id];
               const state = libraryCardState(row);
               // #1289: an all-playlists pipeline schedules this card only if
-              // the backend actually processes its source (file/beatport are skipped).
+              // the backend actually processes its source (file is skipped).
               const pipelineCovers =
                 cardSchedules.hasAllPipeline && autoSyncPipelineCoversPlaylist(row);
               return renaming === row.id ? (
@@ -1253,10 +1253,11 @@ export function MirroredTab({
                   selecting={selecting}
                   selected={selected.has(row.id)}
                   onToggleSelect={() => toggleSelected(row.id)}
+                  onNeedsMatch={() => window.openWingItPoolModal?.(String(row.id))}
                   primary={
-                    // The pipeline endpoint rejects file/beatport outright, and
-                    // lastfm cannot be scheduled either — same guard the board
-                    // uses, so the card never offers a run that 400s.
+                    // The pipeline endpoint rejects file outright, and lastfm
+                    // or a frozen beatport mirror cannot be scheduled either —
+                    // same guard the board uses.
                     !autoSyncCanSchedulePlaylist(row)
                       ? null
                       : {
@@ -1400,6 +1401,11 @@ export function MirroredTab({
           data={detail.data}
           now={now}
           onClose={() => setDetail(null)}
+          onFindMatches={() => {
+            const id = detail.playlistId;
+            setDetail(null);
+            window.openWingItPoolModal?.(String(id));
+          }}
           onDelete={() => {
             const row = rows?.find((r) => r.id === detail.playlistId);
             if (row) void onDelete(row);

@@ -86,3 +86,26 @@ def test_resolution_returns_none_when_nothing_matches(db):
     assert web_server._resolve_batch_quality_profile_id(
         "unknown-ref", "No Such Playlist", profile_id=1,
     ) is None
+
+
+def test_album_completion_bypasses_playlist_quality_profile(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    processed = []
+    def resolve(*args, **kwargs):
+        calls.append((args, kwargs))
+        return [{"id": "track-1", "quality_profile_id": 99}], 99
+    monkeypatch.setattr(web_server, "_tracks_with_mirrored_quality_profile", resolve)
+    monkeypatch.setattr(web_server, "_build_master_deps", lambda: None)
+    fake = SimpleNamespace(run_full_missing_tracks_process=lambda *a, **k: processed.append((a, k)))
+    monkeypatch.setattr(web_server, "_downloads_master", fake)
+    batches = {"completion": {"album_completion_only": True, "playlist_id": "album_completion:42"}, "normal": {"playlist_id": "playlist-1", "playlist_name": "My Mix"}}
+    monkeypatch.setattr(web_server, "download_batches", batches)
+    web_server._run_full_missing_tracks_process("completion", "album_completion:42", [{"id": "track-1"}])
+    assert calls == []
+    assert processed[0][0][2] == [{"id": "track-1"}]
+    assert "quality_profile_id" not in batches["completion"]
+    web_server._run_full_missing_tracks_process("normal", "playlist-1", [{"id": "track-1"}])
+    assert len(calls) == 1
+    assert processed[1][0][2][0]["quality_profile_id"] == 99
+    assert batches["normal"]["quality_profile_id"] == 99

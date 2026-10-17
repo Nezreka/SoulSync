@@ -212,6 +212,7 @@ def find_owned_match(music_database, track_name: str, artists: Any, album: Optio
                 confidence_threshold=confidence_threshold,
                 server_source=active_server,
                 album=album,
+                include_downloads=True,
             )
         except Exception:  # noqa: BLE001 - one bad artist string must not abort the sweep
             continue

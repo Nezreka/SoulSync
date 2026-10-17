@@ -1120,6 +1120,7 @@ class RepairWorker:
                     'status': 'error' if result.errors > 0 and result.auto_fixed == 0 else 'finished',
                     'scanned': result.scanned,
                     'findings_created': result.findings_created,
+                    'run_status': run_status,
                     'errors': result.errors})
             except Exception:   # noqa: BLE001 - events never disturb the scan
                 logger.debug("repair scan event emit failed", exc_info=True)

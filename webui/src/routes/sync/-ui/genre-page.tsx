@@ -44,7 +44,8 @@ import type { BeatportDownloadEnv } from '../-beatport.downloads';
 import type { GenreTop10Lists as GenreTop10Data } from '../-beatport.loaders';
 
 import { BEATPORT_SLIDERS } from '../-beatport.core';
-import { openBeatportGenreTop100, openBeatportRelease } from '../-beatport.downloads';
+import { openBeatportRelease } from '../-beatport.downloads';
+import { beatportRefs } from '../-beatport.lists';
 import {
   genreHeroAlbumLine,
   genreHeroClickRelease,
@@ -97,7 +98,11 @@ export function GenrePage({ genre, onBack, env }: GenrePageProps) {
             className="beatport-nav-button"
             id="genre-top100-btn"
             onClick={() => {
-              void openBeatportGenreTop100(genre.slug, genre.id, genre.name, env);
+              env.openList?.({
+                ref: beatportRefs.genre(genre, 'top-100'),
+                label: `${genre.name} Top 100`,
+                genreName: genre.name,
+              });
             }}
           >
             <span className="beatport-nav-icon top100-icon" />
@@ -196,6 +201,8 @@ function GenreTop10Lists({ genre, env }: { genre: BeatportGenre; env: BeatportDo
             listId="genre-beatport-top10-list"
             subtitle={`Most popular ${lower} tracks`}
             chartName={`${genre.name} Beatport Top 10`}
+            listRef={beatportRefs.genre(genre, 'top-10')}
+            genreName={genre.name}
           />
           {/* 3219, and the comment at 3259: NO else branch — the hype column is
               removed outright rather than shown empty. */}
@@ -207,6 +214,8 @@ function GenreTop10Lists({ genre, env }: { genre: BeatportGenre; env: BeatportDo
               listId="genre-beatport-hype10-list"
               subtitle={`Editor's trending ${lower} picks`}
               chartName={`${genre.name} Hype Top 10`}
+              listRef={beatportRefs.genre(genre, 'hype-10')}
+              genreName={genre.name}
             />
           ) : null}
         </div>

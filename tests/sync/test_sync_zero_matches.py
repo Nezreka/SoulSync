@@ -28,8 +28,13 @@ def test_zero_matches_keeps_playlist_and_still_wishlists(monkeypatch, mode, conn
     playlist = SimpleNamespace(id="playlist-id", name="Playlist", tracks=[track])
     result = asyncio.run(service.sync_playlist(playlist, sync_mode=mode))
     if not connected:
+        # the write failed, the matching did not: the run reports the failure
+        # with its real counts and the missing track still gets wishlisted
         assert result.errors
-        wishlist.add_spotify_track_to_wishlist.assert_not_called()
+        assert result.total_tracks == 1
+        assert result.failed_tracks == 1
+        assert result.synced_tracks == 0
+        wishlist.add_spotify_track_to_wishlist.assert_called_once()
         return
     assert result.wishlist_added_count == 1
     assert result.total_tracks == 1

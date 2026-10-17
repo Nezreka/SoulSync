@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.6"
+_SOULSYNC_BASE_VERSION = "3.5.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1611,6 +1611,59 @@ def _register_automation_handlers():
         discover_callable=_discover_callable_for_registry,
     )
 
+    # Resolve album-completion dependencies at registration time.
+    from core.automation.album_completion_queue import queue_album_completion
+    from core.automation.album_completion_scope import verify_shared_album_scope
+    from core.automation.album_completion_verify import filter_still_missing
+    from core.automation.album_completion_cooldown import claim_attempt, is_cooling_down, release_attempt
+    from core.automation.album_pin import get_current_album_pin
+    from core.search.enriched_download import fetch_release
+
+    def _queue_album_completion(**kwargs):
+        completion_deps = types.SimpleNamespace(
+            profile_id=get_current_profile_id(),
+            verify_album_scope=lambda album_id, profile_id: (
+                verify_shared_album_scope(get_database(), album_id, profile_id)
+            ),
+            verify_missing_tracks=lambda album_id, tracks, profile_id, related_album_ids: (
+                filter_still_missing(
+                    get_database(), album_id, tracks,
+                    profile_id, related_album_ids
+                )
+            ),
+            claim_completion_attempt=lambda profile_id, source, release_id: (
+                claim_attempt(get_database(), profile_id, source, release_id)
+            ),
+            release_completion_attempt=lambda profile_id, source, release_id, token: (
+                release_attempt(
+                    get_database(), profile_id, source, release_id, token
+                )
+            ),
+            download_batches=download_batches,
+            tasks_lock=tasks_lock,
+            submit=lambda batch_id, playlist_id, tracks: (
+                missing_download_executor.submit(
+                    _run_full_missing_tracks_process,
+                    batch_id, playlist_id, tracks
+                )
+            ),
+        )
+        return queue_album_completion(**kwargs, deps=completion_deps)
+
+    def _completion_cooling_down(source, release_id):
+        return is_cooling_down(get_database(), get_current_profile_id(), source, release_id)
+
+    def _get_completion_album_pin(album_id):
+        return get_current_album_pin(get_database(), album_id)
+
+    def _fetch_completion_release(**kwargs):
+        return fetch_release(
+            kwargs["canonical_source"],
+            kwargs["canonical_album_id"],
+            kwargs["album_title"],
+            kwargs["artist"],
+        )
+
     _automation_deps = AutomationDeps(
         engine=automation_engine,
         state=_automation_state,
@@ -1651,6 +1704,11 @@ def _register_automation_handlers():
         bulk_fix_repair_findings=(
             (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
             if repair_worker else None),
+        get_repair_findings=(lambda **kw: repair_worker.get_findings(**kw)) if repair_worker else None,
+        queue_album_completion=_queue_album_completion,
+        get_current_album_pin=_get_completion_album_pin,
+        fetch_canonical_release=_fetch_completion_release,
+        album_completion_cooling_down=_completion_cooling_down,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -4278,7 +4336,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -16295,14 +16353,17 @@ def _tracks_with_mirrored_quality_profile(
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     batch = download_batches.get(batch_id, {})
-    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
-        batch.get('playlist_id') or playlist_id,
-        batch.get('playlist_name'),
-        tracks_json,
-        profile_id=batch.get('profile_id', 1),
-        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
-        source=batch.get('playlist_source'),
-    )
+    if batch.get("album_completion_only"):
+        quality_profile_id = None
+    else:
+        tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+            batch.get('playlist_id') or playlist_id,
+            batch.get('playlist_name'),
+            tracks_json,
+            profile_id=batch.get('profile_id', 1),
+            explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+            source=batch.get('playlist_source'),
+        )
     if quality_profile_id is not None:
         batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
@@ -19561,6 +19622,25 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
 
     except Exception as e:
         logger.error(f"Error updating sync status for {playlist_id}: {e}")
+
+def _invalidate_sync_fingerprint(playlist_id):
+    """Drop the smart-skip fingerprint of a playlist whose sync failed.
+
+    A scheduled run skips a playlist whose track hash is unchanged and was
+    fully matched last time. A later failed write leaves that fingerprint
+    from the last good run in place, so the next run would skip the write
+    again, indefinitely. The rest of the status (last_synced, snapshot) still
+    describes that last good write and stays.
+    """
+    from core.sync.sync_fingerprint import clear_fingerprint
+    try:
+        sync_statuses = _load_sync_status_file()
+        if not clear_fingerprint(sync_statuses, playlist_id):
+            return
+        _save_sync_status_file(sync_statuses)
+        logger.info(f"Cleared smart-skip fingerprint for playlist {playlist_id} after a failed sync")
+    except Exception as e:
+        logger.error(f"Error clearing sync fingerprint for {playlist_id}: {e}")
 
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
@@ -23327,6 +23407,8 @@ app.register_blueprint(_create_stats_blueprint())
 from api.quality_profiles import configure as _cfg_qp, create_blueprint as _bp_qp
 _cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
 app.register_blueprint(_bp_qp())
+from api.audiobook_routes import create_blueprint as _bp_abr
+app.register_blueprint(_bp_abr())
 from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
 def _get_auto_import_worker():
     # the worker handle lives (and is rebound) in api.import_routes
@@ -23715,6 +23797,7 @@ _cfg_sp(
     _run_full_missing_tracks_process=_run_full_missing_tracks_process,
     _tracks_with_mirrored_quality_profile=_tracks_with_mirrored_quality_profile,
     _update_and_save_sync_status=_update_and_save_sync_status,
+    _invalidate_sync_fingerprint=_invalidate_sync_fingerprint,
     _update_automation_progress=_update_automation_progress,
     is_wishlist_actually_processing=is_wishlist_actually_processing,
     get_tidal_client_for_profile=get_tidal_client_for_profile,

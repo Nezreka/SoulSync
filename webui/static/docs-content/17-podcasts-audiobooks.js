@@ -626,6 +626,23 @@ Backend defaults: format order m4b → m4a → mp3 → opus → ogg → flac; mi
 | **Audiobooks Folder (output):** | "Where downloaded audiobooks are saved and organized. Keep this separate from your music library so a media server does not index chapter files as albums." |
 | **Audiobook Path Template:** | Variables \`$author\`, \`$authorletter\`, \`$narrator\`, \`$title\`, \`$series\`, \`$seriespos\` (01), \`$year\`, \`$asin\`. Default \`$author/$series/$seriespos - $title\`; series-less books collapse the folder cleanly. |
 
+## Spoken-word artists
+
+Some audiobooks are not in Audible's catalogue, for example children's audio plays that are sold as albums on the streaming services. The audiobook search never finds them; the **music** search does, and files them in the music library.
+
+Open the artist (search → **Open artist**, or the watchlist) and press **Treat as audiobook** — on the artist page next to *Add to Watchlist*, or under *Audiobooks* in the watchlist artist settings. The same list is shown under **Spoken-word artists (music downloads filed as audiobooks):** in these settings, where you can move albums or remove an artist again. From then on, music downloads by that artist keep the normal music import (same search, tags and \`Artist/Album/NN - Title\` layout) but are filed in the **Audiobooks Folder** instead of the music library. Audiobookshelf reads \`Artist/Album\` as author and book.
+
+- Set the **Audiobooks Folder** first: until it is configured the switch is disabled and nothing is routed, so downloads can never end up in a folder inside the container. Only **admin** profiles can switch artists on or off or move albums, because a route changes where everyone's downloads go.
+- Names are matched ignoring case and punctuation. Only the album's **primary artist** counts, so a routed artist as a guest on a song does not move that song.
+- A routed download counts as **owned**: the wishlist, watchlist and downloads do not fetch it again just because the media server never lists it. (Playlist syncs still ask the media server, so a routed track is not pushed into a media-server playlist.) A file you moved into the audiobooks folder by hand, keeping the same \`Artist/Album\` folders, is recognised too.
+- New downloads are routed automatically. Turning the switch on offers to move albums already in the music library (the settings list has **Move existing…** for later). It shows how many album folders it would move, asks for confirmation, never overwrites, and removes the artist's music folder once empty. Run a library scan in your media server afterwards.
+- Each routed album gets a **\`metadata.opf\`** next to its files, written from the album's tags: the artist is author **and series**, and a number at the front of the album title (\`Folge 16: …\`, \`Episode 3 - …\`) becomes the position in that series, so Audiobookshelf groups and orders the episodes. It is written when a track lands, when you move albums, and when you switch the artist on. An unchanged file is never rewritten.
+- Artists routed to audiobooks carry an **📖 Audiobook** badge on the watchlist and wishlist.
+- **Reorganize** uses the same destination as a download, so *Reorganize all* moves a routed artist's albums from the music library into the audiobooks folder.
+- Moving albums runs while the page waits; a very large move across drives is a full copy and can take a while.
+- Turning the switch off, or removing an artist from the list stops the routing; files already in the audiobooks folder stay.
+- API: \`GET/POST /api/audiobook-routes\`, \`POST /api/audiobook-routes/check\`, \`DELETE /api/audiobook-routes/<name>\`, \`POST /api/audiobook-routes/<name>/move\`, \`POST /api/audiobook-routes/<name>/refresh\`.
+
 ## Download sources
 
 The **Audiobooks** subsection carries its own chain, separate from music on purpose:

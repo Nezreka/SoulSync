@@ -4400,18 +4400,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
-    border: 1px solid var(--white-a10);
     white-space: nowrap;
-    background: var(--white-a06);
-    color: var(--white-a80);
 }
 
 .test-button:hover,
 .detect-button:hover {
-    background: rgba(var(--accent-rgb), 0.15);
     border-color: rgba(var(--accent-rgb), 0.3);
     color: rgb(var(--accent-light-rgb));
-    transform: translateY(-1px);
 }
 
 /* ===== QUALITY PROFILE STYLES ===== */
@@ -5406,7 +5401,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    border: none;
 }
 
 .reset-button {
@@ -12110,19 +12104,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: none;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.72);
-    backdrop-filter: blur(12px);
 }
 
 .auto-sync-modal {
     width: calc(100vw - 96px);
     height: calc(100vh - 64px);
-    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-    border-radius: 20px;
-    box-shadow:
-        0 25px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(var(--accent-rgb), 0.1);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -12133,27 +12119,17 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     align-items: flex-start;
     justify-content: space-between;
     gap: 20px;
-    padding: 24px 28px 20px;
-    border-bottom: 1px solid var(--white-a08);
     flex-shrink: 0;
-    position: relative;
 }
 
 .auto-sync-eyebrow {
     margin-bottom: 4px;
-    color: rgba(var(--accent-rgb), 0.85);
     font-size: 10px;
-    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.12em;
 }
 
 .auto-sync-header h3 {
     margin: 0 0 4px;
-    color: #fff;
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
 }
 
 .auto-sync-header p {
@@ -12192,21 +12168,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-close {
-    width: 32px;
-    height: 32px;
-    border: 1px solid var(--white-a12);
     border-radius: var(--radius-circle);
-    background: var(--white-a06);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 22px;
     line-height: 1;
-}
-
-.auto-sync-close:hover {
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.4);
-    color: #ef4444;
 }
 
 /* Auto-fit rather than a fixed four: the strip is three tiles now, and the
@@ -12214,41 +12180,21 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 10px;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--white-a06);
     flex-shrink: 0;
-}
-
-.auto-sync-summary div {
-    padding: 10px 14px;
-    background: rgba(0, 0, 0, 0.25);
-    border: 1px solid var(--white-a05);
-    border-radius: 10px;
 }
 
 .auto-sync-summary span {
     display: block;
-    color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
 }
 
 .auto-sync-summary small {
     display: block;
-    margin-top: 2px;
-    color: var(--white-a45);
-    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-monitor {
     flex-shrink: 0;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--white-a06);
 }
 
 .auto-sync-monitor-head {
@@ -12271,10 +12217,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-monitor-kicker {
     margin-bottom: 3px;
-    color: rgba(var(--accent-rgb), 0.85);
     font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
     text-transform: uppercase;
 }
 
@@ -12293,25 +12236,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-monitor-head button,
 .auto-sync-board-intro button,
 .auto-sync-history-intro button {
-    height: 30px;
-    padding: 0 14px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a04);
-    color: var(--white-a65);
     cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    transition: all 0.2s ease;
-}
-
-.auto-sync-monitor-head button:hover,
-.auto-sync-board-intro button:hover,
-.auto-sync-history-intro button:hover {
-    background: rgba(var(--accent-rgb), 0.18);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
 }
 
 .auto-sync-monitor-list {
@@ -12324,9 +12249,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-monitor-card,
 .auto-sync-monitor-empty {
     min-width: 0;
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    background: rgba(22, 22, 22, 0.95);
 }
 
 .auto-sync-monitor-card {
@@ -12338,13 +12260,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-monitor-card.running {
-    border-color: rgba(var(--accent-rgb), 0.34);
     background: rgba(var(--accent-rgb), 0.08);
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.08), 0 8px 24px rgba(var(--accent-rgb), 0.08);
 }
 
 .auto-sync-monitor-card.error {
-    border-color: rgba(239, 68, 68, 0.28);
     background: rgba(239, 68, 68, 0.07);
 }
 
@@ -12443,7 +12362,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: fit-content;
     max-width: 100%;
     margin-top: 8px;
-    padding: 8px 12px;
 }
 
 .auto-sync-monitor-empty span,
@@ -12468,35 +12386,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-tabs {
     display: flex;
-    gap: 0;
-    padding: 0 20px;
-    border-bottom: 1px solid var(--white-a06);
     flex-shrink: 0;
 }
 
 .auto-sync-tabs button {
     height: 40px;
-    padding: 0 18px;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    background: transparent;
-    color: var(--white-a50);
     cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    transition: color 0.2s ease, border-color 0.2s ease;
-    position: relative;
     top: 1px;
-}
-
-.auto-sync-tabs button:hover {
-    color: var(--white-a85);
-}
-
-.auto-sync-tabs button.active {
-    color: rgb(var(--accent-light-rgb));
-    border-bottom-color: rgb(var(--accent-rgb));
 }
 
 .auto-sync-tab-panel {
@@ -12550,19 +12446,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-sidebar {
     min-height: 0;
-    border-right: 1px solid var(--white-a06);
-    background: rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
 }
 
 .auto-sync-sidebar-title {
     padding: 14px 18px 8px;
-    color: var(--white-a55);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-sidebar-filter {
@@ -12574,19 +12463,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 100%;
     height: 30px;
     padding: 0 28px 0 10px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    background: rgba(0, 0, 0, 0.3);
     color: #fff;
     font-size: 12px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.2s ease, background 0.2s ease;
-}
-
-.auto-sync-sidebar-search:focus {
-    border-color: rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.04);
 }
 
 .auto-sync-sidebar-search::placeholder {
@@ -12631,14 +12511,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     justify-content: space-between;
     gap: 6px;
     padding: 6px 4px 4px;
-}
-
-.auto-sync-source-title {
-    color: rgba(255, 255, 255, 0.38);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-source-bulk-btn {
@@ -12748,10 +12620,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     z-index: 10001;
     min-width: 220px;
     padding: 8px;
-    background: linear-gradient(135deg, #1f1f1f 0%, #161616 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: 10px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -12759,11 +12627,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-bulk-menu-title {
     padding: 6px 8px 4px;
-    color: var(--white-a55);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-bulk-menu-buckets {
@@ -12774,22 +12637,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-bulk-menu button {
     padding: 6px 10px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-sm);
-    background: var(--white-a03);
     color: var(--white-a75);
     cursor: pointer;
     font-size: 11px;
     font-weight: 600;
     text-align: left;
     font-family: inherit;
-    transition: all 0.15s ease;
-}
-
-.auto-sync-bulk-menu button:hover {
-    background: rgba(var(--accent-rgb), 0.16);
-    border-color: rgba(var(--accent-rgb), 0.35);
-    color: rgb(var(--accent-light-rgb));
 }
 
 /* Tap-to-schedule popover (AutoSyncPickMenu): the bulk menu's chrome for
@@ -12863,20 +12716,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     line-height: 1.3;
 }
 
-.auto-sync-bulk-menu-unschedule {
-    color: var(--white-a55) !important;
-}
-
-.auto-sync-bulk-menu-unschedule:hover {
-    background: rgba(239, 68, 68, 0.18) !important;
-    border-color: rgba(239, 68, 68, 0.4) !important;
-    color: #ef4444 !important;
-}
-
 /* Custom-interval column tag */
-.auto-sync-column.custom {
-    border-style: dashed;
-}
 
 .auto-sync-column-head em {
     font-style: normal;
@@ -12890,11 +12730,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-playlist,
 .auto-sync-scheduled-card {
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    background: rgba(22, 22, 22, 0.95);
     cursor: grab;
-    transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .auto-sync-playlist {
@@ -12910,7 +12746,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 8px;
     height: 8px;
     border-radius: var(--radius-circle);
-    background: var(--white-a18);
     flex-shrink: 0;
     /* Pin the status dot to the first line of the name so multi-line
      * playlist titles flow underneath it instead of pushing it down. */
@@ -12929,12 +12764,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-playlist:hover,
 .auto-sync-scheduled-card:hover {
-    border-color: rgba(var(--accent-rgb), 0.25);
     background: rgba(28, 28, 28, 0.98);
-}
-
-.auto-sync-playlist.scheduled {
-    border-color: rgba(var(--accent-rgb), 0.22);
 }
 
 /* The one number in this strip you would act on. */
@@ -13048,16 +12878,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.auto-sync-scheduled-timing span {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: rgb(var(--accent-light-rgb));
-}
-
-.auto-sync-scheduled-timing small {
-    background: var(--white-a05);
-    color: var(--white-a45);
 }
 
 /* ── Hourly board: interval LANES (horizontal rows — Concept 1) ───────────── */
@@ -13230,37 +13050,26 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     min-height: 0;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 20px;
     display: grid;
     grid-template-columns: repeat(10, minmax(220px, 1fr));
     grid-auto-rows: minmax(0, 1fr);
-    gap: 12px;
 }
 
 .auto-sync-column {
     min-height: 0;
     max-height: 100%;
-    overflow: hidden;
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-lg);
-    background: rgba(0, 0, 0, 0.2);
     display: flex;
     flex-direction: column;
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
 .auto-sync-column.drag-over {
-    border-color: rgba(var(--accent-rgb), 0.5);
     background: rgba(var(--accent-rgb), 0.06);
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3), 0 6px 18px rgba(var(--accent-rgb), 0.12);
 }
 
 .auto-sync-column-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--white-a05);
     color: var(--white-a85);
     font-size: 13px;
     font-weight: 700;
@@ -13268,11 +13077,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-column-head small {
-    color: var(--white-a40);
-    font-size: 10px;
-    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-column-list {
@@ -13317,29 +13122,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-align: center;
 }
 
-.auto-sync-drop-hint {
-    border: 1px dashed var(--white-a10);
-    border-radius: 10px;
-    padding: 20px 12px;
-}
-
-.auto-sync-drop-hint strong,
-.auto-sync-drop-hint span {
-    display: block;
-}
-
 .auto-sync-drop-hint strong {
-    color: var(--white-a50);
-    font-size: 11px;
-    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.3px;
 }
 
 .auto-sync-drop-hint span {
     margin-top: 4px;
-    color: var(--white-a30);
-    font-size: 11px;
 }
 
 .auto-sync-loading,
@@ -13371,15 +13159,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
-    padding: 12px;
     margin-bottom: 8px;
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.auto-sync-scheduled-card.disabled {
-    opacity: 0.52;
 }
 
 .auto-sync-scheduled-main {
@@ -13414,34 +13197,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     min-width: 0;
     height: 26px;
     flex: 1;
-    padding: 0 10px;
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.auto-sync-scheduled-card button.run:disabled {
-    cursor: default;
-    opacity: 0.62;
-}
-
 .auto-sync-scheduled-card button.run:not(:disabled):hover {
     color: rgb(var(--accent-neon-rgb));
-    background: rgba(var(--accent-rgb), 0.2);
     border-color: rgba(var(--accent-rgb), 0.4);
-}
-
-.auto-sync-scheduled-card button:not(.run):hover {
-    color: #ef4444;
-    background: rgba(239, 68, 68, 0.2);
-    border-color: rgba(239, 68, 68, 0.4);
 }
 
 .auto-sync-scheduled-card.failing {
@@ -13697,12 +13460,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-weekly-editor {
-    background: linear-gradient(160deg,
-        rgba(15, 20, 32, 0.96) 0%,
-        rgba(10, 14, 24, 0.96) 100%);
-    border: 1px solid rgba(var(--accent-rgb), 0.4);
-    border-radius: 20px;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
     width: 100%;
     max-width: 460px;
     padding: 24px;
@@ -13720,7 +13477,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-weekly-editor-head h4 {
     margin: 0;
     font-size: 16px;
-    color: rgba(255, 255, 255, 0.95);
 }
 
 .auto-sync-weekly-editor-playlist {
@@ -13753,26 +13509,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-weekly-day-toggle {
     height: 36px;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    background: var(--white-a04);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 11px;
     font-weight: 600;
     font-family: inherit;
-    transition: all 0.15s ease;
-}
-
-.auto-sync-weekly-day-toggle:hover {
-    border-color: rgba(var(--accent-rgb), 0.35);
-    background: rgba(var(--accent-rgb), 0.08);
-}
-
-.auto-sync-weekly-day-toggle.active {
-    border-color: rgba(var(--accent-rgb), 0.65);
-    background: rgba(var(--accent-rgb), 0.2);
-    color: rgb(var(--accent-light-rgb));
 }
 
 .auto-sync-weekly-editor-section input[type="time"],
@@ -13821,19 +13562,16 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-weekly-editor-save {
     height: 34px;
     padding: 0 16px;
-    border-radius: var(--radius-md);
     border: 1px solid var(--white-a10);
     background: var(--white-a04);
     color: var(--white-a70);
     cursor: pointer;
     font-size: 12px;
-    font-weight: 600;
     font-family: inherit;
     transition: all 0.15s ease;
 }
 
 .auto-sync-weekly-editor-save {
-    background: rgba(var(--accent-rgb), 0.2);
     border-color: rgba(var(--accent-rgb), 0.5);
     color: rgb(var(--accent-light-rgb));
 }
@@ -14119,20 +13857,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-history-status {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    padding: 2px 8px;
-    border-radius: 10px;
     background: rgba(148, 163, 184, 0.14);
     color: #94a3b8;
 }
-
-.auto-sync-history-status.completed,
-.auto-sync-history-status.finished { background: rgba(74, 222, 128, 0.15); color: #4ade80; }
-.auto-sync-history-status.error { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
-.auto-sync-history-status.skipped { background: rgba(250, 204, 21, 0.15); color: #facc15; }
 
 .auto-sync-history-duration {
     background: var(--white-a05);
@@ -53214,14 +52941,8 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     --np-ambient-r: 29;
     --np-ambient-g: 185;
     --np-ambient-b: 84;
-    width: 90vw;
-    max-width: 880px;
     max-height: 85vh;
     max-height: 85dvh;
-    background: linear-gradient(180deg, rgba(24, 24, 24, 0.97) 0%, rgba(10, 10, 10, 1) 100%);
-    border: 1px solid var(--white-a06);
-    border-radius: 20px;
-    box-shadow: 0 32px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--white-a03);
     position: relative;
     overflow: hidden;
     transform: scale(1);
@@ -53230,18 +52951,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-modal::before {
     content: '';
     position: absolute;
-    top: -40%;
     left: -20%;
     width: 140%;
-    height: 100%;
-    background: radial-gradient(ellipse at 30% 20%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.35) 0%,
-        rgba(var(--np-ambient-r), var(--np-ambient-g), var(--np-ambient-b), 0.08) 40%,
-        transparent 70%);
     pointer-events: none;
     z-index: 0;
     transition: background 1.2s ease;
-    filter: blur(40px);
 }
 .np-modal > * {
     position: relative;
@@ -53268,10 +52982,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-radius: var(--radius-circle);
     transition: all 0.15s ease;
 }
-.np-close-btn:hover {
-    color: var(--white-a70);
-    background: var(--white-a06);
-}
 
 /* Layout */
 /* Short-viewport safety (the #1024 bug class): the modal is clamped to 85vh
@@ -53288,9 +52998,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-body {
     display: flex;
     flex-direction: row;
-    padding: 48px 40px 36px;
-    gap: 48px;
-    align-items: flex-start;
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -53323,11 +53030,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Album Art */
 .np-album-art-container {
-    width: 300px;
-    height: 300px;
-    border-radius: var(--radius-lg);
     overflow: hidden;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 2px 12px rgba(0, 0, 0, 0.3);
     position: relative;
     background: var(--white-a03);
     flex-shrink: 0;
@@ -53359,30 +53062,21 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 /* Track Info */
 .np-track-info {
-    text-align: center;
     width: 300px;
 }
 .np-track-title {
-    font-size: 22px;
-    font-weight: 700;
     color: #fff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    letter-spacing: -0.3px;
 }
 .np-artist-name {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--white-a55);
     margin-top: 4px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .np-album-name {
-    font-size: 13px;
-    color: var(--white-a35);
     font-style: italic;
     margin-top: 3px;
     white-space: nowrap;
@@ -53390,32 +53084,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     text-overflow: ellipsis;
 }
 .np-format-badges {
-    display: flex;
-    gap: 6px;
     justify-content: center;
-    margin-top: 10px;
-    flex-wrap: wrap;
-}
-.np-format-badge {
-    padding: 2px 8px;
-    border-radius: var(--radius-xs);
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    background: var(--white-a06);
-    color: var(--white-a45);
-    border: 1px solid var(--white-a06);
-}
-.np-format-badge.flac {
-    color: rgba(var(--accent-rgb), 0.9);
-    background: rgba(var(--accent-rgb), 0.08);
-    border-color: rgba(var(--accent-rgb), 0.15);
-}
-.np-format-badge.preview {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.1);
-    border-color: rgba(251, 191, 36, 0.3);
 }
 
 /* Progress Section */
@@ -53423,7 +53092,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 100%;
 }
 .np-progress-bar-container {
-    position: relative;
     height: 20px;
     display: flex;
     align-items: center;
@@ -53432,9 +53100,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-progress-track {
     position: absolute;
     width: 100%;
-    height: 4px;
-    background: var(--white-a08);
-    border-radius: 2px;
     overflow: hidden;
 }
 .np-progress-bar-container:hover .np-progress-track {
@@ -53442,8 +53107,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 .np-progress-fill {
     height: 100%;
-    background: rgb(var(--accent-rgb));
-    border-radius: 2px;
     width: 0%;
     transition: width 0.1s linear;
 }
@@ -53507,23 +53170,15 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 20px;
 }
 .np-btn {
     background: none;
     border: none;
-    color: var(--white-a60);
     cursor: pointer;
     padding: 8px;
-    border-radius: var(--radius-circle);
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
-}
-.np-btn:hover {
-    color: #fff;
-    transform: scale(1.08);
 }
 .np-btn:active {
     transform: scale(0.95);
@@ -53534,26 +53189,11 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     transform: none;
 }
 .np-btn-play {
-    width: 60px;
-    height: 60px;
-    border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
-    color: #000;
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.3);
     position: relative;
-}
-.np-btn-play:hover {
-    filter: brightness(1.15);
-    transform: scale(1.05);
-    box-shadow: 0 6px 28px rgba(var(--accent-rgb), 0.4);
 }
 .np-btn-play:active {
     filter: brightness(0.9);
     transform: scale(0.97);
-}
-.np-btn-shuffle.active,
-.np-btn-repeat.active {
-    color: rgb(var(--accent-rgb));
 }
 .np-btn-shuffle.active::after,
 .np-btn-repeat.active::after {
@@ -53565,7 +53205,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     width: 4px;
     height: 4px;
     border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
 }
 .np-btn-shuffle,
 .np-btn-repeat {
@@ -53606,15 +53245,10 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .np-volume-track {
     position: absolute;
     width: 100%;
-    height: 4px;
-    background: var(--white-a08);
-    border-radius: 2px;
     overflow: hidden;
 }
 .np-volume-fill {
     height: 100%;
-    background: rgb(var(--accent-rgb));
-    border-radius: 2px;
     width: 70%;
     transition: width 0.05s linear;
 }
@@ -53689,8 +53323,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 }
 .np-viz-bar {
     width: 3px;
-    background: rgb(var(--accent-rgb));
-    border-radius: 1.5px;
     height: 24px;
     transform-origin: bottom;
     transform: scaleY(0.125);
@@ -53828,14 +53460,8 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     border-color: var(--white-a20);
 }
 .np-radio-btn.active {
-    color: rgb(var(--accent-rgb));
     border-color: rgba(var(--accent-rgb), 0.3);
     background: rgba(var(--accent-rgb), 0.08);
-}
-.np-queue-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 /* Queue panel scrollbar */
@@ -53922,12 +53548,9 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 
 .np-lyrics-line {
     padding: 2px 0;
-    transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .np-lyrics-line.active {
-    color: rgb(var(--accent-rgb));
-    font-weight: 600;
     transform: translateX(4px);
 }
 
@@ -54004,41 +53627,16 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     gap: 2px;
 }
 .np-queue-item {
-    display: flex;
-    align-items: center;
     justify-content: space-between;
-    padding: 8px 12px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-.np-queue-item:hover {
-    background: var(--white-a05);
 }
 .np-queue-item.active {
-    background: rgba(var(--accent-rgb), 0.12);
     border-left: 3px solid rgb(var(--accent-rgb));
 }
 .np-queue-item-info {
-    min-width: 0;
     flex: 1;
 }
 .np-queue-item-title {
-    font-size: 13px;
     color: var(--white-a85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.np-queue-item.active .np-queue-item-title {
-    color: rgb(var(--accent-light-rgb));
-}
-.np-queue-item-artist {
-    font-size: 11px;
-    color: var(--white-a35);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 .np-queue-item-remove {
     background: none;
@@ -54053,7 +53651,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     justify-content: center;
     border-radius: var(--radius-circle);
     flex-shrink: 0;
-    transition: all 0.15s ease;
 }
 .np-queue-item-remove:hover {
     color: rgba(255, 80, 80, 0.8);
@@ -60513,36 +60110,25 @@ tr.tag-diff-same {
 #settings-page .settings-content {
     flex-direction: column;
     align-items: center;
-    max-width: 100% !important;
-    margin: 0 auto;
     padding-bottom: 10vh;
 }
 
 /* Tab bar + save action sit on one control row. */
 #settings-page .settings-nav-row {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 14px;
     width: 100%;
     /* Was 920px. That is what actually set the page width — the earlier
-       .settings-content cap never applied, this override sets it to 100%
-       !important and caps the CHILDREN instead. 920px also made the tab bar
-       wrap: the tabs fit fine, the row they sit in did not. */
+       .settings-content cap never applied (settings-premier.css sets its
+       max-width with !important), so the page caps the CHILDREN instead.
+       920px also made the tab bar wrap: the tabs fit fine, the row they sit
+       in did not. */
     max-width: var(--settings-max-width);
     margin: 0 auto 28px;
-    padding: 0 2px;
 }
 
 #settings-page .stg-tabbar {
-    display: flex;
     flex: 0 1 auto;
-    margin: 0;
-    width: fit-content;
     max-width: 100%;
     min-width: 0;
-    background: rgba(0, 0, 0, 0.34);
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.045);
 }
 
 #settings-page .settings-nav-row .header-actions {
@@ -60551,8 +60137,6 @@ tr.tag-diff-same {
     justify-content: flex-end;
     align-items: center;
     flex-wrap: nowrap;
-    width: auto;
-    margin: 0 0 0 auto;
     margin-top: 0;
 }
 
@@ -60566,11 +60150,9 @@ tr.tag-diff-same {
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
-    flex-direction: column;
+    /* settings-premier.css overrides this with max-width: none !important.
+       It stays because test_the_page_width_is_one_number pins it. */
     max-width: var(--settings-max-width);
-    width: 100%;
-    gap: 0;
-    margin: 0 auto;
     margin-bottom: 0;
 }
 /* The Logs tab uses the full available width — the log terminal benefits from
@@ -60647,22 +60229,8 @@ tr.tag-diff-same {
     gap: 10px;
 }
 
-#settings-page .settings-left-column,
-#settings-page .settings-right-column,
-#settings-page .settings-third-column {
-    min-width: unset;
-    width: 100%;
-    gap: 0;
-}
-
 /* Kill glassmorphic cards — flat, no bg, no borders, no shadows */
 #settings-page .settings-group {
-    background: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    margin-bottom: 0;
     position: relative;
     overflow: visible;
 }
@@ -60680,16 +60248,12 @@ tr.tag-diff-same {
 #settings-page .settings-group > h3 {
     /* the sub-heading INSIDE a card. deliberately between the card title and a
        field label: it groups rows, it does not title the card. */
-    font-size: 0.72rem;
-    font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--white-a55);
     /* more air above than below, so the label belongs to what follows it */
     padding: 24px 0 8px 2px;
-    margin: 0;
     border: none;
-    border-bottom: 1px solid var(--white-a07);
     border-left: none;
     position: relative;
     transition: color 240ms cubic-bezier(0.2, 0, 0, 1);
@@ -60735,9 +60299,7 @@ tr.tag-diff-same {
 #settings-page .form-group[hidden] { display: none !important; }
 
 #settings-page .form-group > label {
-    font-size: var(--stg-t-label, 0.78rem);
     color: rgba(255, 255, 255, 0.74);
-    font-weight: 450;
     margin: 0;
     /* Grow to fill the left so the control aligns to a consistent right edge. */
     flex: 1 1 auto;
@@ -60833,7 +60395,6 @@ tr.tag-diff-same {
     border-color: rgba(var(--accent-rgb), 0.4);
     outline: none;
     background-color: var(--white-a06);
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
 }
 #settings-page select option {
     background: #1a1a1e;
@@ -61124,9 +60685,6 @@ tr.tag-diff-same {
     flex-basis: 100%;
     display: block;
     padding: 2px 0 4px;
-    font-size: var(--stg-t-sub, 0.75rem);
-    color: rgba(255, 255, 255, 0.42);
-    line-height: 1.55;
     margin: 0;
     background: none;
     border-radius: 0;
@@ -88043,3 +87601,77 @@ body.src-modal-open { overflow: hidden; }
 @media (hover: none) {
     .mm-row-play { display: none; }
 }
+/* #1721: where each track stands. one quiet line under the meta that doubles
+   as a filter, and a chip on the rows that aren't in the library. a healthy
+   row says nothing, same as a healthy card. */
+.mm-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 16px;
+    margin-top: 12px;
+    font-size: 12.5px;
+}
+.mm-status-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--white-a70);
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+.mm-status-seg b { color: #fff; font-weight: 650; }
+.mm-status-seg:hover { color: #fff; }
+.mm-status-seg--on {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+    text-decoration-color: var(--white-a40);
+}
+.mm-status-seg:focus-visible,
+.mm-status-fix:focus-visible,
+.pl-card-attn:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.8); outline-offset: 2px; border-radius: 4px; }
+.mm-status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st, var(--white-a40)); }
+.mm-status-fix {
+    padding: 0;
+    border: none;
+    background: none;
+    color: #e3a63c;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.mm-status-fix:hover { text-decoration: underline; }
+[data-st="in_library"] { --st: #3ccf7a; }
+[data-st="wishlisted"] { --st: #6aa7ff; }
+[data-st="needs_match"] { --st: #e3a63c; }
+[data-st="missing"] { --st: #e0706a; }
+.mm-row-artist { display: flex; align-items: center; gap: 8px; }
+.mm-row-artist-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mm-row-st {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--st);
+}
+.mm-row-st::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.pl-card-attn {
+    align-self: flex-start;
+    margin-top: 1px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: #e3a63c;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+.pl-card-attn:hover { text-decoration: underline; }

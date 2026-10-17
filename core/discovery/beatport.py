@@ -63,6 +63,20 @@ class BeatportDiscoveryDeps:
     sync_discovery_results_to_mirrored: Callable
 
 
+def _source_artist_names(track) -> list:
+    """every artist the beatport track names. chart data sends a list of
+    names, or of {'name'} objects, or one comma-joined string."""
+    raw = track.get('artists')
+    names = []
+    if isinstance(raw, list):
+        for a in raw:
+            name = a.get('name') if isinstance(a, dict) else a
+            names.extend(p.strip() for p in str(name or '').split(','))
+    elif raw:
+        names.extend(p.strip() for p in str(raw).split(','))
+    return [n for n in names if n]
+
+
 def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
     """Background worker for Beatport discovery process (Spotify preferred, iTunes fallback)"""
     _ew_state = {}
@@ -112,11 +126,26 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
 
                 logger.debug(f"Searching {discovery_source.upper()} for: '{track_artist}' - '{track_title}'")
 
+                # the isrc names the exact recording, so it goes before the
+                # cache (a cached name match may be another version) and the
+                # search. a miss or a disagreeing artist falls through to both.
+                isrc_track = None
+                if track.get('isrc'):
+                    from core.discovery.isrc_match import isrc_match
+                    isrc_track = isrc_match(
+                        track.get('isrc'), discovery_source, use_spotify,
+                        spotify_client=deps.spotify_client, fallback_client=itunes_client_instance,
+                        artists=_source_artist_names(track) or [track_artist])
+                    if isrc_track:
+                        logger.info(f"ISRC [{i+1}/{len(tracks)}]: {track_artist} - {track_title} -> "
+                                    f"{getattr(isrc_track, 'name', '?')}")
+
                 # Check discovery cache first
                 cache_key = deps.get_discovery_cache_key(track_title, track_artist)
                 try:
                     cache_db = deps.get_database()
-                    cached_match = cache_db.get_discovery_cache_match(cache_key[0], cache_key[1], discovery_source)
+                    cached_match = None if isrc_track else cache_db.get_discovery_cache_match(
+                        cache_key[0], cache_key[1], discovery_source)
                     if cached_match and deps.validate_discovery_cache_artist(track_artist, cached_match):
                         logger.debug(f"CACHE HIT [{i+1}/{len(tracks)}]: {track_artist} - {track_title}")
                         # Convert artists from ['str'] to [{'name': 'str'}] for Beatport frontend format
@@ -129,6 +158,7 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                                 'title': track_title,
                                 'artist': track_artist
                             },
+                            'source_track': {'id': track.get('id', '')},
                             'status': 'found',
                             'status_class': 'found',
                             'discovery_source': discovery_source,
@@ -141,9 +171,11 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                     logger.error(f"Cache lookup error: {cache_err}")
 
                 # Use matching engine for track matching
-                found_track = None
-                best_confidence = 0.0
+                found_track = isrc_track
+                best_confidence = 1.0 if isrc_track else 0.0
                 best_raw_track = None
+                if isrc_track and use_spotify and getattr(isrc_track, 'id', None):
+                    best_raw_track = deps.get_metadata_cache().get_entity('spotify', 'track', isrc_track.id)
                 min_confidence = 0.9  # Higher threshold for Beatport to avoid bad matches
 
                 # Generate search queries using matching engine (with fallback)
@@ -169,6 +201,9 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                             f"{track_title} {track_artist}",
                             track_title
                         ]
+
+                if isrc_track:
+                    search_queries = []
 
                 # deezer's free text can leave the original out entirely (#1565)
                 from core.metadata.song_search import with_song_first_pass
@@ -240,6 +275,8 @@ def run_beatport_discovery_worker(url_hash, deps: BeatportDiscoveryDeps):
                         'title': track_title,
                         'artist': track_artist
                     },
+                    'source_track': {'id': track.get('id', '')},
+                    'match_method': 'isrc' if isrc_track and found_track is isrc_track else 'search',
                     'status': 'found' if found_track else 'not_found',
                     'status_class': 'found' if found_track else 'not-found',
                     'discovery_source': discovery_source,

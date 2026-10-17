@@ -3,6 +3,8 @@ import { useNavigate } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
+import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
 import {
@@ -136,6 +138,8 @@ export function WatchlistPage() {
   const recentReleasesQuery = useQuery(watchlistRecentReleasesQueryOptions(profileId, 12));
 
   const artists = useMemo(() => artistsQuery.data ?? [], [artistsQuery.data]);
+  // One lookup for the whole page; the cards only read the result.
+  const audiobookArtists = useRoutedArtists(artists.map((artist) => artist.artist_name));
   const count = countQuery.data?.count ?? artists.length;
   const recentReleases = recentReleasesQuery.data ?? [];
 
@@ -895,6 +899,7 @@ export function WatchlistPage() {
                           artist={artist}
                           selected={artistId !== null && selectedIds.has(artistId)}
                           active={artistId !== null && artistId === activeArtistId}
+                          audiobook={audiobookArtists.has(artist.artist_name)}
                           onToggleSelect={() => artistId && toggleArtist(artistId)}
                           onOpenConfig={() =>
                             artistId &&
@@ -973,6 +978,8 @@ interface WatchlistArtistCardProps {
   artist: WatchlistArtist;
   selected: boolean;
   active: boolean;
+  /** Downloads by this artist are filed as audiobooks. */
+  audiobook: boolean;
   onToggleSelect: () => void;
   onOpenConfig: () => void;
   onOpenDetail: () => void;
@@ -984,6 +991,7 @@ function WatchlistArtistCard({
   artist,
   selected,
   active,
+  audiobook,
   onToggleSelect,
   onOpenConfig,
   onOpenDetail,
@@ -1107,9 +1115,13 @@ function WatchlistArtistCard({
                 {pill.label}
               </span>
             ))}
+            {audiobook ? <AudiobookRouteBadge /> : null}
           </div>
         ) : (
-          <span className="watchlist-row-empty-rule">Default rules</span>
+          <>
+            <span className="watchlist-row-empty-rule">Default rules</span>
+            {audiobook ? <AudiobookRouteBadge /> : null}
+          </>
         )}
       </div>
       <div className="watchlist-row-health">

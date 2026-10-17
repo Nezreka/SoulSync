@@ -244,7 +244,12 @@ export function SyncPage() {
         onOpen={(sourceId) => openSourceModal('qobuz', sourceId)}
       />
     ),
-    beatport: <BeatportTab />,
+    beatport: (
+      <BeatportTab
+        vertical={page.verticals.beatport}
+        onOpen={(sourceId) => openSourceModal('beatport', sourceId)}
+      />
+    ),
     deezer: <DeezerArlTab />,
     // The link variant is the same SERVICE: one config, one vertical, one
     // modal id space. Only the way a playlist arrives differs.

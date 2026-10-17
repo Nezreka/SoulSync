@@ -10,6 +10,11 @@ as the source.
 returns the same Track object a search would, so the rest of identification
 stores it unchanged. anything that doesn't pan out returns None and the
 normal search runs, so this can never do worse than before.
+
+a mirrored beatport track has no id any metadata source knows, but it does
+have an isrc: the beatport page that filled the mirror filed each track in the
+metadata cache by its beatport id, isrc included. that isrc is looked up on
+the active source instead (core.discovery.isrc_match).
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ logger = get_logger("discovery.direct_match")
 # mirror sources whose source_track_id is that service's own track id
 _DEEZER_SOURCES = frozenset({"deezer"})
 _SPOTIFY_SOURCES = frozenset({"spotify", "spotify_public"})
+_BEATPORT_SOURCES = frozenset({"beatport"})
 _SPOTIFY_ID_RE = re.compile(r"[A-Za-z0-9]{22}")
 
 
@@ -49,6 +55,9 @@ def direct_source_match(
         if (playlist_source in _SPOTIFY_SOURCES and discovery_source == "spotify"
                 and use_spotify):
             return _spotify_track(spotify_client, track_id)
+        if playlist_source in _BEATPORT_SOURCES:
+            return _beatport_track(discovery_source, use_spotify, track_id,
+                                   spotify_client, fallback_client)
     except Exception as e:  # noqa: BLE001 - a failed lookup just means search
         logger.debug("direct lookup failed for %s track %s: %s",
                      playlist_source, track_id, e)
@@ -80,3 +89,17 @@ def _spotify_track(client: Any, track_id: str) -> Optional[Any]:
     if not raw or not raw.get("id"):
         return None
     return SpotifyTrack.from_spotify_track(raw)
+
+
+def _beatport_track(discovery_source: str, use_spotify: bool, track_id: str,
+                    spotify_client: Any, fallback_client: Any) -> Optional[Any]:
+    from core.beatport.fetch import cached_track
+    from core.discovery.isrc_match import isrc_match
+
+    remembered = cached_track(track_id)
+    if not remembered or not remembered.get('isrc'):
+        return None
+    artists = [a.get('name') for a in remembered.get('artists') or [] if isinstance(a, dict)]
+    return isrc_match(remembered['isrc'], discovery_source, use_spotify,
+                      spotify_client=spotify_client, fallback_client=fallback_client,
+                      artists=artists or [remembered.get('artist', '')])

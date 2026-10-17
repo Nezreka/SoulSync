@@ -611,3 +611,9 @@ describe('ArtistHero watchlist button opens the settings modal', () => {
     expect(document.getElementById('watchadd-modal-overlay')).toBeNull();
   });
 });
+
+// The audiobook toggle has its own tests (features/audiobook-routes); these
+// files pin the hero's own requests, so the toggle must not add fetches.
+vi.mock('@/features/audiobook-routes/audiobook-route-toggle', () => ({
+  AudiobookRouteToggle: () => null,
+}));

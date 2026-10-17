@@ -406,7 +406,7 @@ def test_automatic_wishlist_cleanup_after_db_update_removes_library_matches():
             return [{"id": 1}]
 
     class _CleanupMusicDatabase:
-        def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
+        def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
             if track_name == "Song A" and artist_name == "Artist A":
                 return SimpleNamespace(id='db-track', title=track_name,
                                        artist_name=artist_name, album_title=album,
@@ -498,7 +498,7 @@ class _CleanupMusicDatabase:
     def __init__(self):
         self.track_checks = []
 
-    def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None):
+    def check_track_exists(self, track_name, artist_name, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
         self.track_checks.append((track_name, artist_name, server_source, album))
         if track_name == "Owned Song" and artist_name == "Artist A":
             return SimpleNamespace(id='db-track', title=track_name,

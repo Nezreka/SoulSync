@@ -120,7 +120,8 @@ def test_search_context_carries_the_air_date(monkeypatch):
     ctx = mod.search_context({"show_title": "The Daily Show", "season_number": 31,
                               "episode_number": 85, "air_date": "2026-07-08",
                               "show_tmdb_id": 2224}, "episode")
-    assert ctx["air_date"] == "2026-07-08" and ctx["year"] == "2026"
+    # the air date rides along; the year is the SHOW's (unknown here), never the air year
+    assert ctx["air_date"] == "2026-07-08" and ctx["year"] is None
 
 
 # ── size-inferred quality ─────────────────────────────────────────────────────

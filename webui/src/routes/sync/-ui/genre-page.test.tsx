@@ -25,13 +25,11 @@ function makeEnv(): BeatportDownloadEnv {
     showToast: vi.fn(),
     showLoadingOverlay: vi.fn(),
     hideLoadingOverlay: vi.fn(),
-    setOverlayMessage: vi.fn(),
     openDownloadModal: vi.fn(),
     registerDownload: vi.fn(),
     now: () => 1700000000000,
     random: () => 0.5,
-    schedule: vi.fn(),
-    sleep: async () => {},
+    openList: vi.fn(),
   };
 }
 
@@ -274,7 +272,6 @@ describe('the genre hero slider', () => {
 });
 
 const LISTS_URL = '/api/beatport/genre/tech-house/11/top-10-lists';
-const TRACKS_URL = '/api/beatport/genre/tech-house/11/tracks';
 
 const LISTS = {
   success: true,
@@ -311,12 +308,8 @@ describe('the genre top-10 lists', () => {
     );
   });
 
-  it('files the download under the GENRE-prefixed chart name', async () => {
-    stubApi({
-      [HERO_URL]: { success: true, releases: [RELEASE] },
-      [LISTS_URL]: LISTS,
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'x' }] },
-    });
+  it("opens the genre's own top 10 list, not the homepage one", async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
     const env = makeEnv();
     render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
     await waitFor(() =>
@@ -324,18 +317,15 @@ describe('the genre top-10 lists', () => {
     );
 
     fireEvent.click(document.getElementById('genre-beatport-top10-list') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    expect((env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0][1]).toBe(
-      'Tech House Beatport Top 10',
-    );
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'genre:tech-house:11:top-10',
+      label: 'Tech House Beatport Top 10',
+      genreName: 'Tech House',
+    });
   });
 
-  it('files the hype list under its own name', async () => {
-    stubApi({
-      [HERO_URL]: { success: true, releases: [RELEASE] },
-      [LISTS_URL]: LISTS,
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'x' }] },
-    });
+  it("opens the genre's hype list as its own list", async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
     const env = makeEnv();
     render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
     await waitFor(() =>
@@ -343,12 +333,11 @@ describe('the genre top-10 lists', () => {
     );
 
     fireEvent.click(document.getElementById('genre-beatport-hype10-list') as Element);
-    await waitFor(() => expect(env.registerDownload).toHaveBeenCalled());
-    expect(env.registerDownload).toHaveBeenCalledWith(
-      'Tech House Hype Top 10',
-      '',
-      expect.any(String),
-    );
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'genre:tech-house:11:hype-10',
+      label: 'Tech House Hype Top 10',
+      genreName: 'Tech House',
+    });
   });
 
   it('REMOVES the hype column outright when there is no hype section', async () => {
@@ -425,82 +414,18 @@ describe('the genre top-10 lists', () => {
 });
 
 describe('the genre Top 100 button', () => {
-  it('scrapes the genre tracks endpoint and files it as "<Genre> Top 100"', async () => {
-    const calls = stubApi({
-      [HERO_URL]: { success: true, releases: [RELEASE] },
-      [LISTS_URL]: LISTS,
-      [TRACKS_URL]: { success: true, tracks: [{ title: 'T' }] },
-      '/api/beatport/enrich-tracks': { success: true, tracks: [{ title: 'T+' }] },
-    });
+  it("opens the genre's top 100 as a playlist to identify", async () => {
+    stubApi({ [HERO_URL]: { success: true, releases: [RELEASE] }, [LISTS_URL]: LISTS });
     const env = makeEnv();
     render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
 
     fireEvent.click(document.getElementById('genre-top100-btn') as Element);
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalled());
-    expect(calls.some((c) => c.url.startsWith(TRACKS_URL))).toBe(true);
-    const args = (env.openDownloadModal as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(args[1]).toBe('Tech House Top 100');
-    expect(args[6]).toBe('playlist');
-    expect(env.showLoadingOverlay).toHaveBeenCalledWith('Scraping Tech House Top 100...');
-    // The ENRICHED tracks, not the scraped ones — the stub deliberately
-    // returns a different payload so the two cannot be confused.
-    expect((args[2] as { name: string }[])[0].name).toBe('T+');
-  });
-
-  it('is latched — a second press while the first is in flight is swallowed', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
+    expect(env.openList).toHaveBeenCalledWith({
+      ref: 'genre:tech-house:11:top-100',
+      label: 'Tech House Top 100',
+      genreName: 'Tech House',
     });
-    let scrapes = 0;
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        if (url.startsWith(TRACKS_URL)) {
-          scrapes++;
-          await gate;
-          return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
-            status: 200,
-          });
-        }
-        if (url.startsWith(HERO_URL)) {
-          return new Response(JSON.stringify({ success: true, releases: [RELEASE] }), {
-            status: 200,
-          });
-        }
-        return new Response(JSON.stringify({ success: true, tracks: [{ title: 'T' }] }), {
-          status: 200,
-        });
-      }),
-    );
-    const env = makeEnv();
-    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
-
-    const button = document.getElementById('genre-top100-btn') as Element;
-    fireEvent.click(button);
-    await waitFor(() => expect(scrapes).toBe(1));
-    fireEvent.click(button);
-    expect(scrapes).toBe(1);
-    release();
-    await waitFor(() => expect(env.openDownloadModal).toHaveBeenCalledTimes(1));
-  });
-
-  it('reports an empty chart with the genre in the message', async () => {
-    stubApi({
-      [HERO_URL]: { success: true, releases: [RELEASE] },
-      [LISTS_URL]: LISTS,
-      [TRACKS_URL]: { success: true, tracks: [] },
-    });
-    const env = makeEnv();
-    render(<GenrePage genre={GENRE} onBack={vi.fn()} env={env} />);
-
-    fireEvent.click(document.getElementById('genre-top100-btn') as Element);
-    await waitFor(() =>
-      expect(env.showToast).toHaveBeenCalledWith(
-        'Error loading Tech House Top 100: No tracks found in Tech House Top 100',
-        'error',
-      ),
-    );
+    expect(env.openDownloadModal).not.toHaveBeenCalled();
   });
 });
 

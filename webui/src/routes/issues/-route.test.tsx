@@ -153,12 +153,32 @@ describe('issues route', () => {
     );
   });
 
-  it('stores filters in route search state', async () => {
-    renderIssuesRoute();
-    const status = await screen.findByRole('combobox', { name: /status/i });
-    fireEvent.change(status, { target: { value: 'resolved' } });
-    await waitFor(() => expect(status).toHaveValue('resolved'));
-  });
+  it.each([
+    { label: 'Status', field: 'status', value: 'resolved' },
+    { label: 'Category', field: 'category', value: 'audio_quality' },
+    { label: 'Item type', field: 'entity', value: 'track' },
+    { label: 'Item type', field: 'entity', value: 'all' },
+  ])(
+    'updates $field to $value without dropping other search values',
+    async ({ label, field, value }) => {
+      const initial = {
+        status: 'in_progress',
+        category: 'wrong_metadata',
+        entity: 'album',
+      };
+      const { history } = renderIssuesRoute([`/issues?${new URLSearchParams(initial)}`]);
+      const filter = await screen.findByRole('combobox', { name: label });
+      fireEvent.change(filter, { target: { value } });
+
+      const expected: Record<string, string> = { ...initial, [field]: value };
+      if (field === 'entity' && value === 'all') delete expected.entity;
+      await waitFor(() =>
+        expect(Object.fromEntries(new URLSearchParams(history.location.search))).toEqual(expected),
+      );
+      expect(filter).toHaveValue(value);
+      expect(history.length).toBe(1);
+    },
+  );
 
   it('opens and closes the detail modal', async () => {
     const { history } = renderIssuesRoute();

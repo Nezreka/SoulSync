@@ -1757,6 +1757,7 @@ function autoSyncHistoryDetailHtml(entry, before, after, result, deltas) {
         ['Synced', result.tracks_synced],
         ['Skipped', result.sync_skipped],
         ['Wishlisted', result.wishlist_queued],
+        ['Sync errors', Number(result.sync_errors) > 0 ? result.sync_errors : undefined],
     ].filter(([, v]) => v !== undefined && v !== null && v !== '')
      .map(([k, v]) => `<span class="auto-sync-history-result-pill"><em>${_esc(k)}</em>${_esc(String(v))}</span>`).join('');
     const errorBlock = result.error ? `<div class="auto-sync-history-error">${_esc(result.error)}</div>` : '';

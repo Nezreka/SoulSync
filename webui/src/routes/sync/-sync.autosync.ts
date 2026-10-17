@@ -261,29 +261,57 @@ export function autoSyncSourceLabel(source: string | null | undefined): string {
 }
 
 /**
- * file + beatport have no external refresh hook; lastfm radios are
- * seed-specific snapshots that never change upstream — re-syncing would just
- * re-discover the same tracks, so they are excluded from the board.
+ * a beatport mirror refreshes when its id is a live list ref (the same rule as
+ * core/playlists/sources/beatport.py is_refreshable_mirror): the homepage
+ * lists, a genre's lists, or a chart. an old random chart hash and a release
+ * (which never changes) don't.
+ */
+const BEATPORT_LIVE_REF =
+  /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
+
+export function beatportMirrorRefreshes(playlist: MirroredRow | null | undefined): boolean {
+  return BEATPORT_LIVE_REF.test(String(playlist?.source_playlist_id ?? '').toLowerCase());
+}
+
+/** a dated snapshot of a beatport list: '<ref>@2026-10-16'. frozen, never refreshes. */
+export function beatportMirrorIsSnapshot(playlist: MirroredRow | null | undefined): boolean {
+  const id = String(playlist?.source_playlist_id ?? '').toLowerCase();
+  const at = id.lastIndexOf('@');
+  if (at < 0 || !/^\d{4}-\d{2}-\d{2}$/.test(id.slice(at + 1))) return false;
+  const ref = id.slice(0, at);
+  return BEATPORT_LIVE_REF.test(ref) || /^release:[a-z0-9][a-z0-9-]*:\d+$/.test(ref);
+}
+
+/**
+ * file has no external refresh hook, nor does a beatport mirror that isn't a
+ * live list; lastfm radios are seed-specific snapshots that never change
+ * upstream — re-syncing would just re-discover the same tracks, so they are
+ * excluded from the board.
  */
 export function autoSyncCanSchedulePlaylist(playlist: MirroredRow | null | undefined): boolean {
   if (!playlist) return false;
   const src = playlist.source || '';
-  return !['file', 'beatport', 'lastfm'].includes(src);
+  if (src === 'beatport') return beatportMirrorRefreshes(playlist);
+  return !['file', 'lastfm'].includes(src);
 }
 
 /**
  * Whether an all-playlists pipeline actually processes this playlist.
- * Mirrors the backend filter (pipeline.py:325, refresh_mirrored.py:78):
- * file/beatport sources are skipped. NOTE: lastfm is NOT excluded here —
- * the backend processes it, even though autoSyncCanSchedulePlaylist won't
- * let you schedule it directly.
+ * Mirrors the backend filter (user_playlists.pipeline_runs): file is skipped,
+ * and so is a beatport mirror that is neither a live list nor a dated snapshot.
+ * NOTE: lastfm and snapshots are NOT excluded here — the backend processes
+ * them, even though autoSyncCanSchedulePlaylist won't let you schedule them.
  */
 export function autoSyncPipelineCoversPlaylist(
-  playlist: { source?: string | null } | null | undefined,
+  playlist: { source?: string | null; source_playlist_id?: string | number } | null | undefined,
 ): boolean {
   if (!playlist) return false;
   const src = playlist.source || '';
-  return !['file', 'beatport'].includes(src);
+  if (src === 'beatport') {
+    const row = playlist as MirroredRow;
+    return beatportMirrorRefreshes(row) || beatportMirrorIsSnapshot(row);
+  }
+  return src !== 'file';
 }
 
 /* ── Automation linkage (auto-sync.js 218-241) ────────────────────────────── */
@@ -1419,6 +1447,8 @@ export function autoSyncHistoryResultPills(
       ['Synced', result.tracks_synced],
       ['Skipped', result.sync_skipped],
       ['Wishlisted', result.wishlist_queued],
+      // only when something failed: "Sync errors 0" on every clean run is noise
+      ['Sync errors', Number(result.sync_errors) > 0 ? result.sync_errors : undefined],
     ] as [string, unknown][]
   )
     .filter(([, v]) => v !== undefined && v !== null && v !== '')

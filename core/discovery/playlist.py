@@ -387,6 +387,28 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         except Exception as e:
                             logger.debug("alias search failed for %r: %s", alias, e)
 
+                # a track that came with a spotify id gets fetched by it and
+                # tried again before it becomes a wing it stub (#1721)
+                second = None
+                if not best_match or best_confidence < min_confidence:
+                    from core.discovery.spotify_second_pass import (
+                        SPOTIFY_ID_SOURCES, spotify_second_pass)
+                    for id_source, id_value in origin_ids(db, source, track).items():
+                        if id_source not in SPOTIFY_ID_SOURCES:
+                            continue
+                        second = spotify_second_pass(
+                            id_source=id_source, source_track_id=id_value,
+                            discovery_source=discovery_source, use_spotify=use_spotify,
+                            title=track_name, artist=artist_name,
+                            primary_client=itunes_client_instance,
+                            score_candidates=deps.discovery_score_candidates,
+                            spotify_client=deps.spotify_client)
+                        if second:
+                            best_match = second.track
+                            best_confidence = second.confidence
+                            break
+                match_source = second.provider if second else discovery_source
+
                 # Step 4: Store results
                 if best_match and best_confidence >= min_confidence:
                     match_artists = best_match.artists if hasattr(best_match, 'artists') else []
@@ -401,7 +423,12 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                     # that the Track dataclass strips to just a name string
                     track_number = None
                     disc_number = None
-                    if hasattr(best_match, 'id') and best_match.id:
+                    if second and second.album:
+                        # a spotify keep brings its whole album along
+                        album_obj = dict(second.album)
+                        track_number = second.track_number
+                        disc_number = second.disc_number
+                    elif hasattr(best_match, 'id') and best_match.id:
                         try:
                             cache = deps.get_metadata_cache()
                             _raw = cache.get_entity(discovery_source if not use_spotify else 'spotify', 'track', best_match.id)
@@ -444,7 +471,7 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         'album': album_obj,
                         'duration_ms': best_match.duration_ms if hasattr(best_match, 'duration_ms') else 0,
                         'image_url': match_image,
-                        'source': discovery_source,
+                        'source': match_source,
                         'track_number': track_number if track_number else (
                             getattr(best_match, 'track_number', None)
                         ),
@@ -455,9 +482,13 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
 
                     extra_data = {
                         'discovered': True,
-                        'provider': discovery_source,
+                        'provider': match_source,
                         'confidence': best_confidence,
                         'matched_data': matched_data,
+                        # extra_data merges, so a track that was wing it once
+                        # kept the flag after a real match and got rediscovered
+                        # every run. it's a real match now, say so.
+                        'wing_it_fallback': False,
                     }
                     if matched_data.get('track_number') is None:
                         # M12: the provider genuinely doesn't know the track
@@ -478,15 +509,18 @@ def run_playlist_discovery_worker(playlists, automation_id=None, deps: PlaylistD
                         logger.debug("artist adoption failed for track %s: %s", track_id, e)
                     total_discovered += 1
 
-                    # Save to discovery cache
-                    try:
-                        db.save_discovery_cache_match(
-                            cache_key[0], cache_key[1], discovery_source,
-                            best_confidence, matched_data,
-                            track_name, artist_name
-                        )
-                    except Exception as e:
-                        logger.debug("save discovery cache match failed: %s", e)
+                    # Save to discovery cache. not a spotify keep: the cache
+                    # is filed under the primary source, and every other
+                    # playlist that reads it expects one
+                    if match_source == discovery_source:
+                        try:
+                            db.save_discovery_cache_match(
+                                cache_key[0], cache_key[1], discovery_source,
+                                best_confidence, matched_data,
+                                track_name, artist_name
+                            )
+                        except Exception as e:
+                            logger.debug("save discovery cache match failed: %s", e)
 
                     logger.info(f"[{i+1}/{len(undiscovered_tracks)}] {track_name} → {matched_data['name']} ({best_confidence:.2f})")
                     deps.update_automation_progress(automation_id,

@@ -140,10 +140,15 @@ def test_build_record_episode_shape():
             "episode_number": 3, "air_date": "2008-02-10"}
     best = _cand("BrBa.S01E03.mkv")
     rec = build_download_record(item, best, [best], media_type="episode", target_dir="/tv", query="q")
-    assert rec["kind"] == "episode" and rec["media_id"] == "9" and rec["year"] == "2008"
+    # no show year known: no year at all. the air year is not the show's year
+    # (it named S03 folders "Breaking Bad (2010)" and rejected year-tagged releases)
+    assert rec["kind"] == "episode" and rec["media_id"] == "9" and rec["year"] is None
     assert json.loads(rec["search_ctx"]) == {"scope": "episode", "title": "Breaking Bad",
-                                             "season": 1, "episode": 3, "year": "2008",
+                                             "season": 1, "episode": 3, "year": None,
                                              "air_date": "2008-02-10", "tmdb_id": 9}
+    rec = build_download_record(dict(item, show_year=2008), best, [best], media_type="episode",
+                                target_dir="/tv", query="q")
+    assert rec["year"] == "2008" and json.loads(rec["search_ctx"])["year"] == "2008"
 
 
 def test_build_record_carries_the_series_ids_when_the_library_knows_them():
@@ -268,7 +273,9 @@ def test_season_pack_auto_grab_ignores_soulseek_pack_candidates():
         ("season", "9", 2): [dict(_cand("Silo/Season 2"), source="soulseek")],
     })
     assert res["grabbed"] == 0 and enq == []
-    assert seen == [("season", "9", 2)]
+    # no usable pack, so its episodes are searched one by one
+    assert seen == [("season", "9", 2), ("episode", "9", 2, 1),
+                    ("episode", "9", 2, 2), ("episode", "9", 2, 3)]
 
 
 def test_manual_retry_all_sources_combines_sources(monkeypatch):

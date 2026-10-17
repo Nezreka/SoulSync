@@ -46,6 +46,7 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.complete_incomplete_albums import auto_complete_incomplete_albums
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes_all_profiles, is_airing_already_running
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules, is_refresh_already_running
 from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale, is_reenrich_already_running
@@ -88,6 +89,13 @@ def register_all(deps: AutomationDeps) -> None:
     behaves identically to the pre-extraction code.
     """
     engine = deps.engine
+
+    # Opt-in album completion. The handler independently requires a
+    # successful Album Completeness scan event before queueing anything.
+    engine.register_action_handler(
+        'complete_incomplete_albums',
+        lambda config: auto_complete_incomplete_albums(config, deps),
+    )
 
     # Self-guards prevent duplicate runs of the SAME operation, but
     # different operations can run concurrently — wishlist downloads
