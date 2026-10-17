@@ -181,13 +181,7 @@ async function _saveWizardStepSettings() {
         });
         if (_wizardSettings.media_server !== 'none') {
             settings.active_media_server = _wizardSettings.media_server;
-            if (_wizardSettings.media_server === 'plex') {
-                settings.plex = { base_url: _wizardSettings.server_url, token: _wizardSettings.server_token };
-            } else if (_wizardSettings.media_server === 'jellyfin') {
-                settings.jellyfin = { base_url: _wizardSettings.server_url, api_key: _wizardSettings.server_api_key };
-            } else if (_wizardSettings.media_server === 'navidrome') {
-                settings.navidrome = { base_url: _wizardSettings.server_url, username: _wizardSettings.server_user, password: _wizardSettings.server_pass };
-            }
+            Object.assign(settings, _wizardServerSettings());
         }
     }
 
@@ -200,6 +194,7 @@ async function _saveWizardStepSettings() {
 // ---- Main Render ----
 
 function _renderWizard() {
+    _wizardLoadServers();
     const container = document.getElementById('setup-wizard-content');
     if (!container) return;
 
@@ -431,15 +426,9 @@ async function _wizardTestConnection(service) {
         settings.soulseek = { slskd_url: _wizardSettings.slskd_url, api_key: _wizardSettings.slskd_api_key };
     } else if (service === 'tidal') {
         settings.tidal = { client_id: _wizardSettings.tidal_client_id, client_secret: _wizardSettings.tidal_client_secret };
-    } else if (service === 'plex') {
-        settings.plex = { base_url: _wizardSettings.server_url, token: _wizardSettings.server_token };
-        settings.active_media_server = 'plex';
-    } else if (service === 'jellyfin') {
-        settings.jellyfin = { base_url: _wizardSettings.server_url, api_key: _wizardSettings.server_api_key };
-        settings.active_media_server = 'jellyfin';
-    } else if (service === 'navidrome') {
-        settings.navidrome = { base_url: _wizardSettings.server_url, username: _wizardSettings.server_user, password: _wizardSettings.server_pass };
-        settings.active_media_server = 'navidrome';
+    } else if (_wizardServerDescriptor(service)) {
+        Object.assign(settings, _wizardServerSettings(service));
+        settings.active_media_server = service;
     }
 
     try {
@@ -479,53 +468,23 @@ function _renderPaths(el) {
     const server = _wizardSettings.media_server;
     const showServerConfig = server !== 'none';
 
+    // One block per server used to live here. The fields now come from the
+    // server's descriptor: a url field gets the detection port as its
+    // placeholder, a token or password field is a password input.
     let serverFields = '';
-    if (server === 'plex') {
-        serverFields = `
+    const descriptor = showServerConfig ? _wizardServerDescriptor(server) : null;
+    if (descriptor) {
+        const inputType = f => (f.kind === 'url' ? 'url' : (f.kind === 'token' || f.kind === 'password') ? 'password' : 'text');
+        const placeholder = f => (f.kind === 'url' && descriptor.detection?.port)
+            ? `http://localhost:${descriptor.detection.port}`
+            : (f.kind === 'username' ? 'admin' : f.label || f.key);
+        serverFields = descriptor.fields.filter(f => f.required).map(f => `
             <div class="setup-input-group">
-                <label>Plex URL</label>
-                <input class="setup-input" type="url" placeholder="http://localhost:32400"
-                       value="${_escHtml(_wizardSettings.server_url)}" oninput="_wizardSettings.server_url = this.value">
-            </div>
-            <div class="setup-input-group">
-                <label>Plex Token</label>
-                <input class="setup-input" type="password" placeholder="Your Plex token"
-                       value="${_escHtml(_wizardSettings.server_token)}" oninput="_wizardSettings.server_token = this.value">
-            </div>
-            <button class="setup-test-btn" onclick="_wizardTestConnection('plex')">Test Connection</button>
-        `;
-    } else if (server === 'jellyfin') {
-        serverFields = `
-            <div class="setup-input-group">
-                <label>Jellyfin URL</label>
-                <input class="setup-input" type="url" placeholder="http://localhost:8096"
-                       value="${_escHtml(_wizardSettings.server_url)}" oninput="_wizardSettings.server_url = this.value">
-            </div>
-            <div class="setup-input-group">
-                <label>API Key</label>
-                <input class="setup-input" type="password" placeholder="Your Jellyfin API key"
-                       value="${_escHtml(_wizardSettings.server_api_key)}" oninput="_wizardSettings.server_api_key = this.value">
-            </div>
-            <button class="setup-test-btn" onclick="_wizardTestConnection('jellyfin')">Test Connection</button>
-        `;
-    } else if (server === 'navidrome') {
-        serverFields = `
-            <div class="setup-input-group">
-                <label>Navidrome URL</label>
-                <input class="setup-input" type="url" placeholder="http://localhost:4533"
-                       value="${_escHtml(_wizardSettings.server_url)}" oninput="_wizardSettings.server_url = this.value">
-            </div>
-            <div class="setup-input-group">
-                <label>Username</label>
-                <input class="setup-input" type="text" placeholder="admin"
-                       value="${_escHtml(_wizardSettings.server_user)}" oninput="_wizardSettings.server_user = this.value">
-            </div>
-            <div class="setup-input-group">
-                <label>Password</label>
-                <input class="setup-input" type="password" placeholder="Password"
-                       value="${_escHtml(_wizardSettings.server_pass)}" oninput="_wizardSettings.server_pass = this.value">
-            </div>
-            <button class="setup-test-btn" onclick="_wizardTestConnection('navidrome')">Test Connection</button>
+                <label>${_escHtml(f.label || f.key)}</label>
+                <input class="setup-input" type="${inputType(f)}" placeholder="${_escHtml(placeholder(f))}"
+                       value="${_escHtml(_wizardFieldValue(f))}" oninput="_wizardSetField('${f.key}', this.value)">
+            </div>`).join('') + `
+            <button class="setup-test-btn" onclick="_wizardTestConnection('${_escHtml(server)}')">Test Connection</button>
         `;
     }
 
@@ -571,10 +530,10 @@ function _renderPaths(el) {
                 Connecting a media server lets SoulSync trigger library scans after downloads, import your existing library, and display what you already own when searching. Select <strong>None</strong> if you don't use one.
             </div>
             <div class="setup-server-grid">
-                ${['plex', 'jellyfin', 'navidrome', 'none'].map(s => `
-                    <div class="setup-server-card ${server === s ? 'selected' : ''}"
-                         onclick="_wizardSelectServer('${s}')">
-                        <div class="setup-server-name">${s === 'none' ? 'None' : s.charAt(0).toUpperCase() + s.slice(1)}</div>
+                ${[..._wizardServers.map(d => ({ id: d.name, label: d.display_name })), { id: 'none', label: 'None' }].map(s => `
+                    <div class="setup-server-card ${server === s.id ? 'selected' : ''}"
+                         onclick="_wizardSelectServer('${_escHtml(s.id)}')">
+                        <div class="setup-server-name">${_escHtml(s.label)}</div>
                     </div>
                 `).join('')}
             </div>
@@ -601,6 +560,76 @@ function _wizardTogglePathLock(pathType) {
     }
 }
 
+// The media servers the wizard offers come from GET /api/media-servers (the
+// per-server descriptor: display name, config section, fields and their
+// kinds, detection port). Until that answers, or if it never does, the
+// built-in list below is what the wizard knew before the endpoint existed.
+const _WIZARD_SERVER_FALLBACK = [
+    { name: 'plex', display_name: 'Plex', config_section: 'plex', detection: { port: 32400 }, is_external: true,
+      fields: [{ key: 'base_url', kind: 'url', required: true, label: 'Plex URL' },
+               { key: 'token', kind: 'token', required: true, label: 'Plex Token' }] },
+    { name: 'jellyfin', display_name: 'Jellyfin', config_section: 'jellyfin', detection: { port: 8096 }, is_external: true,
+      fields: [{ key: 'base_url', kind: 'url', required: true, label: 'Jellyfin URL' },
+               { key: 'api_key', kind: 'token', required: true, label: 'API Key' }] },
+    { name: 'navidrome', display_name: 'Navidrome', config_section: 'navidrome', detection: { port: 4533 }, is_external: true,
+      fields: [{ key: 'base_url', kind: 'url', required: true, label: 'Navidrome URL' },
+               { key: 'username', kind: 'username', required: true, label: 'Username' },
+               { key: 'password', kind: 'password', required: true, label: 'Password' }] },
+];
+let _wizardServers = _WIZARD_SERVER_FALLBACK;
+let _wizardServersLoaded = false;
+
+async function _wizardLoadServers() {
+    if (_wizardServersLoaded) return;
+    _wizardServersLoaded = true;
+    try {
+        const res = await fetch('/api/media-servers');
+        if (!res.ok) return;
+        const body = await res.json();
+        const servers = (body?.servers || []).filter(s => s && s.is_external && Array.isArray(s.fields));
+        if (servers.length) {
+            _wizardServers = servers;
+            _renderWizard();
+        }
+    } catch (e) {
+        // the fallback list stays
+    }
+}
+
+function _wizardServerDescriptor(name) {
+    return _wizardServers.find(s => s.name === name) || null;
+}
+
+// The legacy per-server wizard keys, so a descriptor field lands where the
+// rest of the wizard (and its tests) expect it: server_url, server_token,
+// server_api_key, server_user, server_pass.
+const _WIZARD_FIELD_KEYS = { base_url: 'server_url', token: 'server_token', api_key: 'server_api_key',
+                             username: 'server_user', password: 'server_pass' };
+
+function _wizardFieldValue(field) {
+    const legacy = _WIZARD_FIELD_KEYS[field.key];
+    if (legacy) return _wizardSettings[legacy] || '';
+    return (_wizardSettings.server_fields || {})[field.key] || '';
+}
+
+function _wizardSetField(key, value) {
+    const legacy = _WIZARD_FIELD_KEYS[key];
+    if (legacy) { _wizardSettings[legacy] = value; return; }
+    _wizardSettings.server_fields = _wizardSettings.server_fields || {};
+    _wizardSettings.server_fields[key] = value;
+}
+
+// {<config_section>: {key: value, ...}} for the chosen server, the shape
+// /api/settings takes. Empty when no server is chosen.
+function _wizardServerSettings(name) {
+    const server = name || _wizardSettings.media_server;
+    const d = _wizardServerDescriptor(server);
+    if (!d || !d.config_section) return {};
+    const section = {};
+    for (const f of d.fields.filter(f => f.required)) section[f.key] = _wizardFieldValue(f);
+    return { [d.config_section]: section };
+}
+
 function _wizardSelectServer(id) {
     _wizardSettings.media_server = id;
     _wizardSettings.server_url = '';
@@ -608,6 +637,7 @@ function _wizardSelectServer(id) {
     _wizardSettings.server_user = '';
     _wizardSettings.server_pass = '';
     _wizardSettings.server_api_key = '';
+    _wizardSettings.server_fields = {};
     _renderWizard();
 }
 
@@ -1042,13 +1072,7 @@ async function _wizardFinish() {
 
     if (_wizardSettings.media_server !== 'none') {
         settings.active_media_server = _wizardSettings.media_server;
-        if (_wizardSettings.media_server === 'plex') {
-            settings.plex = { base_url: _wizardSettings.server_url, token: _wizardSettings.server_token };
-        } else if (_wizardSettings.media_server === 'jellyfin') {
-            settings.jellyfin = { base_url: _wizardSettings.server_url, api_key: _wizardSettings.server_api_key };
-        } else if (_wizardSettings.media_server === 'navidrome') {
-            settings.navidrome = { base_url: _wizardSettings.server_url, username: _wizardSettings.server_user, password: _wizardSettings.server_pass };
-        }
+        Object.assign(settings, _wizardServerSettings());
     }
 
     try {
