@@ -108,6 +108,33 @@ _sync_user_initiated: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_user_initiated", default=False)
 
 
+def client_for_profile(profile_id, client, server):
+    """the media server client acting as the profile's own server user, when
+    the profile has one saved (#1265). a view, never a change to the shared
+    client. no identity, no profile, a db that will not answer, a client
+    without the hook, or a connection that cannot be made = the client as-is
+    (the last case is logged: the sync then runs as the app account rather
+    than not at all)."""
+    if not profile_id or client is None or not callable(getattr(client, 'user_view', None)):
+        return client
+    try:
+        from database.music_database import MusicDatabase
+        identity = MusicDatabase().get_profile_server_identity(profile_id, server)
+    except Exception as e:
+        logger.error(f"Per-profile: could not read {server} identity for profile {profile_id}: {e}")
+        return client
+    if not identity:
+        return client
+    label = identity.get('label') or ''
+    view = client.user_view(identity)
+    if view is None:
+        logger.error(f"Per-profile: could not connect to {server} as '{label}' for profile {profile_id}; "
+                     f"syncing as the app account")
+        return client
+    logger.info(f"Per-profile: {server} playlist writes run as '{label}' for profile {profile_id}")
+    return view
+
+
 def navidrome_client_for_profile(profile_id, client):
     """the navidrome client acting as the profile's own user, when the
     profile has one saved. subsonic writes playlists as whoever

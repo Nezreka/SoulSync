@@ -6904,6 +6904,36 @@ class MusicDatabase:
             logger.error(f"Error saving plex account for profile {profile_id}: {e}")
             return False
 
+    def get_profile_server_identity(self, profile_id: int, server: str) -> Optional[Dict[str, Any]]:
+        """Who a profile is on ``server``, shaped for the client's
+        ``user_view(identity)`` hook, or None when the profile acts as the app
+        account. One facade over the three per-server storages (#1265):
+        Plex home user link, Jellyfin user and library pick, Navidrome login.
+        Every dict carries ``label`` (what to show or log for that user)."""
+        if not profile_id or not server:
+            return None
+        try:
+            if server == 'plex':
+                link = self.get_profile_plex_home_user(profile_id)
+                if not link:
+                    return None
+                return {'token': link['token'], 'title': link.get('title') or '',
+                        'id': link.get('id'), 'label': link.get('title') or link.get('id') or ''}
+            if server == 'jellyfin':
+                libs = self.get_profile_server_library(profile_id) or {}
+                user_id, library_id = libs.get('jellyfin_user_id'), libs.get('jellyfin_library_id')
+                if not user_id and not library_id:
+                    return None
+                return {'user_id': user_id, 'library_id': library_id, 'label': user_id or 'default'}
+            if server == 'navidrome':
+                login = self.get_profile_navidrome_login(profile_id)
+                if not login:
+                    return None
+                return {'username': login[0], 'password': login[1], 'label': login[0]}
+        except Exception as e:
+            logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
+        return None
+
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,
         or None when it has none (act as the app account, as always)."""
