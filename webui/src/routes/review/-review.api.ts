@@ -268,14 +268,15 @@ export async function applyReviewDecisionGroup(
       body: JSON.stringify({ action }),
     },
   );
-  // A grouped action can partially succeed before a later item fails. Keep
-  // the counts from a non-2xx response so the queue can report that outcome.
+  // Grouped edits return a durable operation ID; database-only dismissals
+  // return completion counts. A missing acknowledgement proves neither success nor failure.
   if (typeof response.text !== 'function') return response.json();
   const raw = await response.text();
   if (!raw.trim()) {
-    return response.ok
-      ? { success: true, refresh_queued: true }
-      : { success: false, error: `The server returned an empty response (${response.status})` };
+    return {
+      success: false,
+      error: `No operation acknowledgement was received (${response.status}). Check operation progress before retrying.`,
+    };
   }
   return JSON.parse(raw) as {
     success: boolean;

@@ -1119,3 +1119,31 @@ def test_refresh_overlay_counts_existing_case_once_across_pages():
     # The snapshot temporarily fills the gap after apply retires the findings.
     assert worker.get_review_summary(job_id='library_reconciliation')['all'] == 2
     db.conn.rollback()
+
+
+def test_metadata_inspector_can_change_and_reset_plan_assignment_without_writing_file(tmp_path):
+    path = tmp_path / 'Song.flac'
+    path.write_bytes(b'original audio')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    worker._reconciliation_file_guard = lambda *_args: None
+    worker._reconciliation_release_guard = lambda *_args: None
+    worker._schedule_review_refresh = lambda *_args, **_kwargs: True
+    details = {'album_id': 'album', 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'release',
+               'size_bytes': path.stat().st_size, 'mtime_ns': path.stat().st_mtime_ns,
+               'assignment_options': [{'key': 'id:recording:1:1', 'title': 'Song'}],
+               'changes': {'title': {'old': 'Old', 'new': 'Song'}}}
+    worker._create_finding(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+                           severity='warning', entity_type='track', entity_id='track',
+                           file_path=str(path), title='Update Song', description='Review proposed title', details=details)
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = worker.get_review_case(case_id)['items'][0]
+    for choice, expected in [('assign:id:recording:1:1', 1), ('assign:auto', 0)]:
+        result = worker.apply_review_decision(case_id, item['id'],
+            evidence_token=item['evidence_token'], action='fix', fix_action=choice)
+        assert result['success'] and result['refresh_queued']
+        assert path.read_bytes() == b'original audio'
+        with db._get_connection() as conn:
+            assert conn.execute('SELECT COUNT(*) FROM reconcile_track_assignment').fetchone()[0] == expected
+            assert conn.execute('SELECT status FROM repair_findings WHERE id=?', (item['id'],)).fetchone()[0] == 'pending'

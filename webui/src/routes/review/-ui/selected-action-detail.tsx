@@ -155,6 +155,7 @@ export function SelectedActionDetail({
             previewUrl={textValue(
               details.expected_preview_url || record(details.replacement_track).preview_url,
             )}
+            artist={textValue(details.expected_artist || record(details.current_tags).artist)}
             previewSource={textValue(details.source)}
             previewTrackId={textValue(record(details.replacement_track).source_track_id)}
           />

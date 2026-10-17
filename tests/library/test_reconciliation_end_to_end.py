@@ -2270,3 +2270,30 @@ def test_embedded_release_identity_refreshes_old_tag_cache(tmp_path):
         assert tags['musicbrainz_release_id'] == 'file-release'
     finally:
         cache.close()
+
+
+def test_release_identity_repairs_mixed_tags_without_rewriting_coherent_pressings():
+    from core.repair_jobs.library_reconciliation import _release_identity_target
+    file = lambda release: {'tags': {'musicbrainz_release_id': release}}
+    assert _release_identity_target([file('old'), file('old')], {}, 'musicbrainz', 'new') == ''
+    assert _release_identity_target([file('old'), file('other')], {}, 'musicbrainz', 'new') == 'new'
+    assert _release_identity_target([file('old'), file('')], {}, 'musicbrainz', 'new') == 'new'
+    assert _release_identity_target([file(''), file('')], {}, 'musicbrainz', 'new') == ''
+    assert _release_identity_target([file('old')], {'canonical_locked': True}, 'musicbrainz', 'new') == 'new'
+    assert _release_identity_target([file('old'), file('other')], {}, 'deezer', '123') == ''
+
+
+def test_same_positioned_musicbrainz_recordings_ignore_release_title_translations():
+    plan = {'pairs': [], 'missing_slots': [0], 'extra_files': []}
+    left = (0, 0, 0, 'musicbrainz', 'a', [{
+        'title': 'Gymnopédie No. 1 (Arr. for Harp)', 'disc_number': 1,
+        'track_number': 3, 'recording_mbid': 'same-performance'}], plan)
+    right = (0, 0, 0, 'musicbrainz', 'b', [{
+        'title': 'Gymnopedie 1', 'disc_number': 1,
+        'track_number': 3, 'recording_mbid': 'same-performance'}], plan)
+    assert _candidate_shapes_equivalent(left, right)
+    right[5][0]['recording_mbid'] = 'different-performance'
+    assert not _candidate_shapes_equivalent(left, right)
+    right[5][0]['recording_mbid'] = 'same-performance'
+    right[5][0]['track_number'] = 4
+    assert not _candidate_shapes_equivalent(left, right)

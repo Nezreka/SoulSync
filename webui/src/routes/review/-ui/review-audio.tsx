@@ -17,6 +17,7 @@ export function ReviewAudio({
   previewUrl,
   previewSource,
   previewTrackId,
+  artist,
 }: {
   localPath: string;
   localTitle: string;
@@ -27,7 +28,9 @@ export function ReviewAudio({
   previewUrl?: string;
   previewSource?: string;
   previewTrackId?: string;
+  artist?: string;
 }) {
+  const searchQuery = [artist, comparisonTitle || localTitle].filter(Boolean).join(' ');
   const audioRef = useRef<HTMLAudioElement>(null);
   const shouldPlayRef = useRef(false);
   const [selected, setSelected] = useState<'local' | 'comparison' | 'preview'>('local');
@@ -129,14 +132,21 @@ export function ReviewAudio({
           </a>
         )}
         <a
-          href={`https://open.spotify.com/search/${encodeURIComponent(comparisonTitle || localTitle)}`}
+          href={`https://open.spotify.com/search/${encodeURIComponent(searchQuery)}`}
           target="_blank"
           rel="noreferrer"
         >
           Search Spotify ↗
         </a>
         <a
-          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(comparisonTitle || localTitle)}`}
+          href={`https://music.apple.com/search?term=${encodeURIComponent(searchQuery)}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Search Apple Music ↗
+        </a>
+        <a
+          href={`https://www.youtube.com/results?search_query=${encodeURIComponent(searchQuery)}`}
           target="_blank"
           rel="noreferrer"
         >

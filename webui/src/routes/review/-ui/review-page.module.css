@@ -1868,17 +1868,7 @@
 .candidateInspection h5 {
   margin: 0 0 12px;
 }
-.versionPairNotice {
-  display: grid;
-  gap: 5px;
-  margin: 12px 14px 0;
-  padding: 11px 13px;
-  border: 1px solid #a07634;
-  border-radius: 8px;
-  background: #2e271b;
-  color: #f5dfb7;
-  font-size: 12px;
-}
+
 .candidateTrackList > div:first-child {
   border-top: 0;
 }
@@ -2731,4 +2721,24 @@
 .matrixRow[data-status='duplicate'] {
   background: #292318;
   box-shadow: inset 3px 0 #b98a35;
+}
+
+@media (max-width: 1150px) {
+  .albumIdentity {
+    flex-basis: auto;
+  }
+}
+.releaseDetail {
+  container-type: inline-size;
+}
+@container (max-width: 520px) {
+  .candidateTrackList > div {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+  .candidateTrackList .statusChip,
+  .candidateTrackList button {
+    grid-column: 2;
+    justify-self: start;
+  }
 }

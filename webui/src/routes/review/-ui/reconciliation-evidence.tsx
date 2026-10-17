@@ -26,12 +26,12 @@ function count(value: unknown): number {
 }
 
 function baseVersionTitle(value: string): string {
-  return value
+  const title = value
     .replace(/\.[^.]+$/, '')
     .replace(/^\d+\s*[-_.]\s*/, '')
-    .split(/\s+[-–]\s+|\s*\(/, 1)[0]
-    .toLocaleLowerCase()
     .trim();
+  const base = title.split(/\s+[-–]\s+|\s*\(/, 1)[0].trim();
+  return (base || title.replace(/[()[\]]/g, '')).toLocaleLowerCase().trim();
 }
 
 function percent(value: unknown): string {
@@ -1025,7 +1025,9 @@ export function ReconciliationEvidence({
     .toLocaleLowerCase()
     .trim();
   const audioSupportsExpected = objects(audio.recordings).some(
-    (recording) => baseVersionTitle(label(recording.title)) === baseVersionTitle(expectedTitle),
+    (recording) =>
+      Boolean(expectedTitle) &&
+      baseVersionTitle(label(recording.title)) === baseVersionTitle(expectedTitle),
   );
 
   return (

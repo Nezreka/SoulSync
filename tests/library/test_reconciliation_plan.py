@@ -680,3 +680,30 @@ def test_alternate_extended_exact_identity_pairs_but_requires_version_review():
     file['tags']['duration_ms'] = 266800
     file['tags']['title'] += ' (live)'
     assert reconcile_folder([file], [slot])['missing_slots'] == [0]
+
+
+def test_exact_session_title_and_fingerprint_can_supply_live_comment():
+    from copy import deepcopy
+    from core.library.reconciliation_plan import versions_compatible
+    file = {'path': '/17 - Laura Palmer (Abbey Road Sessions).flac',
+            'tags': {'title': 'Laura Palmer (Abbey Road Sessions)',
+                     'artist': 'Bastille', 'duration_ms': 182440},
+            'acoustid': {'status': 'ok', 'recordings': [{'mbid': 'session-id', 'title': 'Laura Palmer', 'artist': 'Bastille', 'score': 0.977}]}}
+    slot = {'title': 'Laura Palmer (Abbey Road Sessions)', 'artist': 'Bastille',
+            'recording_mbid': 'session-id', 'duration_ms': 182000,
+            'recording_disambiguation': 'live, Abbey Road Studios, London, UK'}
+    assert versions_compatible(file, slot)
+    plan = reconcile_folder([file], [slot])
+    assert not plan['missing_slots'] and not plan['extra_files']
+    assert plan['pairs'][0]['confidence'] == 'clear'
+    for mutation in ['wrong_recording', 'longer_audio', 'conflicting_comment', 'other_session']:
+        other = deepcopy(file)
+        if mutation == 'wrong_recording':
+            other['acoustid']['recordings'][0]['mbid'] = 'studio-id'
+        elif mutation == 'longer_audio':
+            other['tags']['duration_ms'] = 190000
+        elif mutation == 'conflicting_comment':
+            other['db'] = {'recording_disambiguation': 'studio recording'}
+        else:
+            other['tags']['title'] = 'Laura Palmer (Other Sessions)'
+        assert not versions_compatible(other, slot), mutation

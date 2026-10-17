@@ -542,8 +542,17 @@ export function ReviewPage() {
                         (field) => readyFieldGroup(field).key === trackFilter,
                       ));
   const matchingFilter = (row: AlbumAssignment) => matchesTrackFilter(row, trackFilter);
+  const filterRows =
+    trackView === 'release'
+      ? releaseOrderedAssignments
+      : [
+          ...attentionAssignments,
+          ...changeAssignments,
+          ...missingAssignments,
+          ...settledAssignments,
+        ];
   const filterCount = (filter: string) =>
-    assignments.filter((row) => matchesTrackFilter(row, filter)).length;
+    filterRows.filter((row) => matchesTrackFilter(row, filter)).length;
   const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
   const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
@@ -1033,7 +1042,7 @@ export function ReviewPage() {
       }
       if (!result.success) {
         setError(
-          `${result.applied || 0} of ${result.total || decision.action_count} changes completed. ${result.error || 'The remaining change failed.'}`,
+          `${result.applied == null ? 'The operation outcome could not be confirmed.' : `${result.applied} of ${result.total || decision.action_count} changes completed.`} ${result.error || 'Review the current operation status before retrying.'}`,
         );
       } else {
         setNotice(
@@ -1223,6 +1232,7 @@ export function ReviewPage() {
                 onClick={(event) => {
                   event.currentTarget.closest('details')?.removeAttribute('open');
                   setReloadBusy(true);
+                  setGlobalNotice('Reloading queue…');
                   void refresh()
                     .then((ok) => {
                       if (ok) setGlobalNotice('Queue updated.');
@@ -1243,8 +1253,15 @@ export function ReviewPage() {
         </div>
       )}
       {globalNotice && (
-        <div className={styles.notice} role="status">
-          {globalNotice}
+        <div className={styles.albumNotice} role="status">
+          <span>{globalNotice}</span>
+          <button
+            type="button"
+            aria-label="Dismiss queue notice"
+            onClick={() => setGlobalNotice('')}
+          >
+            ×
+          </button>
         </div>
       )}
       {notice && !reviewCase && (
@@ -1271,12 +1288,18 @@ export function ReviewPage() {
               <progress
                 aria-label="Library reconciliation progress"
                 max={100}
-                value={scanStatus.current_job.progress?.percent || 0}
+                value={
+                  scanStatus.current_job.progress?.total
+                    ? scanStatus.current_job.progress?.percent || 0
+                    : undefined
+                }
               />
             </>
           )}
           {scanStatus?.current_job?.job_id === 'library_reconciliation'
-            ? `Reconciliation running: ${scanStatus.current_job.progress?.scanned ?? 0} of ${scanStatus.current_job.progress?.total ?? '?'} folders (${scanStatus.current_job.progress?.percent ?? 0}%).`
+            ? !scanStatus.current_job.progress?.total
+              ? 'Discovering album folders…'
+              : `Reconciliation running: ${scanStatus.current_job.progress?.scanned ?? 0} of ${scanStatus.current_job.progress?.total ?? '?'} folders (${scanStatus.current_job.progress?.percent ?? 0}%).`
             : lastRun?.status === 'completed'
               ? `Last reconciliation completed: ${lastRun.items_scanned} files checked.`
               : `Last reconciliation ${lastRun?.status}: ${lastRun?.error_text || 'No reason recorded'}. ${lastRun?.items_scanned ?? 0} files checked; a rerun reuses cached fingerprints.`}
@@ -2040,7 +2063,8 @@ export function ReviewPage() {
                                 <option value={trackFilter}>
                                   {decisions.find(
                                     (decision) => `decision:${decision.id}` === trackFilter,
-                                  )?.label || 'Selected decision'}
+                                  )?.label || 'Selected decision'}{' '}
+                                  ({filterCount(trackFilter)})
                                 </option>
                               )}
                               <option value="uncertain">
@@ -2060,17 +2084,15 @@ export function ReviewPage() {
                               </option>
                               {proposedChangeGroups.map((group) => (
                                 <option value={group.key} key={group.key}>
-                                  {group.label} ({group.count})
+                                  {group.label} ({filterCount(group.key)})
                                 </option>
                               ))}
                               {missingAssignments.length > 0 && (
-                                <option value="missing">
-                                  Missing ({missingAssignments.length})
-                                </option>
+                                <option value="missing">Missing ({filterCount('missing')})</option>
                               )}
                               {pairedConflictCount > 0 && (
                                 <option value="version_conflict">
-                                  Version conflicts ({pairedConflictCount})
+                                  Version conflicts ({filterCount('version_conflict')})
                                 </option>
                               )}
                             </select>

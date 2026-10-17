@@ -55,6 +55,19 @@ def _read_reconciliation_tags(path):
 
 _read_reconciliation_tags.required_cache_keys = ('musicbrainz_release_id',)
 
+
+def _release_identity_target(files, album, source, release_id):
+    """Unify inconsistent file identity or honor an explicitly pinned edition.
+
+    An automatically selected catalogue-equivalent pressing is not evidence
+    that a coherent set of embedded release IDs needs rewriting.
+    """
+    if source != 'musicbrainz':
+        return ''
+    identities = {str((file.get('tags') or {}).get('musicbrainz_release_id') or '')
+                  for file in files}
+    return release_id if (len(identities) > 1 or (album or {}).get('canonical_locked')) else ''
+
 _SOURCES = {
     'musicbrainz_release_id': 'musicbrainz',
     'spotify_album_id': 'spotify',
@@ -1371,6 +1384,24 @@ def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
     different edition. Two explicit, different markers or comments still keep
     the releases distinct.
     """
+    if left[3] == right[3] == 'musicbrainz':
+        def recording_shape(candidate):
+            slots, plan = candidate[5], candidate[6]
+            if not slots or any(not slot.get('recording_mbid') for slot in slots):
+                return None
+            def identity(index):
+                slot = slots[index]
+                return (slot.get('disc_number') or 1, slot.get('track_number') or 0,
+                        slot['recording_mbid'])
+            return (len(slots), tuple(sorted((pair['file_index'], *identity(pair['slot_index']))
+                    for pair in plan['pairs'])),
+                    tuple(sorted(identity(index) for index in plan['missing_slots'])),
+                    tuple(sorted(plan['extra_files'])))
+        identity = recording_shape(left)
+        if identity is not None and identity == recording_shape(right):
+            # Release-specific translations/arrangement labels may differ even
+            # when every positioned recording and file assignment is identical.
+            return True
     left_shape, right_shape = _candidate_shape(left), _candidate_shape(right)
     if left_shape[0] != right_shape[0] or left_shape[3] != right_shape[3]:
         return False
@@ -2328,6 +2359,7 @@ class LibraryReconciliationJob(RepairJob):
                 # edition even while the stored canonical pin remains a group.
                 exact_release_id = (release_meta.get('musicbrainz_release_id')
                                     if source == 'musicbrainz' else None) or release_id
+                identity_target = _release_identity_target(files, album, source, exact_release_id)
                 release_title = (release_meta.get('name') or release_meta.get('title') or
                                  (album.get('album_title') if album else '') or
                                  os.path.basename(folder))
@@ -2514,11 +2546,10 @@ class LibraryReconciliationJob(RepairJob):
                         tag_plan['db_data']['musicbrainz_recording_id'] = confirmed_mbid
                     # A database album assignment alone cannot unite the album
                     # in a player that groups by the embedded release identity.
-                    if (source == 'musicbrainz' and tags.get('musicbrainz_release_id') and
-                            tags['musicbrainz_release_id'] != release_id):
+                    if identity_target and tags.get('musicbrainz_release_id') != identity_target:
                         changed['musicbrainz_release_id'] = {
-                            'old': tags['musicbrainz_release_id'], 'new': release_id}
-                        tag_plan['db_data']['musicbrainz_release_id'] = release_id
+                            'old': tags.get('musicbrainz_release_id') or '', 'new': identity_target}
+                        tag_plan['db_data']['musicbrainz_release_id'] = identity_target
                     db_updates = {}
                     row = file.get('db') or {}
                     if (row and not display_title_compatible(

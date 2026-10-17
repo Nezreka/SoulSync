@@ -323,7 +323,7 @@ flowchart TD
 Additional application constraints:
 
 - Duplicate keeper choice verifies every reviewed copy's current library path and physical identity, file stats and fingerprint before invoking the guarded duplicate operation. Changed IDs/paths trigger refreshed evidence rather than bypassing the guard.
-- Saved assignment overrides are scoped to release and file evidence. Two files cannot manually reserve one release slot. Confirming an assignment reanalyzes the album before dependent metadata is offered.
+- Saved assignment overrides are scoped to release and file evidence. Two files cannot manually reserve one release slot. Saving an assignment changes the proposed plan and reanalyzes the album before dependent metadata is offered; it does not write file tags. Pending metadata inspectors retain assignment controls and allow resetting the saved override.
 - Metadata apply checks current tag/library values, metadata locks and rename collisions. It is not blanket permission to overwrite unrelated fields or choose a different release.
 - Recoverable quarantine is explicit; the ordinary ready-metadata batch excludes it.
 - Operation reports are persisted at start, after each item and at completion, retained for 30 days. A restarted worker marks unfinished reports as interrupted; it does not replay them. Organization and reanalysis are reported as queued, separately from completed metadata edits.
@@ -350,3 +350,27 @@ Additional application constraints:
 | Release comparison, raw facts and audio evidence | [`reconciliation-evidence.tsx`](../webui/src/routes/review/-ui/reconciliation-evidence.tsx), [`review-audio.tsx`](../webui/src/routes/review/-ui/review-audio.tsx) |
 
 Thresholds above describe current code, not a user-facing guarantee of identity. The important review boundary is that a strong score may produce a candidate assignment while a version, competing-file, duration, lock or release conflict still requires a human decision.
+
+
+## Review refinements (2026-10-17)
+
+```mermaid
+flowchart TD
+    Release["MusicBrainz release track"] --> Title["Keep release-track title for edition display; retain recording title and recording ID separately"]
+    Tags["Read file tags, including embedded MusicBrainz release ID"] --> Compare["Compare selected edition with embedded identity, tags and library assignment"]
+    Compare --> Proposal["Propose exact changes; writing a library album assignment alone does not unify player-visible file tags"]
+    Proposal --> Group["User applies a numbering, title or metadata group"]
+    Group --> Operation["Capture approved finding payloads; persist operation ID; return immediately"]
+    Operation --> Wait["Wait for active reconciliation to release the scan lock"]
+    Wait --> Check{"Does each current proposal still match its captured payload?"}
+    Check -->|No| Report["Report changed evidence; retain unapplied proposal for review"]
+    Check -->|Yes| Guards["Revalidate file stat, fingerprint, library values, release and rename collisions"]
+    Guards --> Apply["Apply guarded changes and persist per-item outcome"]
+    Apply --> Refresh["Queue album refresh; release scan lock; report durable completion"]
+```
+
+Release comparison renders missing audio slots at their actual disc/track positions. Unassigned files remain separate. Equal display titles alone do not establish that an extra file is an alternate version of a missing track. The `(Exchange)` case illustrates why duration and fingerprint evidence must remain available.
+
+Embedded release-ID repair is proposed for mixed identities within a logical album (including a mixture of present and absent IDs), or for an explicitly pinned MusicBrainz edition. A coherent existing identity is preserved when automatic matching merely prefers an equivalent pressing. The write target is the concrete release ID, never a release-group ID.
+
+MusicBrainz candidates with identical recording IDs at every assigned and missing disc/track position are equivalent even when their release titles use different translations. Session titles can inherit the recording comment’s additional “live” marker only when the complete session title, artist, exact high-confidence recording ID and duration within one second agree, with no conflicting stored recording comment.

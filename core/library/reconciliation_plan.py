@@ -151,15 +151,33 @@ def semantic_title_key(slot: dict) -> tuple[str, tuple[str, ...]]:
     return fold_title(title), tuple(sorted(slot_version_markers({**slot, 'title': title})))
 
 
-def versions_compatible(file: dict, slot: dict) -> bool:
-    """Require symmetric version evidence, including stored MB comments."""
-    if file_version_markers(file) != slot_version_markers(slot):
-        return False
+def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_markers=None) -> bool:
+    """Require consistent version evidence; exact sessions can supply live context."""
+    local = file_version_markers(file) if local_markers is None else local_markers
+    remote = slot_version_markers(slot) if remote_markers is None else remote_markers
     file_disambiguation = str(
         (file.get('db') or {}).get('recording_disambiguation') or '').strip()
     slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
-    return not (file_disambiguation and slot_disambiguation) or (
-        _identity_text(file_disambiguation) == _identity_text(slot_disambiguation)
+    if (file_disambiguation and slot_disambiguation and
+            _identity_text(file_disambiguation) != _identity_text(slot_disambiguation)):
+        return False
+    if local == remote:
+        return True
+    # A release may name an exact session while its recording comment adds
+    # "live". Do not manufacture a studio/live conflict when independent audio
+    # identity and the full qualified title both identify that same session.
+    tags = file.get('tags') or {}
+    delta = _duration_delta_ms(file, slot)
+    return bool(
+        remote - local == {'live'} and not local - remote
+        and local.intersection({'session', 'sessions'})
+        and _identity_text(tags.get('title')) == _identity_text(slot.get('title'))
+        and delta is not None and delta <= 1000
+        and _artist_credit_supports(str(tags.get('artist') or ''), str(slot.get('artist') or ''))
+        and _recording_id(slot)
+        and any(recording.get('mbid') == _recording_id(slot)
+                and float(recording.get('score') or 0) >= 0.90
+                for recording in (file.get('acoustid') or {}).get('recordings') or [])
     )
 
 
@@ -289,11 +307,10 @@ class _MatchFacts:
         return self._memo('slot_versions', id(slot), lambda: slot_version_markers(slot))
 
     def compatible(self, file, slot):
-        if self.file_markers(file) != self.slot_markers(slot):
-            return False
-        local = str((file.get('db') or {}).get('recording_disambiguation') or '').strip()
-        remote = str(slot.get('recording_disambiguation') or '').strip()
-        return not (local and remote) or _identity_text(local) == _identity_text(remote)
+        return self._memo('compatible', (id(file), id(slot)),
+                          lambda: versions_compatible(file, slot,
+                              local_markers=self.file_markers(file),
+                              remote_markers=self.slot_markers(slot)))
 
     def delta(self, file, slot):
         return self._memo('duration', (id(file), id(slot)),

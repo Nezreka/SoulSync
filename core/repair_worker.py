@@ -1386,7 +1386,8 @@ class RepairWorker:
                         except (TypeError, ValueError):
                             prior = {}
                         signals = ('fingerprint_key', 'source', 'release_id',
-                                   'evidence_signature', 'fulfillment_state', 'changes')
+                                   'evidence_signature', 'fulfillment_state', 'changes',
+                                   'expected_title', 'recording_mbid', 'expected_duration_ms')
                         changed_reconciliation_evidence = any(
                             prior.get(key) != (details or {}).get(key) for key in signals)
                     if existing_status == 'dismissed' and not changed_reconciliation_evidence:
@@ -7393,7 +7394,7 @@ class RepairWorker:
                             current = conn.execute('SELECT details_json FROM repair_findings WHERE id = ?', (fid,)).fetchone()
                         finally:
                             conn.close()
-                        if not current or current[0] != reviewed_details.get(fid):
+                        if not current or json.loads(current[0] or '{}') != json.loads(reviewed_details.get(fid) or '{}'):
                             raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
                         result = self.fix_finding(
