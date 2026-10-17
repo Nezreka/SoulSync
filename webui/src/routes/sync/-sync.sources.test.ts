@@ -17,10 +17,6 @@ const STATS_AUTOMATIONS = readFileSync(
   resolve(process.cwd(), 'static/stats-automations.js'),
   'utf8',
 );
-const SYNC_LISTENBRAINZ = readFileSync(
-  resolve(process.cwd(), 'static/sync-listenbrainz.js'),
-  'utf8',
-);
 
 describe('endpoint families', () => {
   it('the hyphen/underscore update-phase drift is exactly beatport + listenbrainz', () => {
@@ -221,9 +217,7 @@ describe('the endpoint table is anchored to the live vanilla', () => {
       for (const p of paths) {
         // Strip the id segment; the vanilla builds these with a template.
         const stem = p.replace(/\/X$/, '/');
-        expect(SYNC_SERVICES + SYNC_SPOTIFY + STATS_AUTOMATIONS + SYNC_LISTENBRAINZ).toContain(
-          stem,
-        );
+        expect(SYNC_SERVICES + SYNC_SPOTIFY + STATS_AUTOMATIONS).toContain(stem);
       }
     }
   });
