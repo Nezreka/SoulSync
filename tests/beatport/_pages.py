@@ -41,9 +41,22 @@ class FakeResponse:
 class FakeScraper:
     """stands in for BeatportUnifiedScraper: serves fixture pages by url"""
 
+    base_url = 'https://www.beatport.com'
+
     def __init__(self, pages):
         self.pages = dict(pages)
         self.calls = []
+
+    def get_page(self, url):
+        # same as the real one: parsed page, or None when the fetch fails
+        import requests
+        from bs4 import BeautifulSoup
+        try:
+            response = self._get(url, timeout=15)
+            response.raise_for_status()
+        except requests.RequestException:
+            return None
+        return BeautifulSoup(response.content, 'html.parser')
 
     def _get(self, url, timeout=None):
         self.calls.append(url)
