@@ -3318,6 +3318,14 @@ function _pollSyncHistoryProgress(entryId, syncPlaylistId) {
                 return;
             }
             const state = await resp.json();
+            // Idle answers 200 + status 'not_found' since #1763; for this
+            // poller that body is the old 404 — the sync never started, so
+            // clean up instead of polling forever.
+            if (state.status === 'not_found') {
+                clearInterval(pollInterval);
+                _cleanupSyncHistoryResync(entryId, 'error');
+                return;
+            }
             const syncFrame = { playlist_id: syncPlaylistId, playlist_name: active?.playlistName || '', ...state };
             window.dispatchEvent(new CustomEvent('ss:sync-progress', { detail: syncFrame }));
             if (typeof updateMusicSyncTask === 'function') updateMusicSyncTask(syncFrame);
@@ -3524,6 +3532,9 @@ function _pollModalSyncProgress(playlistId, syncPlaylistId) {
             const resp = await fetch(`/api/sync/status/${syncPlaylistId}`);
             if (!resp.ok) { clearInterval(pollInterval); _cleanupModalSync(playlistId, 'error'); return; }
             const state = await resp.json();
+            // 200 + status 'not_found' is the old 404 since #1763 — the sync
+            // never started; clean up instead of polling forever.
+            if (state.status === 'not_found') { clearInterval(pollInterval); _cleanupModalSync(playlistId, 'error'); return; }
 
             const bar = document.getElementById(`modal-sync-bar-${playlistId}`);
             const stepEl = document.getElementById(`modal-sync-step-${playlistId}`);

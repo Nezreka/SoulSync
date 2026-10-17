@@ -100,6 +100,10 @@ export function usePlaylistSync(onToast: (toast: SyncToast) => void): PlaylistSy
           const res = await fetch(`/api/sync/status/${virtualId}`);
           if (!res.ok) return;
           const data = (await res.json()) as { status?: string; progress?: unknown };
+          // Idle answers 200 + status 'not_found' since #1763 — that used
+          // to be the 404 this poll skipped; without the guard it would
+          // write a zeroed progress block over the real one every tick.
+          if (data.status === 'not_found') return;
           const p = syncProgress(data.progress as never);
           setProgress((prev) => ({ ...prev, [statusBase]: p }));
           if (syncIsFinished(data.status)) {

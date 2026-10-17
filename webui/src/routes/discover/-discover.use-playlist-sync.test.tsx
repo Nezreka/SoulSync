@@ -174,6 +174,17 @@ describe('usePlaylistSync', () => {
     expect(toasts).toEqual([]);
     expect(result.current.progressFor('popular-picks')).toBeDefined();
 
+    // A 200 carrying status 'not_found' (idle since #1763 — the old 404)
+    // must not zero the live progress block either.
+    statusBody = { status: 'not_found' } as never;
+    await act(() => vi.advanceTimersByTimeAsync(600));
+    expect(toasts).toEqual([]);
+    expect(result.current.progressFor('popular-picks')).toMatchObject({
+      matched: 2,
+      failed: 1,
+      percentage: 75,
+    });
+
     statusBody = {
       status: 'finished',
       progress: { total_tracks: 4, matched_tracks: 3, failed_tracks: 1 },
