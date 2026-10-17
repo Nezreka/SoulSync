@@ -16,6 +16,8 @@
  *     or socket.io transport
  *   • same-origin /api/* + /status only
  *   • failures are not cached (next caller retries for real)
+ * Successful same-origin API writes invalidate cached reads so a post-save
+ * refresh sees the new state. Writes themselves are never deduplicated.
  */
 (function () {
     'use strict';
@@ -57,6 +59,17 @@
         }
     }
 
+    function isApiMutation(input, init) {
+        try {
+            var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+            if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) return false;
+            var url = new URL(typeof input === 'string' ? input : input.url || input.href, window.location.href);
+            return url.origin === window.location.origin && url.pathname.indexOf('/api/') === 0;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function sweep(now) {
         entries.forEach(function (v, k) {
             if (now - v.t > TTL_MS) entries.delete(k);
@@ -65,17 +78,26 @@
 
     window.fetch = function (input, init) {
         var key = dedupeKey(input, init);
-        if (!key) return raw(input, init);
+        if (!key) {
+            if (!isApiMutation(input, init)) return raw(input, init);
+            return raw(input, init).then(function (res) {
+                // A write can affect several read endpoints. Never reuse a
+                // pre-write snapshot for the caller's post-save refresh.
+                if (res.ok) entries.clear();
+                return res;
+            });
+        }
         var now = Date.now();
         var hit = entries.get(key);
         if (hit && (now - hit.t) < TTL_MS) {
             return hit.promise.then(function (res) { return res.clone(); });
         }
         var p = raw(input, init).then(function (res) {
-            if (!res.ok) entries.delete(key);   // failures always retry for real
+            if (!res.ok && entries.get(key)?.promise === p) entries.delete(key);
             return res;
         }, function (err) {
-            entries.delete(key);
+            // An older read must not evict a newer entry created after a write.
+            if (entries.get(key)?.promise === p) entries.delete(key);
             throw err;
         });
         entries.set(key, { promise: p, t: now });
