@@ -889,7 +889,9 @@ def _own_library_scan_clients(server_type):
     profiles = db.get_own_library_profiles()
     if not profiles:
         return []
-    if server_type not in ('plex', 'jellyfin'):
+    from core.media_server import specs
+    _descriptor = specs.describe(server_type)
+    if not (_descriptor and _descriptor.supports_own_libraries):
         logger.info(
             "[Own Library] Active media server '%s' does not support per-profile libraries; "
             "skipping own-library scans for %d profile(s)",
