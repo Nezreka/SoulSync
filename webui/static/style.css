@@ -42975,27 +42975,239 @@ div.artist-hero-badge {
 }
 
 /* ============================================================================
-   MUSICBRAINZ ENRICHMENT STATUS BUTTON - PHASE 5 WEB UI
-   ============================================================================ */
+   ENRICHMENT WORKER ORBS — one rule set for every worker
+   ============================================================================
+   dashboard-header.tsx gives every orb the shared enrich-worker* classes next
+   to its own (musicbrainz-button, mb-spinner, …). The shared rules below draw
+   the orb, its states and its tooltip from the custom properties on
+   .enrich-worker. Each worker's container only sets its colours and, where it
+   departs from the house look, the numbers that differ. The few rules that
+   follow a shared rule fix the workers that never had that part of the look.
+   Order matters: a fix-up sits right after the shared rule it overrides, so it
+   cascades exactly where the worker's own rule used to.
+   The per-worker classes stay on the markup: worker-orbs.js anchors on the
+   containers, mobile.css repositions three tooltips by them, and the 900px
+   rule near `.header-quick-nav` hides tooltips by them. */
 
-/* Container for button + tooltip positioning */
-.mb-button-container {
+.enrich-worker {
     position: relative;
     display: inline-block;
     margin-right: 12px;
+
+    /* --ew-rgb (the brand colour) and --ew-rgb-2 (the deeper gradient stop)
+       come from each worker's container. Everything else defaults to the
+       house look. */
+    --ew-ring-rgb: var(--ew-rgb);           /* button ring (and, for Tidal, the logo glow) */
+    --ew-fill-a: 0.12;
+    --ew-fill-b: 0.18;
+    --ew-glow-a: 0.2;
+    --ew-ring-a: 0.25;
+    --ew-hover-fill-a: 0.18;
+    --ew-hover-fill-b: 0.25;
+    --ew-hover-glow-a: 0.3;
+    --ew-hover-ring-a: 0.4;
+    --ew-active-fill-a: 0.22;
+    --ew-active-fill-b: 0.28;
+    --ew-active-glow-a: 0.4;
+    --ew-active-ring-a: 0.5;
+    --ew-logo-fit: contain;
+    --ew-logo-radius: 0;
+    /* --ew-logo-tint: filters appended to every logo filter (unset = none) */
+    --ew-spin-top: rgba(var(--ew-rgb), 0.8);
+    --ew-spin-right: rgba(var(--ew-rgb), 0.5);
+    --ew-tip-rgb: var(--ew-rgb);            /* tooltip border, arrow and title */
+    --ew-tip-glow-rgb: var(--ew-rgb);
+    --ew-tip-glow-a: 0.25;
+    --ew-status: rgb(var(--accent-light-rgb));
+    --ew-paused-status: #ffc107;
 }
 
-/* MusicBrainz Button */
-.musicbrainz-button {
+/* ── Each worker: its colours, and what differs from the house look ── */
+
+.mb-button-container {
+    --ew-rgb: 186, 85, 211;
+    --ew-rgb-2: 147, 51, 156;
+}
+
+.audiodb-button-container {
+    --ew-rgb: 0, 188, 212;
+    --ew-rgb-2: 0, 150, 170;
+}
+
+.deezer-button-container {
+    --ew-rgb: 162, 56, 255;
+    --ew-rgb-2: 120, 30, 200;
+}
+
+.jiosaavn-button-container {
+    --ew-rgb: 43, 197, 180;
+    --ew-rgb-2: 30, 160, 145;
+}
+
+.spotify-enrich-button-container {
+    --ew-rgb: 30, 215, 96;
+    --ew-rgb-2: 21, 150, 67;
+    --ew-status: rgb(var(--ew-rgb));
+}
+
+.itunes-enrich-button-container {
+    --ew-rgb: 251, 91, 137;
+    --ew-rgb-2: 164, 69, 178;
+    --ew-spin-right: rgba(var(--ew-rgb-2), 0.5);
+}
+
+.lastfm-enrich-button-container {
+    --ew-rgb: 213, 16, 7;
+    --ew-rgb-2: 180, 10, 5;
+    --ew-logo-radius: var(--radius-circle);
+}
+
+.genius-enrich-button-container {
+    --ew-rgb: 255, 255, 100;
+    --ew-rgb-2: 200, 200, 50;
+    --ew-logo-radius: var(--radius-circle);
+}
+
+.bandcamp-enrich-button-container {
+    --ew-rgb: 29, 160, 195;
+    --ew-rgb-2: 20, 130, 165;
+    --ew-logo-radius: var(--radius-circle);
+}
+
+/* Tidal: a black brand colour, so its ring, logo glow and tooltip are white. */
+.tidal-enrich-button-container {
+    --ew-rgb: 0, 0, 0;
+    --ew-rgb-2: 30, 30, 30;
+    --ew-ring-rgb: 255, 255, 255;
+    --ew-fill-a: 0.15;
+    --ew-fill-b: 0.22;
+    --ew-glow-a: 0.25;
+    --ew-ring-a: 0.2;
+    --ew-hover-fill-a: 0.22;
+    --ew-hover-fill-b: 0.30;
+    --ew-hover-glow-a: 0.35;
+    --ew-hover-ring-a: 0.35;
+    --ew-active-fill-a: 0.28;
+    --ew-active-fill-b: 0.36;
+    --ew-active-ring-a: 0.45;
+    --ew-logo-radius: var(--radius-circle);
+    --ew-logo-tint: invert(1) brightness(1.8);
+    --ew-spin-top: var(--white-a80);
+    --ew-spin-right: var(--white-a50);
+    --ew-tip-rgb: 255, 255, 255;
+    --ew-tip-glow-a: 0.3;
+}
+
+.qobuz-enrich-button-container {
+    --ew-rgb: 1, 112, 239;
+    --ew-rgb-2: 1, 90, 200;
+    --ew-logo-radius: var(--radius-circle);
+    --ew-logo-tint: invert(1);
+}
+
+/* Genius, Bandcamp and Qobuz: a softer fill and glow. */
+.genius-enrich-button-container,
+.bandcamp-enrich-button-container,
+.qobuz-enrich-button-container {
+    --ew-fill-a: 0.10;
+    --ew-fill-b: 0.16;
+    --ew-glow-a: 0.15;
+    --ew-hover-fill-a: 0.16;
+    --ew-hover-fill-b: 0.22;
+    --ew-hover-glow-a: 0.25;
+    --ew-active-fill-a: 0.20;
+    --ew-active-fill-b: 0.26;
+    --ew-active-glow-a: 0.3;
+    --ew-tip-glow-a: 0.2;
+}
+
+/* Discogs: a grey ring and spinner on a near-black fill. */
+.discogs-button-container {
+    --ew-rgb: 51, 51, 51;
+    --ew-rgb-2: 80, 80, 80;
+    --ew-ring-rgb: 180, 180, 180;
+    --ew-spin-top: rgba(180, 180, 180, 0.8);
+    --ew-spin-right: rgba(180, 180, 180, 0.5);
+}
+
+.amazon-enrich-button-container {
+    --ew-rgb: 255, 153, 0;
+    --ew-rgb-2: 255, 120, 0;
+    --ew-status: #FF9900;
+}
+
+.similar-artists-enrich-button-container {
+    --ew-rgb: 168, 85, 247;
+    --ew-rgb-2: 124, 58, 237;
+    --ew-status: #c084fc;
+}
+
+/* Amazon and Similar Artists: a fainter resting orb that lifts on hover. */
+.amazon-enrich-button-container,
+.similar-artists-enrich-button-container {
+    --ew-fill-a: 0.10;
+    --ew-fill-b: 0.16;
+    --ew-glow-a: 0.12;
+    --ew-ring-a: 0.22;
+    --ew-hover-glow-a: 0.28;
+    --ew-hover-ring-a: 0.45;
+    --ew-active-fill-a: 0.20;
+    --ew-active-fill-b: 0.26;
+    --ew-active-glow-a: 0.35;
+    --ew-active-ring-a: 0.55;
+    --ew-spin-top: rgba(var(--ew-rgb), 0.85);
+}
+
+/* Discogs, Amazon and Similar Artists: a neutral white tooltip whose status
+   keeps its colour while paused. */
+.discogs-button-container,
+.amazon-enrich-button-container,
+.similar-artists-enrich-button-container {
+    --ew-tip-rgb: 255, 255, 255;
+    --ew-tip-glow-rgb: 0, 0, 0;
+    --ew-tip-glow-a: 0.3;
+    --ew-paused-status: var(--ew-status);
+}
+
+/* Hydrabase has no brand colour: its orb is a white ring (rules further down). */
+.hydrabase-button-container {
+    --ew-spin-top: var(--white-a60);
+    --ew-spin-right: var(--white-a30);
+}
+
+.repair-button-container {
+    --ew-rgb: 180, 130, 255;
+    --ew-rgb-2: 130, 80, 220;
+    --ew-logo-fit: cover;
+    --ew-logo-radius: var(--radius-circle);
+}
+
+/* SoulID follows the accent colour. */
+.soulid-button-container {
+    display: flex;
+    align-items: center;
+    --ew-rgb: var(--accent-rgb);
+    --ew-rgb-2: 100, 80, 220;
+    --ew-glow-a: 0.15;
+    --ew-hover-glow-a: 0.25;
+    --ew-logo-fit: cover;
+    --ew-logo-radius: var(--radius-circle);
+    --ew-spin-right: rgba(var(--ew-rgb-2), 0.5);
+    --ew-tip-glow-a: 0.15;
+}
+
+/* ── The orb ── */
+
+.enrich-worker-btn {
     position: relative;
     width: 44px;
     height: 44px;
     background: linear-gradient(135deg,
-            rgba(186, 85, 211, 0.12) 0%,
-            rgba(147, 51, 156, 0.18) 100%);
+            rgba(var(--ew-rgb), var(--ew-fill-a)) 0%,
+            rgba(var(--ew-rgb-2), var(--ew-fill-b)) 100%);
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(186, 85, 211, 0.25);
+    border: 1.5px solid rgba(var(--ew-ring-rgb), var(--ew-ring-a));
     border-radius: var(--radius-circle);
     cursor: pointer;
     display: flex;
@@ -43003,82 +43215,156 @@ div.artist-hero-badge {
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow:
-        0 4px 16px rgba(186, 85, 211, 0.2),
+        0 4px 16px rgba(var(--ew-rgb), var(--ew-glow-a)),
         0 2px 8px rgba(0, 0, 0, 0.15),
         inset 0 1px 0 var(--white-a08);
 }
 
-.musicbrainz-button:hover {
+.discogs-button {
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(80, 80, 80, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 var(--white-a08);
+}
+
+.hydrabase-button {
+    border: 2px solid var(--white-a25);
+    background: linear-gradient(135deg, var(--white-a08) 0%, var(--white-a04) 100%);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+    transition: all 0.3s ease;
+    overflow: visible;
+    padding: 0;
+}
+
+.enrich-worker-btn:hover {
     background: linear-gradient(135deg,
-            rgba(186, 85, 211, 0.18) 0%,
-            rgba(147, 51, 156, 0.25) 100%);
-    border-color: rgba(186, 85, 211, 0.4);
+            rgba(var(--ew-rgb), var(--ew-hover-fill-a)) 0%,
+            rgba(var(--ew-rgb-2), var(--ew-hover-fill-b)) 100%);
+    border-color: rgba(var(--ew-ring-rgb), var(--ew-hover-ring-a));
     transform: scale(1.05);
     box-shadow:
-        0 6px 20px rgba(186, 85, 211, 0.3),
+        0 6px 20px rgba(var(--ew-rgb), var(--ew-hover-glow-a)),
         0 3px 12px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 var(--white-a12);
 }
 
-.musicbrainz-button:active {
-    transform: scale(0.95);
+/* Discogs, Amazon and Similar Artists lift instead of brightening. */
+.discogs-button:hover,
+.amazon-enrich-button:hover,
+.similar-artists-enrich-button:hover {
+    background: linear-gradient(135deg,
+            rgba(var(--ew-rgb), var(--ew-fill-a)) 0%,
+            rgba(var(--ew-rgb-2), var(--ew-fill-b)) 100%);
+    transform: scale(1.1);
     box-shadow:
-        0 2px 8px rgba(186, 85, 211, 0.15),
+        0 6px 24px rgba(var(--ew-rgb), var(--ew-hover-glow-a)),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 var(--white-a12);
+}
+
+.discogs-button:hover {
+    box-shadow:
+        0 6px 24px rgba(120, 120, 120, 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 var(--white-a12);
+}
+
+.hydrabase-button:hover {
+    background: linear-gradient(135deg, var(--white-a15) 0%, var(--white-a08) 100%);
+    border-color: var(--white-a40);
+    box-shadow: 0 0 15px var(--white-a15);
+}
+
+/* Pressing shrinks the orb, except on the four that never had a press effect. */
+.enrich-worker-btn:not(:where(.jiosaavn-button, .discogs-button, .amazon-enrich-button, .similar-artists-enrich-button)):active {
+    transform: scale(0.95);
+}
+
+/* …and these six also dim their glow while pressed. */
+.musicbrainz-button:active,
+.audiodb-button:active,
+.deezer-button:active,
+.spotify-enrich-button:active,
+.itunes-enrich-button:active,
+.repair-button:active {
+    box-shadow:
+        0 2px 8px rgba(var(--ew-rgb), 0.15),
         inset 0 1px 0 var(--white-a06);
 }
 
-/* MusicBrainz Logo */
-.mb-logo {
+/* The full-colour logos. JioSaavn's emoji and the monochrome Discogs, Amazon,
+   Similar Artists and Hydrabase logos keep their own rules further down. */
+.enrich-worker-logo {
     width: 24px;
     height: 24px;
-    object-fit: contain;
+    object-fit: var(--ew-logo-fit);
+    border-radius: var(--ew-logo-radius);
     opacity: 0.85;
     transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) var(--ew-logo-tint,);
 }
 
-.musicbrainz-button:hover .mb-logo {
+.enrich-worker-btn:hover .enrich-worker-logo {
     opacity: 1;
 }
 
-/* Loading Spinner - Animated Ring */
-.mb-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(186, 85, 211, 0.8);
-    border-right-color: rgba(186, 85, 211, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active State - Spinner visible and rotating */
-.musicbrainz-button.active .mb-spinner {
-    opacity: 1;
-    animation: mb-spin 1.2s linear infinite;
-}
-
-.musicbrainz-button.active {
+/* Active: the worker is running. The spinner turns and the orb glows. */
+.enrich-worker-btn.active {
     background: linear-gradient(135deg,
-            rgba(186, 85, 211, 0.22) 0%,
-            rgba(147, 51, 156, 0.28) 100%);
-    border-color: rgba(186, 85, 211, 0.5);
+            rgba(var(--ew-rgb), var(--ew-active-fill-a)) 0%,
+            rgba(var(--ew-rgb-2), var(--ew-active-fill-b)) 100%);
+    border-color: rgba(var(--ew-ring-rgb), var(--ew-active-ring-a));
     box-shadow:
-        0 6px 24px rgba(186, 85, 211, 0.4),
+        0 6px 24px rgba(var(--ew-rgb), var(--ew-active-glow-a)),
         0 3px 12px rgba(0, 0, 0, 0.2),
         inset 0 1px 0 var(--white-a15);
 }
 
-.musicbrainz-button.active .mb-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(186, 85, 211, 0.6));
+.tidal-enrich-button.active {
+    box-shadow:
+        0 6px 24px rgba(0, 0, 0, 0.4),
+        0 3px 12px rgba(0, 0, 0, 0.25),
+        inset 0 1px 0 var(--white-a15);
 }
 
-/* Complete/Idle State */
-.musicbrainz-button.complete {
+.discogs-button.active {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.22) 0%,
+            rgba(80, 80, 80, 0.28) 100%);
+    box-shadow:
+        0 6px 24px rgba(120, 120, 120, 0.35),
+        0 3px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 var(--white-a15);
+}
+
+.amazon-enrich-button.active {
+    background: linear-gradient(135deg,
+            rgba(255, 153, 0, 0.20) 0%,
+            rgba(255, 100, 0, 0.26) 100%);
+}
+
+/* Repair and SoulID cycle a rainbow ring and glow instead. */
+.repair-button.active,
+.soulid-button.active {
+    animation: rainbow-glow 3s linear infinite;
+}
+
+.hydrabase-button.active {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, var(--white-a10) 100%);
+    border-color: var(--white-a50);
+    box-shadow: 0 0 20px var(--white-a15), inset 0 0 10px var(--white-a05);
+}
+
+.enrich-worker-btn.active .enrich-worker-logo {
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(var(--ew-ring-rgb), 0.6)) var(--ew-logo-tint,);
+}
+
+/* Complete: the worker is idle with nothing left to do. */
+.enrich-worker-btn.complete {
     background: linear-gradient(135deg,
             rgba(76, 175, 80, 0.15) 0%,
             rgba(56, 142, 60, 0.20) 100%);
@@ -43089,17 +43375,12 @@ div.artist-hero-badge {
         inset 0 1px 0 var(--white-a08);
 }
 
-.musicbrainz-button.complete .mb-logo {
+.enrich-worker-btn.complete .enrich-worker-logo {
     opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
+    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) var(--ew-logo-tint,);
 }
 
-.musicbrainz-button.complete .mb-spinner {
-    opacity: 0;
-}
-
-/* Paused State */
-.musicbrainz-button.paused {
+.enrich-worker-btn.paused {
     background: linear-gradient(135deg,
             rgba(255, 193, 7, 0.12) 0%,
             rgba(255, 152, 0, 0.18) 100%);
@@ -43110,33 +43391,184 @@ div.artist-hero-badge {
         inset 0 1px 0 var(--white-a08);
 }
 
-.musicbrainz-button.paused:hover {
+.hydrabase-button.paused {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.18) 0%, rgba(255, 152, 0, 0.10) 100%);
+    border-color: rgba(255, 193, 7, 0.45);
+    box-shadow: 0 0 15px rgba(255, 193, 7, 0.1);
+}
+
+/* JioSaavn's orb keeps its resting fill and glow in every state; only the
+   ring changes. */
+.jiosaavn-button:hover,
+.jiosaavn-button.active,
+.jiosaavn-button.complete,
+.jiosaavn-button.paused {
+    background: linear-gradient(135deg,
+            rgba(var(--ew-rgb), var(--ew-fill-a)) 0%,
+            rgba(var(--ew-rgb-2), var(--ew-fill-b)) 100%);
+    box-shadow:
+        0 4px 16px rgba(var(--ew-rgb), var(--ew-glow-a)),
+        0 2px 8px rgba(0, 0, 0, 0.15),
+        inset 0 1px 0 var(--white-a08);
+}
+
+.enrich-worker-btn:not(:where(.jiosaavn-button, .discogs-button, .amazon-enrich-button, .similar-artists-enrich-button, .hydrabase-button)).paused:hover {
     border-color: rgba(255, 193, 7, 0.5);
     box-shadow:
         0 6px 20px rgba(255, 193, 7, 0.3),
         0 3px 12px rgba(0, 0, 0, 0.2);
 }
 
-/* Spinner Rotation Animation */
-@keyframes mb-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
+/* No-auth: the service isn't connected (Spotify, Last.fm, Genius, Bandcamp,
+   Tidal and Qobuz). */
+.enrich-worker-btn.no-auth {
+    background: linear-gradient(135deg,
+            rgba(120, 120, 120, 0.08) 0%,
+            rgba(80, 80, 80, 0.12) 100%);
+    border-color: rgba(120, 120, 120, 0.25);
+    box-shadow:
+        0 4px 16px rgba(0, 0, 0, 0.15),
+        0 2px 8px rgba(0, 0, 0, 0.1),
+        inset 0 1px 0 var(--white-a04);
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
-/* ============================================================================
-   MUSICBRAINZ HOVER TOOLTIP
-   ============================================================================ */
+.enrich-worker-btn.no-auth .enrich-worker-logo {
+    filter: grayscale(1) opacity(0.4) var(--ew-logo-tint,);
+}
 
-.musicbrainz-tooltip {
+.enrich-worker-btn.no-auth .enrich-worker-spinner {
+    display: none;
+}
+
+.enrich-worker-btn.no-auth:hover {
+    border-color: rgba(120, 120, 120, 0.35);
+    box-shadow:
+        0 6px 20px rgba(0, 0, 0, 0.2),
+        0 3px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0.55;
+}
+
+/* ── The spinner ── */
+
+.enrich-worker-spinner {
+    position: absolute;
+    width: 44px;
+    height: 44px;
+    border: 3px solid transparent;
+    border-top-color: var(--ew-spin-top);
+    border-right-color: var(--ew-spin-right);
+    border-radius: var(--radius-circle);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.hydrabase-spinner {
+    top: -2px;
+    left: -2px;
+    border-width: 2px;
+}
+
+.enrich-worker-btn.active .enrich-worker-spinner {
+    opacity: 1;
+    animation: enrich-worker-spin 1.2s linear infinite;
+}
+
+.repair-button.active .repair-spinner,
+.soulid-button.active .soulid-spinner {
+    animation: enrich-worker-spin 1.2s linear infinite, rainbow-spinner 3s linear infinite;
+}
+
+@keyframes enrich-worker-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ── Logos with their own look ── */
+
+.jiosaavn-logo {
+    font-size: 20px;
+    line-height: 1;
+    opacity: 0.9;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* Discogs and Amazon: white marks, tinted green when complete and amber when
+   paused. */
+.discogs-logo,
+.amazon-enrich-logo {
+    width: 24px;
+    height: 24px;
+    opacity: 0.6;
+    filter: brightness(0) invert(1);
+    transition: all 0.3s ease;
+}
+
+.discogs-button.active .discogs-logo {
+    opacity: 1;
+    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(200, 200, 200, 0.4));
+}
+
+.amazon-enrich-button.active .amazon-enrich-logo {
+    opacity: 1;
+    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(255, 180, 50, 0.5));
+}
+
+.discogs-button.complete .discogs-logo,
+.amazon-enrich-button.complete .amazon-enrich-logo {
+    opacity: 0.8;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(3) hue-rotate(80deg);
+}
+
+.discogs-button.paused .discogs-logo,
+.amazon-enrich-button.paused .amazon-enrich-logo {
+    opacity: 0.5;
+    filter: brightness(0) invert(0.6) sepia(1) saturate(5) hue-rotate(15deg);
+}
+
+.similar-artists-enrich-logo {
+    width: 26px;
+    height: 26px;
+    opacity: 0.7;
+    object-fit: cover;
+    border-radius: 7px;
+    transition: all 0.3s ease;
+}
+
+.similar-artists-enrich-button.active .similar-artists-enrich-logo {
+    opacity: 1;
+}
+
+.similar-artists-enrich-button.paused .similar-artists-enrich-logo {
+    opacity: 0.5;
+}
+
+.hydrabase-worker-logo {
+    width: 24px;
+    height: 24px;
+    opacity: 0.85;
+    filter: brightness(0) invert(1);
+    transition: opacity 0.3s ease;
+    z-index: 1;
+}
+
+.hydrabase-button.active .hydrabase-worker-logo {
+    opacity: 1;
+}
+
+.hydrabase-button.paused .hydrabase-worker-logo {
+    opacity: 0.7;
+    filter: brightness(0) invert(1) sepia(1) saturate(5) hue-rotate(15deg);
+}
+
+/* ── The hover tooltip ── */
+
+.enrich-worker-tooltip {
     position: absolute;
     left: 50%;
     top: calc(100% + 12px);
-    /* 12px gap below button */
     transform: translateX(-50%) translateY(-5px);
     z-index: 5000;
     opacity: 0;
@@ -43145,12 +43577,166 @@ div.artist-hero-badge {
     pointer-events: none;
 }
 
-.musicbrainz-button:hover+.musicbrainz-tooltip {
+.enrich-worker-btn:hover + .enrich-worker-tooltip {
     opacity: 1;
     visibility: visible;
     transform: translateX(-50%) translateY(0);
 }
 
+/* Hydrabase's tooltip sits closer and opens on the whole container. */
+.hydrabase-tooltip {
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.hydrabase-button-container:hover .hydrabase-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+.enrich-worker-tooltip-content {
+    min-width: 260px;
+    background: linear-gradient(135deg,
+            rgba(30, 30, 30, 0.98) 0%,
+            rgba(20, 20, 20, 0.99) 100%);
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    border: 1px solid rgba(var(--ew-tip-rgb), 0.3);
+    border-radius: var(--radius-xl);
+    padding: 16px 18px;
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(var(--ew-tip-glow-rgb), var(--ew-tip-glow-a)),
+        inset 0 1px 0 var(--white-a10);
+}
+
+.jiosaavn-tooltip-content {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+}
+
+.repair-tooltip-content {
+    min-width: 280px;
+}
+
+.hydrabase-tooltip-content {
+    min-width: 180px;
+    background: rgba(30, 30, 30, 0.98);
+    border: 1px solid var(--white-a25);
+    border-radius: 10px;
+    padding: 12px 14px;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.enrich-worker-tooltip-header {
+    font-family: 'SF Pro Display', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(var(--ew-tip-rgb), 0.95);
+    letter-spacing: -0.2px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--white-a08);
+}
+
+.jiosaavn-tooltip-header {
+    font-family: inherit;
+    letter-spacing: inherit;
+}
+
+.hydrabase-tooltip-header {
+    font-family: inherit;
+    font-size: 12px;
+    color: var(--white-a90);
+    letter-spacing: 0.3px;
+    margin-bottom: 6px;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.enrich-worker-tooltip-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Hydrabase's tooltip is one status line, not the stacked body. */
+.hydrabase-tooltip-body {
+    display: block;
+    flex-direction: row;
+    gap: normal;
+    font-size: 11px;
+    color: var(--white-a70);
+}
+
+.enrich-worker-tooltip .tooltip-status > span {
+    color: var(--ew-status);
+    font-weight: 600;
+}
+
+.enrich-worker-btn.paused + .enrich-worker-tooltip .tooltip-status > span {
+    color: var(--ew-paused-status);
+}
+
+.enrich-worker-btn.no-auth + .enrich-worker-tooltip .tooltip-status > span {
+    color: rgba(120, 120, 120, 0.8);
+}
+
+#hydrabase-tooltip-status {
+    color: var(--white-a90);
+    font-weight: 500;
+}
+
+/* The arrow above the tooltip */
+.enrich-worker-tooltip-content::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -8px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(var(--ew-tip-rgb), 0.3);
+}
+
+.enrich-worker-tooltip-content::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: -7px;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
+}
+
+.hydrabase-tooltip-content::before {
+    border-bottom: 8px solid var(--white-a25);
+}
+
+/* These four tooltips have never had the arrow. */
+.jiosaavn-tooltip-content::before,
+.jiosaavn-tooltip-content::after,
+.discogs-tooltip-content::before,
+.discogs-tooltip-content::after,
+.amazon-enrich-tooltip-content::before,
+.amazon-enrich-tooltip-content::after,
+.similar-artists-enrich-tooltip-content::before,
+.similar-artists-enrich-tooltip-content::after {
+    content: none;
+}
+
+/* The generic tooltip classes: MusicBrainz's orb tooltip carries them next to
+   the shared ones, and the video enrichment workers in index.html use them on
+   their own. */
 .tooltip-content {
     min-width: 260px;
     background: linear-gradient(135deg,
@@ -43200,15 +43786,6 @@ div.artist-hero-badge {
     font-weight: 500;
 }
 
-#mb-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.musicbrainz-button.paused+.musicbrainz-tooltip #mb-tooltip-status {
-    color: #ffc107;
-}
-
 /* Tooltip Arrow */
 .tooltip-content::before {
     content: '';
@@ -43236,2762 +43813,7 @@ div.artist-hero-badge {
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
 
-/* ============================================================================
-   AUDIODB ENRICHMENT STATUS BUTTON
-   ============================================================================ */
-
-/* Container for button + tooltip positioning */
-.audiodb-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-/* AudioDB Button */
-.audiodb-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(0, 188, 212, 0.12) 0%,
-            rgba(0, 150, 170, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(0, 188, 212, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(0, 188, 212, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.audiodb-button:hover {
-    background: linear-gradient(135deg,
-            rgba(0, 188, 212, 0.18) 0%,
-            rgba(0, 150, 170, 0.25) 100%);
-    border-color: rgba(0, 188, 212, 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(0, 188, 212, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.audiodb-button:active {
-    transform: scale(0.95);
-    box-shadow:
-        0 2px 8px rgba(0, 188, 212, 0.15),
-        inset 0 1px 0 var(--white-a06);
-}
-
-/* AudioDB Logo */
-.audiodb-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.audiodb-button:hover .audiodb-logo {
-    opacity: 1;
-}
-
-/* Loading Spinner - Animated Ring */
-.audiodb-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(0, 188, 212, 0.8);
-    border-right-color: rgba(0, 188, 212, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active State - Spinner visible and rotating */
-.audiodb-button.active .audiodb-spinner {
-    opacity: 1;
-    animation: audiodb-spin 1.2s linear infinite;
-}
-
-.audiodb-button.active {
-    background: linear-gradient(135deg,
-            rgba(0, 188, 212, 0.22) 0%,
-            rgba(0, 150, 170, 0.28) 100%);
-    border-color: rgba(0, 188, 212, 0.5);
-    box-shadow:
-        0 6px 24px rgba(0, 188, 212, 0.4),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.audiodb-button.active .audiodb-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(0, 188, 212, 0.6));
-}
-
-/* Complete/Idle State */
-.audiodb-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.audiodb-button.complete .audiodb-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.audiodb-button.complete .audiodb-spinner {
-    opacity: 0;
-}
-
-/* Paused State */
-.audiodb-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.audiodb-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow:
-        0 6px 20px rgba(255, 193, 7, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-/* Spinner Rotation Animation */
-@keyframes audiodb-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-/* ============================================================================
-   AUDIODB HOVER TOOLTIP
-   ============================================================================ */
-
-.audiodb-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.audiodb-button:hover+.audiodb-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.audiodb-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(0, 188, 212, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(0, 188, 212, 0.25),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.audiodb-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(0, 188, 212, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.audiodb-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#audiodb-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.audiodb-button.paused+.audiodb-tooltip #audiodb-tooltip-status {
-    color: #ffc107;
-}
-
-/* AudioDB Tooltip Arrow */
-.audiodb-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(0, 188, 212, 0.3);
-}
-
-.audiodb-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ============================================================================
-   DEEZER ENRICHMENT STATUS BUTTON
-   ============================================================================ */
-
-/* Container for button + tooltip positioning */
-/* Discogs Enrichment Button */
-.discogs-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.discogs-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(51, 51, 51, 0.12) 0%,
-            rgba(80, 80, 80, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(120, 120, 120, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(80, 80, 80, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.discogs-logo {
-    width: 24px;
-    height: 24px;
-    opacity: 0.6;
-    filter: brightness(0) invert(1);
-    transition: all 0.3s ease;
-}
-
-.discogs-button:hover {
-    transform: scale(1.1);
-    border-color: rgba(180, 180, 180, 0.4);
-    box-shadow:
-        0 6px 24px rgba(120, 120, 120, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-/* Spinner ring */
-.discogs-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(180, 180, 180, 0.8);
-    border-right-color: rgba(180, 180, 180, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-@keyframes discogs-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* Active State */
-.discogs-button.active .discogs-spinner {
-    opacity: 1;
-    animation: discogs-spin 1.2s linear infinite;
-}
-
-.discogs-button.active {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.22) 0%,
-            rgba(80, 80, 80, 0.28) 100%);
-    border-color: rgba(180, 180, 180, 0.5);
-    box-shadow:
-        0 6px 24px rgba(120, 120, 120, 0.35),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.discogs-button.active .discogs-logo {
-    opacity: 1;
-    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(200, 200, 200, 0.4));
-}
-
-/* Complete/Idle State */
-.discogs-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.discogs-button.complete .discogs-logo {
-    opacity: 0.8;
-    filter: brightness(0) invert(0.6) sepia(1) saturate(3) hue-rotate(80deg);
-}
-
-.discogs-button.complete .discogs-spinner {
-    opacity: 0;
-}
-
-/* Paused State */
-.discogs-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.discogs-button.paused .discogs-logo {
-    opacity: 0.5;
-    filter: brightness(0) invert(0.6) sepia(1) saturate(5) hue-rotate(15deg);
-}
-
-.discogs-button.paused .discogs-spinner {
-    opacity: 0;
-}
-
-/* Tooltip */
-.discogs-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.discogs-button:hover+.discogs-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.discogs-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid var(--white-a30);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a10);
-}
-
-.discogs-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.discogs-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#discogs-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-/* ============================================================
-   AMAZON MUSIC ENRICHMENT WORKER BUTTON
-   ============================================================ */
-
-.amazon-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.amazon-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(255, 153, 0, 0.10) 0%,
-            rgba(255, 120, 0, 0.16) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(255, 153, 0, 0.22);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(255, 153, 0, 0.12),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.amazon-enrich-logo {
-    width: 24px;
-    height: 24px;
-    opacity: 0.6;
-    filter: brightness(0) invert(1);
-    transition: all 0.3s ease;
-}
-
-.amazon-enrich-button:hover {
-    transform: scale(1.1);
-    border-color: rgba(255, 153, 0, 0.45);
-    box-shadow:
-        0 6px 24px rgba(255, 153, 0, 0.28),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.amazon-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(255, 153, 0, 0.85);
-    border-right-color: rgba(255, 153, 0, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-@keyframes amazon-enrich-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.amazon-enrich-button.active .amazon-enrich-spinner {
-    opacity: 1;
-    animation: amazon-enrich-spin 1.2s linear infinite;
-}
-
-.amazon-enrich-button.active {
-    background: linear-gradient(135deg,
-            rgba(255, 153, 0, 0.20) 0%,
-            rgba(255, 100, 0, 0.26) 100%);
-    border-color: rgba(255, 153, 0, 0.55);
-    box-shadow:
-        0 6px 24px rgba(255, 153, 0, 0.35),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.amazon-enrich-button.active .amazon-enrich-logo {
-    opacity: 1;
-    filter: brightness(0) invert(1) drop-shadow(0 0 6px rgba(255, 180, 50, 0.5));
-}
-
-.amazon-enrich-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.amazon-enrich-button.complete .amazon-enrich-logo {
-    opacity: 0.8;
-    filter: brightness(0) invert(0.6) sepia(1) saturate(3) hue-rotate(80deg);
-}
-
-.amazon-enrich-button.complete .amazon-enrich-spinner {
-    opacity: 0;
-}
-
-.amazon-enrich-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.amazon-enrich-button.paused .amazon-enrich-logo {
-    opacity: 0.5;
-    filter: brightness(0) invert(0.6) sepia(1) saturate(5) hue-rotate(15deg);
-}
-
-.amazon-enrich-button.paused .amazon-enrich-spinner {
-    opacity: 0;
-}
-
-.amazon-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.amazon-enrich-button:hover + .amazon-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.amazon-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid var(--white-a30);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a10);
-}
-
-.amazon-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.amazon-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#amazon-enrich-tooltip-status {
-    color: #FF9900;
-    font-weight: 600;
-}
-
-/* Similar Artists (MusicMap relationship worker) dashboard bubble — mirrors the
-   per-source bubbles with a purple accent. The MusicMap logo is a wide branded
-   image, so it's cover-cropped + rounded rather than icon-filtered. */
-.similar-artists-enrich-button-container { position: relative; display: inline-block; margin-right: 12px; }
-.similar-artists-enrich-button {
-    position: relative; width: 44px; height: 44px;
-    background: linear-gradient(135deg, rgba(168,85,247,0.10) 0%, rgba(124,58,237,0.16) 100%);
-    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(168,85,247,0.22); border-radius: var(--radius-circle); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-    box-shadow: 0 4px 16px rgba(168,85,247,0.12), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 var(--white-a08);
-}
-.similar-artists-enrich-logo {
-    width: 26px; height: 26px; opacity: 0.7; object-fit: cover; border-radius: 7px;
-    transition: all 0.3s ease;
-}
-.similar-artists-enrich-button:hover {
-    transform: scale(1.1); border-color: rgba(168,85,247,0.45);
-    box-shadow: 0 6px 24px rgba(168,85,247,0.28), 0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 var(--white-a12);
-}
-.similar-artists-enrich-spinner {
-    position: absolute; width: 44px; height: 44px; border: 3px solid transparent;
-    border-top-color: rgba(168,85,247,0.85); border-right-color: rgba(168,85,247,0.5);
-    border-radius: var(--radius-circle); opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
-}
-@keyframes similar-artists-enrich-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.similar-artists-enrich-button.active .similar-artists-enrich-spinner { opacity: 1; animation: similar-artists-enrich-spin 1.2s linear infinite; }
-.similar-artists-enrich-button.active {
-    background: linear-gradient(135deg, rgba(168,85,247,0.20) 0%, rgba(124,58,237,0.26) 100%);
-    border-color: rgba(168,85,247,0.55);
-    box-shadow: 0 6px 24px rgba(168,85,247,0.35), 0 3px 12px rgba(0,0,0,0.2), inset 0 1px 0 var(--white-a15);
-}
-.similar-artists-enrich-button.active .similar-artists-enrich-logo { opacity: 1; }
-.similar-artists-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76,175,80,0.15) 0%, rgba(56,142,60,0.20) 100%);
-    border-color: rgba(76,175,80,0.35);
-    box-shadow: 0 4px 16px rgba(76,175,80,0.2), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 var(--white-a08);
-}
-.similar-artists-enrich-button.complete .similar-artists-enrich-spinner { opacity: 0; }
-.similar-artists-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255,193,7,0.12) 0%, rgba(255,152,0,0.18) 100%);
-    border-color: rgba(255,193,7,0.35);
-    box-shadow: 0 4px 16px rgba(255,193,7,0.2), 0 2px 8px rgba(0,0,0,0.15), inset 0 1px 0 var(--white-a08);
-}
-.similar-artists-enrich-button.paused .similar-artists-enrich-logo { opacity: 0.5; }
-.similar-artists-enrich-button.paused .similar-artists-enrich-spinner { opacity: 0; }
-.similar-artists-enrich-tooltip {
-    position: absolute; left: 50%; top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px); z-index: 5000;
-    opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); pointer-events: none;
-}
-.similar-artists-enrich-button:hover + .similar-artists-enrich-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
-.similar-artists-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30,30,30,0.98) 0%, rgba(20,20,20,0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6); -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid var(--white-a30); border-radius: var(--radius-xl); padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 6px 20px rgba(0,0,0,0.3), inset 0 1px 0 var(--white-a10);
-}
-.similar-artists-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif; font-size: 13px; font-weight: 600;
-    color: rgba(255,255,255,0.95); letter-spacing: -0.2px; margin-bottom: 12px;
-    padding-bottom: 10px; border-bottom: 1px solid var(--white-a08);
-}
-.similar-artists-enrich-tooltip-body { display: flex; flex-direction: column; gap: 8px; }
-#similar-artists-enrich-tooltip-status { color: #c084fc; font-weight: 600; }
-
-.deezer-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-/* Deezer Button */
-.deezer-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(162, 56, 255, 0.12) 0%,
-            rgba(120, 30, 200, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(162, 56, 255, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(162, 56, 255, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.deezer-button:hover {
-    background: linear-gradient(135deg,
-            rgba(162, 56, 255, 0.18) 0%,
-            rgba(120, 30, 200, 0.25) 100%);
-    border-color: rgba(162, 56, 255, 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(162, 56, 255, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.deezer-button:active {
-    transform: scale(0.95);
-    box-shadow:
-        0 2px 8px rgba(162, 56, 255, 0.15),
-        inset 0 1px 0 var(--white-a06);
-}
-
-/* Deezer Logo */
-.deezer-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.deezer-button:hover .deezer-logo {
-    opacity: 1;
-}
-
-/* Loading Spinner - Animated Ring */
-.deezer-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(162, 56, 255, 0.8);
-    border-right-color: rgba(162, 56, 255, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active State - Spinner visible and rotating */
-.deezer-button.active .deezer-spinner {
-    opacity: 1;
-    animation: deezer-spin 1.2s linear infinite;
-}
-
-.deezer-button.active {
-    background: linear-gradient(135deg,
-            rgba(162, 56, 255, 0.22) 0%,
-            rgba(120, 30, 200, 0.28) 100%);
-    border-color: rgba(162, 56, 255, 0.5);
-    box-shadow:
-        0 6px 24px rgba(162, 56, 255, 0.4),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.deezer-button.active .deezer-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(162, 56, 255, 0.6));
-}
-
-/* Complete/Idle State */
-.deezer-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.deezer-button.complete .deezer-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.deezer-button.complete .deezer-spinner {
-    opacity: 0;
-}
-
-/* Paused State */
-.deezer-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.deezer-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow:
-        0 6px 20px rgba(255, 193, 7, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-/* Spinner Rotation Animation */
-@keyframes deezer-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-/* ============================================================================
-   DEEZER HOVER TOOLTIP
-   ============================================================================ */
-
-.deezer-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.deezer-button:hover+.deezer-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.deezer-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(162, 56, 255, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(162, 56, 255, 0.25),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.deezer-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(162, 56, 255, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.deezer-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#deezer-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.deezer-button.paused+.deezer-tooltip #deezer-tooltip-status {
-    color: #ffc107;
-}
-
-/* Deezer Tooltip Arrow */
-.deezer-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(162, 56, 255, 0.3);
-}
-
-.deezer-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* JioSaavn enrichment bubble (teal #2bc5b4) */
-.jiosaavn-button-container { position: relative; display: inline-block; margin-right: 12px; }
-.jiosaavn-button {
-    position: relative; width: 44px; height: 44px;
-    background: linear-gradient(135deg, rgba(43, 197, 180, 0.12) 0%, rgba(30, 160, 145, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(43, 197, 180, 0.25); border-radius: var(--radius-circle); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(43, 197, 180, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-.jiosaavn-button:hover { border-color: rgba(43, 197, 180, 0.4); transform: scale(1.05); }
-.jiosaavn-logo { font-size: 20px; line-height: 1; opacity: 0.9; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)); }
-.jiosaavn-spinner {
-    position: absolute; width: 44px; height: 44px; border: 3px solid transparent;
-    border-top-color: rgba(43, 197, 180, 0.8); border-right-color: rgba(43, 197, 180, 0.5);
-    border-radius: var(--radius-circle); opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
-}
-.jiosaavn-button.active .jiosaavn-spinner { opacity: 1; animation: jiosaavn-spin 1.2s linear infinite; }
-.jiosaavn-button.active { border-color: rgba(43, 197, 180, 0.5); }
-.jiosaavn-button.complete { border-color: rgba(76, 175, 80, 0.35); }
-.jiosaavn-button.complete .jiosaavn-spinner { opacity: 0; }
-.jiosaavn-button.paused { border-color: rgba(255, 193, 7, 0.35); }
-@keyframes jiosaavn-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.jiosaavn-tooltip {
-    position: absolute; left: 50%; top: calc(100% + 12px); transform: translateX(-50%) translateY(-5px);
-    z-index: 5000; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;
-}
-.jiosaavn-button:hover + .jiosaavn-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
-.jiosaavn-tooltip-content {
-    min-width: 260px; background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    border: 1px solid rgba(43, 197, 180, 0.3); border-radius: var(--radius-xl); padding: 16px 18px;
-}
-.jiosaavn-tooltip-header { font-size: 13px; font-weight: 600; color: rgba(43, 197, 180, 0.95); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--white-a08); }
-.jiosaavn-tooltip-body { display: flex; flex-direction: column; gap: 8px; }
-#jiosaavn-tooltip-status { color: rgb(var(--accent-light-rgb)); font-weight: 600; }
-.jiosaavn-button.paused + .jiosaavn-tooltip #jiosaavn-tooltip-status { color: #ffc107; }
-
-/* ============================================================================
-   SPOTIFY ENRICHMENT STATUS BUTTON
-   ============================================================================ */
-
-.spotify-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.spotify-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(30, 215, 96, 0.12) 0%,
-            rgba(21, 150, 67, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(30, 215, 96, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(30, 215, 96, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.spotify-enrich-button:hover {
-    background: linear-gradient(135deg,
-            rgba(30, 215, 96, 0.18) 0%,
-            rgba(21, 150, 67, 0.25) 100%);
-    border-color: rgba(30, 215, 96, 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(30, 215, 96, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.spotify-enrich-button:active {
-    transform: scale(0.95);
-    box-shadow:
-        0 2px 8px rgba(30, 215, 96, 0.15),
-        inset 0 1px 0 var(--white-a06);
-}
-
-.spotify-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.spotify-enrich-button:hover .spotify-enrich-logo {
-    opacity: 1;
-}
-
-.spotify-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(30, 215, 96, 0.8);
-    border-right-color: rgba(30, 215, 96, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.spotify-enrich-button.active .spotify-enrich-spinner {
-    opacity: 1;
-    animation: spotify-enrich-spin 1.2s linear infinite;
-}
-
-.spotify-enrich-button.active {
-    background: linear-gradient(135deg,
-            rgba(30, 215, 96, 0.22) 0%,
-            rgba(21, 150, 67, 0.28) 100%);
-    border-color: rgba(30, 215, 96, 0.5);
-    box-shadow:
-        0 6px 24px rgba(30, 215, 96, 0.4),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.spotify-enrich-button.active .spotify-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(30, 215, 96, 0.6));
-}
-
-.spotify-enrich-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.spotify-enrich-button.complete .spotify-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.spotify-enrich-button.complete .spotify-enrich-spinner {
-    opacity: 0;
-}
-
-.spotify-enrich-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.spotify-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow:
-        0 6px 20px rgba(255, 193, 7, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-.spotify-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.spotify-enrich-button.no-auth .spotify-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
-}
-
-.spotify-enrich-button.no-auth .spotify-enrich-spinner {
-    display: none;
-}
-
-.spotify-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.spotify-enrich-button.no-auth+.spotify-enrich-tooltip #spotify-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-@keyframes spotify-enrich-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* ============================================================================
-   SPOTIFY ENRICHMENT HOVER TOOLTIP
-   ============================================================================ */
-
-.spotify-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.spotify-enrich-button:hover+.spotify-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.spotify-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(30, 215, 96, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(30, 215, 96, 0.25),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.spotify-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(30, 215, 96, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.spotify-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#spotify-enrich-tooltip-status {
-    color: rgb(30, 215, 96);
-    font-weight: 600;
-}
-
-.spotify-enrich-button.paused+.spotify-enrich-tooltip #spotify-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.spotify-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 215, 96, 0.3);
-}
-
-.spotify-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ============================================================================
-   ITUNES ENRICHMENT STATUS BUTTON
-   ============================================================================ */
-
-.itunes-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.itunes-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(251, 91, 137, 0.12) 0%,
-            rgba(164, 69, 178, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(251, 91, 137, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(251, 91, 137, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.itunes-enrich-button:hover {
-    background: linear-gradient(135deg,
-            rgba(251, 91, 137, 0.18) 0%,
-            rgba(164, 69, 178, 0.25) 100%);
-    border-color: rgba(251, 91, 137, 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(251, 91, 137, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.itunes-enrich-button:active {
-    transform: scale(0.95);
-    box-shadow:
-        0 2px 8px rgba(251, 91, 137, 0.15),
-        inset 0 1px 0 var(--white-a06);
-}
-
-.itunes-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.itunes-enrich-button:hover .itunes-enrich-logo {
-    opacity: 1;
-}
-
-.itunes-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(251, 91, 137, 0.8);
-    border-right-color: rgba(164, 69, 178, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.itunes-enrich-button.active .itunes-enrich-spinner {
-    opacity: 1;
-    animation: itunes-enrich-spin 1.2s linear infinite;
-}
-
-.itunes-enrich-button.active {
-    background: linear-gradient(135deg,
-            rgba(251, 91, 137, 0.22) 0%,
-            rgba(164, 69, 178, 0.28) 100%);
-    border-color: rgba(251, 91, 137, 0.5);
-    box-shadow:
-        0 6px 24px rgba(251, 91, 137, 0.4),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.itunes-enrich-button.active .itunes-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(251, 91, 137, 0.6));
-}
-
-.itunes-enrich-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.itunes-enrich-button.complete .itunes-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.itunes-enrich-button.complete .itunes-enrich-spinner {
-    opacity: 0;
-}
-
-.itunes-enrich-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.itunes-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow:
-        0 6px 20px rgba(255, 193, 7, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes itunes-enrich-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* ============================================================================
-   ITUNES ENRICHMENT HOVER TOOLTIP
-   ============================================================================ */
-
-.itunes-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.itunes-enrich-button:hover+.itunes-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.itunes-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(251, 91, 137, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(251, 91, 137, 0.25),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.itunes-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(251, 91, 137, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.itunes-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#itunes-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.itunes-enrich-button.paused+.itunes-enrich-tooltip #itunes-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.itunes-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(251, 91, 137, 0.3);
-}
-
-.itunes-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   LAST.FM ENRICHMENT STATUS BUTTON
-   ======================================== */
-
-.lastfm-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.lastfm-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(213, 16, 7, 0.12) 0%, rgba(180, 10, 5, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(213, 16, 7, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(213, 16, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.lastfm-enrich-button:hover {
-    background: linear-gradient(135deg, rgba(213, 16, 7, 0.18) 0%, rgba(180, 10, 5, 0.25) 100%);
-    border-color: rgba(213, 16, 7, 0.4);
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(213, 16, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a12);
-}
-
-.lastfm-enrich-button:active {
-    transform: scale(0.95);
-}
-
-.lastfm-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-    border-radius: var(--radius-circle);
-}
-
-.lastfm-enrich-button:hover .lastfm-enrich-logo {
-    opacity: 1;
-}
-
-.lastfm-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(213, 16, 7, 0.8);
-    border-right-color: rgba(213, 16, 7, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.lastfm-enrich-button.active .lastfm-enrich-spinner {
-    opacity: 1;
-    animation: lastfm-spin 1.2s linear infinite;
-}
-
-.lastfm-enrich-button.active {
-    background: linear-gradient(135deg, rgba(213, 16, 7, 0.22) 0%, rgba(180, 10, 5, 0.28) 100%);
-    border-color: rgba(213, 16, 7, 0.5);
-    box-shadow: 0 6px 24px rgba(213, 16, 7, 0.4), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a15);
-}
-
-.lastfm-enrich-button.active .lastfm-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(213, 16, 7, 0.6));
-}
-
-.lastfm-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.lastfm-enrich-button.complete .lastfm-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.lastfm-enrich-button.complete .lastfm-enrich-spinner {
-    opacity: 0;
-}
-
-.lastfm-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.lastfm-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes lastfm-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.lastfm-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.lastfm-enrich-button:hover+.lastfm-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.lastfm-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(213, 16, 7, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(213, 16, 7, 0.25), inset 0 1px 0 var(--white-a10);
-}
-
-.lastfm-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(213, 16, 7, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.lastfm-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#lastfm-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.lastfm-enrich-button.paused+.lastfm-enrich-tooltip #lastfm-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.lastfm-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.lastfm-enrich-button.no-auth .lastfm-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
-}
-
-.lastfm-enrich-button.no-auth .lastfm-enrich-spinner {
-    display: none;
-}
-
-.lastfm-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.lastfm-enrich-button.no-auth+.lastfm-enrich-tooltip #lastfm-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-.lastfm-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(213, 16, 7, 0.3);
-}
-
-.lastfm-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   GENIUS ENRICHMENT STATUS BUTTON
-   ======================================== */
-
-.genius-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.genius-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(255, 255, 100, 0.10) 0%, rgba(200, 200, 50, 0.16) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(255, 255, 100, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(255, 255, 100, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.genius-enrich-button:hover {
-    background: linear-gradient(135deg, rgba(255, 255, 100, 0.16) 0%, rgba(200, 200, 50, 0.22) 100%);
-    border-color: rgba(255, 255, 100, 0.4);
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(255, 255, 100, 0.25), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a12);
-}
-
-.genius-enrich-button:active {
-    transform: scale(0.95);
-}
-
-.genius-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-    border-radius: var(--radius-circle);
-}
-
-.genius-enrich-button:hover .genius-enrich-logo {
-    opacity: 1;
-}
-
-.genius-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(255, 255, 100, 0.8);
-    border-right-color: rgba(255, 255, 100, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.genius-enrich-button.active .genius-enrich-spinner {
-    opacity: 1;
-    animation: genius-spin 1.2s linear infinite;
-}
-
-.genius-enrich-button.active {
-    background: linear-gradient(135deg, rgba(255, 255, 100, 0.20) 0%, rgba(200, 200, 50, 0.26) 100%);
-    border-color: rgba(255, 255, 100, 0.5);
-    box-shadow: 0 6px 24px rgba(255, 255, 100, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a15);
-}
-
-.genius-enrich-button.active .genius-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(255, 255, 100, 0.6));
-}
-
-.genius-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.genius-enrich-button.complete .genius-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.genius-enrich-button.complete .genius-enrich-spinner {
-    opacity: 0;
-}
-
-.genius-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.genius-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes genius-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.genius-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.genius-enrich-button:hover+.genius-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.genius-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(255, 255, 100, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(255, 255, 100, 0.2), inset 0 1px 0 var(--white-a10);
-}
-
-.genius-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 100, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.genius-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#genius-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.genius-enrich-button.paused+.genius-enrich-tooltip #genius-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.genius-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.genius-enrich-button.no-auth .genius-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
-}
-
-.genius-enrich-button.no-auth .genius-enrich-spinner {
-    display: none;
-}
-
-.genius-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.genius-enrich-button.no-auth+.genius-enrich-tooltip #genius-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-.genius-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(255, 255, 100, 0.3);
-}
-
-.genius-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   BANDCAMP ENRICHMENT STATUS BUTTON
-   ======================================== */
-
-.bandcamp-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.bandcamp-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(29, 160, 195, 0.10) 0%, rgba(20, 130, 165, 0.16) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(29, 160, 195, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(29, 160, 195, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.bandcamp-enrich-button:hover {
-    background: linear-gradient(135deg, rgba(29, 160, 195, 0.16) 0%, rgba(20, 130, 165, 0.22) 100%);
-    border-color: rgba(29, 160, 195, 0.4);
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(29, 160, 195, 0.25), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a12);
-}
-
-.bandcamp-enrich-button:active {
-    transform: scale(0.95);
-}
-
-.bandcamp-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-    border-radius: var(--radius-circle);
-}
-
-.bandcamp-enrich-button:hover .bandcamp-enrich-logo {
-    opacity: 1;
-}
-
-.bandcamp-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(29, 160, 195, 0.8);
-    border-right-color: rgba(29, 160, 195, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.bandcamp-enrich-button.active .bandcamp-enrich-spinner {
-    opacity: 1;
-    animation: bandcamp-spin 1.2s linear infinite;
-}
-
-.bandcamp-enrich-button.active {
-    background: linear-gradient(135deg, rgba(29, 160, 195, 0.20) 0%, rgba(20, 130, 165, 0.26) 100%);
-    border-color: rgba(29, 160, 195, 0.5);
-    box-shadow: 0 6px 24px rgba(29, 160, 195, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a15);
-}
-
-.bandcamp-enrich-button.active .bandcamp-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(29, 160, 195, 0.6));
-}
-
-.bandcamp-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.bandcamp-enrich-button.complete .bandcamp-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.bandcamp-enrich-button.complete .bandcamp-enrich-spinner {
-    opacity: 0;
-}
-
-.bandcamp-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.bandcamp-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes bandcamp-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.bandcamp-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.bandcamp-enrich-button:hover+.bandcamp-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.bandcamp-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(29, 160, 195, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(29, 160, 195, 0.2), inset 0 1px 0 var(--white-a10);
-}
-
-.bandcamp-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(29, 160, 195, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.bandcamp-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#bandcamp-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.bandcamp-enrich-button.paused+.bandcamp-enrich-tooltip #bandcamp-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.bandcamp-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.bandcamp-enrich-button.no-auth .bandcamp-enrich-logo {
-    filter: grayscale(1) opacity(0.4);
-}
-
-.bandcamp-enrich-button.no-auth .bandcamp-enrich-spinner {
-    display: none;
-}
-
-.bandcamp-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.bandcamp-enrich-button.no-auth+.bandcamp-enrich-tooltip #bandcamp-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-.bandcamp-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(29, 160, 195, 0.3);
-}
-
-.bandcamp-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   TIDAL ENRICHMENT STATUS BUTTON
-   ======================================== */
-
-.tidal-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.tidal-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.15) 0%, rgba(30, 30, 30, 0.22) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid var(--white-a20);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.tidal-enrich-button:hover {
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.22) 0%, rgba(30, 30, 30, 0.30) 100%);
-    border-color: var(--white-a35);
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a12);
-}
-
-.tidal-enrich-button:active {
-    transform: scale(0.95);
-}
-
-.tidal-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1) brightness(1.8);
-    border-radius: var(--radius-circle);
-}
-
-.tidal-enrich-button:hover .tidal-enrich-logo {
-    opacity: 1;
-}
-
-.tidal-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: var(--white-a80);
-    border-right-color: var(--white-a50);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.tidal-enrich-button.active .tidal-enrich-spinner {
-    opacity: 1;
-    animation: tidal-spin 1.2s linear infinite;
-}
-
-.tidal-enrich-button.active {
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.28) 0%, rgba(30, 30, 30, 0.36) 100%);
-    border-color: var(--white-a45);
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4), 0 3px 12px rgba(0, 0, 0, 0.25), inset 0 1px 0 var(--white-a15);
-}
-
-.tidal-enrich-button.active .tidal-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px var(--white-a60)) invert(1) brightness(1.8);
-}
-
-.tidal-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.tidal-enrich-button.complete .tidal-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1) brightness(1.8);
-}
-
-.tidal-enrich-button.complete .tidal-enrich-spinner {
-    opacity: 0;
-}
-
-.tidal-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.tidal-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes tidal-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.tidal-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.tidal-enrich-button:hover+.tidal-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.tidal-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid var(--white-a30);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a10);
-}
-
-.tidal-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.tidal-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#tidal-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.tidal-enrich-button.paused+.tidal-enrich-tooltip #tidal-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.tidal-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.tidal-enrich-button.no-auth .tidal-enrich-logo {
-    filter: grayscale(1) opacity(0.4) invert(1) brightness(1.8);
-}
-
-.tidal-enrich-button.no-auth .tidal-enrich-spinner {
-    display: none;
-}
-
-.tidal-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.tidal-enrich-button.no-auth+.tidal-enrich-tooltip #tidal-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-.tidal-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid var(--white-a30);
-}
-
-.tidal-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   QOBUZ ENRICHMENT STATUS BUTTON
-   ======================================== */
-
-.qobuz-enrich-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.qobuz-enrich-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg, rgba(1, 112, 239, 0.10) 0%, rgba(1, 90, 200, 0.16) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(1, 112, 239, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(1, 112, 239, 0.15), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.qobuz-enrich-button:hover {
-    background: linear-gradient(135deg, rgba(1, 112, 239, 0.16) 0%, rgba(1, 90, 200, 0.22) 100%);
-    border-color: rgba(1, 112, 239, 0.4);
-    transform: scale(1.05);
-    box-shadow: 0 6px 20px rgba(1, 112, 239, 0.25), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a12);
-}
-
-.qobuz-enrich-button:active {
-    transform: scale(0.95);
-}
-
-.qobuz-enrich-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)) invert(1);
-    border-radius: var(--radius-circle);
-}
-
-.qobuz-enrich-button:hover .qobuz-enrich-logo {
-    opacity: 1;
-}
-
-.qobuz-enrich-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(1, 112, 239, 0.8);
-    border-right-color: rgba(1, 112, 239, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-.qobuz-enrich-button.active .qobuz-enrich-spinner {
-    opacity: 1;
-    animation: qobuz-spin 1.2s linear infinite;
-}
-
-.qobuz-enrich-button.active {
-    background: linear-gradient(135deg, rgba(1, 112, 239, 0.20) 0%, rgba(1, 90, 200, 0.26) 100%);
-    border-color: rgba(1, 112, 239, 0.5);
-    box-shadow: 0 6px 24px rgba(1, 112, 239, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 var(--white-a15);
-}
-
-.qobuz-enrich-button.active .qobuz-enrich-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(1, 112, 239, 0.6)) invert(1);
-}
-
-.qobuz-enrich-button.complete {
-    background: linear-gradient(135deg, rgba(76, 175, 80, 0.15) 0%, rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.qobuz-enrich-button.complete .qobuz-enrich-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5)) invert(1);
-}
-
-.qobuz-enrich-button.complete .qobuz-enrich-spinner {
-    opacity: 0;
-}
-
-.qobuz-enrich-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a08);
-}
-
-.qobuz-enrich-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-@keyframes qobuz-spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.qobuz-enrich-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.qobuz-enrich-button:hover+.qobuz-enrich-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.qobuz-enrich-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(1, 112, 239, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 6px 20px rgba(1, 112, 239, 0.2), inset 0 1px 0 var(--white-a10);
-}
-
-.qobuz-enrich-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(1, 112, 239, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.qobuz-enrich-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#qobuz-enrich-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.qobuz-enrich-button.paused+.qobuz-enrich-tooltip #qobuz-enrich-tooltip-status {
-    color: #ffc107;
-}
-
-.qobuz-enrich-button.no-auth {
-    background: linear-gradient(135deg,
-            rgba(120, 120, 120, 0.08) 0%,
-            rgba(80, 80, 80, 0.12) 100%);
-    border-color: rgba(120, 120, 120, 0.25);
-    box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.1),
-        inset 0 1px 0 var(--white-a04);
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.qobuz-enrich-button.no-auth .qobuz-enrich-logo {
-    filter: grayscale(1) opacity(0.4) invert(1);
-}
-
-.qobuz-enrich-button.no-auth .qobuz-enrich-spinner {
-    display: none;
-}
-
-.qobuz-enrich-button.no-auth:hover {
-    border-color: rgba(120, 120, 120, 0.35);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.2),
-        0 3px 12px rgba(0, 0, 0, 0.15);
-    opacity: 0.55;
-}
-
-.qobuz-enrich-button.no-auth+.qobuz-enrich-tooltip #qobuz-enrich-tooltip-status {
-    color: rgba(120, 120, 120, 0.8);
-}
-
-.qobuz-enrich-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(1, 112, 239, 0.3);
-}
-
-.qobuz-enrich-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ========================================
-   HYDRABASE P2P MIRROR WORKER BUTTON
-   ======================================== */
-
-.hydrabase-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-.hydrabase-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-circle);
-    border: 2px solid var(--white-a25);
-    background: linear-gradient(135deg, var(--white-a08) 0%, var(--white-a04) 100%);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s ease;
-    overflow: visible;
-    padding: 0;
-}
-
-.hydrabase-button:hover {
-    transform: scale(1.05);
-    background: linear-gradient(135deg, var(--white-a15) 0%, var(--white-a08) 100%);
-    border-color: var(--white-a40);
-    box-shadow: 0 0 15px var(--white-a15);
-}
-
-.hydrabase-button:active {
-    transform: scale(0.95);
-}
-
-.hydrabase-worker-logo {
-    width: 24px;
-    height: 24px;
-    opacity: 0.85;
-    filter: brightness(0) invert(1);
-    transition: opacity 0.3s ease;
-    z-index: 1;
-}
-
-.hydrabase-spinner {
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    width: 44px;
-    height: 44px;
-    border: 2px solid transparent;
-    border-top-color: var(--white-a60);
-    border-right-color: var(--white-a30);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active state — white spinning */
-.hydrabase-button.active .hydrabase-spinner {
-    opacity: 1;
-    animation: hydrabase-spin 1.2s linear infinite;
-}
-
-.hydrabase-button.active {
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, var(--white-a10) 100%);
-    border-color: var(--white-a50);
-    box-shadow: 0 0 20px var(--white-a15), inset 0 0 10px var(--white-a05);
-}
-
-.hydrabase-button.active .hydrabase-worker-logo {
-    opacity: 1;
-}
-
-/* Paused state — yellow/orange */
-.hydrabase-button.paused {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.18) 0%, rgba(255, 152, 0, 0.10) 100%);
-    border-color: rgba(255, 193, 7, 0.45);
-    box-shadow: 0 0 15px rgba(255, 193, 7, 0.1);
-}
-
-.hydrabase-button.paused .hydrabase-worker-logo {
-    opacity: 0.7;
-    filter: brightness(0) invert(1) sepia(1) saturate(5) hue-rotate(15deg);
-}
-
-.hydrabase-button.paused .hydrabase-spinner {
-    opacity: 0;
-}
-
-@keyframes hydrabase-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
-
-/* Tooltip */
-.hydrabase-tooltip {
-    position: absolute;
-    top: calc(100% + 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s ease, visibility 0.2s ease;
-    pointer-events: none;
-}
-
-.hydrabase-button-container:hover .hydrabase-tooltip {
-    opacity: 1;
-    visibility: visible;
-}
-
-.hydrabase-tooltip-content {
-    min-width: 180px;
-    background: rgba(30, 30, 30, 0.98);
-    border: 1px solid var(--white-a25);
-    border-radius: 10px;
-    padding: 12px 14px;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-}
-
-.hydrabase-tooltip-header {
-    font-weight: 600;
-    font-size: 12px;
-    color: var(--white-a90);
-    margin-bottom: 6px;
-    letter-spacing: 0.3px;
-}
-
-.hydrabase-tooltip-body {
-    font-size: 11px;
-    color: var(--white-a70);
-}
-
-.hydrabase-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid var(--white-a25);
-}
-
-.hydrabase-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ============================================================================
-   LIBRARY REPAIR WORKER STATUS BUTTON
-   ============================================================================ */
-
-/* Rainbow color animation */
+/* Rainbow colour cycle of the Repair and SoulID orbs while they run */
 @keyframes rainbow-glow {
     0%   { box-shadow: 0 4px 16px rgba(255, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15); border-color: rgba(255, 0, 0, 0.4); }
     17%  { box-shadow: 0 4px 16px rgba(255, 136, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.15); border-color: rgba(255, 136, 0, 0.4); }
@@ -46020,438 +43842,6 @@ div.artist-hero-badge {
     67%  { border-top-color: rgba(0, 136, 255, 0.8); border-right-color: rgba(136, 0, 255, 0.5); }
     83%  { border-top-color: rgba(136, 0, 255, 0.8); border-right-color: rgba(255, 0, 0, 0.5); }
     100% { border-top-color: rgba(255, 0, 0, 0.8); border-right-color: rgba(255, 136, 0, 0.5); }
-}
-
-@keyframes repair-spin {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-}
-
-/* Container */
-.repair-button-container {
-    position: relative;
-    display: inline-block;
-    margin-right: 12px;
-}
-
-/* Base Button */
-.repair-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(180, 130, 255, 0.12) 0%,
-            rgba(130, 80, 220, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(180, 130, 255, 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(180, 130, 255, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.repair-button:hover {
-    background: linear-gradient(135deg,
-            rgba(180, 130, 255, 0.18) 0%,
-            rgba(130, 80, 220, 0.25) 100%);
-    border-color: rgba(180, 130, 255, 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(180, 130, 255, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.repair-button:active {
-    transform: scale(0.95);
-    box-shadow:
-        0 2px 8px rgba(180, 130, 255, 0.15),
-        inset 0 1px 0 var(--white-a06);
-}
-
-/* Logo */
-.repair-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: cover;
-    border-radius: var(--radius-circle);
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.repair-button:hover .repair-logo {
-    opacity: 1;
-}
-
-/* Spinner Ring */
-.repair-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(180, 130, 255, 0.8);
-    border-right-color: rgba(180, 130, 255, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active State — Rainbow! */
-.repair-button.active .repair-spinner {
-    opacity: 1;
-    animation: repair-spin 1.2s linear infinite, rainbow-spinner 3s linear infinite;
-}
-
-.repair-button.active {
-    animation: rainbow-glow 3s linear infinite;
-    background: linear-gradient(135deg,
-            rgba(180, 130, 255, 0.22) 0%,
-            rgba(130, 80, 220, 0.28) 100%);
-}
-
-.repair-button.active .repair-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(180, 130, 255, 0.6));
-}
-
-/* Complete/Idle State */
-.repair-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.repair-button.complete .repair-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.repair-button.complete .repair-spinner {
-    opacity: 0;
-}
-
-/* Paused State */
-.repair-button.paused {
-    background: linear-gradient(135deg,
-            rgba(255, 193, 7, 0.12) 0%,
-            rgba(255, 152, 0, 0.18) 100%);
-    border-color: rgba(255, 193, 7, 0.35);
-    box-shadow:
-        0 4px 16px rgba(255, 193, 7, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.repair-button.paused:hover {
-    border-color: rgba(255, 193, 7, 0.5);
-    box-shadow:
-        0 6px 20px rgba(255, 193, 7, 0.3),
-        0 3px 12px rgba(0, 0, 0, 0.2);
-}
-
-/* ============================================================================
-   REPAIR WORKER HOVER TOOLTIP
-   ============================================================================ */
-
-.repair-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.repair-button:hover+.repair-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.repair-tooltip-content {
-    min-width: 280px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(180, 130, 255, 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(180, 130, 255, 0.25),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.repair-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(180, 130, 255, 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.repair-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#repair-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-.repair-button.paused+.repair-tooltip #repair-tooltip-status {
-    color: #ffc107;
-}
-
-/* Tooltip Arrow */
-.repair-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(180, 130, 255, 0.3);
-}
-
-.repair-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
-}
-
-/* ============================================================================
-   SOULID WORKER BUTTON + TOOLTIP
-   Uses SoulSync logo (whisoul.png) with rainbow spinner like repair worker
-   ============================================================================ */
-
-.soulid-button-container {
-    position: relative;
-    display: flex;
-    align-items: center;
-    margin-right: 12px;
-}
-
-.soulid-button {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.12) 0%,
-            rgba(100, 80, 220, 0.18) 100%);
-    backdrop-filter: blur(20px) saturate(1.4);
-    -webkit-backdrop-filter: blur(20px) saturate(1.4);
-    border: 1.5px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow:
-        0 4px 16px rgba(var(--accent-rgb), 0.15),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.soulid-button:hover {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.18) 0%,
-            rgba(100, 80, 220, 0.25) 100%);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 20px rgba(var(--accent-rgb), 0.25),
-        0 3px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 var(--white-a12);
-}
-
-.soulid-button:active {
-    transform: scale(0.95);
-}
-
-.soulid-logo {
-    width: 24px;
-    height: 24px;
-    object-fit: cover;
-    border-radius: var(--radius-circle);
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.soulid-button:hover .soulid-logo {
-    opacity: 1;
-}
-
-.soulid-spinner {
-    position: absolute;
-    width: 44px;
-    height: 44px;
-    border: 3px solid transparent;
-    border-top-color: rgba(var(--accent-rgb), 0.8);
-    border-right-color: rgba(100, 80, 220, 0.5);
-    border-radius: var(--radius-circle);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-    pointer-events: none;
-}
-
-/* Active State — Rainbow spinner */
-.soulid-button.active .soulid-spinner {
-    opacity: 1;
-    animation: repair-spin 1.2s linear infinite, rainbow-spinner 3s linear infinite;
-}
-
-.soulid-button.active {
-    animation: rainbow-glow 3s linear infinite;
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.22) 0%,
-            rgba(100, 80, 220, 0.28) 100%);
-}
-
-.soulid-button.active .soulid-logo {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.6));
-}
-
-/* Complete/Idle State */
-.soulid-button.complete {
-    background: linear-gradient(135deg,
-            rgba(76, 175, 80, 0.15) 0%,
-            rgba(56, 142, 60, 0.20) 100%);
-    border-color: rgba(76, 175, 80, 0.35);
-    box-shadow:
-        0 4px 16px rgba(76, 175, 80, 0.2),
-        0 2px 8px rgba(0, 0, 0, 0.15),
-        inset 0 1px 0 var(--white-a08);
-}
-
-.soulid-button.complete .soulid-logo {
-    opacity: 0.85;
-    filter: drop-shadow(0 0 6px rgba(76, 175, 80, 0.5));
-}
-
-.soulid-button.complete .soulid-spinner {
-    opacity: 0;
-}
-
-/* Tooltip */
-.soulid-tooltip {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 12px);
-    transform: translateX(-50%) translateY(-5px);
-    z-index: 5000;
-    opacity: 0;
-    visibility: hidden;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-}
-
-.soulid-button:hover+.soulid-tooltip {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.soulid-tooltip-content {
-    min-width: 260px;
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(20, 20, 20, 0.99) 100%);
-    backdrop-filter: blur(40px) saturate(1.6);
-    -webkit-backdrop-filter: blur(40px) saturate(1.6);
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-radius: var(--radius-xl);
-    padding: 16px 18px;
-    box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(var(--accent-rgb), 0.15),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.soulid-tooltip-header {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(var(--accent-rgb), 0.95);
-    letter-spacing: -0.2px;
-    margin-bottom: 12px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.soulid-tooltip-body {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-#soulid-tooltip-status {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-}
-
-/* Tooltip Arrow */
-.soulid-tooltip-content::before {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -8px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(var(--accent-rgb), 0.3);
-}
-
-.soulid-tooltip-content::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: -7px;
-    transform: translateX(-50%);
-    width: 0;
-    height: 0;
-    border-left: 6px solid transparent;
-    border-right: 6px solid transparent;
-    border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
 
 /* MusicBrainz Integration */
