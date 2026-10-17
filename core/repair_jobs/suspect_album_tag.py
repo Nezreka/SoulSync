@@ -378,6 +378,7 @@ class SuspectAlbumTagDetector(RepairJob):
             cur.execute(f"""
                 SELECT
                     al.id          AS album_id,
+                    al.artist_id   AS artist_id,
                     al.title       AS album_title,
                     al.record_type AS album_type,
                     al.track_count AS full_track_count,
@@ -528,6 +529,9 @@ class SuspectAlbumTagDetector(RepairJob):
             )
             details = {
                 'album_id': album_id,
+                # the fix is per track, so the finding opens the album in
+                # the library. that needs the artist page it lives on
+                'artist_id': row.get('artist_id'),
                 'album_title': album_title,
                 'album_artist_name': album_artist,
                 'local_track_count': local_count,

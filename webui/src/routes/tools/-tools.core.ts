@@ -265,7 +265,10 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   suspect_album_tag: 'Re-identify',
 };
 
-export function findingFixLabel(findingType: string): string | null {
+export function findingFixLabel(findingType: string, entityType?: string | null): string | null {
+  // a poisoned album is fixed one track at a time, so its finding opens the
+  // album instead of the single-track re-identify (#1567)
+  if (findingType === 'suspect_album_tag' && entityType === 'album') return 'Open album';
   return FINDING_FIXABLE_TYPES[findingType] ?? null;
 }
 

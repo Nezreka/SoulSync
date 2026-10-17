@@ -942,7 +942,8 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       if (d.full_track_count) {
         rows.push(['Full Release Tracks', text(d.full_track_count)]);
       }
-      pushIf(rows, d.reidentify_query, 'Search Query');
+      // an album finding has no single search, its fix is per track
+      if (finding.entity_type !== 'album') pushIf(rows, d.reidentify_query, 'Search Query');
       if (finding.file_path) {
         rows.push(['File', finding.file_path, 'path']);
       }

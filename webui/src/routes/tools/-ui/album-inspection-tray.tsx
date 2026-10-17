@@ -348,7 +348,7 @@ export function AlbumInspectionTray({
           <div className="album-tray-tracks-list">
             {findings.map((f, idx) => {
               const details = (f.details as Record<string, any>) || {};
-              const fixLabel = findingFixLabel(f.finding_type);
+              const fixLabel = findingFixLabel(f.finding_type, f.entity_type);
               const busy = busyIds.has(f.id);
               // the re-download search needs the track behind the finding; a
               // finding without one (fake lossless reports a file) keeps its fix
