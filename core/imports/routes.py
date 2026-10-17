@@ -1708,6 +1708,7 @@ def _emit_import_completed(
                 "batch_complete",
                 {
                     "playlist_name": playlist_name,
+                    "artist": artist,
                     "total_tracks": str(total_tracks),
                     "completed_tracks": str(track_count),
                     "failed_tracks": str(failed_tracks),
