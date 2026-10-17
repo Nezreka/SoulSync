@@ -280,7 +280,7 @@ def approve_verification_item(history_id):
 @admin_only
 def delete_verification_item(history_id):
     """User decided the file is wrong: delete it from disk and drop the
-    history row (the media-server mirror cleans the tracks row on next scan).
+    history row and its tracks row.
     Admin-only: it removes a file from disk + the library."""
     try:
         db = get_database()
@@ -293,6 +293,10 @@ def delete_verification_item(history_id):
             os.remove(on_disk)
             file_deleted = True
             logger.info(f"[Verification] Deleted rejected file: {on_disk}")
+            # drop its library row too. waiting for the mirror left it there
+            # (only a deep scan clears it), so playlist sync kept matching a
+            # file that was gone and it never went back on the wishlist (#1754)
+            db.delete_track_by_file_path(on_disk)
         db.delete_library_history_rows([history_id])
         return jsonify({"success": True, "file_deleted": file_deleted})
     except Exception as e:
