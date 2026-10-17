@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -34,11 +34,8 @@ const PORT_FILES = [
 const EXPECTED_EDGES = [
   'applyProgressiveTrackRendering <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'autoSavePlaylistM3U <- downloads.js [sync-spotify.js]',
-  'cleanupBeatportChartsSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportDJSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportHypePicksSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportRebuildSlider <- core.js [beatport-ui.js]',
-  'cleanupBeatportReleasesSlider <- core.js [beatport-ui.js]',
+  // the five cleanupBeatport*Slider <- core.js edges are gone: beatport-ui.js
+  // was deleted and core.js's page-leave teardown stopped calling them.
   'cleanupDownloadProcess <- downloads.js [sync-spotify.js]',
   'cleanupWishlist <- downloads.js [sync-services.js]',
   'clearWishlist <- downloads.js [sync-services.js]',
@@ -155,7 +152,10 @@ describe('calls that cross out of the files the sync port deletes', () => {
     // becomes deletable-by-association.
     const dir = resolve(process.cwd(), 'static');
     const settings = readFileSync(resolve(dir, 'settings.js'), 'utf8');
-    const beatport = readFileSync(resolve(dir, 'beatport-ui.js'), 'utf8');
+    // beatport-ui.js is deleted now; if it ever comes back it still must not
+    // take the pickers with it.
+    const beatportPath = resolve(dir, 'beatport-ui.js');
+    const beatport = existsSync(beatportPath) ? readFileSync(beatportPath, 'utf8') : '';
     for (const name of [
       'loadPlexMusicLibraries',
       'selectPlexLibrary',
@@ -213,8 +213,10 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ).toEqual([]);
   });
 
-  it('covers the Beatport slider teardown core.js drives on page-leave', () => {
-    const actual = computeEdges();
+  it('core.js page-leave no longer calls the deleted Beatport sliders', () => {
+    // beatport-ui.js defined them and is gone. a call left in core.js would
+    // throw ReferenceError the first time the beatport content tears down.
+    const core = stripComments(readFileSync(resolve(process.cwd(), 'static', 'core.js'), 'utf8'));
     for (const name of [
       'cleanupBeatportRebuildSlider',
       'cleanupBeatportReleasesSlider',
@@ -222,7 +224,7 @@ describe('calls that cross out of the files the sync port deletes', () => {
       'cleanupBeatportChartsSlider',
       'cleanupBeatportDJSlider',
     ]) {
-      expect(actual).toContain(`${name} <- core.js [beatport-ui.js]`);
+      expect(core).not.toMatch(new RegExp(`\\b${name}\\s*\\(`));
     }
   });
 });

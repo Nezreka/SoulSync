@@ -647,7 +647,9 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),
     ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding",
                    "quarantine", "request", "search_and", "upgrade")),
-    ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue")),
+    ("Library", ("scan", "database", "library", "enrich", "airing", "retag", "youtube", "issue",
+                 # filling out albums you already own (#1711)
+                 "incomplete_albums")),
 ]
 
 

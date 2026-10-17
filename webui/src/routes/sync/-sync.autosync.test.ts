@@ -20,6 +20,8 @@ import { describe, expect, it } from 'vitest';
 import { extractFunction } from '../../test/vanilla-extract';
 import {
   AUTO_SYNC_TABS,
+  beatportMirrorIsSnapshot,
+  beatportMirrorRefreshes,
   autoSyncBuildLanes,
   autoSyncNormalizeTab,
   autoSyncParseCustomInterval,
@@ -1695,5 +1697,33 @@ describe('autoSyncEnabledFlag (#1289)', () => {
     expect(autoSyncEnabledFlag({ enabled: 1 } as never)).toBe(true);
     expect(autoSyncEnabledFlag({ enabled: false } as never)).toBe(false);
     expect(autoSyncEnabledFlag({ enabled: 0 } as never)).toBe(false);
+  });
+});
+
+describe('beatport mirror kinds', () => {
+  const row = (id: string) => ({ source: 'beatport', source_playlist_id: id });
+
+  it('a live list ref refreshes; a hash, a release or nothing does not', () => {
+    for (const id of ['top-100', 'hype-10', 'genre:techno:6:top-100', 'chart:my-chart:123']) {
+      expect(beatportMirrorRefreshes(row(id)), id).toBe(true);
+    }
+    for (const id of ['a1b2c3', 'release:some-ep:42', 'top-100@2026-10-16', '']) {
+      expect(beatportMirrorRefreshes(row(id)), id).toBe(false);
+    }
+    expect(beatportMirrorRefreshes(null)).toBe(false);
+  });
+
+  it('a snapshot is a live list or release ref with a date after the @', () => {
+    for (const id of [
+      'top-100@2026-10-16',
+      'genre:techno:6:hype-10@2026-01-02',
+      'release:some-ep:42@2026-10-16',
+    ]) {
+      expect(beatportMirrorIsSnapshot(row(id)), id).toBe(true);
+    }
+    for (const id of ['top-100', 'top-100@yesterday', 'a1b2c3@2026-10-16', 'top-100@2026-10-16x']) {
+      expect(beatportMirrorIsSnapshot(row(id)), id).toBe(false);
+    }
+    expect(beatportMirrorIsSnapshot(undefined)).toBe(false);
   });
 });

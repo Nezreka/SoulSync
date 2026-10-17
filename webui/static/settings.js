@@ -6489,7 +6489,7 @@ async function saveSettings(quiet = false) {
         // stored setting alone rather than save over it
         beatport: document.getElementById('embed-beatport') ? {
             embed_tags: document.getElementById('embed-beatport').checked,
-            search_all_tracks: document.getElementById('beatport-search-all')?.checked === true,
+            search_all_tracks: _cfgBool('beatport-search-all'),
             tags: _collectServiceTags('beatport')
         } : undefined,
         deezer_download: {

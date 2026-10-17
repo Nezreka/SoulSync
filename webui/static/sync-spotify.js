@@ -39,18 +39,7 @@ async function ensureBeatportContentLoaded() {
             throwIfBeatportLoadAborted();
             await loadBeatportChartsFromBackend();
             throwIfBeatportLoadAborted();
-
-            initializeBeatportRebuildSlider();
-            initializeBeatportReleasesSlider();
-            initializeBeatportHypePicksSlider();
-            initializeBeatportChartsSlider();
-            initializeBeatportDJSlider();
-            throwIfBeatportLoadAborted();
-            await Promise.all([
-                loadBeatportTop10Lists(),
-                loadBeatportTop10Releases()
-            ]);
-            throwIfBeatportLoadAborted();
+            // the sliders and top 10 lists went with beatport-ui.js
             showBeatportDownloadsSection();
 
             beatportContentState.loaded = true;

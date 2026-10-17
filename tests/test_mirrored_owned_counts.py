@@ -114,7 +114,8 @@ def test_owned_counts_stay_bounded_after_analyze(tmp_path, monkeypatch, batched)
     )
     expected = {"total": 103, "discovered": 0, "wishlisted": 0, "in_library": 2}
     if batched:
-        expected["library_checked"] = 0
+        # the playlist card's "N need a match" (#1721)
+        expected.update(library_checked=0, needs_match=0)
     assert counts == expected
 
 

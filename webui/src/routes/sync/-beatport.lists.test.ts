@@ -12,8 +12,10 @@ import type { BeatportListEnv } from './-beatport.lists';
 import {
   beatportListUrl,
   beatportRefs,
+  fetchBeatportList,
   openBeatportList,
   resetBeatportListLatch,
+  saveBeatportSnapshot,
 } from './-beatport.lists';
 import { SYNC_SOURCES } from './-sync.sources';
 import { freshSourceState } from './-sync.state';
@@ -235,5 +237,65 @@ describe("the beatport modal's start body", () => {
     expect(
       defaultDiscoveryStartBody(SYNC_SOURCES.tidal, freshSourceState(SYNC_SOURCES.tidal, 't')),
     ).toBeUndefined();
+  });
+});
+
+describe('fetchBeatportList', () => {
+  it('returns the list when it has a ref and tracks', async () => {
+    const urls = stubFetch(CHART);
+    const data = await fetchBeatportList({ ref: CHART.ref, label: 'Hype' });
+    expect(data.ref).toBe(CHART.ref);
+    expect(urls[0]).toBe(beatportListUrl({ ref: CHART.ref, label: 'Hype' }));
+  });
+
+  it('throws the server error, or the status when there is none', async () => {
+    stubFetch({ success: false, error: 'chart not found' }, 404);
+    await expect(fetchBeatportList({ ref: 'x', label: 'X' })).rejects.toThrow('chart not found');
+    stubFetch({ success: false }, 502);
+    await expect(fetchBeatportList({ ref: 'x', label: 'X' })).rejects.toThrow('(502)');
+  });
+
+  it('an empty list is an error that names it', async () => {
+    stubFetch({ ...CHART, tracks: [] });
+    await expect(fetchBeatportList({ ref: CHART.ref, label: 'Hype' })).rejects.toThrow(
+      `No tracks found in ${CHART.name}`,
+    );
+  });
+
+  it('a body that is not json reports the status', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>', { status: 500 })),
+    );
+    await expect(fetchBeatportList({ ref: 'x', label: 'X' })).rejects.toThrow('(500)');
+  });
+});
+
+describe('saveBeatportSnapshot', () => {
+  it('posts the ref and hands back the result', async () => {
+    const calls: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, body: typeof init?.body === 'string' ? init.body : '' });
+        return new Response(JSON.stringify({ success: true, id: 'top-10@2026-10-16' }));
+      }),
+    );
+    const out = await saveBeatportSnapshot('top-10');
+    expect(calls).toEqual([
+      { url: '/api/beatport/snapshot', body: JSON.stringify({ ref: 'top-10' }) },
+    ]);
+    expect(out.success).toBe(true);
+  });
+
+  it('a body that is not json comes back as a failure, not a throw', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('oops', { status: 503 })),
+    );
+    expect(await saveBeatportSnapshot('top-10')).toEqual({
+      success: false,
+      error: 'Snapshot failed (503)',
+    });
   });
 });
