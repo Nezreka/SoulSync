@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { checkWatchlistRequest, toggleWatchlistRequest } from './-artist-detail.watchlist-button';
+import {
+  addToWatchlistRequest,
+  checkWatchlistRequest,
+  toggleWatchlistRequest,
+} from './-artist-detail.watchlist-button';
 
 /**
  * The hero watchlist button's requests. The toggle re-checks the SERVER state
@@ -56,6 +60,18 @@ describe('toggleWatchlistRequest', () => {
     expect(bump).toHaveBeenCalled();
   });
 
+  it('sends the source with the add when the artist page knows it', async () => {
+    // A bare numeric id is filed under the PRIMARY source server-side, so an
+    // iTunes id from an iTunes artist page would land in the Deezer column.
+    const calls = stubEndpoints(false, { success: true, message: 'Added' });
+    await toggleWatchlistRequest('262836961', 'Adele', 'itunes');
+    expect(calls[1].body).toEqual({
+      artist_id: '262836961',
+      artist_name: 'Adele',
+      source: 'itunes',
+    });
+  });
+
   it('watching → removes with the id only', async () => {
     const calls = stubEndpoints(true, { success: true, message: 'Removed' });
     const result = await toggleWatchlistRequest('sp9', 'Aphex Twin');
@@ -72,5 +88,23 @@ describe('toggleWatchlistRequest', () => {
     vi.stubGlobal('fetch', spy);
     await expect(toggleWatchlistRequest('sp9', 'Aphex Twin')).rejects.toThrow('db locked');
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('addToWatchlistRequest', () => {
+  it('posts the source only when one is given', async () => {
+    const calls = stubEndpoints(false, { success: true, message: 'Added' });
+    expect(await addToWatchlistRequest('1', 'A', 'deezer')).toBe('Added');
+    expect(await addToWatchlistRequest('sp1', 'B')).toBe('Added');
+    expect(calls[0]).toEqual({
+      url: '/api/watchlist/add',
+      body: { artist_id: '1', artist_name: 'A', source: 'deezer' },
+    });
+    expect(calls[1].body).toEqual({ artist_id: 'sp1', artist_name: 'B' });
+  });
+
+  it('throws the server error', async () => {
+    stubEndpoints(false, { success: false, error: 'Unknown source' });
+    await expect(addToWatchlistRequest('1', 'A', 'nope')).rejects.toThrow('Unknown source');
   });
 });

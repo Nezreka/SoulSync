@@ -411,6 +411,27 @@ describe('watchArtistWithSettings', () => {
     expect(configBody.auto_download_pref).toBeNull();
   });
 
+  it('passes the source on to the add', async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/api/watchlist/check'))
+          return json({ success: true, is_watching: false });
+        if (url.endsWith('/api/watchlist/add')) bodies.push(JSON.parse(String(init?.body)));
+        return json({ success: true });
+      }),
+    );
+    await watchArtistWithSettings(
+      '262836961',
+      'Adele',
+      { ...WATCHLIST_ADD_DEFAULTS_FOR_TEST },
+      'itunes',
+    );
+    expect(bodies).toEqual([{ artist_id: '262836961', artist_name: 'Adele', source: 'itunes' }]);
+  });
+
   it('skips the add when already watching, still applies settings', async () => {
     const calls: string[] = [];
     vi.stubGlobal(
