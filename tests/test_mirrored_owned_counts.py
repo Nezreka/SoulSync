@@ -11,6 +11,10 @@ exact-name join still holds.
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from database.music_database import MusicDatabase
 
 
@@ -60,12 +64,80 @@ def _build_db(tmp_path):
     return db
 
 
-def test_batched_owned_count_is_id_first(tmp_path):
+@pytest.mark.parametrize("provider_id_column", [
+    "spotify_track_id", "deezer_id", "tidal_id", "qobuz_id", "itunes_track_id",
+])
+def test_batched_owned_count_is_id_first(tmp_path, provider_id_column):
     db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_tracks SET spotify_id = NULL,external_ids='{}' WHERE id=1")
+        if provider_id_column == 'spotify_track_id':
+            conn.execute("UPDATE lib2_tracks SET spotify_id='sp-humble' WHERE id=1")
+        else:
+            provider = provider_id_column.removesuffix('_track_id').removesuffix('_id')
+            conn.execute("UPDATE lib2_tracks SET external_ids=json_set(external_ids,?,?) WHERE id=1",
+                         (f'$.{provider}', 'sp-humble'))
+        conn.commit()
     counts = db.get_all_mirrored_playlist_status_counts(profile_id=1)
     assert counts[10]['total'] == 3
     # HUMBLE. via spotify id + DNA. via exact name; the ghost stays unowned.
     assert counts[10]['in_library'] == 2
+    assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2
+
+
+@pytest.mark.parametrize("batched", [True, False], ids=["batched", "single"])
+def test_owned_counts_stay_bounded_after_analyze(tmp_path, monkeypatch, batched):
+    """Sparse provider IDs must not cause a library scan per unchecked track.
+
+    Budget SQLite VM work rather than wall time, so slow CI machines do not
+    fail this regression. The old multi-column OR exceeds this budget after
+    ANALYZE makes the mostly-NULL provider indexes look unselective.
+    """
+    db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO lib2_tracks (id, album_id, title, spotify_id) "
+            "VALUES (?, 1, ?, ?)",
+            ((i + 100, f"Library track {i}", f"library-{i}") for i in range(10_000)),
+        )
+        conn.executemany(
+            "INSERT INTO mirrored_playlist_tracks "
+            "(playlist_id, position, track_name, artist_name, source_track_id) "
+            "VALUES (10, ?, ?, 'Missing artist', ?)",
+            ((i + 3, f"Missing track {i}", f"missing-{i}") for i in range(100)),
+        )
+        # Reproduce persisted full-ANALYZE stats from an upgraded installation.
+        # The production helper may sample, which hides the old query's bad plan.
+        conn.execute("PRAGMA analysis_limit=0")
+        conn.execute("ANALYZE")
+        conn.commit()
+
+    connect = db._get_connection
+    steps = 0
+
+    def limit_work():
+        nonlocal steps
+        steps += 1_000
+        return steps >= 200_000
+
+    def budgeted_connection():
+        conn = connect()
+        conn.set_progress_handler(limit_work, 1_000)
+        return conn
+
+    monkeypatch.setattr(db, "_get_connection", budgeted_connection)
+    counts = (
+        db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]
+        if batched else db.get_mirrored_playlist_status_counts(10)
+    )
+    assert steps < 200_000, (
+        f"Status counts exhausted the SQLite work budget (SQLite {sqlite3.sqlite_version})"
+    )
+    expected = {"total": 103, "discovered": 0, "wishlisted": 0, "in_library": 2}
+    if batched:
+        # the playlist card's "N need a match" (#1721)
+        expected.update(library_checked=0, needs_match=0)
+    assert counts == expected
 
 
 def test_per_playlist_owned_count_matches_batched(tmp_path):
@@ -141,13 +213,27 @@ def test_compilation_track_artist_match_counts_in_library(tmp_path):
 
 
 def test_provider_id_match_rides_an_index_not_a_catalogue_scan(tmp_path):
-    """each provider arm has an expression index, so the OR stays a lookup"""
-    from database.music_database import _MIRRORED_ID_MATCH
+    """Each independent provider probe uses its existing expression index."""
+    from database.music_database import _MIRRORED_PROVIDER_PROBES
 
     db = _build_deezer_db(tmp_path)
     with db._get_connection() as conn:
         plan = " ".join(str(r[-1]) for r in conn.execute(
             "EXPLAIN QUERY PLAN SELECT 1 FROM mirrored_playlist_tracks mpt"
-            " WHERE EXISTS (SELECT 1 FROM lib2_tracks t WHERE " + _MIRRORED_ID_MATCH + ")"))
+            " WHERE (" + _MIRRORED_PROVIDER_PROBES.format(owner="") + ")"))
     assert "idx_lib2_tracks_ext_deezer" in plan
     assert "SCAN t" not in plan
+
+
+@pytest.mark.parametrize('scope,expected', [('shared', 0), (7, 2), (8, 0)])
+def test_provider_probes_keep_native_file_ownership(tmp_path, monkeypatch, scope, expected):
+    from core import library_scope
+
+    db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE lib2_track_files SET owner_profile_id=7')
+        conn.commit()
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
+    with library_scope.library_scope(scope):
+        assert db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]['in_library'] == expected
+        assert db.get_mirrored_playlist_status_counts(10)['in_library'] == expected

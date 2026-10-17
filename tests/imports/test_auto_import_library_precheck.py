@@ -227,3 +227,45 @@ def test_finished_folder_stays_by_default(tmp_path, library):
     worker, _ = _worker(tmp_path, library)
     worker._clear_finished_folder(_Candidate(path=str(album), name="x", audio_files=[str(owned)]))
     assert owned.exists() and (album / "cover.jpg").exists()
+
+
+def _keeps_library_copy(_key, ctx, path):
+    # what the real pipeline leaves when the track is already at its library
+    # path and the staged file is not an improvement: no success flag, a
+    # failure message, and the kept flag. the staged file stays put.
+    ctx["_context_failure_msg"] = "Incoming file is not a verified improvement under the quality profile"
+    ctx["_kept_existing_library_file"] = True
+
+
+def test_a_library_copy_the_pipeline_kept_counts_as_owned_not_failed(tmp_path, library):
+    """SeadogsBooty: 13 releases they already had all landed in failed /
+    needs attention. the gate couldn't prove identity (fuzzy pair), the
+    pipeline kept the library copy, and the worker called that a failure."""
+    album, owned, _new = _staging(tmp_path)
+    worker, _ = _worker(tmp_path, library)
+    worker._process_callback = _keeps_library_copy
+    result = _result(_match(owned, "Hell Above", 2, "mbid-owned", match_type=None))
+
+    status, errors = worker._process_matches(
+        _Candidate(path=str(album), name="x", audio_files=[str(owned)]), IDENT, result)
+
+    assert (status, errors) == ("completed", [])
+    assert result["matches"][0]["import_status"] == "skipped_owned"
+    assert result["summary"] == {"imported": 0, "upgraded": 0, "skipped_owned": 1, "failed": 0}
+    assert owned.read_bytes() == b"staged owned"
+
+
+def test_a_real_pipeline_failure_says_why(tmp_path, library):
+    album, owned, _new = _staging(tmp_path)
+    worker, _ = _worker(tmp_path, library)
+
+    def _fails(_key, ctx, _path):
+        ctx["_context_failure_msg"] = "Missing artist context"
+
+    worker._process_callback = _fails
+    result = _result(_match(owned, "Hell Above", 2, "mbid-owned", match_type=None))
+    status, errors = worker._process_matches(
+        _Candidate(path=str(album), name="x", audio_files=[str(owned)]), IDENT, result)
+
+    assert status == "failed"
+    assert "Missing artist context" in errors[0], "not the generic 'did not confirm'"

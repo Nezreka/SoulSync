@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
 from core.imports.paths import config_root_path, docker_resolve_path
-from core.imports.pipeline import import_rejection_reason
+from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
 from utils.logging_config import get_logger
 
 logger = get_logger("auto_import")
@@ -594,26 +594,30 @@ class AutoImportWorker:
             return
 
         candidates = self._enumerate_folders(staging)
+        # folders that already have a finished row (failed and needs-attention
+        # included) are only listed, never re-run. count them apart so the log
+        # doesn't read like the same folders are imported every minute.
+        settled, fresh = [], []
+        for c in candidates:
+            (settled if self._is_already_processed(c) else fresh).append(c)
+        summary = f"{len(candidates)} candidates in {staging}"
+        if settled:
+            summary += (f" ({len(settled)} already handled, left alone until you"
+                        f" retry or fix them in the import inbox)")
         if self._scan_problems:
             unreadable = '; '.join(f"{p['path']}: {p['error']}" for p in self._scan_problems[:3])
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging} "
-                        f"(could not read: {unreadable})")
-        else:
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
-        if not candidates:
+            summary += f" (could not read: {unreadable})"
+        logger.info(f"[Auto-Import] Scan cycle: {summary}")
+        if not fresh:
             return
 
         if self._executor is None:
             logger.warning("[Auto-Import] Executor not initialized — skipping scan")
             return
 
-        for candidate in candidates:
+        for candidate in fresh:
             if self.should_stop or self.paused:
                 break
-
-            # Skip if already processed (DB-level dedup)
-            if self._is_already_processed(candidate):
-                continue
 
             # Skip if already submitted to / running in the pool. This
             # de-dupes across the timer loop + manual scan triggers
@@ -2363,8 +2367,19 @@ class AutoImportWorker:
                 final_path = context.get('_final_processed_path') or context.get('_final_path')
                 if rejection:
                     raise RuntimeError(rejection)
+                # the library check couldn't prove it was the same track, but
+                # the pipeline found it already at its library path and kept
+                # that copy. that's "already in library", not a failure: it
+                # used to fail every track of an album you already own.
+                if kept_existing_library_file(context):
+                    match['import_status'] = 'skipped_owned'
+                    match['import_reason'] = 'already in library at the same spot, kept the library copy'
+                    skipped += 1
+                    logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
+                    continue
                 if not context.get('_pipeline_import_succeeded'):
-                    raise RuntimeError('post-processing did not confirm a successful import')
+                    raise RuntimeError(context.get('_context_failure_msg')
+                                       or 'post-processing did not confirm a successful import')
                 if not final_path or not os.path.isfile(final_path):
                     raise RuntimeError('post-processing produced no final file')
 

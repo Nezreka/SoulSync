@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Optional
 from core.imports.album import build_album_import_context, build_album_import_match_payload, resolve_album_artist_context
 from core.imports.context import get_import_context_artist, get_import_track_info, normalize_import_context
 from core.imports.filename import parse_filename_metadata
-from core.imports.pipeline import import_rejection_reason
+from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
 from core.imports.staging import (
     AUDIO_EXTENSIONS,
     available_import_sources as _available_import_sources,
@@ -1368,6 +1368,12 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                     errors.append(f"{track_name}: {reject_reason}")
                     runtime.logger.warning("Import rejected: %s — %s", track_name, reject_reason)
                     _record_disposition(track_name, file_name, "error", reject_reason)
+                elif kept_existing_library_file(context):
+                    # already at its library path and the pipeline kept that
+                    # copy: nothing was imported, so don't call it imported.
+                    _record_disposition(track_name, file_name, "skipped_owned",
+                                        "already in library at the same spot, kept the library copy")
+                    finished_paths.append(file_path)
                 else:
                     processed += 1
                     # The gate's decision stands: an "upgrade" routing that

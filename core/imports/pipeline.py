@@ -731,9 +731,19 @@ def import_rejection_reason(context: dict) -> str | None:
         return "rejected by audio guard (incomplete or silent audio)"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
+    if context.get('_kept_existing_library_file'):
+        return None
     if context.get('_context_failure_msg'):
         return str(context['_context_failure_msg'])
     return None
+
+
+def kept_existing_library_file(context: dict) -> bool:
+    """the pipeline found this track already at its library path and left
+    that copy alone (not an improvement, or already tagged). nothing was
+    imported, but nothing went wrong either: for an import that means
+    "already in library", not a failure and not a fresh import."""
+    return bool(context.get('_kept_existing_library_file'))
 
 
 def build_import_pipeline_runtime(
@@ -2313,7 +2323,6 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
         _upgrade_old_local = (
             _upgrade_decision.existing_resolved_path if _verified_upgrade else None)
         _replace_reason: str | None = "quality_upgrade" if _verified_upgrade else None
-
         logger.info(f"Moving '{os.path.basename(file_path)}' to '{final_path}'")
         if os.path.exists(final_path):
             if not os.path.exists(file_path):
@@ -2393,17 +2402,10 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                     "[Protection] Incoming file is not a verified improvement under the quality profile - skipping: %s",
                     os.path.basename(final_path),
                 )
-                try:
-                    os.remove(file_path)
-                except FileNotFoundError:
-                    pass
-                except Exception as e:
-                    logger.error(f"[Protection] Error removing redundant file: {e}")
-                if os.path.exists(file_path):
-                    context['_context_failure_msg'] = 'could not remove redundant import source'
-                else:
-                    _confirm_existing_file_bookkeeping(
-                        context, artist_context, album_info)
+                # An already-owned album is a skipped import, not a failure.
+                # Keep the staged source; optional staging cleanup owns it.
+                if _confirm_existing_file_bookkeeping(context, artist_context, album_info):
+                    context['_kept_existing_library_file'] = True
                 return
             try:
                 from mutagen import File as MutagenFile
@@ -2430,9 +2432,9 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
                             logger.error(f"[Protection] Error removing redundant file: {e}")
                         if os.path.exists(file_path):
                             context['_context_failure_msg'] = 'could not remove redundant import source'
-                        else:
-                            _confirm_existing_file_bookkeeping(
-                                context, artist_context, album_info)
+                        elif _confirm_existing_file_bookkeeping(
+                                context, artist_context, album_info):
+                            context['_kept_existing_library_file'] = True
                         return
                 elif is_enhance_download or force_replace:
                     if is_enhance_download:

@@ -34,6 +34,8 @@ const PORT_FILES = [
 const EXPECTED_EDGES = [
   'applyProgressiveTrackRendering <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'autoSavePlaylistM3U <- downloads.js [sync-spotify.js]',
+  // the five cleanupBeatport*Slider <- core.js edges are gone: beatport-ui.js
+  // was deleted and core.js's page-leave teardown stopped calling them.
   'cleanupDownloadProcess <- downloads.js [sync-spotify.js]',
   'cleanupWishlist <- downloads.js [sync-services.js]',
   'clearWishlist <- downloads.js [sync-services.js]',
@@ -150,7 +152,10 @@ describe('calls that cross out of the files the sync port deletes', () => {
     // becomes deletable-by-association.
     const dir = resolve(process.cwd(), 'static');
     const settings = readFileSync(resolve(dir, 'settings.js'), 'utf8');
-    expect(existsSync(resolve(dir, 'beatport-ui.js'))).toBe(false);
+    // beatport-ui.js is deleted now; if it ever comes back it still must not
+    // take the pickers with it.
+    const beatportPath = resolve(dir, 'beatport-ui.js');
+    const beatport = existsSync(beatportPath) ? readFileSync(beatportPath, 'utf8') : '';
     for (const name of [
       'loadPlexMusicLibraries',
       'selectPlexLibrary',
@@ -205,8 +210,10 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ).toEqual([]);
   });
 
-  it('never calls the deleted Beatport slider globals from core.js', () => {
-    const core = stripComments(readFileSync(resolve(process.cwd(), 'static/core.js'), 'utf8'));
+  it('core.js page-leave no longer calls the deleted Beatport sliders', () => {
+    // beatport-ui.js defined them and is gone. a call left in core.js would
+    // throw ReferenceError the first time the beatport content tears down.
+    const core = stripComments(readFileSync(resolve(process.cwd(), 'static', 'core.js'), 'utf8'));
     for (const name of [
       'cleanupBeatportRebuildSlider',
       'cleanupBeatportReleasesSlider',

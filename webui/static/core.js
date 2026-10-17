@@ -537,9 +537,9 @@ function cleanupBeatportContent() {
         beatportContentState.abortController = null;
     }
 
+    // the sliders went with beatport-ui.js; the react tab owns that view now
     stopBeatportDiscoveryAndSyncPolling();
     // React BeatportSlider releases its autoplay timer when it unmounts.
-
     beatportContentState.loadingPromise = null;
     beatportContentState.loaded = false;
 

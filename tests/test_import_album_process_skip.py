@@ -298,3 +298,28 @@ def test_owned_album_stays_in_staging_by_default(db_path, tmp_path):
         album_process(_runtime_with_staging([], tmp_path), data)
 
     assert (folder / "owned.mp3").exists()
+
+
+def test_library_copy_the_pipeline_kept_is_not_called_imported(db_path, tmp_path):
+    # fuzzy pair, so the gate lets it through; the pipeline then finds the
+    # track already at its library path and keeps that copy. nothing was
+    # imported, so the summary can't say it was.
+    fuzzy = _match("Maybe Song", "mbid-x", _staging_file(tmp_path, "maybe.mp3"),
+                   match_type=None, confidence=0.72)
+    processed_log = []
+    runtime = _runtime(processed_log, str(tmp_path))
+
+    def _keeps(_key, ctx, path):
+        processed_log.append(path)
+        ctx["_context_failure_msg"] = "Incoming file is not a verified improvement under the quality profile"
+        ctx["_kept_existing_library_file"] = True
+
+    runtime.post_process_matched_download = _keeps
+    with patch("core.imports.routes._get_import_db", return_value=_FakeDB(db_path)), _has_metadata():
+        payload, status = album_process(runtime, {"album": _album(), "matches": [fuzzy]})
+
+    assert status == 200
+    assert payload["dispositions"][0]["decision"] == "skipped_owned"
+    assert payload["summary"]["skipped_owned"] == 1
+    assert payload["summary"]["imported"] == 0
+    assert payload["processed"] == 0

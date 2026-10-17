@@ -580,58 +580,44 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
-# A mirrored row's source id is whichever provider the playlist came from
-# (upstream 4c738a0c0: deezer/tidal/qobuz/itunes count, not only spotify). Each
-# arm matches an index (lib2 schema: idx_lib2_tracks_spotify and
-# idx_lib2_tracks_ext_<service>), so the OR stays a multi-index lookup instead
-# of a catalogue scan per playlist row. The unary + drops the column's TEXT
-# affinity: with it SQLite will not compare through the expression index.
+# Each provider is a separate non-NULL index probe. A multi-column OR can
+# degrade to a catalogue scan per playlist row after a full SQLite ANALYZE.
 _MIRRORED_ID_SERVICES = ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes')
-_MIRRORED_ID_MATCH = "(t.spotify_id = mpt.source_track_id OR " + " OR ".join(
-    f"TRIM(CAST(json_extract(t.external_ids,'$.{service}') AS TEXT)) = +mpt.source_track_id"
-    for service in _MIRRORED_ID_SERVICES) + ")"
+_MIRRORED_OWNED_FILE = """EXISTS (
+    SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id
+      AND f.path IS NOT NULL AND TRIM(f.path)<>''
+      AND COALESCE(f.file_state,'active')='active'{owner})"""
+_MIRRORED_PROVIDER_PROBES = " OR ".join(
+    f"EXISTS (SELECT 1 FROM lib2_tracks t WHERE {expression} IS NOT NULL "
+    f"AND {expression}=+mpt.source_track_id AND {_MIRRORED_OWNED_FILE})"
+    for expression in (
+        't.spotify_id',
+        *(f"TRIM(CAST(json_extract(t.external_ids,'$.{service}') AS TEXT))"
+          for service in _MIRRORED_ID_SERVICES),
+    )
+)
 
-# Preserve positive sync matches for aliases/collaborations. A current provider
-# ID with an active scoped file supersedes an old negative verdict after download.
-# Checked title-only rejections remain rejected; unchecked rows may use names.
+# Current scoped provider/file evidence can supersede an old negative verdict.
+# Unchecked rows also get an indexed, exact-name fallback. The LOWER predicate
+# selects the existing expression index; exact equality still rejects wrong case.
 _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
     WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
-    WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' AND EXISTS (
-        SELECT 1 FROM lib2_tracks t
-         WHERE """ + _MIRRORED_ID_MATCH + """
-           AND EXISTS (
-             SELECT 1 FROM lib2_track_files f
-              WHERE f.track_id = t.id
-                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
-                AND COALESCE(f.file_state, 'active') = 'active'{owner})
-    ) THEN 1
+    WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id<>''
+         AND (""" + _MIRRORED_PROVIDER_PROBES + """) THEN 1
     WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
     WHEN EXISTS (
         SELECT 1 FROM lib2_tracks t
-         WHERE (
-           (mpt.source_track_id IS NOT NULL
-            AND mpt.source_track_id != ''
-            AND """ + _MIRRORED_ID_MATCH + """)
-           OR (t.title = mpt.track_name AND (
-             EXISTS (
+         WHERE LOWER(t.title)=LOWER(mpt.track_name) AND t.title=mpt.track_name
+           AND (EXISTS (
                SELECT 1 FROM lib2_track_artists ta
-                 JOIN lib2_artists a ON a.id = ta.artist_id
-                WHERE ta.track_id = t.id
-                  AND a.name = mpt.artist_name)
+                 JOIN lib2_artists a ON a.id=ta.artist_id
+                WHERE ta.track_id=t.id AND a.name=mpt.artist_name)
              OR EXISTS (
                SELECT 1 FROM lib2_albums al
-                 JOIN lib2_artists a ON a.id = al.primary_artist_id
-                WHERE al.id = t.album_id
-                  AND a.name = mpt.artist_name)
-           ))
-         )
-           AND EXISTS (
-             SELECT 1 FROM lib2_track_files f
-              WHERE f.track_id = t.id
-                AND f.path IS NOT NULL AND TRIM(f.path) <> ''
-                AND COALESCE(f.file_state, 'active') = 'active'{owner})
-    ) THEN 1
-    ELSE 0 END)"""
+                 JOIN lib2_artists a ON a.id=al.primary_artist_id
+                WHERE al.id=t.album_id AND a.name=mpt.artist_name))
+           AND """ + _MIRRORED_OWNED_FILE + """
+    ) THEN 1 ELSE 0 END)"""
 
 
 class MusicDatabase:
