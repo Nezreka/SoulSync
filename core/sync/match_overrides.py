@@ -388,13 +388,23 @@ def cached_match_is_stale(
     return True
 
 
-def drop_stale_cached_match(db: Any, source_track_id: Any, server_source: str) -> None:
-    """Best-effort delete of one proven-stale cache row. Never raises."""
+def drop_stale_cached_match(db: Any, source_track_id: Any, server_source: str,
+                            server_track_id: Any = None) -> None:
+    """Best-effort delete of one proven-stale cache row. Never raises.
+
+    With ``server_track_id`` given, the delete is scoped to a row that
+    actually points at that server track (#1754) — implemented by the
+    database's own predicate, so a row pointing at a live track under
+    the same source id is never deleted on another pairing's evidence."""
     deleter = getattr(db, "delete_sync_match_cache", None)
     if deleter is None:
         return
     try:
-        deleter(str(source_track_id), server_source)
+        if server_track_id is None:
+            deleter(str(source_track_id), server_source)
+        else:
+            deleter(str(source_track_id), server_source,
+                    server_track_id=str(server_track_id))
     except Exception as e:  # noqa: BLE001 - bookkeeping must not fail a sync
         logger.debug("stale sync match cache delete failed: %s", e)
 

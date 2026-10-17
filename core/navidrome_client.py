@@ -184,6 +184,15 @@ class NavidromeClient(MediaServerClient):
         # Progress callback for UI updates
         self._progress_callback = None
 
+        # Server IDs the most recent validated playlist write could not
+        # resolve (navidrome no longer has them), recorded by the guard
+        # in core.library.navidrome_identity so the sync layer can stop
+        # counting those tracks as synced (#1754). Cleared when a write
+        # starts and set when it reaches track resolution, so it always
+        # describes the latest write that got that far; on a per-user
+        # view the record lives on the view, the object its caller holds.
+        self._last_validated_write_skipped: list = []
+
     def set_progress_callback(self, callback):
         """Set callback function for progress updates"""
         self._progress_callback = callback
