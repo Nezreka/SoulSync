@@ -128,11 +128,6 @@ export function SyncPage() {
   );
 
   /**
-   * `runPipeline` is the page's ONE controller, injected rather than reached
-   * for on `window` — `runMirroredPlaylistPipeline` lives in auto-sync.js,
-   * which the flip deletes.
-   */
-  /**
    * Open for the Auto-Sync modal OR for Activity's scheduled-runs tab, which
    * reads the same run history. Leaving it closed there would show an empty
    * list on a tab whose whole job is that list.

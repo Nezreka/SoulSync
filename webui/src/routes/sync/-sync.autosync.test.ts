@@ -1,23 +1,6 @@
-/**
- * Auto-Sync pure core — differential against the live auto-sync.js.
- *
- * Every ported function is executable outside the DOM, so this file lifts the
- * REAL vanilla bodies and runs them beside the port over matrices that include
- * the awkward inputs. The vanilla's module constants (AUTO_SYNC_BUCKETS, the
- * weekday tables) are supplied as a transcribed preamble; raw source anchors
- * pin the originals so a silent vanilla edit fails here.
- *
- * One deliberate divergence: the port null-guards `getMirroredSourceRef` and
- * friends with optional chaining where the vanilla would throw on null rows.
- * Differentials therefore only run over non-null inputs (the only ones any
- * caller produces).
- */
-
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+/** Auto-Sync scheduling, personalized rows and history contracts. */
 import { describe, expect, it } from 'vitest';
 
-import { extractFunction } from '../../test/vanilla-extract';
 import {
   AUTO_SYNC_TABS,
   beatportMirrorIsSnapshot,
@@ -94,65 +77,8 @@ import {
   autoSyncEnabledFlag,
 } from './-sync.autosync';
 
-const AUTO_SYNC_SRC = readFileSync(resolve(process.cwd(), 'static/auto-sync.js'), 'utf8');
-
-/**
- * The vanilla functions close over module constants; supply them transcribed.
- * The source anchors below keep the transcription honest.
- */
-const PREAMBLE = `
-const AUTO_SYNC_BUCKETS = [1, 2, 4, 8, 12, 16, 24, 48, 72, 168];
-const AUTO_SYNC_WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const AUTO_SYNC_WEEKDAY_LABELS = {
-    mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu',
-    fri: 'Fri', sat: 'Sat', sun: 'Sun',
-};
-`;
-
-const NAMES = [
-  'getMirroredSourceRef',
-  'autoSyncTriggerForHours',
-  'autoSyncHoursFromTrigger',
-  'autoSyncBucketLabel',
-  'autoSyncIntervalLabel',
-  'autoSyncLaneCadence',
-  'detectBrowserTimezone',
-  'autoSyncWeeklyTrigger',
-  'autoSyncWeeklyFromTrigger',
-  'autoSyncWeeklyLabel',
-  'autoSyncSourceLabel',
-  'autoSyncCanSchedulePlaylist',
-  'autoSyncIsPipelineAutomation',
-  'autoSyncPlaylistIdFromAutomation',
-  'autoSyncIsScheduleOwned',
-  'autoSyncKindLabel',
-  'autoSyncEnrichDiscoveryRows',
-  'autoSyncGeneratedCountMap',
-  'autoSyncExpandPersonalizedRows',
-  'autoSyncActionForPlaylist',
-  'autoSyncIsPersonalizedAutomation',
-  'autoSyncPersonalizedEntry',
-  'autoSyncRowIdForPersonalized',
-  'autoSyncGroupSidebarRows',
-] as const;
-
-type Vanilla = Record<(typeof NAMES)[number], (...args: never[]) => unknown>;
-
-const body = NAMES.map((n) => extractFunction(n, AUTO_SYNC_SRC)).join('\n');
-// eslint-disable-next-line @typescript-eslint/no-implied-eval
-const vanilla = new Function(`${PREAMBLE}\n${body}\nreturn { ${NAMES.join(', ')} };`)() as Vanilla;
-
-describe('constants stay anchored to the vanilla source', () => {
-  it('transcribed preamble matches the live declarations', () => {
-    expect(AUTO_SYNC_SRC).toContain(
-      'const AUTO_SYNC_BUCKETS = [1, 2, 4, 8, 12, 16, 24, 48, 72, 168];',
-    );
-    expect(AUTO_SYNC_SRC).toContain(
-      "const AUTO_SYNC_WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];",
-    );
-  });
-
-  it('port constants match as literals', () => {
+describe('schedule constants', () => {
+  it('pins interval buckets and weekday order', () => {
     expect(AUTO_SYNC_BUCKETS).toEqual([1, 2, 4, 8, 12, 16, 24, 48, 72, 168]);
     expect(AUTO_SYNC_WEEKDAYS).toEqual(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
     expect(AUTO_SYNC_WEEKDAY_LABELS.mon).toBe('Mon');
@@ -160,7 +86,7 @@ describe('constants stay anchored to the vanilla source', () => {
   });
 });
 
-describe('getMirroredSourceRef (differential)', () => {
+describe('getMirroredSourceRef', () => {
   const ROWS = [
     {
       source_ref: 'ref-1',
@@ -180,12 +106,16 @@ describe('getMirroredSourceRef (differential)', () => {
     { source: 'tidal' },
   ];
 
-  it('matches the vanilla row for row', () => {
-    for (const row of ROWS) {
-      expect(getMirroredSourceRef(row), JSON.stringify(row)).toBe(
-        vanilla.getMirroredSourceRef(row as never),
-      );
-    }
+  it('prefers an explicit reference, then link descriptions, then the source id', () => {
+    expect(ROWS.map(getMirroredSourceRef)).toEqual([
+      'ref-1',
+      'https://open.spotify.com/playlist/abc',
+      'HTTPS://youtu.be/x',
+      'sp1',
+      '7',
+      '12345',
+      '',
+    ]);
   });
 
   it('pins the URL-in-description trick as literals', () => {
@@ -206,15 +136,26 @@ describe('getMirroredSourceRef (differential)', () => {
   });
 });
 
-describe('trigger codecs (differential)', () => {
+describe('trigger codecs', () => {
   const HOURS = [0, 1, 2, 12, 23, 24, 25, 36, 48, 167, 168, 169, NaN, '24' as const];
 
-  it('autoSyncTriggerForHours matches the vanilla', () => {
-    for (const h of HOURS) {
-      expect(autoSyncTriggerForHours(h as never), String(h)).toEqual(
-        vanilla.autoSyncTriggerForHours(h as never),
-      );
-    }
+  it('encodes whole days and preserves non-day intervals', () => {
+    expect(HOURS.map((h) => autoSyncTriggerForHours(h as never))).toEqual([
+      { interval: 1, unit: 'days' },
+      { interval: 1, unit: 'hours' },
+      { interval: 2, unit: 'hours' },
+      { interval: 12, unit: 'hours' },
+      { interval: 23, unit: 'hours' },
+      { interval: 1, unit: 'days' },
+      { interval: 25, unit: 'hours' },
+      { interval: 36, unit: 'hours' },
+      { interval: 2, unit: 'days' },
+      { interval: 167, unit: 'hours' },
+      { interval: 7, unit: 'days' },
+      { interval: 169, unit: 'hours' },
+      { interval: 1, unit: 'days' },
+      { interval: 1, unit: 'days' },
+    ]);
   });
 
   it('pins the surprising arms', () => {
@@ -238,12 +179,20 @@ describe('trigger codecs (differential)', () => {
     undefined,
   ];
 
-  it('autoSyncHoursFromTrigger matches the vanilla', () => {
-    for (const c of CONFIGS) {
-      expect(autoSyncHoursFromTrigger(c as never), JSON.stringify(c)).toBe(
-        vanilla.autoSyncHoursFromTrigger(c as never),
-      );
-    }
+  it('decodes minutes, days and weeks, rejecting absent or zero intervals', () => {
+    expect(CONFIGS.map((c) => autoSyncHoursFromTrigger(c as never))).toEqual([
+      2,
+      1,
+      48,
+      168,
+      5,
+      5,
+      3,
+      null,
+      null,
+      null,
+      null,
+    ]);
   });
 
   it('pins minutes rounding and the null contract', () => {
@@ -254,17 +203,25 @@ describe('trigger codecs (differential)', () => {
   });
 });
 
-describe('cadence labels (differential)', () => {
+describe('cadence labels', () => {
   const HOURS = [1, 2, 3, 12, 16, 23, 24, 36, 48, 72, 168];
 
-  it('all three label maps match the vanilla', () => {
-    for (const h of HOURS) {
-      expect(autoSyncBucketLabel(h), `bucket ${h}`).toBe(vanilla.autoSyncBucketLabel(h as never));
-      expect(autoSyncIntervalLabel(h), `interval ${h}`).toBe(
-        vanilla.autoSyncIntervalLabel(h as never),
-      );
-      expect(autoSyncLaneCadence(h), `lane ${h}`).toBe(vanilla.autoSyncLaneCadence(h as never));
-    }
+  it('labels standard and fractional-day intervals', () => {
+    expect(
+      HOURS.map((h) => [autoSyncBucketLabel(h), autoSyncIntervalLabel(h), autoSyncLaneCadence(h)]),
+    ).toEqual([
+      ['1h', 'Every 1 hour', 'Hourly'],
+      ['2h', 'Every 2 hours', 'Every 2h'],
+      ['3h', 'Every 3 hours', 'Every 3h'],
+      ['12h', 'Every 12 hours', 'Twice a day'],
+      ['16h', 'Every 16 hours', 'Every 16h'],
+      ['23h', 'Every 23 hours', 'Every 23h'],
+      ['1d', 'Every 1 day', 'Daily'],
+      ['1.5d', 'Every 1.5 days', 'Every 1.5 days'],
+      ['2d', 'Every 2 days', 'Every 2 days'],
+      ['3d', 'Every 3 days', 'Every 3 days'],
+      ['Weekly', 'Every week', 'Weekly'],
+    ]);
   });
 
   it('pins the words as literals', () => {
@@ -277,9 +234,9 @@ describe('cadence labels (differential)', () => {
   });
 });
 
-describe('weekly codecs (differential)', () => {
-  it('detectBrowserTimezone agrees with the vanilla in this environment', () => {
-    expect(detectBrowserTimezone()).toBe(vanilla.detectBrowserTimezone());
+describe('weekly codecs', () => {
+  it('detects the browser timezone', () => {
+    expect(detectBrowserTimezone()).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   });
 
   const TRIGGER_INPUTS = [
@@ -292,12 +249,17 @@ describe('weekly codecs (differential)', () => {
     undefined,
   ];
 
-  it('autoSyncWeeklyTrigger matches the vanilla', () => {
-    for (const input of TRIGGER_INPUTS) {
-      expect(autoSyncWeeklyTrigger(input as never), JSON.stringify(input)).toEqual(
-        vanilla.autoSyncWeeklyTrigger(input as never),
-      );
-    }
+  it('keeps valid picker values and defaults malformed or missing fields', () => {
+    const tz = detectBrowserTimezone();
+    expect(TRIGGER_INPUTS.map((input) => autoSyncWeeklyTrigger(input as never))).toEqual([
+      { time: '08:30', days: ['mon', 'fri'], tz: 'Europe/Berlin' },
+      { time: '8:30', days: ['mon'], tz: 'UTC' },
+      { time: '09:00', days: ['mon', 'sun'], tz: 'UTC' },
+      { time: '10:00', days: [], tz: 'UTC' },
+      { time: '10:00', days: ['tue'], tz },
+      { time: '09:00', days: [], tz },
+      { time: '09:00', days: [], tz },
+    ]);
   });
 
   const PARSE_INPUTS = [
@@ -310,12 +272,16 @@ describe('weekly codecs (differential)', () => {
     42,
   ];
 
-  it('autoSyncWeeklyFromTrigger matches the vanilla', () => {
-    for (const input of PARSE_INPUTS) {
-      expect(autoSyncWeeklyFromTrigger(input as never), JSON.stringify(input)).toEqual(
-        vanilla.autoSyncWeeklyFromTrigger(input as never),
-      );
-    }
+  it('normalizes saved weekdays and rejects non-object schedules', () => {
+    expect(PARSE_INPUTS.map((input) => autoSyncWeeklyFromTrigger(input as never))).toEqual([
+      { time: '08:30', days: ['mon', 'fri'], tz: 'Europe/Berlin' },
+      { time: '08:30', days: ['mon', 'fri'], tz: 'UTC' },
+      { time: '09:00', days: [...AUTO_SYNC_WEEKDAYS], tz: 'UTC' },
+      { time: '09:00', days: [...AUTO_SYNC_WEEKDAYS], tz: 'UTC' },
+      null,
+      null,
+      null,
+    ]);
   });
 
   it('pins the empty-days = every-day convention', () => {
@@ -335,12 +301,14 @@ describe('weekly codecs (differential)', () => {
     { time: '22:00', days: ['sun'], tz: 'UTC' },
   ];
 
-  it('autoSyncWeeklyLabel matches the vanilla', () => {
-    for (const input of LABEL_INPUTS) {
-      expect(autoSyncWeeklyLabel(input as never), JSON.stringify(input)).toBe(
-        vanilla.autoSyncWeeklyLabel(input as never),
-      );
-    }
+  it('labels daily, unscheduled and selected-day schedules', () => {
+    expect(LABEL_INPUTS.map((input) => autoSyncWeeklyLabel(input as never))).toEqual([
+      'Unscheduled',
+      'Daily @ 09:00',
+      'Daily @ 09:00',
+      'Mon, Fri @ 07:15',
+      'Sun @ 22:00',
+    ]);
   });
 
   it('pins canonical ordering as a literal', () => {
@@ -351,7 +319,7 @@ describe('weekly codecs (differential)', () => {
   });
 });
 
-describe('source labels + scheduling eligibility (differential)', () => {
+describe('source labels + scheduling eligibility', () => {
   const SOURCES = [
     'spotify',
     'spotify_public',
@@ -370,12 +338,24 @@ describe('source labels + scheduling eligibility (differential)', () => {
     null,
   ];
 
-  it('autoSyncSourceLabel matches the vanilla for every source', () => {
-    for (const s of SOURCES) {
-      expect(autoSyncSourceLabel(s as never), String(s)).toBe(
-        vanilla.autoSyncSourceLabel(s as never),
-      );
-    }
+  it('labels known sources and preserves unknown source names', () => {
+    expect(SOURCES.map((s) => autoSyncSourceLabel(s as never))).toEqual([
+      'Spotify',
+      'Spotify Link',
+      'Tidal',
+      'YouTube',
+      'Deezer',
+      'Qobuz',
+      'Beatport',
+      'File Imports',
+      'iTunes Link',
+      'ListenBrainz',
+      'Last.fm Radio',
+      'SoulSync Discovery',
+      'something_new',
+      'Other',
+      'Other',
+    ]);
   });
 
   it('pins the odd labels as literals', () => {
@@ -386,11 +366,26 @@ describe('source labels + scheduling eligibility (differential)', () => {
   });
 
   it('autoSyncCanSchedulePlaylist excludes file, lastfm and frozen beatport mirrors', () => {
-    for (const s of SOURCES.filter((x): x is string => typeof x === 'string')) {
-      expect(autoSyncCanSchedulePlaylist({ source: s }), s).toBe(
-        vanilla.autoSyncCanSchedulePlaylist({ source: s } as never),
-      );
-    }
+    expect(
+      SOURCES.filter((s): s is string => typeof s === 'string').map((source) =>
+        autoSyncCanSchedulePlaylist({ source }),
+      ),
+    ).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+    ]);
     expect(autoSyncCanSchedulePlaylist({ source: 'file' })).toBe(false);
     expect(autoSyncCanSchedulePlaylist({ source: 'beatport' })).toBe(false);
     expect(autoSyncCanSchedulePlaylist({ source: 'lastfm' })).toBe(false);
@@ -418,7 +413,7 @@ describe('source labels + scheduling eligibility (differential)', () => {
   });
 });
 
-describe('automation linkage (differential)', () => {
+describe('automation linkage', () => {
   const AUTOMATIONS = [
     { action_type: 'playlist_pipeline', action_config: { playlist_id: '42', all: false } },
     { action_type: 'playlist_pipeline', action_config: { all: true } },
@@ -431,17 +426,23 @@ describe('automation linkage (differential)', () => {
     null,
   ];
 
-  it('autoSyncIsPipelineAutomation + autoSyncPlaylistIdFromAutomation match the vanilla', () => {
-    for (const a of AUTOMATIONS) {
-      // The vanilla's bare `auto && …` leaks null for a null row; the port
-      // returns a real boolean. Truthiness-identical — compare coerced.
-      expect(autoSyncIsPipelineAutomation(a as never), JSON.stringify(a)).toBe(
-        Boolean(vanilla.autoSyncIsPipelineAutomation(a as never)),
-      );
-      expect(autoSyncPlaylistIdFromAutomation(a as never), JSON.stringify(a)).toBe(
-        vanilla.autoSyncPlaylistIdFromAutomation(a as never),
-      );
-    }
+  it('recognizes pipeline actions and resolves only valid per-playlist ids', () => {
+    expect(
+      AUTOMATIONS.map((a) => [
+        autoSyncIsPipelineAutomation(a as never),
+        autoSyncPlaylistIdFromAutomation(a as never),
+      ]),
+    ).toEqual([
+      [true, 42],
+      [true, null],
+      [true, null],
+      [true, null],
+      [true, null],
+      [true, 7],
+      [true, null],
+      [false, null],
+      [false, null],
+    ]);
   });
 
   const OWNERSHIP = [
@@ -454,17 +455,21 @@ describe('automation linkage (differential)', () => {
     null,
   ];
 
-  it('autoSyncIsScheduleOwned matches the vanilla (flag, legacy group, name prefix)', () => {
-    for (const a of OWNERSHIP) {
-      expect(autoSyncIsScheduleOwned(a as never), JSON.stringify(a)).toBe(
-        vanilla.autoSyncIsScheduleOwned(a as never),
-      );
-    }
+  it('recognizes ownership by flag, legacy group or case-sensitive name prefix', () => {
+    expect(OWNERSHIP.map((a) => autoSyncIsScheduleOwned(a as never))).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+    ]);
     expect(autoSyncIsScheduleOwned({ name: 'auto-sync: lowercase' })).toBe(false); // prefix is case-sensitive
   });
 });
 
-describe('personalized rows (differential)', () => {
+describe('personalized rows', () => {
   const KINDS = [
     { kind: 'daily_mix', name_template: 'Daily Mix' },
     {
@@ -477,12 +482,15 @@ describe('personalized rows (differential)', () => {
     { kind: 'genre', name_template: 'Genre: {variant}', requires_variant: true, variants: [] },
   ];
 
-  it('autoSyncKindLabel matches the vanilla, separators stripped', () => {
-    for (const k of [...KINDS, { kind: 'bare' }, null]) {
-      expect(autoSyncKindLabel(k as never), JSON.stringify(k)).toBe(
-        vanilla.autoSyncKindLabel(k as never),
-      );
-    }
+  it('strips variant placeholders and trailing separators from kind labels', () => {
+    expect([...KINDS, { kind: 'bare' }, null].map((k) => autoSyncKindLabel(k as never))).toEqual([
+      'Daily Mix',
+      'Time Machine',
+      'Time',
+      'Genre',
+      'bare',
+      '',
+    ]);
     expect(
       autoSyncKindLabel({ kind: 'time_machine', name_template: 'Time Machine — {variant}' }),
     ).toBe('Time Machine');
@@ -497,14 +505,15 @@ describe('personalized rows (differential)', () => {
     { id: 6, source: 'soulsync_discovery' },
   ];
 
-  it('autoSyncEnrichDiscoveryRows matches the vanilla, longest-prefix rule included', () => {
-    expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, KINDS)).toEqual(
-      vanilla.autoSyncEnrichDiscoveryRows(PLAYLISTS as never, KINDS as never),
-    );
-    // Fails open with no kinds metadata.
-    expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, [])).toEqual(
-      vanilla.autoSyncEnrichDiscoveryRows(PLAYLISTS as never, [] as never),
-    );
+  it('enriches variants by longest prefix and keeps all rows without kinds metadata', () => {
+    expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, KINDS)).toEqual([
+      PLAYLISTS[0],
+      PLAYLISTS[1],
+      { ...PLAYLISTS[2], kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
+      { ...PLAYLISTS[3], kind: 'time', variant: 'x', kind_label: 'Time' },
+      PLAYLISTS[5],
+    ]);
+    expect(autoSyncEnrichDiscoveryRows(PLAYLISTS, [])).toEqual(PLAYLISTS);
   });
 
   it('pins the drop rule: an unregistered ssd row disappears', () => {
@@ -515,7 +524,7 @@ describe('personalized rows (differential)', () => {
     expect(out.find((p) => p.id === 3)?.variant).toBe('1990s');
   });
 
-  it('autoSyncGeneratedCountMap matches the vanilla', () => {
+  it('maps generated counts by kind and variant, ignoring orphan rows', () => {
     const DATA = {
       success: true,
       playlists: [
@@ -526,39 +535,71 @@ describe('personalized rows (differential)', () => {
       ],
     };
     expect([...autoSyncGeneratedCountMap(DATA).entries()]).toEqual([
-      ...(vanilla.autoSyncGeneratedCountMap(DATA as never) as Map<string, number>).entries(),
+      ['daily_mix ', 25],
+      ['time_machine 1990s', 30],
     ]);
     expect([...autoSyncGeneratedCountMap({ success: false }).entries()]).toEqual([]);
   });
 
-  it('autoSyncExpandPersonalizedRows matches the vanilla (negative ids, skip existing)', () => {
+  it('expands missing variants with negative ids and known generated counts', () => {
     const existing = [PLAYLISTS[1], PLAYLISTS[2]]; // ssd_daily_mix + ssd_time_machine_1990s
     const counts = new Map([['time_machine 2000s', 12]]);
     const ours = autoSyncExpandPersonalizedRows(KINDS, existing, counts);
-    const theirs = vanilla.autoSyncExpandPersonalizedRows(
-      KINDS as never,
-      existing as never,
-      counts as never,
-    );
-    expect(ours).toEqual(theirs);
+    expect(ours).toEqual([
+      {
+        id: -1,
+        source: 'soulsync_discovery',
+        name: KINDS[1].name_template.replace('{variant}', '2000s'),
+        track_count: 12,
+        kind: 'time_machine',
+        variant: '2000s',
+        kind_label: 'Time Machine',
+        source_playlist_id: 'ssd_time_machine_2000s',
+        _personalized: true,
+      },
+      {
+        id: -2,
+        source: 'soulsync_discovery',
+        name: KINDS[2].name_template.replace('{variant}', 'x'),
+        track_count: 0,
+        kind: 'time',
+        variant: 'x',
+        kind_label: 'Time',
+        source_playlist_id: 'ssd_time_x',
+        _personalized: true,
+      },
+    ]);
     // daily_mix exists → skipped; 1990s exists → only 2000s + time/x remain.
     expect(ours.map((r) => r.source_playlist_id)).toEqual(['ssd_time_machine_2000s', 'ssd_time_x']);
     expect(ours.map((r) => r.id)).toEqual([-1, -2]);
     expect(ours[0].track_count).toBe(12);
   });
 
-  it('autoSyncActionForPlaylist matches the vanilla for both row kinds', () => {
+  it('builds personalized actions or mirrored-playlist actions as appropriate', () => {
     const CASES = [
       { p: { _personalized: true, kind: 'time_machine', variant: '1990s' }, id: -1 },
       { p: { _personalized: true, kind: 'daily_mix', variant: '' }, id: -2 },
       { p: { id: 7, source: 'tidal' }, id: 7 },
       { p: null, id: 9 },
     ];
-    for (const { p, id } of CASES) {
-      expect(autoSyncActionForPlaylist(p as never, id), JSON.stringify(p)).toEqual(
-        vanilla.autoSyncActionForPlaylist(p as never, id as never),
-      );
-    }
+    expect(CASES.map(({ p, id }) => autoSyncActionForPlaylist(p as never, id))).toEqual([
+      {
+        action_type: 'personalized_pipeline',
+        action_config: {
+          kinds: [{ kind: 'time_machine', variant: '1990s' }],
+          refresh_first: true,
+        },
+      },
+      {
+        action_type: 'personalized_pipeline',
+        action_config: {
+          kinds: [{ kind: 'daily_mix' }],
+          refresh_first: true,
+        },
+      },
+      { action_type: 'playlist_pipeline', action_config: { playlist_id: '7', all: false } },
+      { action_type: 'playlist_pipeline', action_config: { playlist_id: '9', all: false } },
+    ]);
     // Empty variant must NOT put a variant key in the entry.
     expect(
       autoSyncActionForPlaylist({ _personalized: true, kind: 'daily_mix', variant: '' }, -2)
@@ -566,7 +607,7 @@ describe('personalized rows (differential)', () => {
     ).toEqual({ kinds: [{ kind: 'daily_mix' }], refresh_first: true });
   });
 
-  it('autoSyncIsPersonalizedAutomation + autoSyncPersonalizedEntry match the vanilla', () => {
+  it('resolves only single-kind personalized automation entries', () => {
     const AUTOS = [
       {
         action_type: 'personalized_pipeline',
@@ -582,17 +623,23 @@ describe('personalized rows (differential)', () => {
       { action_type: 'playlist_pipeline', action_config: { kinds: [{ kind: 'x' }] } },
       null,
     ];
-    for (const a of AUTOS) {
-      expect(autoSyncIsPersonalizedAutomation(a as never), JSON.stringify(a)).toBe(
-        vanilla.autoSyncIsPersonalizedAutomation(a as never),
-      );
-      expect(autoSyncPersonalizedEntry(a as never), JSON.stringify(a)).toEqual(
-        vanilla.autoSyncPersonalizedEntry(a as never),
-      );
-    }
+    expect(
+      AUTOS.map((a) => [
+        autoSyncIsPersonalizedAutomation(a as never),
+        autoSyncPersonalizedEntry(a as never),
+      ]),
+    ).toEqual([
+      [true, { kind: 'x', variant: 'y' }],
+      [true, { kind: 'x', variant: '' }],
+      [true, null],
+      [true, null],
+      [true, null],
+      [false, null],
+      [false, null],
+    ]);
   });
 
-  it('autoSyncRowIdForPersonalized matches the vanilla (real row beats synthetic)', () => {
+  it('finds a real or synthetic personalized row, returning null when absent', () => {
     const rows = [
       { id: 3, source: 'soulsync_discovery', source_playlist_id: 'ssd_time_machine_1990s' },
       { id: -4, _personalized: true, kind: 'time_machine', variant: '2000s' },
@@ -605,14 +652,16 @@ describe('personalized rows (differential)', () => {
       { kind: 'missing', variant: '' },
       null,
     ];
-    for (const entry of CASES) {
-      expect(autoSyncRowIdForPersonalized(entry as never, rows), JSON.stringify(entry)).toBe(
-        vanilla.autoSyncRowIdForPersonalized(entry as never, rows as never),
-      );
-    }
+    expect(CASES.map((entry) => autoSyncRowIdForPersonalized(entry as never, rows))).toEqual([
+      3,
+      -4,
+      -5,
+      null,
+      null,
+    ]);
   });
 
-  it('autoSyncGroupSidebarRows matches the vanilla (order + first-row label)', () => {
+  it('groups variant rows in encounter order, keeping the first label', () => {
     const rows = [
       { id: 1, source: 'spotify' },
       { id: 2, kind: 'time_machine', variant: '1990s', kind_label: 'Time Machine' },
@@ -621,7 +670,13 @@ describe('personalized rows (differential)', () => {
       { id: 5, kind: 'singleton_no_variant' },
     ];
     const ours = autoSyncGroupSidebarRows(rows);
-    expect(ours).toEqual(vanilla.autoSyncGroupSidebarRows(rows as never));
+    expect(ours).toEqual({
+      flat: [rows[0], rows[4]],
+      groups: [
+        { kind: 'time_machine', label: 'Time Machine', rows: [rows[1], rows[3]] },
+        { kind: 'genre', label: 'genre', rows: [rows[2]] },
+      ],
+    });
     expect(ours.flat.map((r) => r.id)).toEqual([1, 5]); // kind without variant stays flat
     expect(ours.groups.map((g) => g.label)).toEqual(['Time Machine', 'genre']);
     expect(ours.groups[0].rows.map((r) => r.id)).toEqual([2, 4]);

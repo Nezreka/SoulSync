@@ -59,9 +59,7 @@ const EXPECTED_EDGES = [
   // looked up sync markup that no longer exists.
   'openDownloadMissingModal <- shared-helpers.js [sync-spotify.js]',
   'openYouTubeDiscoveryModal <- core.js,stats-automations.js [sync-services.js]',
-  'pollMirroredPipelineStatus <- stats-automations.js [auto-sync.js]',
   'rehydrateModal <- api-monitor.js,core.js,downloads.js,init.js,wishlist-tools.js [sync-spotify.js]',
-  'runMirroredPlaylistPipeline <- stats-automations.js [auto-sync.js]',
   'startListenBrainzDiscoveryPolling <- core.js [sync-services.js]',
   'startListenBrainzSyncPolling <- downloads.js [sync-services.js]',
   'startYouTubeDiscoveryPolling <- stats-automations.js [sync-services.js]',

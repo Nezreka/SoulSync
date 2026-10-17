@@ -1,15 +1,7 @@
 /**
- * the auto-sync manager for everywhere that isn't the playlists page.
- *
- * the dashboard's quick actions tile and sync band call
- * window.openAutoSyncScheduleModal, which was still the vanilla modal in
- * auto-sync.js. so the same manager looked and behaved differently depending
- * on where you opened it (no drag glow, old cards, two refresh buttons).
- * mounted at the root, this takes that global over and opens the react one.
- *
- * the react bundle is a module script, so it runs after every classic vanilla
- * script, and this effect runs after that. auto-sync.js can't take it back.
- * the playlists page keeps its own copy, wired to its cards and pipeline.
+ * Root-owned Auto Sync manager and pipeline bridge for classic dialogs.
+ * The playlists page injects the same controller hook into its own manager.
+ * Only classic card-state painting remains delegated to auto-sync.js.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
