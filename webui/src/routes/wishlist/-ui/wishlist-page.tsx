@@ -153,7 +153,11 @@ export function WishlistPage() {
   );
   const visibleRoutedGroups = useMemo(
     () =>
-      filterWishlistGroups(routedGroups, media === 'audiobooks' ? abQuery : search.q, search.failing),
+      filterWishlistGroups(
+        routedGroups,
+        media === 'audiobooks' ? abQuery : search.q,
+        search.failing,
+      ),
     [routedGroups, media, abQuery, search.q, search.failing],
   );
 
