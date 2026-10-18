@@ -136,7 +136,10 @@ class JellyfinClient(MediaServerBase):
         # Bulk inserts from the Jellyfin cache lock the database with more
         # workers; the worker capped itself at 3 for Jellyfin.
         return {'max_workers_cap': 3,
-                'preparing_message': 'Preparing Jellyfin cache for fast processing...'}
+                'preparing_message': 'Preparing Jellyfin cache for fast processing...',
+                # per-artist album / per-album track listings live on a
+                # process-wide singleton; the scan clears them
+                'caches_listings': True}
 
     def user_view(self, identity):
         """``as_user`` under the shared hook name (see MediaServerBase)."""

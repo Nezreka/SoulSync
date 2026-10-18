@@ -135,7 +135,7 @@ def test_scan_hints_match_what_the_worker_hard_codes():
     jf = c['jellyfin'].__new__(c['jellyfin'])
     nd = c['navidrome'].__new__(c['navidrome'])
     assert jf.scan_hints()['max_workers_cap'] == 3
-    assert 'preparing_message' in nd.scan_hints()
+    assert 'preparing_message' in nd.scan_hints() and nd.scan_hints()['caches_listings'] is True
     assert c['plex'].__new__(c['plex']).scan_hints() == {}
 
 
