@@ -1545,7 +1545,9 @@ export function ReviewPage() {
                   />
                   <div>
                     <div className={styles.eyebrow}>
-                      Album {albumNumber ?? '—'} of {queue?.total ?? '—'}
+                      {albumNumber === null
+                        ? 'Album review'
+                        : `Album ${albumNumber} of ${queue?.total ?? '—'}`}
                       {' · '}
                       {reviewCase.count} pending action
                       {reviewCase.count === 1 ? '' : 's'}

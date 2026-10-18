@@ -457,12 +457,14 @@
 }
 .decisionGrid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
 }
 .decisionGrid[data-single='true'] {
   display: block;
 }
 .decisionGrid article {
+  min-width: 0;
   border: 1px solid #4a4e63;
   border-radius: 12px;
   background: #1b1d27;
