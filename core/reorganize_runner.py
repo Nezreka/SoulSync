@@ -248,7 +248,12 @@ def build_runner(
     @maintenance_mutation
     def notifying_runner(item):
         from core.library.reconciliation_authority import conflict
-        protected = conflict(get_database(), 'path_mismatch', entity_type='album', entity_id=item.album_id)
+        db = get_database()
+        protected = conflict(db, 'path_mismatch', entity_type='album', entity_id=item.album_id)
+        if not protected and (getattr(item, 'metadata_source', 'api') or 'api') != 'tags':
+            # API organization may rewrite accepted identity fields as well as
+            # paths; tag-based organization retains the already reviewed tags.
+            protected = conflict(db, 'library_retag', entity_type='album', entity_id=item.album_id)
         if protected:
             return {'status': 'review_required', 'moved': 0, 'skipped': 0, 'failed': 1,
                     'errors': [{'error': protected['error']}], **protected}

@@ -504,3 +504,19 @@ def test_a_successful_update_still_does_not_raise(repoint):
 
     assert conn.execute(
         "SELECT file_path FROM tracks WHERE id = 't1'").fetchone()[0] == NEW
+
+
+def test_api_organization_cannot_overwrite_accepted_tags(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr('core.library.reconciliation_authority.conflict',
+        lambda db, kind, **kwargs: {'success':False,'review_conflict':True,
+            'review_case_key':'case','error':'Accepted title'} if kind == 'library_retag' else None)
+    runner = _build(monkeypatch, download_path_fn=lambda:str(tmp_path),
+        transfer_path_fn=lambda:str(tmp_path), reorganize_album_fn=lambda **kw: calls.append(kw) or {'moved':0})
+    item = _make_item()
+    item.metadata_source = 'api'
+    result = runner(item)
+    assert result['review_conflict'] and not calls
+    item.metadata_source = 'tags'
+    assert runner(item) == {'moved':0}
+    assert len(calls) == 1

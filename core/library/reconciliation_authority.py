@@ -14,9 +14,11 @@ ALIASES = {
     'library_recording_mbid': 'musicbrainz_recording_id',
     'library_album_title': 'album', 'album_title': 'album',
     'musicbrainz_album_id': 'musicbrainz_release_id',
+    'library_recording_disambiguation': 'recording_disambiguation',
 }
 IDENTITY = {'title', 'artist', 'album', 'album_artist', 'track_number', 'disc_number',
-            'musicbrainz_recording_id', 'musicbrainz_release_id', 'filename'}
+            'musicbrainz_recording_id', 'musicbrainz_release_id', 'filename',
+            'recording_disambiguation', 'year', 'date', 'track_total', 'disc_total'}
 FIELDS = {
     'mbid_mismatch': {'musicbrainz_recording_id'},
     'album_mbid_mismatch': {'musicbrainz_release_id'},
@@ -25,7 +27,7 @@ FIELDS = {
     'album_tag_inconsistency': IDENTITY, 'library_retag': IDENTITY,
     'metadata_gap': IDENTITY, 'comma_artist_split': {'artist'},
     'unknown_artist': IDENTITY | {'files'}, 'suspect_album_tag': IDENTITY | {'files'},
-    'acoustid_mismatch': IDENTITY | {'files'}, 'album_release_year_mismatch': {'release', 'files'},
+    'acoustid_mismatch': IDENTITY | {'files'}, 'album_release_year_mismatch': {'release', 'files', 'year', 'date'},
     'duplicate_tracks': {'files'}, 'single_album_redundant': {'files'},
     'path_mismatch': {'files'}, 'orphan_file': {'files'}, 'dead_file': {'files'},
     'corrupt_audio': {'files'}, 'short_preview_track': {'files'},
