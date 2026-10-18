@@ -3,7 +3,10 @@
 import json
 import re
 import unicodedata
+import time
 from collections import defaultdict
+from copy import deepcopy
+from functools import lru_cache
 from difflib import SequenceMatcher
 
 from core.metadata_service import (
@@ -465,14 +468,56 @@ class AlbumCompletenessJob(RepairJob):
         )
         return result
 
+    @staticmethod
+    def _standard_owner(db, album_ids, expected_owner):
+        """Verify every fragment's explicit owner against current database rows."""
+        if type(expected_owner) is not int or expected_owner <= 0:
+            raise ValueError('Album ownership is missing, null or invalid')
+        conn = db._get_connection()
+        try:
+            placeholders = ','.join('?' for _ in album_ids)
+            rows = conn.execute(
+                f'SELECT id, owner_profile_id FROM albums WHERE id IN ({placeholders})', album_ids
+            ).fetchall()
+            if (len(rows) != len(album_ids)
+                    or any(type(row[1]) is not int or row[1] != expected_owner for row in rows)):
+                raise ValueError('Album ownership changed or could not be verified for all fragments')
+            if not conn.execute('SELECT id FROM profiles WHERE id = ?', (expected_owner,)).fetchone():
+                raise ValueError('Album owner profile does not exist')
+        finally:
+            conn.close()
+        return expected_owner
+
+    # Worker job instances survive scheduled runs. Cache reports only, never a
+    # pending download plan; recheck local metadata and ownership on every scan.
+    _standard_complete_ttl = 7 * 24 * 60 * 60
+    _standard_complete_limit = 1024
+
     def _scan_standard(self, context, albums, settings, source):
         """Download-only mode: preview first, never invoke the file-moving fill action."""
         from core.edition_grouping import edition_group_key
         from core.metadata.standard_completion import plan_standard_album, enqueue_standard_plan
+        from core.metadata.standard_completion import get_artist_albums_for_source, get_album_for_source, get_album_tracks_for_source
 
         result = JobResult()
         seen = set()
         dry_run = settings.get('dry_run', True) is not False
+        if getattr(self, '_standard_cache_db', None) is not context.db:
+            self._standard_cache_db = context.db
+            self._standard_complete_cache = {}
+        cache = self._standard_complete_cache
+        now = time.monotonic()
+        for cache_key in list(cache):
+            if now - cache[cache_key][0] >= self._standard_complete_ttl:
+                del cache[cache_key]
+        # Reuse each artist catalogue and exact release within this run only.
+        # Failures are never remembered between runs.
+        fetch_releases = lru_cache(maxsize=128)(get_artist_albums_for_source)
+        fetch_album = lru_cache(maxsize=256)(get_album_for_source)
+        fetch_tracks = lru_cache(maxsize=256)(get_album_tracks_for_source)
+        groups = defaultdict(list)
+        for row in albums:
+            groups[(str(row['artist_id']), edition_group_key(row['album_title']), row.get('owner_profile_id'))].append(row)
         for row in albums:
             if context.check_stop() or context.wait_if_paused():
                 break
@@ -483,15 +528,38 @@ class AlbumCompletenessJob(RepairJob):
             result.scanned += 1
             # Read all same-artist edition rows, including bonus tracks; matching
             # counts only songs in the selected standard reference tracklist.
-            related = [a['album_id'] for a in albums
-                       if str(a['artist_id']) == key[0]
-                       and edition_group_key(a['album_title']) == key[1]
-                       and a.get('owner_profile_id') == key[2]]
+            related = [a['album_id'] for a in groups[key]]
             local = self._load_local_tracks(context, related)
             cfg = context.config_manager
             explicit = cfg.get('watchlist.prefer_explicit_edition', True) if cfg else True
-            plan = plan_standard_album(row, local, source, prefer_explicit=explicit)
-            if not local:
+            plan = {'artist': row['artist_name'], 'album': row['album_title'], 'source': source,
+                    'status': 'skipped', 'reason': '', 'existing_tracks': [], 'missing_tracks': [], 'proposed_downloads': []}
+            owner = None
+            try:
+                owner = self._standard_owner(context.db, related, row.get('owner_profile_id'))
+            except Exception as exc:
+                plan['reason'] = f'Ownership could not be verified: {exc}'
+            cache_key = (key, source, bool(explicit), row['album_title'], row['artist_name'])
+            # Full local rows, not counts: a new import, deletion or retag must
+            # invalidate the proof even if the observed count stays the same.
+            fingerprint = json.dumps(sorted(local, key=lambda t: str(t.get('id'))), sort_keys=True, default=str)
+            cached = cache.get(cache_key)
+            if owner is not None:
+                if cached and cached[1] == fingerprint:
+                    plan = deepcopy(cached[2])
+                    plan['verification_cached'] = True
+                else:
+                    cache.pop(cache_key, None)
+                    plan = plan_standard_album(
+                        row, local, source, prefer_explicit=explicit,
+                        fetch_releases=fetch_releases, fetch_album=fetch_album, fetch_tracks=fetch_tracks)
+                    if plan['status'] == 'ready' and not plan['missing_tracks'] and local:
+                        if len(cache) >= self._standard_complete_limit:
+                            del cache[next(iter(cache))]
+                        cache[cache_key] = (time.monotonic(), fingerprint, deepcopy(plan))
+            else:
+                cache.pop(cache_key, None)
+            if owner is not None and not local:
                 plan.update(status='skipped', reason='Local tracks unavailable; refusing to guess ownership', proposed_downloads=[])
             if plan['status'] == 'ready':
                 owned = len(plan['existing_tracks'])
@@ -503,18 +571,14 @@ class AlbumCompletenessJob(RepairJob):
             if plan['status'] == 'skipped':
                 result.skipped += 1
             elif not dry_run:
-                # Preserve per-profile routing. Do not guess when an owner lookup fails.
                 try:
-                    conn = context.db._get_connection()
-                    try:
-                        columns = {c[1] for c in conn.execute('PRAGMA table_info(albums)')}
-                        owner = conn.execute('SELECT owner_profile_id FROM albums WHERE id = ?',
-                                             (row['album_id'],)).fetchone() if 'owner_profile_id' in columns else None
-                    finally:
-                        conn.close()
-                    result.auto_fixed += enqueue_standard_plan(context.db, plan, profile_id=(owner[0] if owner and owner[0] else 1))
+                    # Metadata requests can take time. Refuse to queue if any
+                    # fragment was reassigned/deleted while resolving releases.
+                    self._standard_owner(context.db, related, owner)
+                    result.auto_fixed += enqueue_standard_plan(context.db, plan, profile_id=owner)
                 except Exception as exc:
-                    plan.update(status='skipped', reason=f'Wishlist enqueue failed: {type(exc).__name__}')
+                    plan.update(status='skipped', reason=f'Ownership verification / wishlist enqueue failed: {exc}', proposed_downloads=[])
+                    result.skipped += 1
                     result.errors += 1
             message = json.dumps(plan, ensure_ascii=False)
             logger.info('Standard album %s: %s', 'preview' if dry_run else 'completion', message)

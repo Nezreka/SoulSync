@@ -52,7 +52,14 @@ needed: this reuses the existing scheduled scan. Set a suitable interval after
 normal sync/import rather than expecting immediate completion on playlist update.
 The usual server scan makes successful imports visible in Navidrome.
 
-Requests retain album provenance and the album owner's profile. They carry no
+Requests require an explicit positive `owner_profile_id` on every related album
+row, verified against the current `profiles` table. Missing/null/invalid owners,
+missing owner columns, nonexistent profiles and conflicting ownership produce a
+clear skip in both preview and live mode. Ownership is rechecked just before
+queueing; there is no fallback to profile 1. A shared-library album with no
+explicit owner therefore needs its ownership resolved before it can qualify.
+
+Requests retain album provenance and the verified album owner's profile. They carry no
 playlist ID and never change playlist membership. Wishlist's persistent
 track/album/profile keys deduplicate repeated scans. Completion also checks
 already-requested songs by artist, title and edition group across provider IDs,
@@ -64,6 +71,27 @@ its normal verified-publish cleanup and uses its existing retry/queue handling.
 To stop new completion requests, turn the maintenance job off or turn Dry Run
 back on. Already queued wishlist requests remain governed by the wishlist's
 existing controls.
+
+## Repeated scheduled scans
+
+Only successfully verified **complete** albums are cached between runs. The cache
+is in memory on the maintenance job instance, bounded to 1,024 reports and a
+seven-day lifetime; restarting SoulSync clears it. It never stores pending
+acquisition plans and adds no production database tables or cache files.
+
+Every scan still reads the local tracks and verifies ownership. A new import,
+deleted song or changed track metadata invalidates the proof even when the track
+count is unchanged. Source, explicit preference, artist/title, ownership and
+database-instance changes also prevent reuse. New playlist albums remain eligible.
+An unchanged complete album reuses its report without provider calls; its progress
+JSON contains `verification_cached: true`. Metadata changes alone are discovered
+on expiry (within seven days) or restart. No downloads can be scheduled from a
+cached complete report because its missing-track list is empty.
+
+Within each scan, catalogue lookups are shared per artist and exact-release
+lookups are reused. Full embedded tracklists in provider album details are reused
+instead of fetched twice; partial/paginated lists require a complete lookup.
+Incomplete, failed and ambiguous plans are retried on the next run.
 
 ## Selection and safety
 
@@ -170,3 +198,11 @@ See `tests/metadata/test_standard_completion.py` and
 inventory-scan tests. The latter includes a one-song import with no external
 album ID, repeated live scans, owner routing, metadata failure and a byte-for-byte
 dry-run database comparison with no created music directory.
+
+Provider contract regression tests in
+`tests/metadata/test_standard_provider_responses.py` exercise Deezer's real
+catalogue dataclasses, full album detail builder and normalized tracklists using
+mocked HTTP/cache boundaries. They also cover normalized Spotify/iTunes/Hydrabase
+embedded/paginated lists. Deezer catalogue cache stubs are not treated as full
+album details merely because they have a release date. Missing/zero track
+positions are skipped rather than assigned guessed positions.

@@ -26,6 +26,8 @@ def _items(response):
     if isinstance(response, list):
         return response
     if isinstance(response, dict):
+        if response.get('next'):
+            return []  # a paginated fragment is not a full reference
         value = response.get('items') or response.get('tracks') or []
         return value.get('items', []) if isinstance(value, dict) else value
     return []
@@ -68,7 +70,8 @@ def plan_standard_album(row, local_tracks, source, *, prefer_explicit=True,
             meta = fetch_album(source, str(aid))
             if not meta or _norm(_title(meta)) != _norm(name):
                 return skip('Release metadata unavailable or conflicting')
-            if str(meta.get('id') or aid) != str(aid) or meta.get('album_type', 'album') != 'album':
+            if (str(meta.get('id') or '') != str(aid) or meta.get('album_type', 'album') != 'album'
+                    or meta.get('_source', source) != source):
                 return skip('Release identity/type conflicts with catalogue')
             artists = meta.get('artists') or []
             names = [_get(a, 'name', a if isinstance(a, str) else '') for a in artists]
@@ -79,10 +82,18 @@ def plan_standard_album(row, local_tracks, source, *, prefer_explicit=True,
                 names.append(artist)
             if _norm(row['artist_name']) not in {_norm(n) for n in names}:
                 return skip('Release artist cannot be verified')
-            tracks = _items(fetch_tracks(source, str(aid)))
             expected = meta.get('total_tracks') or meta.get('track_count') or meta.get('nb_tracks')
+            # Deezer/iTunes/Hydrabase details already carry a normalized tracklist.
+            # Spotify may embed only the first page, so require the full count.
+            tracks = _items(meta.get('tracks'))
+            if not expected or len(tracks) != int(expected):
+                tracks = _items(fetch_tracks(source, str(aid)))
             if not expected or int(expected) != len(tracks) or not tracks:
                 return skip('Full expected tracklist unavailable')
+            if any(t.get('_source', source) != source for t in tracks):
+                return skip('Tracklist source conflicts with release source')
+            if len({str(t.get('id') or '') for t in tracks}) != len(tracks):
+                return skip('Duplicate source track IDs in expected tracklist')
             slots = [(t.get('disc_number', 1), t.get('track_number')) for t in tracks]
             if (len(set(slots)) != len(tracks) or any(not t.get('id') or not _title(t) or not t.get('track_number') for t in tracks)):
                 return skip('Incomplete or ambiguous track metadata')
@@ -137,8 +148,10 @@ def plan_standard_album(row, local_tracks, source, *, prefer_explicit=True,
         return skip(f'Metadata lookup failed: {type(exc).__name__}')
 
 
-def enqueue_standard_plan(db, plan, *, profile_id=1):
+def enqueue_standard_plan(db, plan, *, profile_id):
     """Use the wishlist's persistent deduplication, download priorities and importer."""
+    if type(profile_id) is not int or profile_id <= 0:
+        raise ValueError('Standard completion requires an explicit valid owner profile ID')
     if plan['status'] != 'ready':
         return 0
     created = 0
