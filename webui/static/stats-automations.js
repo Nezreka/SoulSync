@@ -2943,8 +2943,34 @@ async function loadAutomations() {
         const systemAutos = automations.filter(a => a.is_system);
         const userAutos = automations.filter(a => !a.is_system);
 
-        if (systemAutos.length) {
-            list.appendChild(_buildAutomationSection('auto-section-system', 'System', systemAutos, true, { isProtected: true }));
+        const isMaint = (a) => {
+            if (a.owned_by === 'system:repair_job') return true;
+            const maintActions = [
+                'run_repair_job', 'video_run_repair_job',
+                'clean_search_history', 'video_clean_search_history',
+                'clean_completed_downloads', 'video_clean_completed_downloads',
+                'backup_database', 'video_backup_database',
+                'full_cleanup', 'video_full_cleanup',
+                'library_cleanup', 'deep_scan_library',
+                'video_deep_scan_movies', 'video_deep_scan_tv',
+                'refresh_beatport_cache',
+                'seeding_sweep', 'video_seeding_sweep',
+                'import_lastfm_listening', 'import_listenbrainz_listening',
+                'audiobook_purge_recycle', 'video_clean_youtube_episodes',
+                'video_clean_plex_images', 'video_purge_recycle_bin',
+                'video_reenrich_stale'
+            ];
+            return maintActions.includes(a.action_type);
+        };
+
+        const opAutos = systemAutos.filter(a => !isMaint(a));
+        const maintAutos = systemAutos.filter(a => isMaint(a));
+
+        if (opAutos.length) {
+            list.appendChild(_buildAutomationSection('auto-section-operations', 'Operations', opAutos, true, { isProtected: true }));
+        }
+        if (maintAutos.length) {
+            list.appendChild(_buildAutomationSection('auto-section-maintenance', 'Maintenance', maintAutos, true, { isProtected: true }));
         }
 
         // Automation Hub section
