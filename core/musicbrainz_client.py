@@ -287,10 +287,20 @@ class MusicBrainzClient:
         logger.info(f"MusicBrainz client initialized with user agent: {self.user_agent}")
 
     def _get(self, path: str, *, params: Optional[Dict[str, Any]] = None) -> requests.Response:
+        from core.library.reconciliation_catalogue import current, stage
+        session = current.get()
+        if session is not None:
+            with stage('catalogue_inclusive'):
+                settings = _server_settings()
+                return session.request(settings[0], path, params,
+                    lambda request_path, **kw: self._get_network(request_path, _settings=settings, **kw))
+        return self._get_network(path, params=params)
+
+    def _get_network(self, path: str, *, params: Optional[Dict[str, Any]] = None, _settings=None) -> requests.Response:
         """GET a MusicBrainz endpoint with shared pacing and transient retries."""
         # Resolve at request boundaries so every existing client sees UI saves.
         # Keep this pair local: an in-flight retry stays on its original server.
-        base_url, interval = _server_settings()
+        base_url, interval = _settings or _server_settings()
         url = f"{base_url}{path}"
         origin = urlsplit(base_url)
         attempts = self.max_retries + 1
@@ -302,14 +312,17 @@ class MusicBrainzClient:
                 request_params = params
                 for redirect_count in range(MAX_REDIRECTS + 1):
                     with _adaptive_inflight if interval == 0 else nullcontext():
-                        _wait_for_musicbrainz_slot(interval, base_url)
+                        from core.library.reconciliation_catalogue import stage
+                        with stage('rate_limit_wait'):
+                            _wait_for_musicbrainz_slot(interval, base_url)
                         started = time.monotonic()
-                        response = self.session.get(
-                            request_url,
-                            params=request_params,
-                            timeout=(self.connect_timeout, self.read_timeout),
-                            allow_redirects=False,
-                        )
+                        with stage('network'):
+                            response = self.session.get(
+                                request_url,
+                                params=request_params,
+                                timeout=(self.connect_timeout, self.read_timeout),
+                                allow_redirects=False,
+                            )
                         latency = time.monotonic() - started
                     if not 300 <= response.status_code < 400:
                         break
@@ -363,7 +376,9 @@ class MusicBrainzClient:
                     attempts,
                     exc,
                 )
-                time.sleep(backoff)
+                from core.library.reconciliation_catalogue import stage
+                with stage('retry_backoff'):
+                    time.sleep(backoff)
 
         raise last_exc or RuntimeError('MusicBrainz request failed')
     

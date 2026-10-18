@@ -31,6 +31,17 @@ class CacheEvictorJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
 
+        try:
+            from core.library.reconciliation_catalogue import ensure_schema, evict, connection
+            with connection(context.db) as conn:
+                ensure_schema(conn)
+                removed = evict(conn)
+                result.auto_fixed += removed
+                result.scanned += removed
+        except Exception as exc:
+            logger.warning('Catalogue cache maintenance failed: %s', exc)
+            result.errors += 1
+
         cache = context.metadata_cache
         if not cache:
             logger.debug("No metadata cache available — skipping")

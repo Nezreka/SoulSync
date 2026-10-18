@@ -218,6 +218,7 @@ class JobResult:
     # stop (a rate limit, no provider). the run is then recorded as 'stopped'
     # with this as the reason, not 'completed' (#1289)
     stopped_early: str = ''
+    metrics: dict = field(default_factory=dict)
 
 
 @dataclass

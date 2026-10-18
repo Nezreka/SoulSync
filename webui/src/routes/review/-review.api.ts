@@ -434,10 +434,16 @@ export async function startMissingTrackRequests(
   );
 }
 
-export async function reanalyzeReviewCase(caseId: string): Promise<void> {
+export async function reanalyzeReviewCase(caseId: string, refreshCatalogue = false): Promise<void> {
   await readJson<{ queued: boolean }>(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/reanalyze`, {
       method: 'POST',
+      ...(refreshCatalogue
+        ? {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_catalogue: true }),
+          }
+        : {}),
     }),
   );
 }

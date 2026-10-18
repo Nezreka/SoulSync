@@ -2395,3 +2395,51 @@ def test_targeted_reanalysis_follows_organized_album_and_retires_old_case(tmp_pa
     assert current['folder'] == str(new)
     assert current['status'] != 'completed'
     assert worker.get_review_cases()['total'] == 1
+
+
+def test_failed_catalogue_reanalysis_preserves_plan_and_findings(tmp_path, monkeypatch):
+    import requests
+    import core.repair_jobs.library_reconciliation as module
+    from core.library.reconciliation_catalogue import current
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '01 - Laid to Rest.flac'
+    _minimal_flac(path, {'title': 'Laid to Rest', 'artist': 'Lamb of God',
+                         'album': 'Ashes of the Wake', 'tracknumber': '1'})
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'laid', 'title': 'Laid to Rest',
+                                   'artist': 'Lamb of God', 'score': .99}})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *args, **kw: [
+        {'id': 'laid', 'name': 'Laid to Rest', 'track_number': 1,
+         'duration_ms': 200000, 'artists': [{'name': 'Lamb of God'}]}])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *args, **kw: {'name': 'Ashes of the Wake'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    first = LibraryReconciliationJob().scan(context)
+    assert not first.stopped_early
+
+    def state():
+        with db._get_connection() as conn:
+            return (conn.execute('SELECT case_id,plan_json FROM reconcile_album_plans').fetchall(),
+                    conn.execute('SELECT id,status,details_json FROM repair_findings').fetchall())
+
+    before = state()
+    assert before[0]
+
+    def failed(*args, **kwargs):
+        def transport(*args, **kwargs):
+            raise requests.Timeout('temporary provider outage')
+        try:
+            current.get().request('http://mirror', '/release/release', {}, transport)
+        except requests.Timeout:
+            return None  # The existing provider adapter's failure contract.
+
+    monkeypatch.setattr(module, 'get_album_for_source', failed)
+    result = LibraryReconciliationJob().scan(context, refresh_catalogue=True)
+    assert result.stopped_early and result.metrics['catalogue_incomplete']
+    assert state() == before
+    assert result.findings_created == 0

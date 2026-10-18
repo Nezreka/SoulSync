@@ -973,6 +973,19 @@ describe('library reconciliation review queue', () => {
         fetchMock.mock.calls.some(([url]) => String(url).endsWith('/folder%3A1%3Aloose/reanalyze')),
       ).toBe(true),
     );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Refresh catalogue evidence' })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalogue evidence' }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, options]) =>
+            String(url).endsWith('/folder%3A1%3Aloose/reanalyze') &&
+            options?.body === JSON.stringify({ refresh_catalogue: true }),
+        ),
+      ).toBe(true),
+    );
   });
 
   it('presents competing copies as one explicit keeper decision', async () => {

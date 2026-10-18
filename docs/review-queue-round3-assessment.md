@@ -250,7 +250,7 @@ test from reaching application code. No frontend source changed in this round.
   pacing, matching and persistence. It is not valid to assign that remainder to
   any single stage without the proposed instrumentation.
 
-## Proposed performance implementation plan — awaiting review
+## Performance implementation plan — milestones 1–3 approved
 
 Performance is part of feature readiness. Implement the first three milestones
 as a focused performance series before proposing the feature upstream, with each
@@ -423,3 +423,31 @@ entire album lifecycle.
 - Review decisions requested: approve milestones 1–3 as the next focused pass;
   confirm the proposed TTL/storage defaults and force-refresh control; decide
   whether milestone 4 is in scope only after the measured results are available.
+
+
+## Performance implementation: milestones 1–3
+
+Implemented run-scoped catalogue timings/counters, one rich MusicBrainz release
+response shared by analysis consumers, and a persistent response cache keyed by
+server, entity and complete request parameters. Response storage uses 7-day
+entity TTLs, 24-hour listing/search TTLs and 1-hour confirmed negatives, with
+25,000-row / 256 MiB capacity limits and a 2 MiB individual response ceiling.
+Maintenance is amortized during writes and enforced when the scan finishes.
+
+Ordinary reanalysis reuses valid evidence; “Refresh catalogue evidence” bypasses
+persistent entries only for requests made by that album. The setting
+`repair.jobs.library_reconciliation.settings.catalogue_cache_enabled=false`
+disables catalogue response reuse for diagnosis. Other providers and apply-time
+guards retain their existing behavior. Whole-album matching reuse (#4) is deferred.
+
+Album finding/plan publication is staged until its catalogue reads finish.
+Transient or malformed responses do not become cached negatives, and an
+incomplete catalogue read retains that album's prior plan and findings. Other
+albums may complete; global stale-result retirement is withheld for an incomplete
+scan. Metrics are exposed in run history and targeted refresh status, including
+partial runs, and distinguish inclusive catalogue time from nested network,
+pacing and retry timers. Cache hits do not write SQLite access counters per hit.
+
+Initial verification: 995 backend tests, 670 Review/Tools tests, 110 focused
+follow-up tests, frontend check with zero errors (551 existing warnings), and
+production build passed. Deployed cold/warm measurements follow after rollout.

@@ -202,7 +202,13 @@ def repair_review_queue_reanalyze(case_id):
     if worker is None:
         return jsonify({'error': 'Repair worker not initialized'}), 503
     try:
-        queued = worker.reanalyze_review_case(case_id)
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict):
+            return jsonify({'error': 'Expected a JSON object'}), 400
+        refresh = body.get('refresh_catalogue', False)
+        if not isinstance(refresh, bool):
+            return jsonify({'error': 'refresh_catalogue must be a boolean'}), 400
+        queued = worker.reanalyze_review_case(case_id, **({'refresh_catalogue': True} if refresh else {}))
         return jsonify({'queued': queued}), 200 if queued else 404
     except Exception as exc:
         logger.error('Error reanalyzing review case: %s', exc, exc_info=True)

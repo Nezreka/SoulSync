@@ -1134,6 +1134,9 @@ class RepairWorker:
             run_status = 'failed'
             run_error = f"{type(e).__name__}: {e}"[:500]
 
+        if getattr(context, 'reconciliation_metrics', None):
+            result.metrics = context.reconciliation_metrics
+
         # A user-requested stop is not a failure — record it as its own state
         # so history can say "you stopped this" instead of implying a crash.
         if run_status == 'completed' and self._cancel_current_job.is_set():
@@ -1799,10 +1802,12 @@ class RepairWorker:
         return case
 
     def _schedule_review_refresh(self, case_id: str, folder: str,
-                                 snapshot: dict, *, scope: str = 'album') -> bool:
+                                 snapshot: dict, *, scope: str = 'album', refresh_catalogue: bool = False) -> bool:
         if not hasattr(self, '_review_refresh_snapshots'):
             self._review_refresh_snapshots = {}
         self._review_refresh_snapshots[case_id] = snapshot
+        if refresh_catalogue:
+            return self._schedule_album_refresh(case_id, folder, scope=scope, refresh_catalogue=True)
         return (self._schedule_album_refresh(case_id, folder) if scope == 'album' else
                 self._schedule_album_refresh(case_id, folder, scope=scope))
 
@@ -1821,13 +1826,14 @@ class RepairWorker:
                 if case:
                     self._schedule_review_refresh(key, folder, case, scope='discovery')
 
-    def reanalyze_review_case(self, case_id: str, *, scope: str = 'discovery') -> bool:
+    def reanalyze_review_case(self, case_id: str, *, scope: str = 'discovery', refresh_catalogue: bool = False) -> bool:
         """Refresh one current album case without queuing a full library job."""
         case = self.get_review_case(case_id)
         return bool(case and self._schedule_review_refresh(
-            case.get('case_id') or case_id, case.get('folder') or '', case, scope=scope))
+            case.get('case_id') or case_id, case.get('folder') or '', case, scope=scope,
+            **({'refresh_catalogue': True} if refresh_catalogue else {})))
 
-    def _schedule_album_refresh(self, case_id: str, folder: str, *, scope: str = 'album') -> bool:
+    def _schedule_album_refresh(self, case_id: str, folder: str, *, scope: str = 'album', refresh_catalogue: bool = False) -> bool:
         """Replan only the changed logical album after a review action."""
         from core.library.reconciliation_inventory import ScanScope
         scope = ScanScope(scope).value
@@ -1838,18 +1844,21 @@ class RepairWorker:
             current = self._album_refreshes.get(case_id) or {}
             if current.get('state') == 'running':
                 current['again'] = True
+                current['refresh_catalogue'] = current.get('refresh_catalogue', False) or refresh_catalogue
                 ranks = {'album': 0, 'discovery': 1, 'library': 2}
                 current['scope'] = max((scope, current.get('scope', 'album')), key=ranks.get)
                 if snapshot:
                     current['snapshot'] = snapshot
                 return True
             self._album_refreshes[case_id] = {
-                'state': 'running', 'again': False, 'snapshot': snapshot, 'scope': scope}
+                'state': 'running', 'again': False, 'snapshot': snapshot, 'scope': scope,
+                'refresh_catalogue': refresh_catalogue}
 
         def refresh_one_album():
             from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
             while True:
                 error = ''
+                metrics = {}
                 try:
                     transfer = self.transfer_folder
                     if self._config_manager:
@@ -1866,10 +1875,13 @@ class RepairWorker:
                     )
                     with self._album_refresh_lock:
                         scan_scope = self._album_refreshes[case_id].get('scope', 'album')
+                        force_catalogue = self._album_refreshes[case_id].get('refresh_catalogue', False)
                     with self._reconciliation_scan_lock:
                         outcome = LibraryReconciliationJob().scan(
-                            context, target_folder=folder, scope=scan_scope)
+                            context, target_folder=folder, scope=scan_scope,
+                            **({'refresh_catalogue': True} if force_catalogue else {}))
                     error = outcome.stopped_early or ''
+                    metrics = getattr(outcome, 'metrics', {})
                 except Exception as exc:
                     logger.error('Album reconciliation failed for %s: %s',
                                  case_id, exc, exc_info=True)
@@ -1880,11 +1892,12 @@ class RepairWorker:
                         self._album_refreshes[case_id] = {
                             'state': 'running', 'again': False,
                             'snapshot': state.get('snapshot'),
-                            'scope': state.get('scope', 'album')}
+                            'scope': state.get('scope', 'album'),
+                            'refresh_catalogue': state.get('refresh_catalogue', False)}
                         continue
                     self._album_refreshes[case_id] = {
                         'state': 'error' if error else 'complete',
-                        'error': error,
+                        'error': error, 'metrics': metrics,
                     }
                 break
 
@@ -8184,6 +8197,11 @@ class RepairWorker:
                     WHERE id = ?
                 """, (duration, result.scanned, result.findings_created,
                       result.auto_fixed, result.errors, status, run_id))
+            if getattr(result, 'metrics', None):
+                from core.library.reconciliation_catalogue import ensure_schema
+                ensure_schema(conn)
+                conn.execute('INSERT OR REPLACE INTO reconcile_scan_metrics VALUES (?,?)',
+                             (run_id, json.dumps(result.metrics)))
             conn.commit()
         except Exception as e:
             logger.debug("Error recording job finish: %s", e)
@@ -8291,13 +8309,20 @@ class RepairWorker:
                     LIMIT ?
                 """, (limit,))
 
+            rows = cursor.fetchall()
+            metrics = {}
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_scan_metrics'").fetchone():
+                metrics = {key: json.loads(raw) for key, raw in conn.execute(
+                    'SELECT run_id,metrics_json FROM reconcile_scan_metrics WHERE run_id IN (SELECT value FROM json_each(?))',
+                    (json.dumps([row[0] for row in rows]),))}
             runs = []
-            for row in cursor.fetchall():
+            for row in rows:
                 # Get display name for this job
                 job = self._jobs.get(row[1])
                 display_name = job.display_name if job else row[1]
                 runs.append({
                     'id': row[0],
+                    'metrics': metrics.get(row[0], {}),
                     'job_id': row[1],
                     'display_name': display_name,
                     'started_at': row[2],

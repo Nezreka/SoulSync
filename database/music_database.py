@@ -8983,6 +8983,8 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_review_job_case "
                 "ON repair_findings (job_id, status, review_case_key)")
+            from core.library.reconciliation_catalogue import ensure_schema as ensure_catalogue_schema
+            ensure_catalogue_schema(cursor.connection)
             from core.library.reconciliation_store import ensure_schema
             ensure_schema(cursor.connection)
         except Exception as e:

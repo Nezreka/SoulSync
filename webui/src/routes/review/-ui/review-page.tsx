@@ -898,7 +898,7 @@ export function ReviewPage() {
     reviewCase?.album_id,
   ]);
 
-  const reanalyzeAlbum = async () => {
+  const reanalyzeAlbum = async (refreshCatalogue = false) => {
     if (!reviewCase) return;
     const requestedId = reviewCase.case_id;
     const requestVersion = ++caseRequestVersion.current;
@@ -906,7 +906,7 @@ export function ReviewPage() {
     setNotice('');
     setReanalyzingCase(requestedId);
     try {
-      await reanalyzeReviewCase(requestedId);
+      await reanalyzeReviewCase(requestedId, refreshCatalogue);
       const updated = await fetchReviewCase(requestedId);
       if (
         selectedCaseRef.current === requestedId &&
@@ -1578,6 +1578,14 @@ export function ReviewPage() {
                     onClick={() => void reanalyzeAlbum()}
                   >
                     Reanalyze album
+                  </button>
+                  <button
+                    type="button"
+                    disabled={mutationBusy}
+                    title="Fetch fresh catalogue evidence and reanalyze this album"
+                    onClick={() => void reanalyzeAlbum(true)}
+                  >
+                    Refresh catalogue evidence
                   </button>
                   <button
                     type="button"
