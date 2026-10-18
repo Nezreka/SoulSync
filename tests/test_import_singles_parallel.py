@@ -172,6 +172,80 @@ def test_worker_returns_ok_with_resolved_title(tmp_path) -> None:
     assert payload == "Resolved Title"
 
 
+def test_worker_from_own_tags_imports_tags_without_any_catalogue_lookup(tmp_path) -> None:
+    """#1772 end to end through the real worker and the real resolver: a
+    "no track picked" file must import under its own tags even though every
+    catalogue client would happily return an unrelated track, and no client
+    may even be asked. Only post-processing and the staging root are stubbed.
+    """
+    import web_server  # noqa: F401 - wires api.import_routes' deps
+    from api.import_routes import _process_single_import_file
+
+    audio_file = tmp_path / "mix.mp3"
+    audio_file.write_bytes(b"fake")
+
+    class WrongClient:
+        def __init__(self):
+            self.searches = []
+
+        def search_tracks(self, query, limit=1, **kwargs):
+            self.searches.append(query)
+            from types import SimpleNamespace
+            return [SimpleNamespace(
+                id="wrong-1", name="Whiskey Glasses",
+                artists=["Morgan Wallen"], album="Dangerous",
+                duration_ms=197_000, track_number=1, disc_number=1,
+            )]
+
+        def get_track_details(self, track_id):
+            return {"id": track_id, "name": "Whiskey Glasses",
+                    "artists": [{"name": "Morgan Wallen", "id": "mw-1"}],
+                    "album": {"name": "Dangerous"}}
+
+        def get_artist(self, artist_id):
+            return {"id": artist_id, "genres": ["country"]}
+
+    wrong_client = WrongClient()
+    client_requests = []
+
+    def recording_client_for_source(source, **kwargs):
+        client_requests.append(source)
+        return wrong_client
+
+    file_info = {
+        'full_path': str(audio_file),
+        'filename': 'mix.mp3',
+        'title': 'Live Mix',
+        'artist': 'Dj StarSunglasses',
+        'album': 'Live Mix',
+        'duration_ms': 2_880_000,
+        'from_own_tags': True,
+    }
+
+    captured = {}
+    with patch("core.imports.routes._get_staging_path", return_value=str(tmp_path)):
+        with patch(
+            "core.metadata.registry.get_client_for_source",
+            side_effect=recording_client_for_source,
+        ):
+            with patch(
+                "api.import_routes._post_process_matched_download",
+                side_effect=lambda key, context, path: captured.update(context=context),
+            ):
+                outcome, payload = _process_single_import_file(file_info)
+
+    assert outcome == "ok"
+    assert payload == "Live Mix"
+    assert client_requests == []
+    assert wrong_client.searches == []
+    context = captured["context"]
+    assert context["track_info"]["name"] == "Live Mix"
+    assert context["track_info"]["id"] == ""
+    assert context["track_info"]["duration_ms"] == 2_880_000
+    assert context["artist"]["name"] == "Dj StarSunglasses"
+    assert context["_manual_metadata"] is True
+
+
 # ---------------------------------------------------------------------------
 # Executor wiring
 # ---------------------------------------------------------------------------

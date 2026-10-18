@@ -1467,8 +1467,8 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
     if runtime.post_process_matched_download is None:
         return ("error", "Import post-processing not available")
 
-    title = file_info.get("title", "")
-    artist = file_info.get("artist", "")
+    title = file_info.get("title") if isinstance(file_info.get("title"), str) else ""
+    artist = file_info.get("artist") if isinstance(file_info.get("artist"), str) else ""
     manual_match = file_info.get("manual_match")
     if manual_match is not None and not isinstance(manual_match, dict):
         manual_match = None
@@ -1480,6 +1480,16 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
         manual_match_id = str(manual_match.get("id") or "").strip()
         if not manual_match_id or not manual_match_source:
             return ("error", f"Malformed manual match for file: {file_info.get('filename', '?')}")
+
+    # "No track picked: imported from its own tags" (and the inbox's bulk
+    # "from tags" import): the user declined a catalogue match, so the file
+    # must NOT be run through another automatic lookup — that lookup could
+    # rematch it to an unrelated track (#1772). An explicit manual match is
+    # more specific and wins over the flag if both somehow arrive. Only a
+    # real JSON true sets the flag — the string "false" must not turn it on
+    # for raw API callers. (An empty manual_match dict counts as no match
+    # picked, same as it did before this flag existed.)
+    from_own_tags = file_info.get("from_own_tags") is True and not manual_match
 
     if not title and not manual_match:
         parsed = runtime.parse_filename_metadata(file_info.get("filename", ""))
@@ -1493,6 +1503,13 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             artist,
             override_id=manual_match_id,
             override_source=manual_match_source,
+            from_own_tags=from_own_tags,
+            album=file_info.get("album") or "",
+            # raw on purpose: the resolver's tag coercion is the one place
+            # that decides what an unusable number becomes
+            track_number=file_info.get("track_number"),
+            disc_number=file_info.get("disc_number"),
+            duration_ms=file_info.get("duration_ms"),
         )
         context = runtime.normalize_import_context(resolved["context"])
         context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
