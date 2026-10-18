@@ -274,6 +274,17 @@ def record_grab(db: Any, *, asin: str, ref: str, client_ref: str, release: Dict[
             book=book,
         )
 
+    if ref:
+        from core.audiobook_events import announce, first_author, series_title
+
+        book_info = book or {}
+        announce("audiobook_grab_started",
+                 title=book_info.get("title") or title or release.get("title") or "",
+                 author=first_author(book_info, author),
+                 series=series_title(book_info),
+                 protocol=release.get("protocol") or "",
+                 release_title=release.get("title") or "")
+
     if asin:
         from core.audiobook_database import STATUS_GRABBED
         # Only moves a row that already exists: grabbing something that was

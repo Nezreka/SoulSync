@@ -265,3 +265,7 @@ def scan(root: Optional[str] = None, db: Any = None, progress=None,
             report()
         finally:
             _SCAN_LOCK.release()
+            from core.audiobook_events import announce
+            announce("audiobook_library_scan_completed",
+                     **{k: summary.get(k) for k in ("status", "checked", "adopted", "updated",
+                                                    "moved", "removed", "errors", "duration")})

@@ -228,6 +228,43 @@ def test_a_completed_download_reaches_the_library(db):
     assert db.is_owned("B1") is True
 
 
+def test_a_completed_download_announces_the_import(db):
+    # "Import Complete" automations fired for music only; a finished book
+    # reached the library silently.
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1",
+                       book={"asin": "B1", "title": "The Final Empire",
+                             "author_names": ["Brandon Sanderson"]})
+    events = []
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("completed")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.audiobook_download_monitor._check_complete", side_effect=_whole_book), \
+         patch("core.audiobook_download_monitor._organize",
+               return_value={"ok": True, "path": "/library/Sanderson/Book"}), \
+         patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
+        tick(db=db)
+
+    assert events == [("import_completed", {
+        "track_count": "1", "album_name": "The Final Empire", "artist": "Brandon Sanderson",
+    })]
+
+
+def test_a_failed_download_announces_no_completed_import(db):
+    _wishlisted(db)
+    db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
+    events = []
+
+    with patch("core.audiobook_download_monitor._get_status",
+               return_value=_status("error", error="dead torrent")), \
+         patch("core.audiobook_download_monitor._resolve_path", side_effect=_identity_path), \
+         patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
+        tick(db=db)
+
+    assert "import_completed" not in [event for event, _ in events]
+
+
 def test_a_failed_download_marks_the_wishlist_row(db):
     # So the wishlist retries it later instead of believing it was handled.
     _wishlisted(db)
