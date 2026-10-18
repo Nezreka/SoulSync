@@ -262,6 +262,59 @@ def test_get_single_track_import_context_from_own_tags_tolerates_garbage_tag_num
     assert result["context"]["track_info"]["duration_ms"] == 0
 
 
+def test_get_single_track_import_context_from_own_tags_honours_tag_string_conventions(monkeypatch):
+    """Tag strings follow the staging reader's conventions: "3/12" is track
+    3, a float-string duration keeps its whole part, and non-positive
+    positions are not real, so they take the defaults."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: None)
+
+    result = resolution.get_single_track_import_context(
+        "Song",
+        "Artist",
+        from_own_tags=True,
+        track_number="3/12",
+        disc_number=-2,
+        duration_ms="2880000.0",
+    )
+
+    assert result["context"]["track_info"]["track_number"] == 3
+    assert result["context"]["track_info"]["disc_number"] == 1
+    assert result["context"]["track_info"]["duration_ms"] == 2_880_000
+
+
+def test_get_single_track_import_context_from_own_tags_failed_override_never_searches(monkeypatch):
+    """The flag is an absolute never-search promise: even when an override
+    id was supplied and its lookup fails, the resolver lands on the own-tags
+    context instead of falling through to the catalogue search loop."""
+    wrong_client = FakeClient(
+        search_results=[_track_result(track_id="wrong-1", name="Whiskey Glasses", artist="Morgan Wallen")],
+        details={},
+    )
+
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: wrong_client,
+    )
+
+    result = resolution.get_single_track_import_context(
+        "Live Mix",
+        "Dj StarSunglasses",
+        override_id="missing-track",
+        override_source="deezer",
+        from_own_tags=True,
+    )
+
+    assert result["source"] is None
+    assert result["context"]["track_info"]["name"] == "Live Mix"
+    assert result["context"]["_manual_metadata"] is True
+    assert [c for c in wrong_client.calls if c[0] == "search_tracks"] == []
+
+
 def test_get_single_track_import_context_from_own_tags_yields_to_override(monkeypatch):
     spotify_client = FakeClient(
         details={"override-track-1": _track_details("spotify", track_id="override-track-1", artist_name="Override Artist", artist_id="spotify-artist-1")},

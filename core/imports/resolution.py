@@ -318,11 +318,25 @@ def _coerce_tag_int(value: Any, default: int) -> int:
     """Tag fields arrive as whatever the file (or the request JSON) carried —
     strings, floats, None. Anything unusable becomes the default instead of
     raising out of the import (int(float('inf')) is an OverflowError, not a
-    ValueError, so it needs naming)."""
+    ValueError, so it needs naming). Tag conventions are honoured: a track
+    position written "3/12" means track 3 (the staging reader splits the
+    same way), a float-string duration keeps its whole part, and zero or
+    negative positions/distances are not real, so they take the default."""
+    if isinstance(value, str):
+        value = value.strip().split('/', 1)[0].strip()
+        if not value:
+            return default
+    result: Optional[int] = None
     try:
-        return int(value or default)
+        result = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
+        try:
+            result = int(float(value))  # type: ignore[arg-type]
+        except (TypeError, ValueError, OverflowError):
+            return default
+    if result is None or result <= 0:
         return default
+    return result
 
 
 def _build_single_import_fallback_context(
@@ -398,8 +412,9 @@ def _build_single_import_fallback_context(
         # The user explicitly chose the file's own tags over every catalogue
         # match. That is hand-tagged metadata (core/metadata/manual.py):
         # automatic correction — source-id lookups, the AcoustID gate, the
-        # preferred-art lookup — stands down, so the file keeps its own
-        # artist, title and embedded cover instead of a studio release's.
+        # preferred-art lookup — stands down, so nothing replaces the file's
+        # own artist and title with a studio release's, and no fetched cover
+        # is written over the file's embedded art.
         # Deliberate consequence, same as a hand-typed download: the import
         # pipeline records a manual lock for the file, which also locks its
         # album row against enrichment until the user unlocks the album
@@ -479,6 +494,21 @@ def get_single_track_import_context(
                     return payload
             except Exception as exc:
                 logger.debug("Override track lookup failed on %s for %s: %s", chosen_source, override_id, exc)
+
+    if from_own_tags:
+        # The override was asked for but did not resolve. The flag is an
+        # absolute "never search" promise, so a failed override lands on the
+        # own-tags context too instead of falling through to the search loop.
+        return _build_single_import_fallback_context(
+            title,
+            artist,
+            source_priority,
+            album=album,
+            track_number=track_number,
+            disc_number=disc_number,
+            duration_ms=duration_ms,
+            manual_metadata=True,
+        )
 
     for source in source_priority:
         client = metadata_registry.get_client_for_source(source)

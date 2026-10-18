@@ -633,10 +633,14 @@ def test_process_single_import_file_from_own_tags_skips_catalogue_match(tmp_path
             },
         }
 
+    from core.imports.context import normalize_import_context as _real_normalize
+
     runtime = ImportRouteRuntime(
         get_allowed_import_roots=lambda: [str(tmp_path)],
         get_single_track_import_context=fake_context,
-        normalize_import_context=lambda context: context,
+        # the REAL normalizer, not an identity stub: this pins that the
+        # manual flag survives the normalization the production runtime runs
+        normalize_import_context=_real_normalize,
         get_import_context_artist=lambda context: context["artist"],
         get_import_track_info=lambda context: context["track_info"],
         post_process_matched_download=lambda key, context, path: post_calls.append((key, context, path)),
