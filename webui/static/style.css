@@ -20016,16 +20016,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
 }
 
-.youtube-discovery-modal .sync-progress-display {
-    color: rgb(var(--accent-light-rgb));
-    font-size: 14px;
-    font-weight: 500;
-    padding: 8px 12px;
-    background: rgba(var(--accent-rgb), 0.1);
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-}
-
 /* Modal state management */
 .modal-overlay.hidden {
     display: none !important;
