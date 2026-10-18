@@ -235,6 +235,7 @@ export function FindingsSurface({
    * follow the server, not the ask.
    */
   const [serverPage, setServerPage] = useState(0);
+  const [conflictingReview, setConflictingReview] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [counts, setCounts] = useState<Awaited<ReturnType<typeof fetchFindingCounts>> | null>(null);
   const [cacheHealth, setCacheHealth] = useState<CacheHealthStats | null>(null);
@@ -590,6 +591,7 @@ export function FindingsSurface({
           }
           result = await fixFinding(finding.id, 'delete_confirmed');
         }
+        setConflictingReview(result.review_conflict ? result.review_case_key || null : null);
         toast(
           result.success ? result.message || 'Fixed successfully' : result.error || 'Fix failed',
           result.success ? 'success' : 'error',
@@ -1319,6 +1321,14 @@ export function FindingsSurface({
         onPickType={pickType}
       />
 
+      {conflictingReview && (
+        <div className="repair-bulk-bar">
+          This action conflicts with an accepted album decision.{' '}
+          <a href={`/review?case=${encodeURIComponent(conflictingReview)}`}>
+            Review the album plan →
+          </a>
+        </div>
+      )}
       {bulkRunBar}
 
       {cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (

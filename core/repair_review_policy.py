@@ -95,13 +95,24 @@ def supported_version_metadata(details: dict) -> bool:
         return False
     if details.get('audio_conflict') or details.get('version_conflict'):
         return False
+    audio = details.get('acoustid') or {}
+    if audio.get('status') not in (None, 'ok'):
+        return False
     expected = details.get('recording_mbid')
     tags = details.get('current_tags') or {}
     local, remote = tags.get('duration_ms'), details.get('expected_duration_ms')
     if not expected or not local or not remote or abs(float(local) - float(remote)) > 3000:
         return False
+    from core.matching.audio_verification import _detect_title_version
+    expected_version = _detect_title_version(details.get('expected_title') or '')
+    candidates = audio.get('recordings') or []
+    for row in candidates:
+        version = _detect_title_version(row.get('title') or '')
+        if (float(row.get('score') or 0) >= .9 and version != 'original'
+                and expected_version != 'original' and version != expected_version):
+            return False
     return any(row.get('mbid') == expected and float(row.get('score') or 0) >= .9
-               for row in (details.get('acoustid') or {}).get('recordings') or [])
+               for row in candidates)
 
 
 def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tuple[str, str]:
@@ -137,6 +148,9 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'blocked', 'The selected release must be resolved first'
     if details.get('plan_approved') or details.get('plan_keep'):
         return 'ready', 'Saved in the album plan; no file changes applied yet'
+    if ((details.get('acoustid') or {}).get('status') == 'fingerprint_error'
+            and set(changes) - {'library_album_title'}):
+        return 'manual', 'Audio could not be decoded; review before changing this file'
     if (details.get('title_difference_kind') in ('material', 'version') and
             _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
         return 'manual', 'The title may identify a different song or recording version'
@@ -162,13 +176,13 @@ def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str
         params.extend([needle] * 3)
     if category:
         import json
-        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
+        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         categories = {category, 'pending_fulfillment'} if category == 'album_completeness' else {category}
         keys = [key for key, value in modes.items() if any(finding_category(item) in categories for item in value['items'])]
         search += ' AND review_case_key IN (SELECT value FROM json_each(?))'
         params.append(json.dumps(keys))
     if risk:
-        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
+        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         keys = [key for key, value in modes.items() if value['mode'] == risk]
         import json
         search += ' AND review_case_key IN (SELECT value FROM json_each(?))'
@@ -184,21 +198,43 @@ def case_mode(items: list[dict]) -> str:
     return 'manual' if unresolved else 'ready' if required else 'waiting'
 
 
-def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '') -> dict:
+def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '', compact: bool = False) -> dict:
     """One classification for counts, filtering and execution, including draft choices."""
     import json
     from core.library import reconciliation_choices as choices
     choices.ensure_schema(conn)
-    saved = choices.load_choices(conn)
+    saved = {} if compact else choices.load_choices(conn)
     grouped = {}
-    for fid, key, kind, error, raw in conn.execute(
-            "SELECT id, review_case_key, finding_type, last_error, details_json FROM repair_findings "
-            "WHERE status = ? AND (? = '' OR job_id = ?) AND (? = '' OR review_case_key = ?)", (status, job_id, job_id, case_id, case_id)):
+    # Lists and counters need policy inputs, not thousands of complete release
+    # candidates and evidence snapshots. Execution still reads full evidence.
+    detail_sql, join = 'f.details_json', ''
+    choice_sql = 'NULL, NULL, NULL'
+    if compact:
+        fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict',
+                  'title_difference_kind', 'confidence', 'numbering_mode',
+                  'release_disc_count', 'local_file_count', 'release_track_count',
+                  'recording_mbid', 'expected_duration_ms', 'expected_title')
+        raw_details = "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END"
+        pairs = [f"'{field}', json_extract({raw_details}, '$.{field}')" for field in fields]
+        pairs += [f"'current_tags', json_object('duration_ms', json_extract({raw_details}, '$.current_tags.duration_ms'))",
+                  f"'acoustid', CASE WHEN json_extract({raw_details}, '$.title_difference_kind') = 'version' THEN json_extract({raw_details}, '$.acoustid') ELSE json_object('status', json_extract({raw_details}, '$.acoustid.status')) END"]
+        detail_sql = 'json_object(' + ', '.join(pairs) + ')'
+        join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
+                'AND c.case_id=f.review_case_key AND c.evidence_json=f.details_json')
+        choice_sql = 'c.category, c.choice, c.fix_action'
+    for fid, key, kind, error, raw, category, choice, action in conn.execute(
+            f"SELECT f.id, f.review_case_key, f.finding_type, f.last_error, {detail_sql}, {choice_sql} "
+            f"FROM repair_findings f {join} WHERE f.status = ? AND (? = '' OR f.job_id = ?) "
+            "AND (? = '' OR f.review_case_key = ?)", (status, job_id, job_id, case_id, case_id)):
         try:
             details = json.loads(raw or '{}')
         except (TypeError, ValueError):
             details = {}
-        details = choices.project(details if isinstance(details, dict) else {}, saved.get(fid), case_id=key, raw_json=raw)
+        if compact:
+            details = {k: v for k, v in details.items() if v is not None}
+            raw = json.dumps(details)
+        saved_choice = (key, raw, category, choice, action) if compact and choice else saved.get(fid)
+        details = choices.project(details if isinstance(details, dict) else {}, saved_choice, case_id=key, raw_json=raw)
         grouped.setdefault(key, []).append({'id': fid, 'finding_type': kind, 'details': details, 'last_error': error})
     result = {}
     for key, items in grouped.items():
@@ -214,5 +250,5 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
 
 
 def count_ready_findings(conn, *, status: str, job_id: str = "", case_modes=None) -> int:
-    modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
+    modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id, compact=True)
     return sum(len(case['ready_ids']) for case in modes.values())

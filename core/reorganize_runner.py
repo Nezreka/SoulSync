@@ -20,6 +20,7 @@ module load. That way a user changing their download path in settings
 takes effect on the next reorganize without needing a server restart.
 """
 
+from core.library.maintenance_lock import maintenance_mutation
 import json
 import os
 from typing import Callable, Optional
@@ -244,7 +245,13 @@ def build_runner(
             profile_id=profile_id,
         )
 
+    @maintenance_mutation
     def notifying_runner(item):
+        from core.library.reconciliation_authority import conflict
+        protected = conflict(get_database(), 'path_mismatch', entity_type='album', entity_id=item.album_id)
+        if protected:
+            return {'status': 'review_required', 'moved': 0, 'skipped': 0, 'failed': 1,
+                    'errors': [{'error': protected['error']}], **protected}
         result = runner(item)
         if on_album_moved and result.get('moved', 0):
             try:

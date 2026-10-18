@@ -26,7 +26,7 @@ def record_request(db, details, slot):
             (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
             VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
                 state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
-                WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked') ''', (
+                WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked', 'cancelled') ''', (
                 review_case_key(details, None), int(details.get('profile_id') or 1),
                 str(details['album_id']), details.get('album_folder') or '',
                 details.get('source') or '', details.get('exact_release_id') or details.get('release_id') or '',
@@ -67,6 +67,22 @@ def outstanding(conn):
     ensure_schema(conn)
     return conn.execute('''SELECT profile_id, source_track_id, release_id, state, source
         FROM reconcile_fulfillment WHERE state IN ('requested', 'published') ''').fetchall()
+
+
+def cancel_request(conn, profile_id, payload):
+    """Cancel acquisition only; collection intent is a separate user decision."""
+    if not isinstance(payload, dict):
+        return
+    source = payload.get('provider') or 'spotify'
+    track_id = str(payload.get('id') or '')
+    release_id = str((payload.get('album') or {}).get('id') or '')
+    if not track_id or not release_id:
+        return
+    ensure_schema(conn)
+    conn.execute("""UPDATE reconcile_fulfillment SET state='cancelled', refresh_needed=1,
+        updated_at=CURRENT_TIMESTAMP WHERE profile_id=? AND source=? AND release_id=?
+        AND source_track_id=? AND state='requested'""",
+        (profile_id, source, release_id, track_id))
 
 
 def settle_assignments(db, case_id, assignments, release_id, source):

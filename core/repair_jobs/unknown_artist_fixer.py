@@ -4,6 +4,7 @@ Resolves the correct artist/album/track metadata from file tags or metadata API,
 re-tags the audio file, moves it to the correct folder, and updates the database.
 """
 
+from core.library.maintenance_lock import maintenance_mutation
 import os
 import re
 import shutil
@@ -258,7 +259,10 @@ class UnknownArtistFixerJob(RepairJob):
                     fname_base = f"{fname_base} [{quality}]"
                 expected_rel = os.path.join(folder, fname_base + file_ext)
 
-            if dry_run:
+            from core.library.reconciliation_authority import conflict
+            protected = conflict(context.db, 'unknown_artist', entity_type='track',
+                                 entity_id=track.get('id'), file_path=resolved, details={'db_data': corrected}) if not dry_run else None
+            if dry_run or protected:
                 # Create finding for review
                 desc_parts = [f'Artist: Unknown Artist → {corrected["artist"]}']
                 if corrected.get('album'):
@@ -513,9 +517,13 @@ class UnknownArtistFixerJob(RepairJob):
             'confidence': confidence,
         }
 
+    @maintenance_mutation
     def _apply_fix(self, context, track, corrected, resolved_path,
                    expected_rel, transfer, fix_tags, reorganize_files):
         """Apply the fix: re-tag file, move to correct path, update DB."""
+        from core.library.reconciliation_authority import conflict
+        if conflict(context.db, 'unknown_artist', entity_type='track', entity_id=track['id'], file_path=resolved_path):
+            return False
         track_id = track['id']
         # #1504: the fixed file belongs in the owning profile's library,
         # not necessarily the shared transfer folder.

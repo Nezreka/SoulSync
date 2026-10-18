@@ -389,14 +389,15 @@ export function ReviewPage() {
 
   useEffect(() => {
     let live = true;
-    void Promise.all([
-      fetchReviewQueue(page, query, category, risk),
-      fetchReviewQueueModeTotals(query, category),
-    ])
-      .then(([result, totals]) => {
+    void fetchReviewQueueModeTotals(query, category)
+      .then((totals) => {
+        if (live) setQueueTotals(totals);
+      })
+      .catch(() => undefined);
+    void fetchReviewQueue(page, query, category, risk)
+      .then((result) => {
         if (!live) return;
         setQueue(result);
-        setQueueTotals(totals);
         if (!caseId && result.items[0]) setCaseId(result.items[0].case_id);
       })
       .catch((cause: unknown) => {
@@ -423,6 +424,9 @@ export function ReviewPage() {
     else url.searchParams.delete('case');
     url.searchParams.set('mode', queueMode);
     window.history.replaceState(null, '', url);
+  }, [caseId, queueMode]);
+
+  useEffect(() => {
     if (!caseId) {
       setReviewCase(null);
       return;
@@ -471,7 +475,7 @@ export function ReviewPage() {
     return () => {
       live = false;
     };
-  }, [caseId, queueMode]);
+  }, [caseId]);
 
   const active = useMemo(
     () => reviewCase?.items.find((finding) => finding.id === activeId),
@@ -663,8 +667,10 @@ export function ReviewPage() {
     const requestedId = caseId;
     const requestVersion = ++caseRequestVersion.current;
     try {
-      const updatedQueue = await refreshQueue();
-      if (!requestedId) return true;
+      if (!requestedId) {
+        await refreshQueue();
+        return true;
+      }
       const updated = await fetchReviewCase(requestedId);
       if (selectedCaseRef.current !== requestedId || requestVersion !== caseRequestVersion.current)
         return true;
@@ -672,6 +678,16 @@ export function ReviewPage() {
         setCaseId(updated.case_id);
         return true;
       }
+      // Poll the active album while it is being analyzed. Recounting the whole
+      // library every 1.2 seconds adds latency without exposing a final result.
+      if (updated.refresh?.state === 'running') {
+        setReviewCase(updated);
+        return true;
+      }
+      setReviewCase(updated);
+      const updatedQueue = await refreshQueue();
+      if (selectedCaseRef.current !== requestedId || requestVersion !== caseRequestVersion.current)
+        return true;
       if (refreshError.current) {
         const previous = refreshError.current;
         setError((current) => (current === previous ? '' : current));
@@ -680,7 +696,6 @@ export function ReviewPage() {
       if (
         updated.status === 'completed' &&
         !updated.album_plan?.assignments.some((row) => row.fulfillment_state) &&
-        updated.refresh?.state !== 'running' &&
         updated.refresh?.state !== 'error'
       ) {
         const previousIndex = queue?.items.findIndex((item) => item.case_id === requestedId) ?? 0;

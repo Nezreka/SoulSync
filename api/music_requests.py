@@ -9,6 +9,8 @@ identity is the session's (core.profile_context), never the request body.
 
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, jsonify, request
 
 from core.permissions import profile_can_download
@@ -324,6 +326,13 @@ def decline_music_request():
 
 def _remove_rows(db, owner, group, why):
     for t in group["tracks"]:
+        # Capture exact provider/release identity before removing the request.
+        if callable(getattr(db, '_get_connection', None)):
+            from core.library.reconciliation_fulfillment import cancel_request
+            with db._get_connection() as conn:
+                row = conn.execute('SELECT spotify_data FROM wishlist_tracks WHERE spotify_track_id=? AND profile_id=?', (t['id'], owner)).fetchone()
+                if row:
+                    cancel_request(conn, owner, json.loads(row[0] or '{}'))
         db.remove_from_wishlist(t["id"], profile_id=owner)
         try:
             db.add_to_wishlist_ignore(t["id"], track_name=t.get("title") or "",

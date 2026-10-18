@@ -28,14 +28,18 @@ def ensure_schema(conn):
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
 
 
-def load_choices(conn, finding_id=None):
+def load_choices(conn, finding_id=None, *, case_id=None):
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
         return {}
     action_column = 'fix_action' if 'fix_action' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')} else "''"
     sql = f'SELECT finding_id, case_id, evidence_json, category, choice, {action_column} FROM reconcile_review_choices'
-    return {row[0]: tuple(row[1:]) for row in conn.execute(
-        sql + (' WHERE finding_id=?' if finding_id is not None else ''),
-        (finding_id,) if finding_id is not None else ())}
+    if finding_id is not None:
+        sql, params = sql + ' WHERE finding_id=?', (finding_id,)
+    elif case_id is not None:
+        sql, params = sql + ' WHERE case_id=?', (case_id,)
+    else:
+        params = ()
+    return {row[0]: tuple(row[1:]) for row in conn.execute(sql, params)}
 
 
 def project(details, saved, *, case_id=None, raw_json=None):
@@ -109,3 +113,36 @@ def retains_numbering(previous, current):
     before = {k: v for k, v in (previous.get('changes') or {}).items() if k in fields}
     after = {k: v for k, v in (current.get('changes') or {}).items() if k in fields}
     return bool(before) and before == after
+
+
+def same_relocated_evidence(previous, current):
+    """A verified path change alone does not revoke a reviewed decision."""
+    if not previous.get('fingerprint_key') or previous.get('fingerprint_key') != current.get('fingerprint_key'):
+        return False
+    if previous.get('album_folder') == current.get('album_folder'):
+        return False
+    volatile = {'album_folder', 'album_folders', 'folder_audio_path_digest',
+                'evidence_signature', 'mtime_ns', 'target_path'}
+    return ({k: v for k, v in previous.items() if k not in volatile} ==
+            {k: v for k, v in current.items() if k not in volatile})
+
+
+def assignment_for_file(overrides, album_id, source, release_id, file, files):
+    """Retain an assignment after a unique, verified move of the same audio."""
+    import os
+    prefix = (str(album_id), source, release_id)
+    exact = overrides.get((*prefix, file['path']))
+    if exact:
+        return exact
+    fingerprint = (file.get('acoustid') or {}).get('fingerprint_key')
+    if not fingerprint:
+        return None
+    matches = [value for key, value in overrides.items()
+               if key[:3] == prefix and not os.path.exists(key[3])
+               and value[1] == file['size_bytes'] and value[3] == fingerprint]
+    copies = [row for row in files if row['size_bytes'] == file['size_bytes']
+              and (row.get('acoustid') or {}).get('fingerprint_key') == fingerprint]
+    if len(matches) == len(copies) == 1:
+        slot, size, _, key = matches[0]
+        return slot, size, file['mtime_ns'], key
+    return None

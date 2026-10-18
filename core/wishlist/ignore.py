@@ -164,6 +164,10 @@ def ignore_wishlist_track(
         return False
     name, artist = extract_display(spotify_data or {})
     try:
+        if isinstance(spotify_data, dict) and hasattr(database, '_get_connection'):
+            from core.library.reconciliation_fulfillment import cancel_request
+            with database._get_connection() as conn:
+                cancel_request(conn, profile_id, spotify_data)
         return bool(
             database.add_to_wishlist_ignore(
                 key,

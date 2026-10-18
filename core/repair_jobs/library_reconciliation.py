@@ -1825,6 +1825,7 @@ class LibraryReconciliationJob(RepairJob):
             from core.library.reconciliation_fulfillment import backfill_requests, outstanding
             backfill_requests(conn)
             durable = outstanding(conn)
+            cancelled = conn.execute("SELECT profile_id, source, source_track_id, release_id FROM reconcile_fulfillment WHERE state='cancelled'").fetchall()
             rows = conn.execute('''
                 SELECT profile_id, spotify_track_id, spotify_data
                 FROM wishlist_tracks
@@ -1836,6 +1837,9 @@ class LibraryReconciliationJob(RepairJob):
             conn.close()
         by_profile: dict[int, set[tuple[str, str, str]]] = defaultdict(set)
         self._published_by_profile = defaultdict(set)
+        self._cancelled_by_profile = defaultdict(set)
+        for profile_id, source, track_id, release_id in cancelled:
+            self._cancelled_by_profile[int(profile_id or 1)].add((source, track_id, release_id))
         for profile_id, track_id, release_id, state, source in durable:
             by_profile[int(profile_id or 1)].add((source, track_id, release_id))
             if state == 'published':
@@ -2373,8 +2377,8 @@ class LibraryReconciliationJob(RepairJob):
                     continue
                 forced_pairs = {}
                 for file_index, file in enumerate(files):
-                    override = assignment_overrides.get(
-                        (str(album_id), source, release_id, file['path']))
+                    from core.library.reconciliation_choices import assignment_for_file
+                    override = assignment_for_file(assignment_overrides, album_id, source, release_id, file, files)
                     if not override:
                         continue
                     slot_key, size_bytes, mtime_ns, fingerprint_key = override
@@ -2874,11 +2878,13 @@ class LibraryReconciliationJob(RepairJob):
                             continue
                         if (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_published_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
                             fulfillment_state = 'downloaded'
+                        if not fulfillment_state and (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_cancelled_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
+                            fulfillment_state = 'cancelled'
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_missing',
                             severity='info', entity_type='album_slot', entity_id=key,
                             file_path=None, title=f'Missing: {slot["title"]}',
-                            description='This track is absent from the intended complete release.',
+                            description=('Acquisition was cancelled. Request this track again or deliberately change the album completeness choice.' if fulfillment_state == 'cancelled' else 'This track is absent from the intended complete release.'),
                             details={**common, 'fulfillment_state': fulfillment_state,
                                      'missing_tracks': [{
                                 'name': slot['title'], 'track_number': slot['track_number'],

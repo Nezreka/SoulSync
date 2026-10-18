@@ -343,7 +343,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     conn = db._get_connection()
     choices.ensure_schema(conn)
     try:
-        modes = effective_case_modes(conn, status=status, job_id=job_id)
+        modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         where, params = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
                                      category=category, risk=risk)
         job_filter = 'AND job_id = ?' if job_id else ''
@@ -448,7 +448,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     choices.ensure_schema(conn)
     try:
         conn.execute('BEGIN')
-        modes = effective_case_modes(conn, status=status, job_id=job_id)
+        modes = effective_case_modes(conn, status=status, job_id=job_id, compact=True)
         projections = []
         params = []
         for mode in ('', 'manual', 'ready', 'destructive', 'waiting'):
@@ -489,7 +489,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         if not rows:
             return None
         items = []
-        saved_choices = choices.load_choices(conn)
+        saved_choices = choices.load_choices(conn, case_id=case_id)
         for row in rows:
             try:
                 details = json.loads(row[10]) if row[10] else {}

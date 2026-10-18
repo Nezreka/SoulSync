@@ -16,6 +16,7 @@ In live mode (or when applying a finding):
 """
 
 from __future__ import annotations
+from core.library.maintenance_lock import maintenance_mutation
 
 import os
 import re
@@ -396,6 +397,7 @@ def rename_album_folder(
     return new_folder
 
 
+@maintenance_mutation
 def apply_album_year_fix(
     db: Any,
     album_id: str,
@@ -410,6 +412,10 @@ def apply_album_year_fix(
     new_folder_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute the full year alignment: retag audio files, update DB, and rename folder."""
+    from core.library.reconciliation_authority import conflict
+    protected = conflict(db, 'album_release_year_mismatch', entity_type='album', entity_id=album_id)
+    if protected:
+        return {'fixed_files': 0, 'errors': 1, 'changes': [], 'renamed_folder': None, **protected}
     result = {'success': False, 'fixed_files': 0, 'errors': 0, 'changes': [], 'renamed_folder': None}
     download_folder = config_manager.get('soulseek.download_path', '') if config_manager else ''
 
@@ -894,7 +900,9 @@ class AlbumReleaseYearRepairJob(RepairJob):
 
                 track_items = [{'id': t['id'], 'file_path': t['file_path']} for t in eligible_tracks]
 
-                if dry_run:
+                from core.library.reconciliation_authority import conflict
+                protected = conflict(context.db, 'album_release_year_mismatch', entity_type='album', entity_id=album_id) if not dry_run else None
+                if dry_run or protected:
                     if context.create_finding:
                         inserted = context.create_finding(
                             job_id=self.job_id,

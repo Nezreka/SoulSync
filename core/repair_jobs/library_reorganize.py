@@ -300,7 +300,9 @@ class LibraryReorganizeJob(RepairJob):
                     )
                 continue
 
-            if dry_run:
+            from core.library.reconciliation_authority import conflict
+            protected = conflict(context.db, 'path_mismatch', entity_type='album', entity_id=album_id) if not dry_run else None
+            if dry_run or protected:
                 # One finding per track that would move.
                 for t in mismatched:
                     try:

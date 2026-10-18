@@ -104,3 +104,49 @@ def test_legacy_wishlist_history_does_not_resurrect_completed_or_cancelled_reque
         conn.execute('INSERT INTO wishlist_tracks VALUES (?,?,?)', (1, 'slot', json.dumps(payload)))
         backfill_requests(conn)
         assert len(outstanding(conn)) == 1
+
+
+def test_cancel_preserves_intent_and_cannot_be_confused_with_publication(tmp_path):
+    from core.library.reconciliation_fulfillment import cancel_request
+    db = Database(tmp_path / 'cancel.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'deezer', 'release_id': 'release'}
+    slot = {'source_track_id': 'slot'}
+    record_request(db, details, slot)
+    payload = {'id': 'slot', 'provider': 'deezer', 'album': {'id': 'release'}}
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE reconcile_album_intent(album_id TEXT, scope TEXT)')
+        conn.execute("INSERT INTO reconcile_album_intent VALUES ('2','complete')")
+        cancel_request(conn, 2, payload)
+        assert len(outstanding(conn)) == 1
+        cancel_request(conn, 1, {**payload, 'provider': 'itunes'})
+        assert len(outstanding(conn)) == 1
+        cancel_request(conn, 1, payload)
+        assert outstanding(conn) == []
+        assert conn.execute('SELECT scope FROM reconcile_album_intent').fetchone()[0] == 'complete'
+        assert conn.execute('SELECT state,refresh_needed FROM reconcile_fulfillment').fetchone() == ('cancelled',1)
+    record_request(db, details, slot)
+    with db._get_connection() as conn:
+        assert len(outstanding(conn)) == 1
+        conn.execute("UPDATE reconcile_fulfillment SET state='published'")
+        cancel_request(conn, 1, payload)
+        assert outstanding(conn)[0][3] == 'published'
+
+
+def test_relocated_acquisition_settles_against_new_case(tmp_path):
+    from core.library.reconciliation_redirects import record_relocation
+    db = Database(tmp_path / 'move.db')
+    details = {'album_id': 'album', 'profile_id': 1, 'album_folder': '/old',
+               'source': 'musicbrainz', 'release_id': 'release'}
+    record_request(db, details, {'source_track_id': 'slot'})
+    old = review_case_key(details, None)
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE reconcile_album_plans(case_id TEXT,album_id TEXT,album_folder TEXT,source TEXT,release_id TEXT,profile_id INTEGER)')
+        conn.executemany('INSERT INTO reconcile_album_plans VALUES (?,?,?,?,?,?)',
+                         [(old,'album','/old','musicbrainz','release',1),('new','album','/new','musicbrainz','release',1)])
+    record_relocation(db, '/old', 'new')
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT case_id,album_folder,refresh_needed FROM reconcile_fulfillment').fetchone() == ('new','/new',1)
+    settle_assignments(db,'new',[{'source_track_id':'slot','status':'confirmed','file_path':'/new/song.flac'}],'release','musicbrainz')
+    with db._get_connection() as conn:
+        assert not outstanding(conn)

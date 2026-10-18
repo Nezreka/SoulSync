@@ -16536,6 +16536,8 @@ class MusicDatabase:
                     except (json.JSONDecodeError, TypeError):
                         spotify_data = {}
                     name, artist = extract_display(spotify_data)
+                    from core.library.reconciliation_fulfillment import cancel_request
+                    cancel_request(conn, profile_id, spotify_data)
                     key = normalize_ignore_id(row['spotify_track_id'])
                     if not key:
                         continue

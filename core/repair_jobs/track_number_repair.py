@@ -6,6 +6,7 @@ before falling back to MusicBrainz and AudioDB to resolve the correct tracklist
 and repair each file.
 """
 
+from core.library.maintenance_lock import maintenance_mutation
 import os
 import re
 from difflib import SequenceMatcher
@@ -252,7 +253,9 @@ class TrackNumberRepairJob(RepairJob):
 
             result.scanned += 1
             try:
-                if dry_run:
+                from core.library.reconciliation_authority import conflict
+                protected = conflict(context.db, 'track_number_mismatch', file_path=fpath) if not dry_run else None
+                if dry_run or protected:
                     finding = _check_single_track(fpath, fname, api_tracks, title_sim)
                     if finding:
                         if context.create_finding:
@@ -1305,6 +1308,7 @@ def _check_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     }
 
 
+@maintenance_mutation
 def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
                          title_similarity: float, context: JobContext) -> bool:
     """Match a single file to the API tracklist and fix its track number tag + filename.
@@ -1313,6 +1317,12 @@ def _repair_single_track(file_path: str, filename: str, api_tracks: List[Dict],
     """
     plan = _plan_track_repair(file_path, filename, api_tracks, title_similarity)
     if not plan:
+        return False
+
+    from core.library.reconciliation_authority import conflict
+    if conflict(context.db, 'track_number_mismatch', file_path=file_path, details={
+            'track_number': plan['correct_num'], 'disc_number': plan['correct_disc'],
+            'new_filename': plan['new_basename']}):
         return False
 
     if not plan['tag_ok']:

@@ -422,8 +422,8 @@ class CommaArtistSplitterJob(RepairJob):
                     logger.debug("Error creating finding for %s: %s", combined_name, e)
                     result.errors += 1
             elif not dry_run:
-                applied = fixer._fix_comma_artist_split(
-                    'track', combined_name, None, details)
+                applied = fixer._execute_fix(
+                    'comma_artist_split', 'track', combined_name, None, details)
                 if applied.get('success') and applied.get('action') == 'artists_split':
                     result.auto_fixed += applied.get('fixed', 0)
                     self._record_resolved_finding(

@@ -14,6 +14,7 @@ uses (resolve path → remove file → drop track row → drop history row).
 """
 
 from __future__ import annotations
+from core.library.maintenance_lock import maintenance_mutation
 
 import json
 import os
@@ -135,11 +136,16 @@ def _should_treat_unresolved_as_mapping_error(raw_path, config_manager) -> bool:
     return not os.path.isabs(raw_path)
 
 
+@maintenance_mutation
 def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> dict:
     """Delete one origin-tracked download: the file on disk (resolved through
     the shared resolver), its library track row, and the history entry. A file
     that refuses deletion keeps its history row and reports the error. Returns
     {removed, file_deleted, error}."""
+    from core.library.reconciliation_authority import conflict
+    protected = conflict(db, 'expired_download', file_path=entry.get('file_path'))
+    if protected:
+        return {'removed': False, 'file_deleted': False, **protected}
     raw_path = entry.get('file_path') or ''
     file_deleted = False
     error = None
@@ -554,7 +560,9 @@ class ExpiredDownloadCleanerJob(RepairJob):
         for i, entry in enumerate(expired):
             if context.check_stop():
                 return result
-            if not dry_run:
+            from core.library.reconciliation_authority import conflict
+            protected = conflict(context.db, 'expired_download', file_path=entry.get('file_path')) if not dry_run else None
+            if not dry_run and not protected:
                 try:
                     res = delete_origin_download(
                         context.db, entry, context.config_manager,

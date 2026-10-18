@@ -45,8 +45,10 @@ def _db_with_album(path, track_file, current_title='Old Title'):
 
 def _context(conn, settings):
     findings = []
+    # Match MusicDatabase's connection ownership: each caller closes its handle.
+    path = conn.execute('PRAGMA database_list').fetchone()[2]
     return SimpleNamespace(
-        db=SimpleNamespace(_get_connection=lambda: conn),
+        db=SimpleNamespace(_get_connection=lambda: sqlite3.connect(path)),
         config_manager=SimpleNamespace(get=lambda k, d=None: {'repair.jobs.library_retag.settings': settings}.get(k, d)),
         check_stop=lambda: False, wait_if_paused=lambda: False,
         update_progress=lambda *a, **k: None, report_progress=lambda *a, **k: None,

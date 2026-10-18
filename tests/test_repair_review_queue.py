@@ -1427,3 +1427,63 @@ def test_refresh_snapshot_does_not_restore_case_to_old_bucket():
     summary = worker.get_review_summary()
     assert summary['all'] == summary['ready'] == 1
     assert summary['review'] == 0
+
+
+def test_decode_error_requires_review_for_file_edits_but_not_album_display_cleanup():
+    details = {'confidence': 'clear', 'acoustid': {'status': 'fingerprint_error'},
+               'changes': {'musicbrainz_release_id': {'old': 'old', 'new': 'new'}}}
+    assert classify_case([{'finding_type': 'reconciliation_metadata', 'details': details}])['manual'] == 1
+    details['changes'] = {'library_album_title': {'old': 'Album (pressing)', 'new': 'Album'}}
+    assert classify_case([{'finding_type': 'reconciliation_metadata', 'details': details}])['ready'] == 1
+
+
+def test_version_metadata_does_not_hide_explicit_competing_version():
+    from core.repair_review_policy import supported_version_metadata
+    details = {'title_difference_kind': 'version', 'confidence': 'clear',
+               'recording_mbid': 'live', 'expected_title': 'Song (live)',
+               'current_tags': {'duration_ms': 200000}, 'expected_duration_ms': 200000,
+               'acoustid': {'status': 'ok', 'recordings': [
+                   {'mbid': 'live', 'title': 'Song', 'score': 1}]}}
+    assert supported_version_metadata(details)
+    details['acoustid']['recordings'].append({'mbid': 'remix', 'title': 'Song (remix)', 'score': 1})
+    assert not supported_version_metadata(details)
+
+
+def test_compact_queue_policy_agrees_with_full_execution_evidence():
+    from core.repair_review_policy import effective_case_modes
+    db = _Database()
+    db.add(1, '/music/album/one.flac', {'confidence': 'clear', 'title_difference_kind': 'version',
+           'recording_mbid': 'demo', 'expected_title': 'Song (demo)', 'current_tags': {'duration_ms': 100000},
+           'expected_duration_ms': 100000, 'acoustid': {'status': 'ok', 'recordings': [{'mbid': 'demo','title': 'Song','score': 1}]},
+           'changes': {'title': {'old': 'Song','new': 'Song (demo)'}},
+           'assignment_options': [{'irrelevant': 'large evidence'}] * 100},
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    with db._get_connection() as conn:
+        full = effective_case_modes(conn, job_id='library_reconciliation')
+        compact = effective_case_modes(conn, job_id='library_reconciliation', compact=True)
+    assert {k: (v['mode'], v['ready_ids']) for k,v in full.items()} == {k: (v['mode'], v['ready_ids']) for k,v in compact.items()}
+    assert all('assignment_options' not in item['details'] for v in compact.values() for item in v['items'])
+
+
+def test_saved_choice_survives_only_a_verified_relocation(tmp_path):
+    from core.library.reconciliation_choices import ensure_schema as ensure_choices
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    details = {'album_id': 'album', 'album_folder': '/old', 'fingerprint_key': 'audio',
+               'size_bytes': 100, 'mtime_ns': 1, 'evidence_signature': 'old',
+               'changes': {'title': {'old': 'Old', 'new': 'New'}}}
+    finding = dict(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+                   severity='info', entity_type='track', entity_id='track',
+                   title='Change title', description='Supported')
+    assert worker._create_finding(**finding, file_path='/old/song.flac', details=details)
+    with db._get_connection() as c:
+        ensure_choices(c)
+        fid, key, raw = c.execute('SELECT id,review_case_key,details_json FROM repair_findings').fetchone()
+        c.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (?,?,?,'metadata','fix')", (fid,key,raw))
+    relocated = {**details, 'album_folder': '/new', 'mtime_ns': 2, 'evidence_signature': 'new'}
+    assert not worker._create_finding(**finding, file_path='/new/song.flac', details=relocated)
+    key = review_case_key(relocated, '/new/song.flac', fid)
+    assert get_case(db,key)['items'][0]['details']['plan_approved']
+    changed = {**relocated, 'fingerprint_key': 'different audio'}
+    worker._create_finding(**finding, file_path='/new/song.flac', details=changed)
+    assert not get_case(db,key)['items'][0]['details'].get('plan_approved')

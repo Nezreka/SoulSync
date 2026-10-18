@@ -335,6 +335,8 @@ export async function dismissFindingType(
 }
 
 export interface FixResult {
+  review_case_key?: string;
+  review_conflict?: boolean;
   success?: boolean;
   message?: string;
   error?: string;

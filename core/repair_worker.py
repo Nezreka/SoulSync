@@ -7,6 +7,7 @@ is independently configurable and can be enabled/disabled by the user.
 The worker is deactivated by default — the user must explicitly enable it.
 """
 
+from core.library.maintenance_lock import maintenance_mutation
 import hashlib
 import json
 import os
@@ -1383,6 +1384,25 @@ class RepairWorker:
             existing = cursor.fetchone()
             if existing:
                 existing_id, existing_status, resolved_at = existing[0], existing[1], existing[2]
+                if job_id == 'library_reconciliation':
+                    from core.library.reconciliation_choices import same_relocated_evidence
+                    try:
+                        prior_details = json.loads(existing[3] or '{}')
+                    except (TypeError, ValueError):
+                        prior_details = {}
+                    if same_relocated_evidence(prior_details, details or {}):
+                        new_raw = json.dumps(details)
+                        new_key = review_case_key(details, file_path, existing_id)
+                        review_choices.ensure_schema(conn)
+                        # Rebind only a choice that still matches its old evidence.
+                        cursor.execute('''UPDATE reconcile_review_choices SET case_id=?, evidence_json=?
+                            WHERE finding_id=? AND evidence_json=?''',
+                            (new_key, new_raw, existing_id, existing[3]))
+                        cursor.execute('''UPDATE repair_findings SET file_path=?, review_case_key=?, details_json=?
+                            WHERE id=?''', (file_path, new_key, new_raw, existing_id))
+                        if existing_status in ('resolved', 'dismissed') and existing[4] != 'obsolete':
+                            conn.commit()
+                            return False
                 if existing_status == 'pending':
                     cursor.execute("""
                         UPDATE repair_findings
@@ -2911,9 +2931,15 @@ class RepairWorker:
             'album_release_year_mismatch': self._fix_album_release_year_mismatch,
         }
 
+    @maintenance_mutation
     def _execute_fix(self, finding_type: str, entity_type: str, entity_id: str,
                      file_path: str, details: dict) -> dict:
         """Route a fix to the correct handler based on finding_type."""
+        from core.library.reconciliation_authority import conflict
+        blocked = conflict(self.db, finding_type, entity_type=entity_type,
+                           entity_id=entity_id, file_path=file_path, details=details)
+        if blocked:
+            return blocked
         handler = self._fix_handlers().get(finding_type)
         if not handler:
             return {'success': False, 'error': f'No fix available for finding type: {finding_type}'}
@@ -7669,6 +7695,16 @@ class RepairWorker:
                             eligible_ids.difference_update(selected_ids)
                 finally:
                     conn.close()
+            failed_cases = set()
+            case_by_finding = {}
+            if review_approved:
+                conn = self.db._get_connection()
+                try:
+                    case_by_finding = dict(conn.execute(
+                        'SELECT id, review_case_key FROM repair_findings WHERE id IN (SELECT value FROM json_each(?))',
+                        (json.dumps(ids),)))
+                finally:
+                    conn.close()
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
                     state['stopped'] = True
@@ -7677,6 +7713,8 @@ class RepairWorker:
                     break
                 apply_started = time.perf_counter()
                 try:
+                    if case_by_finding.get(fid) in failed_cases:
+                        raise ValueError('An earlier action in this album failed; refresh the album before retrying its remaining actions.')
                     if eligible_ids is not None and fid not in eligible_ids:
                         raise ValueError('The album plan changed or has unresolved decisions; review it before applying.')
                     if reviewed_details is not None:
@@ -7713,6 +7751,8 @@ class RepairWorker:
                     state['fixed'] += 1
                 else:
                     state['failed'] += 1
+                    if case_by_finding.get(fid):
+                        failed_cases.add(case_by_finding[fid])
                     error_msg = result.get('error', 'unknown error')
                     logger.warning("Bulk fix failed for finding #%s: %s", fid, error_msg)
                     if len(state['errors']) < 20:

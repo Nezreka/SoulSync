@@ -21,7 +21,20 @@ def record_relocation(db, old_folder: str, new_case: str) -> None:
     conn = db._get_connection()
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS reconcile_case_redirects (old_case_id TEXT PRIMARY KEY, new_case_id TEXT NOT NULL)')
-        conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ?', (new_case, old_folder, new_case))
+        target = conn.execute('SELECT album_id, album_folder, source, release_id, profile_id FROM reconcile_album_plans WHERE case_id=?', (new_case,)).fetchone()
+        if not target:
+            return
+        conn.execute('INSERT OR REPLACE INTO reconcile_case_redirects SELECT case_id, ? FROM reconcile_album_plans WHERE album_folder = ? AND case_id != ? AND profile_id=?', (new_case, old_folder, new_case, target[4]))
+        if target and conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_fulfillment'").fetchone():
+            # Rebind exact acquisition targets only when the selected release
+            # survives the move. A link redirect alone cannot settle a download.
+            conn.execute('''INSERT OR IGNORE INTO reconcile_fulfillment
+                (case_id,profile_id,album_id,album_folder,source,release_id,source_track_id,state,published_path,refresh_needed,updated_at)
+                SELECT ?,profile_id,?,?,source,release_id,source_track_id,state,published_path,1,updated_at
+                FROM reconcile_fulfillment WHERE album_folder=? AND source=? AND release_id=? AND case_id!=? AND profile_id=?''',
+                (new_case, str(target[0]), target[1], old_folder, target[2], target[3], new_case, target[4]))
+            conn.execute('''DELETE FROM reconcile_fulfillment WHERE album_folder=? AND source=? AND release_id=? AND case_id!=? AND profile_id=?''',
+                         (old_folder, target[2], target[3], new_case, target[4]))
         conn.commit()
     finally:
         conn.close()

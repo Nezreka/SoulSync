@@ -10,6 +10,7 @@ every field that would change); nothing touches a file until you apply a
 finding. The apply handler lives in repair_worker (_fix_library_retag).
 """
 
+from core.library.maintenance_lock import maintenance_mutation
 import os
 
 from core.library.path_resolver import resolve_library_file_path
@@ -154,8 +155,9 @@ def _run_full_enrich(file_path, full_meta, runtime=None) -> bool:
         return False
 
 
+@maintenance_mutation
 def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False,
-                      lyrics_action=False, enrich_runtime=None) -> dict:
+                      lyrics_action=False, enrich_runtime=None, db=None) -> dict:
     """Write each plan's tags in place (+ optionally embed/refresh cover art,
     + optionally fetch/refresh .lrc lyrics), reusing tag_writer.write_tags_to_file.
     ``file_path`` on each plan must be a real, reachable path (caller resolves
@@ -167,6 +169,10 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
     pipeline uses (fetch if missing, re-embed if a sidecar already exists)."""
     import os as _os
     result = {'written': 0, 'failed': 0, 'skipped': 0, 'cover_written': False, 'lyrics_written': 0}
+    from core.library.reconciliation_authority import conflict
+    protected = conflict(db, 'library_retag', details={'tracks': track_plans})
+    if protected:
+        return {**result, 'failed': len(track_plans), **protected}
     embed_cover = bool(cover_action and cover_url)
     cover_data = None
     if embed_cover:
@@ -606,9 +612,12 @@ class LibraryRetagJob(RepairJob):
 
         # Not dry-run: apply the tags in place now (the track paths were already
         # isfile-checked above) and count it as an auto-fix — no finding.
-        if not dry_run:
+        from core.library.reconciliation_authority import conflict
+        protected = conflict(context.db, 'library_retag', entity_type='album', entity_id=album_id,
+                             details={'album_id': album_id, 'tracks': track_plans}) if not dry_run else None
+        if not dry_run and not protected:
             res = apply_track_plans(track_plans, cover_action, cover_url, full=(depth == 'full'),
-                                    lyrics_action=lyrics_action,
+                                    lyrics_action=lyrics_action, db=context.db,
                                     enrich_runtime=build_retag_enrichment_runtime(
                                         context.config_manager, context.db)
                                     if depth == 'full' else None)

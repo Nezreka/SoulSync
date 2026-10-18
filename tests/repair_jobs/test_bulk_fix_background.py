@@ -330,3 +330,24 @@ def test_confirmed_batch_snapshot_survives_startup_race(tmp_path):
     result = _wait_done(worker)
     assert calls == []
     assert result['failed'] == 2 and result['fixed'] == 0
+
+
+def test_failed_album_stops_its_remaining_actions_but_other_albums_continue(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'failures.db'))
+    worker = _worker(db, tmp_path)
+    for index, album in ((1,'a'),(2,'a'),(3,'b')):
+        worker._create_finding(job_id='library_reconciliation',finding_type='reconciliation_metadata',
+            severity='warning',entity_type='track',entity_id=str(index),file_path=str(tmp_path / album / f'{index}.flac'),
+            title=f'Track {index}',description='Metadata',details={'album_id':album,'album_folder':str(tmp_path / album),
+            'confidence':'clear','changes':{'title':{'old':'song','new':'Song'}}})
+    calls=[]
+    def apply(fid, **kwargs):
+        calls.append(fid)
+        return {'success':len(calls)>1,'error':'test write failure'}
+    worker.fix_finding=apply
+    worker._schedule_album_refresh=lambda *a,**kw:True
+    assert worker.start_review_safe()['started']
+    result=_wait_done(worker)
+    assert len(calls)==2
+    assert result['fixed']==1 and result['failed']==2
+    assert any('earlier action' in row['error'] for row in result['errors'])
