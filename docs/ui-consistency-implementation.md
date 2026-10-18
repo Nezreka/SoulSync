@@ -103,9 +103,53 @@ The final visual pass corrected mobile modal overlap from both floating controls
 
 The prior completion claim is superseded by the user's visual and workflow audit. Shared infrastructure is implemented, but acceptance is reopened for semantic state colors, comparison cues, evidence spacing, sticky opacity, artwork delivery/loading, individual missing-track choices, count scopes, and cross-consumer parity. The next pass must verify capability by album state and inspect rendered before/after views, including scrolled content, rather than treating rendering and overflow checks as visual acceptance.
 
-- [ ] Restore semantic rows/group headers, selected-state independence, comparison arrows/strikethrough/unchanged cues.
-- [ ] Fix evidence spacing, compact release facts, quiet scan history, opaque sticky completion notices.
-- [ ] Verify exact candidate artwork and shared loading/failure behavior in Review and Library.
-- [ ] Provide individual missing-track choices and scope editing in all applicable album states.
-- [ ] Make filtered versus global ready counts coherent without changing server apply authority.
-- [ ] Recheck all original tasks, shared consumers, desktop/mobile, focus, data states, and prior-version parity; record actual evidence and remaining limitations.
+- [x] Restore semantic rows/group headers, selected-state independence, comparison arrows/strikethrough/unchanged cues.
+- [x] Fix evidence spacing, compact release facts, quiet scan history, opaque sticky completion notices.
+- [x] Verify exact candidate artwork and shared loading/failure behavior in Review and Library.
+- [x] Provide individual missing-track choices and scope editing in all applicable album states.
+- [x] Make filtered versus global ready counts coherent without changing server apply authority.
+- [x] Recheck all original tasks, shared consumers, desktop/mobile, focus, data states, and prior-version parity; record actual evidence and remaining limitations.
+
+
+## Regression acceptance and original-plan recheck — 2026-10-18
+
+This section supersedes the earlier handoff assessment. The initial unification implemented the shared components but did not preserve every visual cue or make every workflow reachable. The corrected implementation restores those capabilities while retaining shared components. Baseline comparisons used the pre-unification source (`827f04e30`), the prior unified image (`bd93669aeb4b`), the user’s screenshots, and rendered corrected views.
+
+### Corrections and plan coverage
+
+| Original tasks | Recheck and correction |
+| --- | --- |
+| 1, 22: baseline and acceptance | Revisited the actual rendered states, including scrolled content. Rendering without overflow alone was insufficient: the first followup browser pass still exposed a translucent sticky surface, which was corrected and checked against the actual scrolling ancestor. |
+| 2–4: tokens, semantic tones, controls | Restored blue proposed changes, amber uncertainty, red missing/extra states and green confirmation, including group headings and status pills. Selection uses a separate outline. Removed ordinary-button rules that overrode structural controls. Semantic colors remain independent of the selected app accent. |
+| 5–8: dialogs, menus, player, records | Existing shared integrations retained. Apply previews remain server-authorized and cancellable; missing tracks have no local player. Track record inspection, artist record inspection, keyboard/focus return and mobile dialogs were rechecked. Choice saving remains separate from execution. |
+| 9–10, 21: comparisons and shared consumers | Shared MetadataComparison now strikes replaced/removed values, uses arrows for changes and checks for unchanged values, and preserves these cues when stacked on mobile. Library tag previews receive the same correction. Artwork loading placeholders and loaded/error resets are restored for Library as well as Review. |
+| 11–13: release information and artwork | Compact facts no longer dominate release identity and assignment counts. Readable neutral qualifier badges remain. Missing MusicBrainz image URLs resolve to that exact release’s Cover Art Archive URL in both candidate serialization and the UI; unavailable covers stay neutral rather than borrowing library art. Real release images loaded successfully in the browser. |
+| 14–17: feedback, readiness, dependencies, navigation | Completed reconciliation is quiet header context; running and failed operations retain visible feedback. Global ready-album and ready-action totals now share the same global scope even under queue filters. Server whole-album eligibility and signed execution remain unchanged. Individual missing-track selection now works for already-complete albums as well as unresolved scope decisions; the endpoint validates the current eligible subset. Existing navigation/relocation and decision contracts remain intact. |
+| 18–20: layout and interaction | Removed compounded evidence margins and empty action space. Completion notice is opaque and clickable when scrolled. The Tracks checklist supports individual/all selections; a missing-track inspector offers a direct request and a focusable route to the checklist. Mobile Back to tracks restores the actual scroll-container positions and row focus rather than only window scroll. |
+
+### Workflow parity
+
+- Release inspection/selection, numbering choices, current-value choices, assignment changes, album scope, duplicate/file decisions, record inspection, playback and signed apply previews remain available through their existing contracts.
+- Missing-track requests support both all actionable tracks and an explicit subset. Unselected tracks remain wanted when the album is complete; choosing a partial album is still a separate scope decision. Already requested or fulfilled tracks cannot be resubmitted through subset IDs.
+- Global apply remains limited to fully decided eligible albums. The count correction does not broaden execution authority or apply decisions from albums with outstanding input.
+- Waiting, cancelled, operation-in-progress and failed-case presentations were checked with browser response fixtures. No fixtures were persisted to the live database.
+
+### Verification for this regression pass
+
+- Backend: **161 passed** across review-queue and reconciliation end-to-end suites; **9 passed** in API parameter tests, including malformed and subset request cases.
+- Broad frontend: **1,980 passed in 115 files**, covering Review, Library, artist detail, Tools, shared components and player contracts. A subsequent affected-consumer run passed **652 tests in 46 files**, including Discover. These runs overlap and are not additive totals.
+- Final followup: **43 passed in 11 files**. `npm run check` reported **0 errors / 551 existing warnings**; production builds succeeded.
+- Deployed main regression browser matrix: **72 checks**, no page exceptions or failed assertions. Covered Plan/Release/Tracks at 390, 900 and 2048 pixels, unresolved/ready cases, real candidate images, missing-track selection, record inspection, preview cancellation, and waiting/cancelled/running/failed fixtures.
+- Followup browser checks cover direct single-track request cancellation, checklist focus, actual ancestor scroll restoration, opaque sticky completion, accent-independent semantic colors and keyboard tabs. Screenshots were manually inspected in addition to assertions.
+
+### Verification boundaries
+
+Browser validation deliberately blocks repair, library and file mutations; request/apply dialogs are cancelled. Backend and component tests exercise the mutation contracts. No user plans, requests or music files were changed as test data. Artwork depends on remote availability: an exact edition with no accessible cover displays a neutral fallback. The passing matrix supports the reviewed workflows and representative widths/states; it is not a claim to have exhaustively tested every possible catalog response or device.
+
+### Final deployed verification
+
+Code image `localhost/soulsync:test-afb0333c369d` is deployed and **Ready 1/1**. The six followup browser checks passed against served assets with no local CSS/asset injection and no page exceptions. Library artist-record filtering/JSON/focus return and desktop/mobile tag previews were repeated successfully on the final deployment; mobile screenshots show unobstructed dialog actions and no horizontal document overflow. Network logs include deliberately blocked mutation/background requests and unavailable remote resources; these are not reported as an entirely error-free network trace.
+
+Music automation was paused for the rollout and restored to its prior enabled state immediately afterward; video automation was unchanged. The feature image remains available for user review, with SoulSync Flux still suspended as it was before this work. GitOps manifests were not changed.
+
+All original checklist items have been rechecked within the documented scope, and the reopened regression items are resolved. No known implementation item remains open. The previous acceptance mistake was treating component reuse and successful rendering as sufficient; this pass additionally checked preserved visual meaning, reachable per-track actions and actual scrolling behavior.
