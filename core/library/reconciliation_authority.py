@@ -13,6 +13,7 @@ ALIASES = {
     'library_track_number': 'track_number', 'library_disc_number': 'disc_number',
     'library_recording_mbid': 'musicbrainz_recording_id',
     'library_album_title': 'album', 'album_title': 'album',
+    'albumartist': 'album_artist', 'musicbrainz_albumid': 'musicbrainz_release_id',
     'musicbrainz_album_id': 'musicbrainz_release_id',
     'library_recording_disambiguation': 'recording_disambiguation',
 }
@@ -32,7 +33,7 @@ FIELDS = {
     'path_mismatch': {'files'}, 'orphan_file': {'files'}, 'dead_file': {'files'},
     'corrupt_audio': {'files'}, 'short_preview_track': {'files'},
     'expired_download': {'files'}, 'unwanted_content': {'files'},
-    'quality_upgrade': {'files'},
+    'quality_upgrade': {'files'}, 'fake_lossless': {'files'},
 }
 
 

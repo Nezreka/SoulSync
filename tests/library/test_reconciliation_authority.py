@@ -53,7 +53,8 @@ def test_changed_unapproved_proposal_does_not_reuse_old_choice(tmp_path):
 
 def test_active_album_blocks_file_actions_and_completeness_uses_persisted_intent(tmp_path):
     db = Database(tmp_path / 'db')
-    assert conflict(db, 'duplicate_tracks', entity_type='track', entity_id='track')['review_conflict']
+    for kind in ('duplicate_tracks', 'fake_lossless', 'quality_upgrade', 'corrupt_audio'):
+        assert conflict(db, kind, entity_type='track', entity_id='track')['review_conflict']
     with db._get_connection() as c:
         c.execute("UPDATE repair_findings SET status='resolved'")
         c.execute("CREATE TABLE reconcile_album_intent(album_id TEXT, scope TEXT)")
@@ -138,3 +139,15 @@ def test_accepted_release_id_governs_legacy_auto_resolver_without_explicit_pin(t
                     details={'source':'musicbrainz','album_id':'other'})['review_conflict']
     assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
                     details={'source':'musicbrainz','album_id':'selected'}) is None
+
+
+def test_album_tag_consistency_uses_tag_names_for_accepted_fields(tmp_path):
+    db = Database(tmp_path / 'db')
+    with db._get_connection() as c:
+        raw = json.dumps({'changes':{'musicbrainz_release_id':{'old':'old','new':'selected'}}})
+        c.execute("UPDATE repair_findings SET details_json=?,status='resolved',user_action='retagged'", (raw,))
+    args = dict(entity_type='album',entity_id='album')
+    assert conflict(db,'album_tag_inconsistency',details={'inconsistencies':[
+        {'field':'musicbrainz_albumid','canonical':'other'}]},**args)['review_conflict']
+    assert conflict(db,'album_tag_inconsistency',details={'inconsistencies':[
+        {'field':'musicbrainz_albumid','canonical':'selected'}]},**args) is None
