@@ -251,12 +251,13 @@ class ImageCache:
             # Put the entries back (newer registrations for the same key
             # win) and clear their coalesce marks, so the next render or
             # serve — _get_row flushes pending keys — retries the write.
+            # Exception: on index corruption the rebuild below re-indexes
+            # from the files on disk and starts the pending set over, which
+            # supersedes this restore; pages re-register as they render.
             with self._pending_touches_lock:
                 for key, entry in pending.items():
                     self._pending_registrations.setdefault(key, entry)
                     self._registrations.pop(key, None)
-                if self._pending_registrations and not self._pending_registrations_since:
-                    self._pending_registrations_since = time.time()
             if _is_corruption(e):
                 self._rebuild_index(str(e))
 

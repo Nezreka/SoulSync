@@ -413,8 +413,8 @@ async function bootstrapServerAppearanceSettings() {
 // It reads /api/settings, which is admin-only, so firing it at parse time —
 // before any profile is known — guaranteed a 403 on every page load for
 // every non-admin member (and a 401 on the login screen), the burst in
-// #1763. _continueAppInit calls it once the profile is resolved, and only
-// for profiles that may actually read settings.
+// #1763. initApp() calls it once the profile is resolved, and only for
+// profiles that may actually read settings.
 
 // ── Password-manager autofill suppression ──────────────────────────────
 // Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
@@ -656,11 +656,42 @@ function isAdminProfile() {
     return currentProfile.id === 1 || !!currentProfile.is_admin;
 }
 
+// Profile resolution state for boot-time callers (#1763). The shell's
+// background fetches must not fire before the profile is known: on a
+// multi-profile install sitting on the picker they would go out with no
+// profile session at all (401 profile_required), and on a slow profile
+// fetch they would race it and earn the very 403s the gates above exist to
+// prevent. initProfileSystem marks resolution done on every path where the
+// app may proceed (including the fall-through where no profile exists);
+// deferred paths (picker, PIN, login) complete later via setCurrentProfile,
+// which notifies the same event.
+let _profileResolutionDone = false;
+
+function _markProfileResolutionDone() {
+    _profileResolutionDone = true;
+    notifyProfileContextChanged();
+}
+
+// Run fn once the profile context is known (immediately if it already is).
+function whenProfileKnown(fn) {
+    if (currentProfile || _profileResolutionDone) {
+        fn();
+        return;
+    }
+    const handler = () => {
+        window.removeEventListener(PROFILE_CONTEXT_CHANGED_EVENT, handler);
+        fn();
+    };
+    window.addEventListener(PROFILE_CONTEXT_CHANGED_EVENT, handler);
+}
+
 function getCurrentProfileContext() {
     if (!currentProfile) return null;
     return {
         profileId: currentProfile.id,
-        isAdmin: !!currentProfile.is_admin,
+        // profile 1 is the owner-admin even if its row's flag is unset —
+        // same convention as isAdminProfile() and the server's g.is_admin
+        isAdmin: !!currentProfile.is_admin || currentProfile.id === 1,
         // who's signed in, for the My Account header
         name: currentProfile.name || '',
         avatarColor: currentProfile.avatar_color || '',
@@ -733,6 +764,7 @@ async function initProfileSystem() {
                 return false; // Defer app init until PIN verified
             }
 
+            _markProfileResolutionDone();
             return true; // Profile already selected, skip picker
         }
 
@@ -744,6 +776,7 @@ async function initProfileSystem() {
         if (profiles.length === 0) {
             // No profiles yet — auto-select admin profile 1
             await selectProfile(1);
+            _markProfileResolutionDone();
             return true;
         }
 
@@ -759,6 +792,7 @@ async function initProfileSystem() {
                 return false;
             }
 
+            _markProfileResolutionDone();
             return true;
         }
 
@@ -780,6 +814,7 @@ async function initProfileSystem() {
                     showLaunchPinScreen();
                     return false;
                 }
+                _markProfileResolutionDone();
                 return true;
             }
         }
@@ -789,6 +824,7 @@ async function initProfileSystem() {
         return false; // App init deferred until profile selected
     } catch (e) {
         console.error('Profile init error:', e);
+        _markProfileResolutionDone();
         return true; // Fall through to normal init
     }
 }
@@ -4117,15 +4153,6 @@ async function _continueAppInit() {
         return; // App init deferred until profile is selected via picker
     }
 
-    // Server appearance (accent / particles) lives behind admin-only
-    // /api/settings. Only profiles that may read it fetch it; a member's
-    // load no longer eats the 403 (#1763). No profile at all (profile
-    // system off) keeps the historical behavior — settings are readable
-    // there. Quick profile switches don't re-run this, same as before.
-    if (!currentProfile || currentProfile.is_admin || currentProfile.id === 1) {
-        bootstrapServerAppearanceSettings();
-    }
-
     initApp();
 }
 
@@ -4134,6 +4161,16 @@ function initApp() {
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
     // component init below measures real layout, not a display:none container.
     document.body.classList.remove('app-locked');
+    // Server appearance (accent / particles) lives behind admin-only
+    // /api/settings. Only profiles that may read it fetch it; a member's
+    // load no longer eats the 403 (#1763). This lives in initApp — the one
+    // funnel every successful boot passes through, including the launch-PIN
+    // and recovery sign-ins that call initApp directly — so no boot path
+    // skips it and none runs it twice. No profile at all (profile system
+    // off) keeps the historical behavior — settings are readable there.
+    if (!currentProfile || currentProfile.is_admin || currentProfile.id === 1) {
+        bootstrapServerAppearanceSettings();
+    }
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();

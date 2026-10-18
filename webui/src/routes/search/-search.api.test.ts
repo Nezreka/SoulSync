@@ -250,6 +250,29 @@ describe('fetchConfigStatus', () => {
       enabledExperimental: new Set(),
     });
   });
+
+  it('never fires the request for a known non-admin profile (#1763)', async () => {
+    // config-status is admin-only; for a member the answer is a guaranteed
+    // 403, and the empty fallback is exactly what a failed read produced.
+    let hits = 0;
+    server.use(
+      http.get('/api/settings/config-status', () => {
+        hits += 1;
+        return HttpResponse.json({ itunes: { configured: true } });
+      }),
+    );
+    const original = window.getCurrentProfileContext;
+    window.getCurrentProfileContext = () => ({ profileId: 7, isAdmin: false });
+    try {
+      expect(await fetchConfigStatus()).toEqual({
+        configured: {},
+        enabledExperimental: new Set(),
+      });
+      expect(hits).toBe(0);
+    } finally {
+      window.getCurrentProfileContext = original;
+    }
+  });
 });
 
 describe('lookupById', () => {

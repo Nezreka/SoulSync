@@ -147,6 +147,8 @@
         b.classList.toggle('hidden', !n);
     }
     function refreshBadge() {
+        // Side-gated server-side; skip for profiles without the video side (#1763).
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch('/api/video/watchlist/counts', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) { if (d && d.success) updateNavBadge(d); })
@@ -502,6 +504,7 @@
     }
 
     function refreshChannelCount() {
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch('/api/video/youtube/channels', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -587,8 +590,10 @@
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onShown);
-        refreshBadge();   // seed the nav badge on boot
-        refreshChannelCount();
+        // Seed the nav badge on boot — once the profile is known, so the
+        // probes don't fire session-less or race the profile fetch (#1763).
+        if (typeof whenProfileKnown === 'function') whenProfileKnown(function () { refreshBadge(); refreshChannelCount(); });
+        else { refreshBadge(); refreshChannelCount(); }
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

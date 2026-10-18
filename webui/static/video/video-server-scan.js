@@ -83,6 +83,8 @@
     function loadTitle() {
         var titleEl = $('[data-video-srvscan-title]');
         if (!titleEl) return;
+        // Side-gated server-side; skip for profiles without the video side (#1763).
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch('/api/video/dashboard', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -96,6 +98,7 @@
     // If the server is already mid-scan when the page opens, restore the live UI.
     function resumeIfScanning() {
         if (scanning) return;
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         var mt = targetValue();
         fetch(STATUS_URL + '?media_type=' + encodeURIComponent(mt), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.json(); })
@@ -119,8 +122,10 @@
         document.addEventListener('soulsync:video-page-shown', function (e) {
             if (e && e.detail === 'video-tools') { loadTitle(); resumeIfScanning(); }
         });
-        loadTitle();
-        resumeIfScanning();
+        // Deferred until the profile is known — these probes are side-gated
+        // server-side and must not fire session-less or pre-profile (#1763).
+        if (typeof whenProfileKnown === 'function') whenProfileKnown(function () { loadTitle(); resumeIfScanning(); });
+        else { loadTitle(); resumeIfScanning(); }
     }
 
     if (document.readyState === 'loading') {

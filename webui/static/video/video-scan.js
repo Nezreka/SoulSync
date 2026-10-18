@@ -171,6 +171,9 @@
     // resume polling — parity with the music tools.
     function resumeIfScanning() {
         if (scanning) return;
+        // Behind the video side gate server-side; a profile without the
+        // video side only earns a 403 here (#1763).
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch(STATUS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.json(); })
             .then(function (s) {
@@ -211,8 +214,11 @@
             if (e && e.detail === 'video-tools') { loadToolStats(); resumeIfScanning(); }
         });
         // On load: if a scan is already running (page was refreshed mid-scan),
-        // restore the live state instead of showing Idle.
-        resumeIfScanning();
+        // restore the live state instead of showing Idle. Deferred until the
+        // profile is known so the probe doesn't fire session-less from the
+        // picker or race the profile fetch (#1763).
+        if (typeof whenProfileKnown === 'function') whenProfileKnown(resumeIfScanning);
+        else resumeIfScanning();
     }
 
     if (document.readyState === 'loading') {

@@ -794,6 +794,8 @@
     }
     // Keep the YouTube tab badge fresh without switching to the tab.
     function refreshYtCount() {
+        // Side-gated server-side; skip for profiles without the video side (#1763).
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch('/api/video/youtube/channels', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) { if (d && d.counts) setYtCounts(d.counts); })
@@ -820,6 +822,7 @@
         });
     }
     function refreshBadge() {
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         fetch('/api/video/wishlist/counts', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) { if (d && d.success) updateBadges(d.total); })
@@ -1134,6 +1137,9 @@
     // 'changed' event. So poll the authoritative count: quicker while downloads are active
     // (the downloads page exposes _vdpgAnyActive), slower when idle, paused when hidden.
     function scheduleBadgePoll() {
+        // Don't even start the session-long badge poll for a profile the
+        // server will refuse (#1763).
+        if (typeof canAccessVideoSide === 'function' && !canAccessVideoSide()) return;
         var active = (typeof window._vdpgAnyActive === 'function') && window._vdpgAnyActive();
         if (scheduleBadgePoll._t) clearTimeout(scheduleBadgePoll._t);
         scheduleBadgePoll._t = setTimeout(function () {
@@ -1145,9 +1151,11 @@
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onShown);
-        refreshBadge();
-        refreshYtCount();
-        scheduleBadgePoll();
+        // Boot seeds wait for the profile context (#1763) — the fetchers and
+        // the poll are side-gated above, and firing them session-less or
+        // pre-profile would reproduce the burst this issue is about.
+        if (typeof whenProfileKnown === 'function') whenProfileKnown(function () { refreshBadge(); refreshYtCount(); scheduleBadgePoll(); });
+        else { refreshBadge(); refreshYtCount(); scheduleBadgePoll(); }
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

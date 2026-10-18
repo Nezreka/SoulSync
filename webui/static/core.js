@@ -1739,7 +1739,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         if (playlistId === 'discover_release_radar') {
             apiEndpoint = '/api/discover/release-radar';
         } else if (playlistId === 'discover_discovery_weekly') {
-            apiEndpoint = '/api/discover/discovery-weekly';
+            apiEndpoint = '/api/discover/weekly';
         } else if (playlistId === 'discover_seasonal_playlist') {
             apiEndpoint = '/api/discover/seasonal-playlist';
         } else if (playlistId === 'discover_popular_picks') {

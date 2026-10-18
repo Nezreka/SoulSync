@@ -174,7 +174,7 @@ window.SoulSyncWebShellBridge = {
         if (!currentProfile) return null;
         return {
             profileId: currentProfile.id,
-            isAdmin: !!currentProfile.is_admin,
+            isAdmin: !!currentProfile.is_admin || currentProfile.id === 1,
             // resolved server-side; mirrors the /api/video/* gate (#1763) —
             // kept in step with init.js's getCurrentProfileContext
             allowedSides: currentProfile.allowed_sides || null,

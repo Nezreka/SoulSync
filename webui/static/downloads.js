@@ -6360,12 +6360,20 @@ let _gsController = null;
 // job that was already running before this page connected (the socket keeps them
 // live thereafter).
 (function _overlayTaskInit() {
-    const run = () => setTimeout(() => {
+    const seedAll = () => {
         if (typeof _seedOverlayTask === 'function') _seedOverlayTask();
         if (typeof _seedCollectionSyncTask === 'function') _seedCollectionSyncTask();
         if (typeof _seedCollectionArtTask === 'function') _seedCollectionArtTask();
         if (typeof _seedVideoBulkTask === 'function') _seedVideoBulkTask();
-    }, 1200);
+    };
+    // Wait for the profile context before seeding (#1763): on a blind timer
+    // these fired while a multi-profile install was still sitting on the
+    // picker (401 profile_required) or before the profile fetch landed
+    // (the seeds' own gates read a still-null profile and fail open).
+    const run = () => {
+        if (typeof whenProfileKnown === 'function') whenProfileKnown(() => setTimeout(seedAll, 1200));
+        else setTimeout(seedAll, 1200);
+    };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
     else run();
 })();
