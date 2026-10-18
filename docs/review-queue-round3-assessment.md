@@ -195,3 +195,231 @@ release ID and date while adding genre/BPM; reset and legacy protection after a
 move; a concurrent release-pin change; a new unresolved decision between batch
 writes; five fulfillment-state collisions; and assignment survival after an
 approved tag edit and rename. Mutating tests continue to use disposable data.
+
+### Requirements recheck
+
+| Requirement | Validation in this correction round |
+| --- | --- |
+| Decisions are saved before file changes; album-wide choices precede dependent edits | Queue/API and real-file lifecycle suites pass; mid-batch invalidation now has a regression test. |
+| Accepted queue decisions govern affected fields across legacy jobs | Provider write-boundary tests, canonical/assignment guards, shared-lock concurrency test and date/count alias tests pass. |
+| Global apply contains fully decided albums, including approved file actions | Whole-album selector and background-batch tests pass; deployed preview retains 123 albums / 558 actions, including one approved replacement. No plans were applied in production. |
+| Harmless metadata stays eligible, while identity conflicts require approval | Readiness suites pass; the earlier Oceanic fingerprint-failure exclusion remains present. |
+| Cancellation does not change completion intent | Fulfillment cancellation and exact profile/release tests pass; relocation collisions preserve the newer acquisition state. |
+| Decisions and acquisitions survive moves, and can be reconsidered | Persisted relocation/reset tests, real tag-write/rename assignment test and fulfillment merge tests pass. Changed audio/evidence is not silently approved. |
+| Failure and restart do not replay destructive actions | Background failure isolation and interrupted-operation tests pass. |
+| Consistent UI, playback, evidence and notifications; responsive queue access | 670 Review/Tools tests and 39 deployed album/tab/viewport checks pass. During reconciliation, three-request medians were 0.205 s for summary and 0.363 s for list; these are observations, not a throughput guarantee. |
+| Focused PR, with existing maintenance tools retained | No Operations redesign or removal of specialized jobs is included. |
+
+The final selected backend run passed 2,204 tests (165 existing deprecation
+warnings). One unrelated BPM audio-analysis test module was excluded because
+the local environment lacks NumPy. A bulk-reopen test fixture was made portable
+across SQLite builds; its optional `UPDATE ... LIMIT` syntax had prevented the
+test from reaching application code. No frontend source changed in this round.
+
+### Deployed correction-round result
+
+- Code commit/image `3173e9e7e6e9` is healthy (1/1). Automatic music downloads
+  were restored; SoulSync alone remains in the existing Flux-suspended feature
+  test workflow. No user repair plan was applied.
+- Full reconciliation run 842 completed in 1,562.56 seconds: 13,835 files across
+  1,602 folders, zero errors and zero automatic fixes. One new unresolved-release
+  finding concerns Sawyer Hill's “Folsom Prison Blues”; the other new folder is
+  a fully matched seven-track *Heartbreak Hysteria*. These account for eight new
+  files and the increase from 883 to 884 queue cases.
+- Final modes: 759 need input, 123 ready, two file-decision albums, zero waiting.
+  The ready batch retains exactly the same 558 IDs, including one approved file
+  action. All 34 pending approvals remain valid. All selected source stat checks
+  pass, with no occupied or duplicate rename destinations.
+- All five relocated motionblur assignments now have persisted current paths and
+  matching file evidence. Seven of eight stored assignments match their files;
+  the remaining pre-existing changed-file assignment was correctly not refreshed
+  without evidence. No stored assignment points to a missing path.
+- No previous logical album plan disappeared. The only changed existing semantic
+  plan was Queen's clear-match counter, 49 → 50, now including its manual Headlong
+  assignment. Changing only that counter back reproduces the exact old plan hash;
+  assignments, proposed edits and coverage otherwise remain unchanged.
+- All 39 deployed desktop/mobile screen checks passed. An interrupted check was
+  traced to a Kubernetes port-forward stream timeout; direct pod requests remained
+  responsive, and the check passed through a replacement tunnel. Provider 404s
+  remain visible in logs; the reconciliation job reported no errors.
+- Runtime evidence strengthens the proposed performance work: 13,801 fingerprint
+  hits, 13,801 AcoustID hits and 13,835 tag-cache hits; only 34 fingerprints and
+  eight lookups were computed. The scan considered 9,949 releases. Inventory,
+  fingerprint and lookup timers reported 8.5, 7.4 and 1.7 seconds respectively;
+  most of the 1,561.6-second scanner time remains unattributed between catalogue,
+  pacing, matching and persistence. It is not valid to assign that remainder to
+  any single stage without the proposed instrumentation.
+
+## Proposed performance implementation plan — awaiting review
+
+Performance is part of feature readiness. Implement the first three milestones
+as a focused performance series before proposing the feature upstream, with each
+milestone independently testable and revertible. Whole-album result reuse is a
+fourth, evidence-dependent milestone. This plan is not implemented by the
+correctness commit above.
+
+### 1. Attribute scan time and establish a reproducible baseline
+
+**Locations:** `core/repair_jobs/library_reconciliation.py`,
+`core/library/reconciliation_evidence.py`, `core/musicbrainz_client.py`, and the
+existing repair run/progress reporting contract.
+
+- Add a run-scoped metrics collector for catalogue lookup, rate-limit waits,
+  retry backoff, candidate matching, assignment preparation, finding persistence,
+  plan persistence and total wall time. Retain the existing inventory/audio/tag
+  measurements. Distinguish inclusive from exclusive timers so nested calls do
+  not make the totals appear additive when they are not.
+- Count requests by provider and operation; record memory/persistent hits,
+  misses, expired entries, confirmed negatives, transient failures and shared
+  in-flight requests. Keep a bounded list of the slowest album stages; avoid
+  track IDs, paths and unbounded labels in aggregate metrics.
+- Instrument MusicBrainz pacing and transport separately at `_get` and
+  `_wait_for_musicbrainz_slot`. Pass an optional observer/context through the
+  reconciliation call chain; do not charge other background jobs to this run.
+- Persist one compact summary with the completed run and expose it through
+  existing run details/progress. Include partial metrics on cancellation and
+  provider failure. No new Operations dashboard is needed.
+- Capture an unchanged-library baseline: full scan and targeted Bastille,
+  motionblur, Oceanic, Queen and a multi-edition case. Run targeted cases at
+  least three times; record warm/cold cache state, provider/server configuration,
+  concurrent jobs, request counts and browser/API latency.
+
+**Gate:** deterministic tests account for simulated network, pacing, retry and
+matching time without double counting; metrics survive early exit. The baseline
+identifies the dominant stages. Instrumentation adds less than 5% to a local
+replay benchmark and does not change findings or readiness.
+
+### 2. Reuse one catalogue snapshot during each analysis
+
+**Locations:** `core/metadata/album_tracks.py`, `core/musicbrainz_search.py`,
+`core/repair_jobs/library_reconciliation.py`; add a small run-scoped catalogue
+access object rather than another global mutable dictionary.
+
+- Introduce an internal release snapshot containing metadata, complete normalized
+  tracks and release-group identity, with provenance and response completeness.
+  Adapt the existing tracklist/metadata functions to consume that snapshot while
+  retaining their public return shapes for other callers.
+- For MusicBrainz, request the standard rich release response once (recordings,
+  artist credits, release groups and labels). Derive both consumers from it;
+  edition expansion reuses its group ID. Fetch group editions separately only
+  when needed. A partial response cannot satisfy a richer request.
+- Keep known release and release-group identifiers typed through the adapter so
+  an exact release does not first probe the release-group endpoint. Preserve
+  existing bounded discovery, pagination and video-track filtering.
+- Add per-key in-flight request sharing. Release the key on failure/cancellation;
+  never hold a database transaction or global maintenance lock during catalogue
+  fetches. Different albums can use different keys independently.
+- Hold the selected response stable for the duration of one analysis, even if
+  its persistent TTL expires midway. Consumers receive immutable views or copies
+  so normalizing tracks cannot alter metadata used elsewhere.
+
+**Gate:** a release used for scoring, evidence and edition expansion produces one
+rich release fetch per run, including concurrent consumers. Tests cover differing
+include sets, exact release versus group, paginated editions, provider fallback,
+partial/malformed responses and mutation isolation. Existing semantic plans,
+proposal values, readiness and approval tokens remain equivalent on frozen input.
+
+### 3. Persist bounded catalogue responses across runs and deployments
+
+**Locations:** a dedicated catalogue-response module/table, database schema
+migration, the catalogue adapter from milestone 2, `core/musicbrainz_client.py`
+for structured outcomes, and `core/repair_jobs/cache_evictor.py` for maintenance.
+
+The existing `core/metadata/cache.py` is a useful lifecycle reference, but its
+entity key lacks server and requested-field identity, its TTL is day-based and
+it writes access counters on each hit. Do not overload that key or make every
+reconciliation cache hit a SQLite write.
+
+- Proposed key: cache schema version, provider, normalized configured endpoint,
+  entity/operation type, identifier or normalized query, and canonical request
+  parameters (sorted includes, pagination, market/language where relevant).
+  Never store credentials in keys or logs. Include account/profile scope only
+  where provider output actually depends on it; public MusicBrainz responses can
+  be shared. A mirror change must produce a cache miss.
+- Store validated JSON, fetched/expiry times, outcome, payload hash, byte size and
+  last-access bucket. Use UTC epoch timestamps and second-resolution TTL checks.
+  Add response-schema/parser versions so incompatible deployments cannot reuse
+  incorrectly shaped entries. Normalized snapshots have their own version.
+- Initial reviewable defaults: successful release/recording details 7 days;
+  searches and edition listings 24 hours; confirmed 404 or valid empty search
+  1 hour. Limit storage to 25,000 responses and 256 MiB, with a 2 MiB per-response
+  ceiling; oversized responses remain usable but are not persisted. These are
+  starting limits to validate against the measured working set (the current run
+  considered 9,949 releases before counting discovery/group responses).
+- Evict expired entries first, then least-recently-used entries in bounded
+  batches. Coalesce access touches rather than writing on every hit. Use short
+  transactions, and make corrupt entries/cache write failures ordinary misses.
+  A cache problem must not prevent analysis or leave repair writes half-applied.
+- Distinguish `success`, `not_found`, `empty_success`, `transient_error` and
+  `invalid_response` before the current client wrappers collapse them to `None`.
+  Never persist timeout, connection failure, 429, 5xx or malformed data as a
+  negative result. Retain existing retry/backoff behavior. A failed refresh
+  cannot overwrite a previously successful cache entry with an empty response.
+- Expired data may remain stored for diagnosis, but does not silently become new
+  ready evidence. If refresh fails, preserve the prior plan and mark analysis
+  incomplete; do not retire its findings or manufacture missing tracks from the
+  failure. This also needs coverage at the existing scanner finalization boundary.
+- Normal “Reanalyze album” rereads current files and choices while reusing valid
+  catalogue evidence. Offer “Refresh catalogue evidence” as an explicit force
+  refresh for that album's release/discovery dependencies; do not clear the
+  whole library cache or discard pins, assignments or completion intent.
+- Initially enable persistent responses for the MusicBrainz path identified by
+  the measurements. Other provider adapters retain their current behavior until
+  their identity, pagination and account-dependent cache rules have tests.
+
+**Gate:** tests cover restart persistence, TTL boundaries, server/market/include
+isolation, 404 versus transient failure, failed refresh preserving plans,
+corrupt JSON, eviction/byte caps, concurrent fetches and cache-write failure.
+An unchanged warm scan makes zero upstream requests for eligible unexpired keys;
+request sharing prevents duplicate misses. Force refresh changes only the intended
+catalogue dependencies. A changed proposal invalidates its old approval.
+
+### 4. Consider skipping unchanged album matching only after measurement
+
+Implement only if matching/persistence remains a substantial measured cost after
+milestones 1–3. Start with reusing the pure matching result, while still checking
+current inventory and deriving current plan state; do not initially skip the
+entire album lifecycle.
+
+- Build a versioned signature from profile and physical album membership,
+  file stat/audio/tag evidence, relevant library metadata and locks, selected
+  provider/release and catalogue hashes, manual assignments, pins, numbering and
+  completion intent, wanted slots, saved/reopened decisions, playlist constraints,
+  fulfillment state and publication/discovery revision, relevant settings, and
+  matching-policy version. Include absent-slot dependencies so newly published
+  files invalidate a previously incomplete album.
+- Moves, split/merged folders, deleted files, reanalysis after a download,
+  cancellation, changed provider data and upgraded matching policy must recompute
+  their affected results. Cancellation still leaves completion intent unchanged.
+- Retain live projection of transient job/wishlist status and approval validity.
+  Do not replay old finding writes or use cached “ready” flags as authority.
+- Gate on signature-parity/invalidation tests for each dependency and a fallback
+  to ordinary analysis on any uncertainty. Exclude this milestone if measured
+  benefit is small compared with its invalidation complexity.
+
+### Performance and correctness acceptance / rollout
+
+- Run cold and warm analyses against the same captured inventory/catalogue
+  fixtures and compare normalized plans, pending finding IDs/values, ready modes,
+  accepted decisions and fulfillment states. Ignore only documented bookkeeping
+  timestamps and expiring media URLs. Explain every live-data difference.
+- Report full-scan wall time, targeted p50/p95, catalogue calls and wait time,
+  matching/persistence time, cache bytes and peak memory. Proposed targets:
+  at least 90% fewer eligible catalogue calls on warm scans; at least 50% less
+  warm full-scan wall time where catalogue work dominates; targeted warm album
+  reanalysis p95 under 3 seconds for ordinary single albums. Confirm or revise
+  those latency targets against milestone 1's measured non-catalogue floor.
+- Queue list/summary latency must not regress by more than 10% in matched replay;
+  request-count gates and semantic equivalence are deterministic CI checks.
+  Live latency targets are deployment measurements, not flaky unit assertions.
+- Keep all existing apply-time file, fingerprint, pin, evidence, playlist and
+  destination checks. The analysis cache must not bypass them. Revalidate the
+  accepted plan before mutation and do not substitute refreshed proposal values.
+- Commit and test each milestone; deploy the combined approved performance pass,
+  run a cold/full then warm/full reconciliation and targeted cases, verify all
+  saved approvals and queue totals, and rerun deployed desktop/mobile checks.
+  Do not apply live user plans to benchmark mutations. Retain a cache-disable
+  escape hatch and backwards-compatible schema for rollback.
+- Review decisions requested: approve milestones 1–3 as the next focused pass;
+  confirm the proposed TTL/storage defaults and force-refresh control; decide
+  whether milestone 4 is in scope only after the measured results are available.
