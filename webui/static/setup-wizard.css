@@ -420,11 +420,6 @@
     text-overflow: ellipsis;
 }
 
-.setup-artist-genre {
-    font-size: 0.78rem;
-    color: var(--white-a40);
-}
-
 /* Added artists chips */
 .setup-added-artists {
     display: flex;
