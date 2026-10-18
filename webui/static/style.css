@@ -88099,6 +88099,12 @@ body:has([data-shared-modal]) :is(
     .media-player,
     .hamburger-btn
 ) {
-    visibility: hidden !important;
+    display: none !important;
     pointer-events: none !important;
+}
+
+/* Toasts remain in the notification history, but must not intercept a
+   modal's confirmation or cancel controls. Local dialog feedback stays inside. */
+body:has([data-shared-modal]) .toast-container {
+    z-index: calc(var(--z-modal) - 1);
 }
