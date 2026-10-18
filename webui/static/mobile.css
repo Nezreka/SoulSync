@@ -91,10 +91,6 @@
         width: 100%;
     }
 
-    .enhanced-dropdown-content {
-        max-width: 100% !important;
-    }
-
     .dashboard-container {
         gap: 15px;
         margin: 15px;
@@ -370,11 +366,6 @@
         overflow: hidden;
     }
 
-    .downloads-side-panel {
-        max-height: 400px;
-        margin-top: 0;
-    }
-
     .search-bar-container {
         flex-direction: column;
         gap: 12px;
@@ -386,24 +377,8 @@
         min-height: 44px;
     }
 
-    .enhanced-search-bar-container {
-        flex-direction: column;
-        gap: 8px;
-        padding: 8px;
-    }
-
-    .enhanced-search-wrapper {
-        width: 100%;
-    }
-
     .filter-group {
         flex-wrap: wrap;
-    }
-
-    .filter-btn {
-        font-size: 13px;
-        padding: 8px 14px;
-        min-height: 36px;
     }
 
     .sort-order-btn {
@@ -422,27 +397,7 @@
         max-height: none;
     }
 
-    .search-mode-btn {
-        min-height: 44px;
-    }
-
-    .enh-artists-wrapper {
-        flex-direction: column;
-        gap: 16px;
-    }
-
-    /* Artist cards — center and wrap */
-    .enh-compact-list.enh-artists-grid {
-        justify-content: center;
-    }
-
     /* Album cards — wrap and fill space, 2 per row */
-    .enh-compact-list.enh-albums-grid {
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 10px;
-        overflow-x: hidden;
-    }
 
     .enh-compact-item.album-card {
         width: calc(50% - 8px);
@@ -542,39 +497,7 @@
         gap: 10px;
     }
 
-    .result-item__main-content {
-        flex: 1;
-        min-width: 0;
-        gap: 10px;
-    }
-
-    .result-item__title {
-        white-space: normal;
-        word-break: break-word;
-        font-size: 12px;
-    }
-
-    .result-item__secondary-info {
-        white-space: normal;
-        word-break: break-word;
-    }
-
-    .result-item__actions {
-        width: auto;
-        flex-shrink: 0;
-    }
-
-    .action-btn {
-        width: 40px;
-        height: 40px;
-        border-radius: 20px;
-    }
-
-    /* Enhanced search artist/album grids */
     /* Enhanced search — tablet/mobile responsive */
-    .enh-compact-list.enh-artists-grid {
-        gap: 10px;
-    }
 
     .enh-compact-item.artist-card {
         width: calc(50% - 8px);
@@ -616,29 +539,7 @@
         gap: 8px;
     }
 
-    /* Source tabs — horizontal scroll on small screens */
-    .enh-source-tabs {
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        padding-bottom: 4px;
-    }
-    .enh-source-tabs::-webkit-scrollbar {
-        display: none;
-    }
-
-    .enh-source-tab {
-        flex-shrink: 0;
-        min-height: 36px;
-        padding: 8px 14px;
-    }
-
     /* --- Phase 4: Sync --- */
-
-    .sync-content {
-        max-width: 100%;
-    }
 
     .sync-tabs {
         flex-wrap: wrap;
@@ -919,16 +820,7 @@
         width: 100%;
     }
 
-    .genre-chart-types-grid {
-        grid-template-columns: 1fr;
-    }
-
     /* --- Phase 5A: Artists --- */
-
-    .artists-content {
-        height: auto;
-        overflow-y: visible;
-    }
 
     .artists-search-state {
         min-height: auto;
@@ -936,42 +828,10 @@
         gap: 20px;
     }
 
-    .artists-welcome-title {
-        font-size: 24px;
-    }
-
-    .artists-welcome-subtitle {
-        font-size: 14px;
-    }
-
-    .artists-results-state {
-        padding: 16px;
-    }
-
-    .artists-results-header {
-        flex-direction: column;
-        gap: 12px;
-        margin-bottom: 20px;
-    }
-
-    .artists-cards-container {
-        flex-wrap: wrap;
-        overflow-x: visible;
-        overflow-y: visible;
-        justify-content: center;
-        padding: 16px 0;
-    }
-
     .artist-card {
         width: 100%;
         max-width: 280px;
         height: 300px;
-    }
-
-    .artist-detail-info {
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
     }
 
     .album-cards-container,
@@ -993,51 +853,12 @@
         border-radius: var(--radius-lg);
     }
 
-    .artists-hero-main {
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        gap: 16px;
-    }
-
-    .artists-hero-image {
-        width: 140px;
-        height: 175px;
-        border-radius: 10px;
-    }
-
     .artists-hero-name {
         font-size: 1.5em;
     }
 
-    .artists-hero-genres {
-        justify-content: center;
-    }
-
-    .artists-hero-badges {
-        justify-content: center;
-    }
-
-    .artists-hero-content {
-        padding: 16px 14px 20px;
-    }
-
-    .artists-hero-actions {
-        position: static;
-        justify-content: center;
-        margin-top: 8px;
-    }
-
-    .artists-hero-bio {
-        text-align: left;
-    }
-
     .artists-hero-stats {
         justify-content: center;
-    }
-
-    .artists-hero-stat strong {
-        font-size: 15px;
     }
 
     /* --- Phase 5B: Library --- */
@@ -1073,10 +894,6 @@
     .watch-all-cell-img, .watch-all-cell-placeholder { width: 32px; height: 32px; }
     .watch-all-header { padding: 16px 18px; }
     .watch-all-search-wrap { padding: 8px 14px 4px; }
-
-    .library-card-watchlist-btn {
-        opacity: 1;
-    }
 
     .alphabet-selector-inner {
         flex-wrap: wrap;
@@ -1609,17 +1426,6 @@
         max-width: 100%;
     }
 
-    .confirmation-modal {
-        width: 90vw;
-        max-width: 90vw;
-        padding: 24px;
-    }
-
-    .confirmation-modal button {
-        width: 100%;
-        min-height: 44px;
-    }
-
     .genre-browser-modal-container {
         width: 100%;
         max-width: 100%;
@@ -1666,13 +1472,6 @@
         min-height: 0;
     }
 
-    /* Wishlist category tracks view */
-    .wishlist-category-tracks {
-        height: auto;
-        padding: 0 16px;
-        overflow: visible;
-    }
-
     /* Tracks scroll container - fit within modal */
     .playlist-tracks-scroll {
         max-height: none;
@@ -1705,14 +1504,6 @@
         width: 100%;
         min-height: 44px;
         text-align: center;
-    }
-
-    /* Watchlist fullscreen modal on mobile */
-    .watchlist-fullscreen {
-        max-width: 100vw;
-        width: 100vw;
-        max-height: 100vh;
-        border-radius: 0;
     }
 
     /* Watchlist card grid on mobile */
@@ -1767,13 +1558,7 @@
         padding: 0 16px;
     }
 
-    /* Retag modal on mobile — fullscreen */
-    .retag-modal-container {
-        max-width: 100vw;
-        width: 100vw;
-        max-height: 100vh;
-        border-radius: 0;
-    }
+    /* Retag modal on mobile */
 
     .retag-modal-header {
         padding: 16px;
@@ -1804,13 +1589,6 @@
         font-size: 13px;
     }
 
-    .retag-search-container {
-        max-width: 100vw;
-        width: 100vw;
-        max-height: 100vh;
-        border-radius: 0;
-    }
-
     /* Watchlist live activity - stack on mobile */
     #watchlist-live-activity {
         flex-direction: column;
@@ -1818,11 +1596,6 @@
     }
 
     /* Wishlist category grid */
-    .wishlist-category-grid {
-        grid-template-columns: 1fr;
-        gap: 12px;
-        padding: 16px;
-    }
 
     .wishlist-category-card {
         min-height: 140px;
@@ -1845,23 +1618,6 @@
     }
 
     .wishlist-track-artists {
-        font-size: 12px;
-    }
-
-    .wishlist-delete-btn {
-        padding: 6px 8px;
-        font-size: 13px;
-        right: 8px;
-    }
-
-    .wishlist-delete-album-btn {
-        padding: 6px 8px;
-        font-size: 13px;
-        right: 8px;
-    }
-
-    .wishlist-delete-btn-small {
-        padding: 4px 8px;
         font-size: 12px;
     }
 
@@ -1909,17 +1665,6 @@
 
     input[type="range"] {
         min-height: 12px;
-    }
-
-    /* Fix hover-only invisible elements */
-    .wishlist-delete-btn {
-        opacity: 1;
-        pointer-events: auto;
-    }
-
-    .wishlist-delete-album-btn {
-        opacity: 1;
-        pointer-events: auto;
     }
 
     /* --- Phase 10: Typography & Spacing --- */
@@ -2008,10 +1753,6 @@
     .media-expanded {
         margin-top: 6px;
         padding-top: 6px;
-    }
-
-    .media-controls {
-        gap: 8px;
     }
 
     .volume-control {
@@ -2104,11 +1845,7 @@
         font-size: 14px;
     }
 
-    /* Enhanced search - smaller cards on small screens */
     /* Enhanced search — small phone */
-    .enh-compact-list.enh-artists-grid {
-        gap: 8px;
-    }
 
     .enh-compact-item.artist-card {
         width: calc(50% - 6px);
@@ -2152,10 +1889,6 @@
     .enh-item-image-placeholder.track-placeholder {
         width: 38px;
         height: 38px;
-    }
-
-    .enh-section-title {
-        font-size: 11px;
     }
 
     /* Beatport tighter */
@@ -2374,13 +2107,6 @@
     /* Disable alphabet-btn scale hover effect for touch */
     .alphabet-btn:hover {
         transform: none;
-    }
-
-    /* Make hover-reveal elements always visible */
-    .wishlist-delete-btn,
-    .wishlist-delete-album-btn {
-        opacity: 1;
-        pointer-events: auto;
     }
 
     /* Active feedback states */
@@ -2809,24 +2535,9 @@
         gap: 12px;
     }
 
-    .automations-header-actions {
-        width: 100%;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-
-    .automations-header-actions button {
-        flex: 1;
-        min-width: 120px;
-    }
-
     .automations-stats {
         flex-wrap: wrap;
         gap: 8px;
-    }
-
-    .automations-stat {
-        font-size: 12px;
     }
 
     /* Builder view */
@@ -2874,16 +2585,6 @@
 
     .block-item {
         padding: 10px;
-    }
-
-    .block-inputs label {
-        font-size: 12px;
-    }
-
-    .block-inputs input,
-    .block-inputs select {
-        font-size: 13px;
-        padding: 6px 8px;
     }
 
     .condition-builder {
@@ -2981,41 +2682,6 @@
         gap: 8px;
     }
 
-    .rate-gauge-card {
-        padding: 10px 8px 8px;
-        border-radius: var(--radius-lg);
-    }
-
-    .gauge-card-header {
-        gap: 5px;
-        margin-bottom: 2px;
-    }
-
-    .gauge-card-name {
-        font-size: 11px;
-    }
-
-    .gauge-card-status {
-        font-size: 8px;
-        padding: 1px 5px;
-    }
-
-    .gauge-card-stats {
-        padding: 0 2px;
-    }
-
-    .gauge-card-stat-val {
-        font-size: 11px;
-    }
-
-    .gauge-card-stat-label {
-        font-size: 7px;
-    }
-
-    .gauge-value {
-        font-size: 20px !important;
-    }
-
     .gauge-unit {
         font-size: 8px !important;
     }
@@ -3050,29 +2716,6 @@
     .rate-monitor-grid {
         grid-template-columns: repeat(2, 1fr) !important;
         gap: 6px;
-    }
-
-    .gauge-card-dot {
-        width: 6px;
-        height: 6px;
-    }
-
-    .gauge-card-name {
-        font-size: 10px;
-    }
-
-    .gauge-card-status {
-        display: none;
-    }
-
-    .gauge-budget-label {
-        font-size: 7px;
-    }
-
-    .gauge-rl-badge {
-        font-size: 8px;
-        padding: 2px 6px;
-        gap: 3px;
     }
 }
 
@@ -3130,18 +2773,6 @@
 
     .notif-panel-title {
         font-size: 13px;
-    }
-
-    .notif-item {
-        padding: 8px 14px;
-    }
-
-    .notif-item-msg {
-        font-size: 12px;
-    }
-
-    .notif-item-time {
-        font-size: 9px;
     }
 
     /* Helper button */
@@ -3564,16 +3195,6 @@ body:has([data-year-story-overlay]) .helper-float-btn {
 }
 
 @media (max-width: 768px) {
-    /* Recommended-artist carousel cards → 2-up wrap on mobile. The base rule
-       pins them with flex:0 0 160px, which overrides plain width — so override
-       the flex-basis too for the 45% to take. */
-    .recommended-card--carousel {
-        flex: 0 0 45%;
-        width: 45%;
-    }
-}
-
-@media (max-width: 768px) {
     /* ── Downloads page (.adl-*) ──
        The redesign is single-column already; the phone pass is about row
        anatomy. Desktop rows are art + text + a right-hand status column,
@@ -3880,9 +3501,6 @@ body:has([data-year-story-overlay]) .helper-float-btn {
 
     .automations-section { padding: 11px 11px 12px; }
     .automations-section-header { flex-wrap: wrap; row-gap: 4px; }
-    /* The family summary drops to its own line rather than squeezing the
-       label and the count into ellipsis. */
-    .automations-section-header .section-summary { flex-basis: 100%; order: 5; white-space: normal; }
     .automations-section-header .section-line { display: none; }
     .automations-section-header .section-action-btn { min-width: 34px; min-height: 34px; }
 
@@ -5113,6 +4731,9 @@ body:has(.artist-map-container) #gsearch-bar {
         flex: 1 1 30%;
         min-width: 0;
     }
+    /* No markup uses .mm-btn-wrap / .mm-btn-caption since the made-over
+       playlist detail modal (b968b3445), but mirrored-modal-mobile.test.ts
+       still pins these three rules, so they stay until that test moves. */
     .mm-btn-wrap {
         flex: 1 1 100%;
         min-width: 0;
