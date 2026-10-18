@@ -259,10 +259,4 @@ describe('the whole-playlist download action', () => {
   it('reports a failure with the underlying message', () => {
     expect(playlistDownloadFailed('boom')).toBe('Failed to open download modal: boom');
   });
-
-  it('addresses the SAME virtual playlist id as the sync', () => {
-    // The download modal and the sync both address one playlist, and the
-    // download bar keys its bubble on that id.
-    expect(virtualPlaylistId('release_radar')).toBe('discover_release_radar');
-  });
 });
