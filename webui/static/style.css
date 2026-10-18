@@ -5610,11 +5610,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     min-height: 0;
 }
 
-.downloads-side-panel {
-    margin-top: 100px;
-    overflow-y: scroll;
-}
-
 /* Header: Replicates create_elegant_header() */
 .downloads-header {
     padding: 16px 0;
@@ -5658,80 +5653,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-top: 4px;
 }
 
-/* Toggle Download Manager Button */
-.toggle-manager-btn {
-    background: linear-gradient(135deg,
-            rgba(35, 35, 35, 0.8) 0%,
-            rgba(25, 25, 25, 0.9) 100%);
-    backdrop-filter: blur(10px);
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-circle);
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    flex-shrink: 0;
-    box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.toggle-manager-btn:hover {
-    background: linear-gradient(135deg,
-            rgba(45, 45, 45, 0.9) 0%,
-            rgba(35, 35, 35, 0.95) 100%);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    transform: scale(1.05);
-    box-shadow:
-        0 6px 16px rgba(0, 0, 0, 0.4),
-        0 0 20px rgba(var(--accent-rgb), 0.2),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.toggle-manager-btn:active {
-    transform: scale(0.95);
-}
-
-.toggle-icon {
-    font-size: 20px;
-    font-weight: 600;
-    color: #ffffff;
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    line-height: 1;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-/* When manager is hidden, rotate the icon */
-.downloads-content.manager-hidden .toggle-icon {
-    transform: rotate(180deg);
-}
-
-/* Hide side panel when toggled */
-.downloads-content.manager-hidden {
-    grid-template-columns: 1fr;
-    /* Only show main panel */
-}
-
-.downloads-content.manager-hidden .downloads-side-panel {
-    display: none;
-}
-
 /* Responsive: Mobile adjustments for toggle button */
 @media (max-width: 768px) {
     .downloads-header-content {
         gap: 12px;
-    }
-
-    .toggle-manager-btn {
-        width: 40px;
-        height: 40px;
-    }
-
-    .toggle-icon {
-        font-size: 20px;
     }
 
     .downloads-header .downloads-title {
@@ -5748,15 +5673,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         gap: 10px;
     }
 
-    .toggle-manager-btn {
-        width: 36px;
-        height: 36px;
-    }
-
-    .toggle-icon {
-        font-size: 18px;
-    }
-
     .downloads-header .downloads-title {
         font-size: 20px;
     }
@@ -5766,28 +5682,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     }
 }
 
-/* Search Bar: Replicates create_elegant_search_bar() */
-.search-bar-container {
-    background: linear-gradient(to bottom, rgba(50, 50, 50, 0.55), rgba(40, 40, 40, 0.65));
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    padding: 16px 20px;
-    display: flex;
-    gap: 16px;
-    align-items: center;
-}
-
 /* Search Status Bar */
-.search-status-container {
-    background: linear-gradient(to right, rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.08));
-    border-radius: 10px;
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    padding: 8px 10px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
 #search-status-text {
     color: var(--white-a70);
     font-size: 11px;
@@ -5847,82 +5742,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .search-result-item:hover {
     border-color: rgba(var(--accent-rgb), 0.8);
     transform: translateY(-2px);
-}
-
-.result-item__main-content {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-grow: 1;
-    min-width: 0;
-    /* Prevents text overflow issues */
-}
-
-.result-item__icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 22px;
-    background: linear-gradient(to bottom right, rgba(var(--accent-rgb), 0.3), rgba(24, 156, 71, 0.2));
-    border: 2px solid rgba(var(--accent-rgb), 0.4);
-    font-size: 18px;
-    color: rgb(var(--accent-light-rgb));
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.result-item__info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.result-item__title-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.result-item__title {
-    font-size: 12px;
-    font-weight: bold;
-    color: #ffffff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.result-item__secondary-info {
-    font-size: 9px;
-    color: rgba(179, 179, 179, 0.8);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.result-item__actions {
-    display: flex;
-    gap: 8px;
-}
-
-.action-btn {
-    width: 46px;
-    height: 46px;
-    border-radius: 23px;
-    border: 2px solid;
-    font-size: 18px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.action-btn:hover {
-    transform: scale(1.1);
 }
 
 .action-btn--stream {
@@ -6112,79 +5931,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 8px;
 }
 
-.track-item .action-btn {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-xl);
-    font-size: 12px;
-}
-
-/* Right Panel: Controls & Download Queue */
-.controls-panel {
-    background: linear-gradient(to bottom, rgba(40, 40, 40, 0.6), rgba(25, 25, 25, 0.7));
-    border-radius: 18px;
-    border: 1px solid rgba(80, 80, 80, 0.4);
-    padding: 14px 8px;
-    flex-shrink: 0;
-    /* Prevent this panel from shrinking */
-}
-
-.controls-panel__header {
-    font-size: 12px;
-    font-weight: bold;
-    color: var(--white-a90);
-    padding: 6px 14px;
-}
-
-.controls-panel__stats {
-    background: linear-gradient(to bottom, rgba(45, 45, 45, 0.7), rgba(35, 35, 35, 0.8));
-    border-radius: 10px;
-    border: 1px solid rgba(80, 80, 80, 0.3);
-    padding: 8px 10px;
-    margin: 0 6px;
-    font-size: 9px;
-    color: var(--white-a80);
-}
-
-.controls-panel__actions {
-    padding: 6px;
-}
-
-.controls-panel__clear-btn {
-    width: 100%;
-    height: 28px;
-    background: linear-gradient(to bottom, rgba(220, 53, 69, 0.4), rgba(220, 53, 69, 0.25));
-    border: 1px solid rgba(220, 53, 69, 0.8);
-    color: #dc3545;
-    border-radius: 14px;
-    font-size: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.controls-panel__clear-btn:hover {
-    background: linear-gradient(to bottom, rgba(220, 53, 69, 0.5), rgba(220, 53, 69, 0.35));
-}
-
-.controls-panel__cancel-all-btn {
-    width: 100%;
-    height: 28px;
-    margin-top: 4px;
-    background: linear-gradient(to bottom, rgba(255, 152, 0, 0.4), rgba(255, 152, 0, 0.25));
-    border: 1px solid rgba(255, 152, 0, 0.8);
-    color: #ff9800;
-    border-radius: 14px;
-    font-size: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.controls-panel__cancel-all-btn:hover {
-    background: linear-gradient(to bottom, rgba(255, 152, 0, 0.5), rgba(255, 152, 0, 0.35));
-}
-
 /* Download Manager (Tabs & Queue) */
 .download-manager {
     flex-grow: 1;
@@ -6194,37 +5940,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .download-manager__tabs {
     display: flex;
-}
-
-.tab-btn {
-    flex-grow: 1;
-    padding: 6px 12px;
-    background: #404040;
-    color: #ffffff;
-    border: 1px solid #606060;
-    border-bottom: none;
-    font-size: 10px;
-    font-weight: bold;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.tab-btn:first-child {
-    border-top-left-radius: 8px;
-}
-
-.tab-btn:last-child {
-    border-top-right-radius: 8px;
-}
-
-.tab-btn.active {
-    background: rgb(var(--accent-rgb));
-    color: #000000;
-    border-color: rgb(var(--accent-rgb));
-}
-
-.tab-btn:hover:not(.active) {
-    background: #505050;
 }
 
 .download-manager__content {
@@ -6355,11 +6070,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 10px;
 }
 
-.status--cancelled {
-    color: #ffa500;
-}
-
-
 
 
 
@@ -6379,11 +6089,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 
 /* Artists Page Styling */
-.artists-content {
-    height: calc(100vh - 150px);
-    overflow-y: auto;
-}
-
 .artists-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
