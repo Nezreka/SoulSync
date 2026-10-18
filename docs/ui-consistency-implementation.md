@@ -98,3 +98,14 @@ All 22 tasks are complete. The final code image is `localhost/soulsync:test-bd93
 The queue now shares the application's visual primitives and core interaction components while retaining its album-decision workflow. Library and artist consumers use the same extracted components. Whole-album readiness, signed execution previews, decision authority and relocation contracts remain server-owned. The only backend addition preserves label/catalog-number associations in release evidence.
 
 The final visual pass corrected mobile modal overlap from both floating controls and transient toasts. Global toasts remain in notification history and sit behind shared dialogs; dialog feedback stays local. No live repair plans, replacement requests or file writes were executed as a test. No implementation tasks remain open in this plan.
+
+## Reopened acceptance review — 2026-10-18
+
+The prior completion claim is superseded by the user's visual and workflow audit. Shared infrastructure is implemented, but acceptance is reopened for semantic state colors, comparison cues, evidence spacing, sticky opacity, artwork delivery/loading, individual missing-track choices, count scopes, and cross-consumer parity. The next pass must verify capability by album state and inspect rendered before/after views, including scrolled content, rather than treating rendering and overflow checks as visual acceptance.
+
+- [ ] Restore semantic rows/group headers, selected-state independence, comparison arrows/strikethrough/unchanged cues.
+- [ ] Fix evidence spacing, compact release facts, quiet scan history, opaque sticky completion notices.
+- [ ] Verify exact candidate artwork and shared loading/failure behavior in Review and Library.
+- [ ] Provide individual missing-track choices and scope editing in all applicable album states.
+- [ ] Make filtered versus global ready counts coherent without changing server apply authority.
+- [ ] Recheck all original tasks, shared consumers, desktop/mobile, focus, data states, and prior-version parity; record actual evidence and remaining limitations.

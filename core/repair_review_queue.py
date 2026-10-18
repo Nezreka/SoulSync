@@ -467,6 +467,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
         ).fetchone()
         return dict(zip(('all', 'review', 'ready', 'files', 'waiting'), values)) | {
             'ready_total': count_ready_findings(conn, status=status, job_id=job_id, case_modes=modes),
+            'ready_albums_total': sum(bool(case['ready_ids']) for case in modes.values()),
         }
     finally:
         conn.close()

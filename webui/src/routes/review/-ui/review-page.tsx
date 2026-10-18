@@ -38,6 +38,7 @@ import { fetchFindingTypes } from '../../tools/-tools.api';
 import { usePolledStatus } from '../../tools/-tools.polling';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
+import { MissingTracksChoice } from './missing-tracks-choice';
 import { ProviderReleaseId } from './provider-release-id';
 import { AssignmentEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
 import { buildAlbumModel, decisionOrder } from './review-album-model';
@@ -1019,11 +1020,11 @@ export function ReviewPage() {
     }
   };
 
-  const requestAllMissing = async (missingCount: number) => {
+  const requestAllMissing = async (missingCount: number, findingIds?: number[]) => {
     if (!reviewCase || !missingCount) return;
     const confirmed = await confirm({
       title: 'Request missing album tracks',
-      message: `Request ${missingCount === 1 ? 'the missing track' : `all ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
+      message: `Request ${missingCount === 1 ? 'the missing track' : `${findingIds ? 'the selected' : 'all'} ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
       confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
     });
     if (!confirmed) return;
@@ -1031,7 +1032,7 @@ export function ReviewPage() {
     setError('');
     setApplyProgress(`Requesting 0 of ${missingCount} missing tracks…`);
     try {
-      const started = await startMissingTrackRequests(reviewCase.case_id);
+      const started = await startMissingTrackRequests(reviewCase.case_id, findingIds);
       if (!started.started) throw new Error(started.error || 'Could not request missing tracks');
       rememberOperation(started.operation_id, reviewCase.case_id);
     } catch (cause) {
@@ -1317,21 +1318,31 @@ export function ReviewPage() {
       </a>
       <PageHeader
         title="Review Queue"
-        subtitle="Review album plans, apply supported changes, and resolve exceptions."
+        subtitle={
+          <>
+            Review album plans, apply supported changes, and resolve exceptions.
+            {lastRun?.status === 'completed' &&
+              scanStatus?.current_job?.job_id !== 'library_reconciliation' && (
+                <span className={styles.scanHistory}>
+                  Last reconciliation: {lastRun.items_scanned} files checked.
+                </span>
+              )}
+          </>
+        }
         actions={
           <div className={styles.headerTools}>
             <div className={styles.headerCount}>
               <strong>
                 {queueTotals || queue
-                  ? `${queueTotals?.all ?? queue?.total} album${(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}`
+                  ? `${queueTotals?.all ?? queue?.total} album${(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}${query || category ? ' in this view' : ''}`
                   : 'Loading queue…'}
               </strong>
               <span>
-                {queueTotals
-                  ? `${queueTotals.ready} ready album${queueTotals.ready === 1 ? '' : 's'} · `
+                {queueTotals?.ready_albums_total != null
+                  ? `${queueTotals.ready_albums_total} fully decided album${queueTotals.ready_albums_total === 1 ? '' : 's'} · `
                   : ''}
                 {queue
-                  ? `${queue.ready_total || 0} ready change${queue.ready_total === 1 ? '' : 's'}`
+                  ? `${queueTotals?.ready_total ?? queue.ready_total ?? 0} ready changes across the library`
                   : 'Loading ready changes…'}
               </span>
             </div>
@@ -1349,13 +1360,13 @@ export function ReviewPage() {
               type="button"
               variant="primary"
               className={styles.safeAction}
-              disabled={mutationBusy || !queue?.ready_total}
+              disabled={mutationBusy || !(queueTotals?.ready_total ?? queue?.ready_total)}
               onClick={() => void applyReady()}
             >
               {applyBusy && !operationCase
                 ? applyProgress || 'Applying…'
                 : queue
-                  ? `Apply ready changes (${queue.ready_total || 0})`
+                  ? `Apply ready changes (${queueTotals?.ready_total ?? queue.ready_total ?? 0})`
                   : 'Loading ready changes…'}
             </Button>
             <div className={styles.inlineActions} aria-label="Queue actions">
@@ -1421,7 +1432,8 @@ export function ReviewPage() {
           <span>This continues on the server. You can leave this page and return.</span>
         </Notice>
       )}
-      {(scanStatus?.current_job?.job_id === 'library_reconciliation' || lastRun) && (
+      {(scanStatus?.current_job?.job_id === 'library_reconciliation' ||
+        (lastRun && lastRun.status !== 'completed')) && (
         <div
           className={styles.scanStatus}
           role="status"
@@ -2003,9 +2015,17 @@ export function ReviewPage() {
                                             ? 'the missing track'
                                             : `all ${decision.action_count} missing tracks`}
                                         </Button>
+                                        <Button
+                                          onClick={() => {
+                                            setAlbumView('tracks');
+                                            setTrackFilter('missing');
+                                          }}
+                                        >
+                                          Choose individual tracks →
+                                        </Button>
                                         <small>
-                                          Each track is added to the wishlist for the selected
-                                          release.
+                                          Each requested track is added to the wishlist for the
+                                          selected release.
                                         </small>
                                       </div>
                                     );
@@ -2146,7 +2166,10 @@ export function ReviewPage() {
                               {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'}{' '}
                               ready
                             </strong>
-                            <p>These can be applied without resolving the decisions above.</p>
+                            <p>
+                              These edits are supported. Resolve the remaining album decisions
+                              before applying the plan.
+                            </p>
                           </div>
                           <div className={styles.planBadges}>
                             <StatusChip tone="good" icon="check">
@@ -2342,6 +2365,48 @@ export function ReviewPage() {
                             </Button>
                           )}
                         </div>
+                        {missingAssignments.length > 0 &&
+                          !releaseChoicePending &&
+                          (reviewCase.items.some(
+                            (item) => item.finding_type === 'reconciliation_intent',
+                          ) ? (
+                            <section
+                              className={styles.missingChoices}
+                              aria-label="Choose album completeness"
+                            >
+                              <h4>Choose which missing tracks you want</h4>
+                              <CompletenessChoice
+                                key={reviewCase.case_id}
+                                finding={
+                                  reviewCase.items.find(
+                                    (item) => item.finding_type === 'reconciliation_intent',
+                                  )!
+                                }
+                                busy={mutationBusy}
+                                onChoose={(choice) =>
+                                  void act(
+                                    reviewCase.items.find(
+                                      (item) => item.finding_type === 'reconciliation_intent',
+                                    )!,
+                                    'fix',
+                                    choice,
+                                  )
+                                }
+                              />
+                            </section>
+                          ) : reviewCase.items.some(
+                              (item) => item.finding_type === 'reconciliation_missing',
+                            ) ? (
+                            <MissingTracksChoice
+                              key={reviewCase.case_id}
+                              findings={reviewCase.items.filter(
+                                (item) => item.finding_type === 'reconciliation_missing',
+                              )}
+                              busy={mutationBusy}
+                              onRequest={(ids) => void requestAllMissing(ids.length, ids)}
+                              onChangeScope={() => void reconsiderScope()}
+                            />
+                          ) : null)}
                         <div
                           className={styles.trackTable}
                           role="group"
@@ -2408,8 +2473,8 @@ export function ReviewPage() {
                                     <>
                                       {hasIntentDecision && (
                                         <p>
-                                          Choose album completeness on Plan; each absent track is
-                                          listed here for context.
+                                          Choose missing tracks above, or review album completeness
+                                          on Plan.
                                         </p>
                                       )}
                                       {missingAssignments
@@ -2548,7 +2613,6 @@ export function ReviewPage() {
                           source: reviewCase.album_plan?.source,
                           release_id: reviewCase.album_plan?.release_id,
                         }}
-                        fallbackArtwork={reviewCase.album_thumb_url || ''}
                         numberingMode={reviewCase.album_plan?.numbering_mode}
                         onPin={(index) =>
                           !reviewCase.album_plan &&

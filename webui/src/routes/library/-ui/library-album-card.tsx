@@ -26,14 +26,7 @@ interface Props {
  * straight to the placeholder.
  */
 function AlbumImage({ album }: { album: LibraryAlbum }) {
-  return (
-    <Artwork
-      url={album.thumb_url?.trim()}
-      title={album.title}
-      variant="grid"
-      className="is-loaded"
-    />
-  );
+  return <Artwork url={album.thumb_url?.trim()} title={album.title} variant="grid" />;
 }
 
 /**

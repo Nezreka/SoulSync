@@ -164,6 +164,8 @@ export interface ReviewQueuePage {
 }
 
 export interface ReviewQueueModeTotals {
+  ready_albums_total?: number;
+  ready_total?: number;
   all: number;
   review: number;
   ready: number;
@@ -426,10 +428,13 @@ export async function startAlbumMetadataChanges(
 
 export async function startMissingTrackRequests(
   caseId: string,
+  findingIds?: number[],
 ): Promise<{ started: boolean; operation_id?: string; total?: number; error?: string }> {
   return readJson(
     await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/request-missing`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(findingIds ? { finding_ids: findingIds } : {}),
     }),
   );
 }

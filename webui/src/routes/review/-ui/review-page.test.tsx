@@ -195,6 +195,8 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByText('Choose whether this folder represents the complete album');
+    fireEvent.click(screen.getByRole('tab', { name: /^Tracks/ }));
+    await screen.findByRole('heading', { name: 'Choose which missing tracks you want' });
     fireEvent.click(screen.getByRole('checkbox', { name: 'First' }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep as partial · 1 wanted' }));
     await waitFor(() =>

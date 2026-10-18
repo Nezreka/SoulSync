@@ -1261,7 +1261,9 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
         'date': release_meta.get('date') or release_meta.get('release_date') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
         'format': ', '.join(dict.fromkeys(formats)) or release_meta.get('format') or '',
-        'image_url': release_meta.get('image_url') or release_meta.get('thumb_url') or '',
+        'image_url': (release_meta.get('image_url') or release_meta.get('thumb_url') or
+                      (f'https://coverartarchive.org/release/{candidate.release_id}/front-250'
+                       if candidate.source == 'musicbrainz' else '')),
         'matched': candidate.matched, 'total_slots': len(release_slots),
         'excluded_video_tracks': max((slot.get('excluded_video_tracks', 0)
                                       for slot in release_slots), default=0),

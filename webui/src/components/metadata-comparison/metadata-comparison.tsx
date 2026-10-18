@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import { Button } from '@/components/form/form';
 import { copyRecordText } from '@/components/record-inspector/record-helpers';
@@ -34,6 +34,7 @@ export function MetadataComparison({
           <tr>
             <th>Field</th>
             <th>{currentLabel}</th>
+            <th aria-label="Change" />
             <th>{plannedLabel}</th>
           </tr>
         </thead>
@@ -44,23 +45,51 @@ export function MetadataComparison({
               {[row.current, row.planned].map((value, index) => {
                 const text = valueText(value);
                 return (
-                  <td key={index} data-label={index ? plannedLabel : currentLabel}>
-                    <span>{text || <em>Not set</em>}</span>
-                    {text.length > 60 && (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        aria-label={`Copy ${index ? plannedLabel : currentLabel} ${row.field}`}
-                        onClick={() => {
-                          void copyRecordText(text)
-                            .then(() => setCopied('Value copied'))
-                            .catch(() => setCopied('Could not copy value'));
-                        }}
+                  <Fragment key={index}>
+                    {index === 1 && (
+                      <td
+                        className={styles.direction}
+                        aria-label={
+                          row.changed === false
+                            ? 'Unchanged'
+                            : !valueText(row.current)
+                              ? 'Added'
+                              : !valueText(row.planned)
+                                ? 'Removed'
+                                : 'Changed'
+                        }
                       >
-                        ⧉
-                      </Button>
+                        {row.changed === false ? '✓' : '→'}
+                      </td>
                     )}
-                  </td>
+                    <td data-label={index ? plannedLabel : currentLabel}>
+                      <span className={index ? styles.planned : styles.current}>
+                        {text ? (
+                          index === 0 && row.changed !== false ? (
+                            <del>{text}</del>
+                          ) : (
+                            text
+                          )
+                        ) : (
+                          <em>Not set</em>
+                        )}
+                      </span>
+                      {text.length > 60 && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Copy ${index ? plannedLabel : currentLabel} ${row.field}`}
+                          onClick={() => {
+                            void copyRecordText(text)
+                              .then(() => setCopied('Value copied'))
+                              .catch(() => setCopied('Could not copy value'));
+                          }}
+                        >
+                          ⧉
+                        </Button>
+                      )}
+                    </td>
+                  </Fragment>
                 );
               })}
             </tr>

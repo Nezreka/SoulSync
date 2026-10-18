@@ -519,7 +519,6 @@ export function ReleaseComparison({
   onPin?: (index: number) => void;
   busy?: boolean;
   currentRelease?: Data;
-  fallbackArtwork?: string;
   numberingMode?: string;
   view?: 'all' | 'list' | 'detail';
 }) {
@@ -592,7 +591,15 @@ export function ReleaseComparison({
                     <span className={styles.candidateRank}>{index + 1}</span>
                     <ReviewArtwork
                       title={label(candidate.release_title) || 'Release'}
-                      url={label(candidate.image_url)}
+                      url={
+                        label(candidate.image_url) ||
+                        (candidate.source === 'musicbrainz' &&
+                        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+                          label(candidate.release_id),
+                        )
+                          ? `https://coverartarchive.org/release/${label(candidate.release_id)}/front-250`
+                          : '')
+                      }
                       size="release"
                     />
                     <span>

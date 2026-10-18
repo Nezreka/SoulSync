@@ -55,3 +55,21 @@ it('distinguishes a cancelled missing-track request from an active download', ()
   );
   expect(screen.getByText(/Waiting for a verified local file/)).toBeTruthy();
 });
+
+it('loads exact MusicBrainz release artwork for persisted candidates without image URLs', () => {
+  const id = '6c0de14f-703b-4ce7-a8cd-2997790ec7e2';
+  const { container } = render(
+    <ReleaseComparison
+      selected={0}
+      onSelect={() => {}}
+      candidates={[
+        { source: 'musicbrainz', release_id: id, release_title: 'Exact edition', image_url: '' },
+      ]}
+    />,
+  );
+  const image = container.querySelector('img');
+  expect(image).toBeTruthy();
+  expect(decodeURIComponent(image!.getAttribute('src')!)).toContain(
+    `coverartarchive.org/release/${id}/front-250`,
+  );
+});

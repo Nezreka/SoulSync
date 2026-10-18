@@ -8,7 +8,6 @@ export function ReviewArtwork({
 }: {
   title: string;
   url?: string | null;
-  fallbackUrl?: string | null;
   size: 'list' | 'header' | 'release';
 }) {
   return (

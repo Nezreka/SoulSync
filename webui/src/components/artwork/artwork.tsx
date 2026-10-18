@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { thumb, type ThumbVariant } from '@/platform/artwork-thumb';
 
@@ -42,17 +42,33 @@ function ArtworkImage({
   decorative: boolean;
 }) {
   const [broken, setBroken] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const imageRef = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    if (imageRef.current?.complete && imageRef.current.naturalWidth > 0) setLoaded(true);
+  }, []);
   return url && !broken ? (
-    <img
-      src={thumb(url, variant)}
-      alt={decorative ? '' : title}
-      loading="lazy"
-      className={`${styles.artwork} ${className}`}
-      onError={() => setBroken(true)}
-    />
+    <span className={styles.frame} data-loading={!loaded || undefined}>
+      {!loaded && (
+        <span className={styles.placeholder} aria-hidden="true">
+          ♫
+        </span>
+      )}
+      <img
+        ref={imageRef}
+        src={thumb(url, variant)}
+        alt={decorative ? '' : title}
+        loading="lazy"
+        className={`${styles.artwork} ${loaded ? 'is-loaded' : 'is-loading'} ${className}`}
+        data-loading={!loaded || undefined}
+        onLoad={() => setLoaded(true)}
+        onError={() => setBroken(true)}
+      />
+    </span>
   ) : (
     <span
       className={`${styles.fallback} ${className}`}
+      title={broken ? 'Artwork could not be loaded' : 'No artwork available'}
       role={decorative ? undefined : 'img'}
       aria-label={decorative ? undefined : `No artwork for ${title}`}
       aria-hidden={decorative || undefined}

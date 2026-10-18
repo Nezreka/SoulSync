@@ -68,3 +68,25 @@ def test_repair_history_with_undefined_limit(client):
     assert res.status_code == 200
     data = res.get_json()
     assert 'runs' in data
+
+
+@pytest.mark.parametrize('body', ['[]', 'null', 'false', '{broken'])
+def test_missing_request_rejects_malformed_payload_instead_of_requesting_every_track(client, monkeypatch, body):
+    calls = []
+    monkeypatch.setattr(MockWorker, 'start_review_missing_tracks',
+                        lambda self, *args, **kwargs: calls.append(kwargs), raising=False)
+    response = client.post('/api/repair/review-queue/album/request-missing',
+                           data=body, content_type='application/json')
+    assert response.status_code == 400
+    assert not calls
+
+
+def test_missing_request_passes_selected_ids_to_validating_worker(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(MockWorker, 'start_review_missing_tracks',
+                        lambda self, *args, **kwargs: calls.append(kwargs) or {'started': True},
+                        raising=False)
+    response = client.post('/api/repair/review-queue/album/request-missing',
+                           json={'finding_ids': [7, 9]})
+    assert response.status_code == 200
+    assert calls == [{'finding_ids': [7, 9]}]

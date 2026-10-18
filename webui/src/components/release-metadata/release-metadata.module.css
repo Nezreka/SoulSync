@@ -8,4 +8,7 @@
   white-space: normal;
   text-align: left;
   font-weight: 500;
+  font-size: 12px;
+  color: var(--text-2);
+  padding: 3px 7px;
 }

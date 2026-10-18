@@ -12,7 +12,7 @@
 .comparison td {
   text-align: left;
   vertical-align: top;
-  padding: 12px;
+  padding: 10px;
   overflow-wrap: anywhere;
   border-bottom: 1px solid var(--line);
 }
@@ -68,5 +68,35 @@
     font-size: 11px;
     color: var(--text-2);
     margin-bottom: 3px;
+  }
+}
+
+.comparison thead th:nth-child(3),
+.comparison .direction {
+  width: 28px;
+  padding-inline: 2px;
+  text-align: center;
+}
+.comparison .direction {
+  color: var(--success);
+}
+.comparison tr[data-changed='true'] .current {
+  color: var(--text-2);
+  text-decoration-color: rgba(var(--danger-rgb), 0.7);
+}
+.comparison tr[data-changed='true'] .planned {
+  color: var(--success-light, var(--success));
+}
+.comparison tr[data-changed='false'] .direction {
+  color: var(--text-2);
+}
+@container (max-width:520px) {
+  .comparison .direction {
+    width: auto;
+    text-align: left;
+    padding: 0 8px;
+  }
+  .comparison .direction::before {
+    content: none;
   }
 }

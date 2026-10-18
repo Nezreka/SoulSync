@@ -106,7 +106,7 @@ def repair_review_queue_list():
 def repair_review_queue_summary():
     worker = _repair_worker()
     if worker is None:
-        return jsonify(dict.fromkeys(('all', 'review', 'ready', 'files', 'waiting', 'ready_total'), 0))
+        return jsonify(dict.fromkeys(('all', 'review', 'ready', 'files', 'waiting', 'ready_total', 'ready_albums_total'), 0))
     status = request.args.get('status') or 'pending'
     if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
         return jsonify({'error': 'Invalid finding status'}), 400
@@ -320,7 +320,10 @@ def repair_review_queue_request_missing(case_id):
     if worker is None:
         return jsonify({'error': 'Repair worker not initialized'}), 503
     try:
-        result = worker.start_review_missing_tracks(case_id)
+        payload = request.get_json(silent=True) if request.data else {}
+        if not isinstance(payload, dict):
+            return jsonify({'started': False, 'error': 'Expected a request object'}), 400
+        result = worker.start_review_missing_tracks(case_id, finding_ids=payload.get('finding_ids'))
         return jsonify(result), 200 if result.get('started') else 400
     except Exception as exc:
         logger.error('Error requesting album missing tracks: %s', exc, exc_info=True)

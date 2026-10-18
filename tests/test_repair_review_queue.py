@@ -1121,6 +1121,7 @@ def test_summary_matches_paginated_modes_without_loading_plans(monkeypatch):
                         for label, risk in [('all', ''), ('review', 'manual'),
                                             ('ready', 'ready'), ('files', 'destructive'), ('waiting', 'waiting')]}
             expected['ready_total'] = list_cases(db, job_id='library_reconciliation')['ready_total']
+            expected['ready_albums_total'] = list_cases(db, job_id='library_reconciliation', risk='ready')['total']
             with monkeypatch.context() as patch:
                 patch.setattr(queue, 'classify_case', lambda *a: (_ for _ in ()).throw(
                     AssertionError('Summary must not hydrate page plans')))
@@ -1351,7 +1352,7 @@ def test_whole_album_readiness_counts_choices_and_waiting_consistently():
         db.add(fid, f'/music/{folder}/{fid}.flac', {'album_folder': f'/music/{folder}', **details},
                job_id='library_reconciliation', kind=kind)
     totals = queue_summary(db, job_id='library_reconciliation')
-    assert totals == {'all': 4, 'review': 1, 'ready': 1, 'files': 1, 'waiting': 1, 'ready_total': 1}
+    assert totals == {'all': 4, 'review': 1, 'ready': 1, 'files': 1, 'waiting': 1, 'ready_total': 1, 'ready_albums_total': 1}
     assert safe_finding_ids(db)[0] == [4]
     db.conn.rollback()
     # Saving the only remaining choice automatically makes the entire album ready.
@@ -1513,3 +1514,23 @@ def test_verified_manual_assignment_allows_harmless_metadata_but_not_new_title_d
     finding['details']['title_difference_kind'] = 'material'
     finding['details']['changes']['title'] = {'old': 'Song', 'new': 'Other song'}
     assert classify_case([finding])['manual'] == 1
+
+
+def test_missing_track_subset_rejects_foreign_stale_and_invalid_selections():
+    worker = RepairWorker.__new__(RepairWorker)
+    case = {'items': [
+        {'id': 1, 'finding_type': 'reconciliation_missing'},
+        {'id': 2, 'finding_type': 'reconciliation_missing'},
+        {'id': 3, 'finding_type': 'reconciliation_missing', 'details': {'fulfillment_state': 'wishlisted'}},
+        {'id': 4, 'finding_type': 'reconciliation_metadata'},
+    ]}
+    worker.get_review_case = lambda *_args, **_kwargs: case
+    calls = []
+    worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {'started': True}
+    assert worker.start_review_missing_tracks('album', finding_ids=[2])['started']
+    assert calls[0]['finding_ids'] == [2]
+    for invalid in ([], [3], [4], [99], [True], ['1'], '1'):
+        assert not worker.start_review_missing_tracks('album', finding_ids=invalid)['started']
+    assert len(calls) == 1
+    case['items'].append({'id': 5, 'finding_type': 'reconciliation_release'})
+    assert not worker.start_review_missing_tracks('album', finding_ids=[1])['started']

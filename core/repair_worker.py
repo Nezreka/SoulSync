@@ -2270,7 +2270,7 @@ class RepairWorker:
             review_case_folders=[(case_id, case.get('folder') or '')], review_scope='album',
         )
 
-    def start_review_missing_tracks(self, case_id: str) -> dict:
+    def start_review_missing_tracks(self, case_id: str, *, finding_ids: list[int] | None = None) -> dict:
         """Request the absent slots of an explicitly completed album together."""
         case = self.get_review_case(case_id, job_id='library_reconciliation')
         if not case:
@@ -2282,6 +2282,12 @@ class RepairWorker:
         ids = [item['id'] for item in case.get('items') or []
                if (item.get('finding_type') == 'reconciliation_missing' and
                    (item.get('details') or {}).get('fulfillment_state') not in ('wishlisted', 'downloading', 'downloaded'))]
+        if finding_ids is not None:
+            if (not isinstance(finding_ids, list) or not finding_ids or
+                    any(type(value) is not int for value in finding_ids) or
+                    not set(finding_ids).issubset(ids)):
+                return {'started': False, 'error': 'Selected missing tracks changed; refresh this album'}
+            ids = [fid for fid in ids if fid in set(finding_ids)]
         if not ids:
             return {'started': False, 'error': 'No missing release tracks remain'}
         return self.start_bulk_fix(
