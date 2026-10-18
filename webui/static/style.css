@@ -75814,8 +75814,6 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
     background: var(--white-a08); border: 1px solid var(--white-a10);
     border-radius: 5px; padding: 1px 6px;
 }
-.chat-msg-text .chat-link { color: #58a6ff; word-break: break-all; }
-.chat-msg-text .chat-link:hover { text-decoration: underline; }
 .chat-quote {
     display: inline-block; border-left: 3px solid rgba(var(--accent-rgb), 0.6);
     padding-left: 10px; color: var(--white-a60); font-style: italic;
@@ -76013,9 +76011,6 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
 .chat-settings-label { display: flex; flex-direction: column; gap: 6px;
     font-size: 12.5px; font-weight: 600; color: var(--white-a75); }
 .chat-settings-hint { font-size: 11px; font-weight: 500; color: var(--white-a40); }
-.chat-settings-check { display: flex; align-items: center; gap: 9px;
-    font-size: 13px; color: var(--white-a80); cursor: pointer; }
-.chat-settings-check input { accent-color: rgb(var(--accent-rgb)); width: 15px; height: 15px; }
 .chat-settings-actions {
     margin-top: 18px;
     padding: 14px 24px 18px;
