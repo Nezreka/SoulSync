@@ -100,6 +100,11 @@ export function ReviewAudio({
         </div>
       )}
       <div className={styles.listeningLinks} aria-label="Find this recording online">
+        {catalogSource && (
+          <a href={catalogSource} target="_blank" rel="noreferrer">
+            Open release preview ↗
+          </a>
+        )}
         {previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '') && (
           <a
             href={`https://www.deezer.com/track/${previewTrackId}`}
@@ -131,11 +136,6 @@ export function ReviewAudio({
           Search YouTube ↗
         </a>
       </div>
-      {catalogSource && (
-        <a href={catalogSource} target="_blank" rel="noreferrer">
-          Open release preview ↗
-        </a>
-      )}
       {playError && <small role="alert">{playError}</small>}
     </section>
   );
