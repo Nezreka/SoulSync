@@ -3426,8 +3426,8 @@ def serve_cached_image(cache_key):
             orig_url = cache.get_original_url(cache_key)
             if orig_url:
                 return redirect(orig_url, code=302)
-        except Exception:
-            pass
+        except Exception as redirect_exc:
+            logger.debug("original URL redirect lookup failed for %s: %s", cache_key, redirect_exc)
         return '', 404
 
 

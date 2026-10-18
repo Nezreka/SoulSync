@@ -276,8 +276,8 @@ class ImageCache:
             row = self._get_row(key)
             if row and row["original_url"]:
                 return str(row["original_url"])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed looking up original URL for %s: %s", key, exc)
         return None
 
     def _get(self, key: str) -> CachedImage:
