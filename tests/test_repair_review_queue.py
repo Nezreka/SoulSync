@@ -1311,6 +1311,8 @@ def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidenc
     db = _Database()
     db.add(1, '/music/Album/extra.flac', {'album_id': 10, 'album_title': 'Album'},
            job_id='library_reconciliation', kind='reconciliation_extra')
+    db.conn.execute("UPDATE repair_findings SET last_error='A previous apply failed' WHERE id=1")
+    db.conn.commit()
     key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
     worker = RepairWorker.__new__(RepairWorker)
     worker.db = db
@@ -1320,6 +1322,7 @@ def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidenc
                                       action='fix', fix_action='quarantine')['success']
     case = get_case(db, key)
     assert case['plan']['ready'] == 1
+    assert case['items'][0]['last_error'] is None
     assert safe_finding_ids(db)[0] == []
     assert safe_finding_ids(db, include_planned_files=True)[0] == []
     assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == [1]

@@ -2047,6 +2047,9 @@ class RepairWorker:
                     category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
                     updated_at=CURRENT_TIMESTAMP""",
                     (item['id'], case_id, row[10], category, action, fix_action))
+                # A newly reviewed choice may retry a failed apply. The file and
+                # release guards still run when the saved plan is applied.
+                conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))
             conn.commit()
         finally:
             conn.close()
