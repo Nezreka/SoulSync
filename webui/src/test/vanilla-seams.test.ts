@@ -140,10 +140,7 @@ const SEAMS: { file: string; symbol: string; pattern: RegExp; usedBy: string }[]
     file: 'static/stats-automations.js',
     symbol: 'openMirroredPlaylistModal',
     pattern: /async function openMirroredPlaylistModal\b/,
-    usedBy:
-      'the SoulSync Discovery tab after a mirror (routes/sync/-ui/soulsync-discovery-tab.tsx) ' +
-      "and the Auto-Sync monitor's Details button — note S4 deletes _initImportFileTab from " +
-      'this same file, so a region-sized deletion could take this with it',
+    usedBy: 'the Sync page fallback when its React mirrored-detail opener is unavailable',
   },
   {
     file: 'static/core.js',
