@@ -247,3 +247,52 @@ def test_partial_rich_release_cannot_replace_complete_evidence(db, payload):
     cached = catalogue.CatalogueSession(db).request('http://mirror', '/release/release', {}, fetcher(calls))
     assert cached.json()['media'] == []
     assert len(calls) == 1
+
+
+def test_single_flight_failure_reaches_waiters_and_can_retry(db):
+    import time
+    one, two = catalogue.CatalogueSession(db), catalogue.CatalogueSession(db)
+    entered, release = threading.Event(), threading.Event()
+
+    def fail(path, *, params):
+        entered.set()
+        assert release.wait(3)
+        raise requests.Timeout('temporary outage')
+
+    with ThreadPoolExecutor(2) as pool:
+        owner = pool.submit(one.request, 'http://mirror', '/release/release', {}, fail)
+        assert entered.wait(2)
+        waiter = pool.submit(two.request, 'http://mirror', '/release/release', {}, fail)
+        deadline = time.monotonic() + 2
+        while not two.counts['shared_inflight'] and time.monotonic() < deadline:
+            time.sleep(.005)
+        assert two.counts['shared_inflight'] == 1
+        release.set()
+        for future in (owner, waiter):
+            with pytest.raises(requests.Timeout):
+                future.result(timeout=3)
+    assert one.failed and two.failed
+    assert not catalogue._flights
+    calls = []
+    catalogue.CatalogueSession(db).request('http://mirror', '/release/release', {}, fetcher(calls))
+    assert len(calls) == 1
+
+
+def test_partial_scan_metrics_survive_exception_and_reset_context(db):
+    from types import SimpleNamespace
+    context = SimpleNamespace(db=db, report_progress=None)
+
+    class Job:
+        def _get_settings(self, context):
+            return {}
+
+        @catalogue.catalogue_scan
+        def scan(self, context):
+            catalogue.current.get().counts['albums_started'] += 1
+            raise RuntimeError('scan interrupted')
+
+    with pytest.raises(RuntimeError, match='scan interrupted'):
+        Job().scan(context)
+    assert context.reconciliation_metrics['counts']['albums_started'] == 1
+    assert context.reconciliation_metrics['seconds']['total_wall'] >= 0
+    assert catalogue.current.get() is None

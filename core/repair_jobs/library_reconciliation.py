@@ -1294,7 +1294,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
 
 
 @deferred('plan')
-@timed('plan_preparation')
+@timed('plan_preparation_inclusive')
 def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            *, candidates: list[tuple] | None = None,
                            candidate_metadata: dict[tuple[str, str], dict] | None = None,
@@ -1358,7 +1358,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                  else 'confirmed')
     candidate_rows = candidates or [scored]
     try:
-        case_id = persist_album_plan(db, common, {
+        payload = {
             'source': source, 'release_id': release_id, 'state': state,
             'intent_scope': intent_scope,
             'numbering_mode': numbering_mode,
@@ -1369,9 +1369,11 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'candidates': [candidate_preview(files, row,
                             (candidate_metadata or {}).get((row[3], row[4])) or {},
                             numbering_mode) for row in candidate_rows[:6]],
-        })
+        }
         from core.library.reconciliation_fulfillment import settle_assignments
-        settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id, source)
+        with stage('plan_persistence'):
+            case_id = persist_album_plan(db, common, payload)
+            settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id, source)
         return case_id
     except Exception as exc:
         # The snapshot is a review read model. A transient persistence problem

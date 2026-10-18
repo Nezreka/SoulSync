@@ -159,7 +159,7 @@ class CatalogueSession:
                     cache.clear()
             if complete and not self.album_failed:
                 for kind, callback in pending:
-                    with stage(kind + '_persistence'):
+                    with stage('plan_publication_inclusive' if kind == 'plan' else 'finding_persistence'):
                         value = callback()
                     if kind == 'finding':
                         self.created += bool(value)
@@ -309,6 +309,7 @@ def catalogue_scan(fn):
         finally:
             session.seconds['total_wall'] = time.perf_counter() - start
             metrics = session.finish()
+            metrics['seconds']['total_wall'] = round(time.perf_counter() - start, 4)
             context.reconciliation_metrics = metrics
             current.reset(token)
             if result is not None:
