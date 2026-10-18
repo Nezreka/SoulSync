@@ -275,13 +275,13 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
         } else if (virtualPlaylistId === 'discover_discovery_weekly') {
             apiEndpoint = '/api/discover/weekly';
         } else if (virtualPlaylistId === 'discover_seasonal_playlist') {
-            apiEndpoint = '/api/discover/seasonal-playlist';
+            apiEndpoint = '/api/discover/seasonal/current/playlist';
         } else if (virtualPlaylistId === 'discover_popular_picks') {
-            apiEndpoint = '/api/discover/popular-picks';
+            apiEndpoint = '/api/discover/personalized/popular-picks';
         } else if (virtualPlaylistId === 'discover_hidden_gems') {
-            apiEndpoint = '/api/discover/hidden-gems';
+            apiEndpoint = '/api/discover/personalized/hidden-gems';
         } else if (virtualPlaylistId === 'discover_discovery_shuffle') {
-            apiEndpoint = '/api/discover/discovery-shuffle';
+            apiEndpoint = '/api/discover/personalized/discovery-shuffle';
         } else if (virtualPlaylistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (virtualPlaylistId.startsWith('discover_lb_')) {

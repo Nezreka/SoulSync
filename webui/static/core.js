@@ -1741,13 +1741,13 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         } else if (playlistId === 'discover_discovery_weekly') {
             apiEndpoint = '/api/discover/weekly';
         } else if (playlistId === 'discover_seasonal_playlist') {
-            apiEndpoint = '/api/discover/seasonal-playlist';
+            apiEndpoint = '/api/discover/seasonal/current/playlist';
         } else if (playlistId === 'discover_popular_picks') {
-            apiEndpoint = '/api/discover/popular-picks';
+            apiEndpoint = '/api/discover/personalized/popular-picks';
         } else if (playlistId === 'discover_hidden_gems') {
-            apiEndpoint = '/api/discover/hidden-gems';
+            apiEndpoint = '/api/discover/personalized/hidden-gems';
         } else if (playlistId === 'discover_discovery_shuffle') {
-            apiEndpoint = '/api/discover/discovery-shuffle';
+            apiEndpoint = '/api/discover/personalized/discovery-shuffle';
         } else if (playlistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (playlistId.startsWith('discover_lb_')) {

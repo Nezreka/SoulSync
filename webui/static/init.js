@@ -767,8 +767,6 @@ async function initProfileSystem() {
         return false; // App init deferred until profile selected
     } catch (e) {
         console.error('Profile init error:', e);
-        // no profile to judge by: let gated api calls through as before
-        window.SoulSyncProfileGate?.setProfile(null);
         return true; // Fall through to normal init
     }
 }
@@ -4082,6 +4080,9 @@ document.addEventListener('DOMContentLoaded', async function () {
         window._onSetupWizardComplete = function () {
             _continueAppInit();
         };
+        // the wizard runs before any profile is picked, let its calls through
+        window.SoulSyncProfileGate?.setProfile(null);
+        window.SoulSyncProfileGate?.open();
         openSetupWizard();
         return; // Defer init until wizard closes
     }
@@ -4101,6 +4102,8 @@ async function _continueAppInit() {
 }
 
 function initApp() {
+    // a profile is picked and unlocked: calls held at boot go out now
+    window.SoulSyncProfileGate?.open();
     // Unlocked / authenticated — reveal the app (the lock screens hide it via
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
     // component init below measures real layout, not a display:none container.

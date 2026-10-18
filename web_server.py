@@ -450,6 +450,13 @@ def _inject_soulsync_version():
     everywhere it's rendered."""
     return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
 
+
+@app.context_processor
+def _inject_profile_gate_rules():
+    """the no-profile and page rules profile-api-gate.js mirrors (#1763)"""
+    from core.security.session_profile import client_gate_rules
+    return {'profile_gate_rules': client_gate_rules()}
+
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
 def _init_flask_secret_key():

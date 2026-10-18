@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+// node scripts/css-class-refs.mjs
 /**
  * Which legacy CSS classes does the app still reference?
  *

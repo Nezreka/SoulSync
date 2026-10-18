@@ -97,4 +97,18 @@ def no_profile_request_is_blocked(path: str, method: str) -> bool:
     return True
 
 
-__all__ = ['resolve_session_profile', 'no_profile_request_is_blocked', 'is_open_profile_path']
+def client_gate_rules() -> dict:
+    """the rules above, for profile-api-gate.js. the browser holds a call the
+    server would 401 until a profile is picked, and needs the same open list:
+    a path missing from a copy would hang the picker (#1763)."""
+    from core.permissions import PAGE_EXCLUSIVE_APIS
+    return {
+        'data_prefixes': list(_DATA_PREFIXES),
+        'open_get': sorted(_ALLOWED_GET),
+        'open_post': sorted(_ALLOWED_POST),
+        'page_apis': [list(pair) for pair in PAGE_EXCLUSIVE_APIS],
+    }
+
+
+__all__ = ['resolve_session_profile', 'no_profile_request_is_blocked', 'is_open_profile_path',
+           'client_gate_rules']

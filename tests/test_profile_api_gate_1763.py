@@ -10,6 +10,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import json
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -21,11 +22,18 @@ def _node():
     return shutil.which("node") or shutil.which("node.exe")
 
 
+def _gate_rules_json() -> str:
+    """the server's open-path lists, passed to the JS harness so the gate
+    and the server can't drift apart."""
+    from core.security.session_profile import client_gate_rules
+    return json.dumps(client_gate_rules())
+
+
 @pytest.mark.skipif(_node() is None, reason="node not available")
 def test_behavioral_harness_passes():
     # relative path + cwd: under wsl node.exe can't open /mnt/... absolute paths
     res = subprocess.run(
-        [_node(), "tests/js/profile_api_gate_harness.mjs"],
+        [_node(), "tests/js/profile_api_gate_harness.mjs", _gate_rules_json()],
         cwd=str(_ROOT), capture_output=True, text=True, timeout=120)
     assert res.returncode == 0, f"harness failed:\n{res.stdout}\n{res.stderr}"
     assert "all assertions passed" in res.stdout
