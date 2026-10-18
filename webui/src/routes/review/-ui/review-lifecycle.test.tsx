@@ -223,3 +223,25 @@ it('returns to Plan when another queue album is selected from Tracks', async () 
       .getAttribute('aria-current'),
   ).toBe('page');
 });
+
+it('keeps a failed global operation at queue scope while an album is open', async () => {
+  setup();
+  const read = fetchMock.getMockImplementation()!;
+  window.sessionStorage.setItem('review-operation', 'global-op');
+  fetchMock.mockImplementation(async (input: string) =>
+    new URL(input, 'http://localhost').pathname.endsWith('/bulk-fix/status')
+      ? reply({
+          operation_id: 'global-op',
+          review_scope: 'global',
+          running: false,
+          failed: 1,
+          error: 'Batch verification failed',
+        })
+      : read(input),
+  );
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  expect(await screen.findByRole('alert', { name: 'Queue error' })).toHaveTextContent(
+    'Batch verification failed',
+  );
+});

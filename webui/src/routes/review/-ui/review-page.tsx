@@ -781,6 +781,12 @@ export function ReviewPage() {
           window.sessionStorage.setItem('review-operation', operationRef.current);
         }
         if (!operationRef.current) return;
+        const reportCase =
+          status.review_scope === 'global'
+            ? null
+            : status.review_scope === 'album'
+              ? status.review_case_ids?.[0] || null
+              : operationCase;
         if (status.review_scope)
           setOperationCase(
             status.review_scope === 'album' ? status.review_case_ids?.[0] || null : null,
@@ -788,6 +794,7 @@ export function ReviewPage() {
         if (!status.operation_id && operationRef.current !== 'current') {
           setError(
             'The server no longer has this operation report. Review the refreshed album before retrying.',
+            reportCase,
           );
         } else if (
           status.operation_id &&
@@ -796,6 +803,7 @@ export function ReviewPage() {
         ) {
           setError(
             'Another operation has replaced this progress report. Refreshing the current album.',
+            reportCase,
           );
         } else if (status.running) {
           setApplyBusy(true);
@@ -812,6 +820,7 @@ export function ReviewPage() {
         } else if (status.error || status.failed || status.stopped) {
           setError(
             `${status.fixed || 0} completed; ${status.failed || 0} failed. ${status.error || status.errors?.[0]?.error || 'The operation stopped before completing.'}`,
+            reportCase,
           );
         } else {
           const message = `${status.fixed || 0} album action${status.fixed === 1 ? '' : 's'} completed.${status.organize_queued ? ' Folder organization was queued.' : ''}${status.reconciliation_queued ? ' Updating the album plan…' : ''}`;
@@ -850,7 +859,7 @@ export function ReviewPage() {
       await runReconciliationScan();
       setGlobalNotice('Library reconciliation queued. Progress will appear here.');
     } catch (cause) {
-      setError((cause as Error).message);
+      setError((cause as Error).message, null);
     } finally {
       setScanBusy(false);
     }
@@ -1384,7 +1393,7 @@ export function ReviewPage() {
       />
 
       {error && (!errorCase || !reviewCase) && (
-        <Notice tone="danger" role="alert">
+        <Notice tone="danger" role="alert" aria-label="Queue error">
           {error}
         </Notice>
       )}
