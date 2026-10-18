@@ -212,3 +212,16 @@ def test_completion_respects_global_no_duplicate_songs_setting(tmp_path, monkeyp
     monkeypatch.setattr(config_manager, 'get', lambda key, default=None:
                         False if key == 'wishlist.allow_duplicate_tracks' else original_get(key, default))
     assert enqueue_standard_plan(db, plan) == 0
+
+
+def test_failure_and_cancellation_preserve_per_track_safeguard():
+    from core.wishlist.payloads import build_failed_track_wishlist_context, build_cancelled_task_wishlist_payload
+    from core.wishlist.album_grouping import group_wishlist_tracks_by_album
+    db = Mock()
+    enqueue_standard_plan(db, fixture_plan())
+    song = dict(db.add_to_wishlist.call_args.args[0], artists=['Fixture Artist'])
+    failed = build_failed_track_wishlist_context(song)['track_data']
+    cancelled = build_cancelled_task_wishlist_payload({'track_info': song})['track_data']
+    for data in (failed, cancelled):
+        assert data['standard_completion_per_track'] is True
+        assert not group_wishlist_tracks_by_album([{'spotify_data': data}], min_tracks_per_album=1).album_groups
