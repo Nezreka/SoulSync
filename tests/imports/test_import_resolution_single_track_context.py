@@ -194,6 +194,99 @@ def test_get_single_track_import_context_uses_explicit_override_source(monkeypat
     assert spotify_client.calls == []
 
 
+def test_get_single_track_import_context_from_own_tags_never_searches(monkeypatch):
+    """#1772: "No track picked" — the user declined every catalogue match, so
+    no source may be searched at all. The clients below WOULD return an
+    unrelated first result (the reported Morgan Wallen rematch); the context
+    must come from the file's own tags alone, flagged as hand-tagged so
+    downstream correction stands down and the embedded cover survives."""
+    wrong_client = FakeClient(
+        search_results=[_track_result(track_id="wrong-1", name="Whiskey Glasses", artist="Morgan Wallen")],
+        details={"wrong-1": _track_details("itunes", track_id="wrong-1", name="Whiskey Glasses", artist_name="Morgan Wallen")},
+    )
+
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "itunes")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "deezer"])
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: wrong_client,
+    )
+
+    result = resolution.get_single_track_import_context(
+        "Live Mix",
+        "Dj StarSunglasses",
+        from_own_tags=True,
+        album="Live Mix",
+        track_number=1,
+        disc_number=1,
+        duration_ms=2_880_000,
+    )
+
+    assert wrong_client.calls == []
+    assert result["success"] is False
+    assert result["source"] is None
+    context = result["context"]
+    assert context["artist"]["name"] == "Dj StarSunglasses"
+    assert context["artist"]["id"] == ""
+    assert context["track_info"]["name"] == "Live Mix"
+    assert context["track_info"]["id"] == ""
+    assert context["track_info"]["album"] == "Live Mix"
+    assert context["track_info"]["duration_ms"] == 2_880_000
+    assert context["album"]["name"] == "Live Mix"
+    assert context["original_search_result"]["clean_title"] == "Live Mix"
+    assert context["original_search_result"]["clean_artist"] == "Dj StarSunglasses"
+    assert context["_manual_metadata"] is True
+    assert context["track_info"]["_manual_metadata"] is True
+
+
+def test_get_single_track_import_context_from_own_tags_tolerates_garbage_tag_numbers(monkeypatch):
+    """Tag numbers arrive as whatever the file/request carried; unusable
+    values (including inf, whose int() is an OverflowError) must fall back
+    to defaults, never raise out of the import."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: None)
+
+    result = resolution.get_single_track_import_context(
+        "Song",
+        "Artist",
+        from_own_tags=True,
+        track_number="abc",
+        disc_number=None,
+        duration_ms=float("inf"),
+    )
+
+    assert result["context"]["track_info"]["track_number"] == 1
+    assert result["context"]["track_info"]["disc_number"] == 1
+    assert result["context"]["track_info"]["duration_ms"] == 0
+
+
+def test_get_single_track_import_context_from_own_tags_yields_to_override(monkeypatch):
+    spotify_client = FakeClient(
+        details={"override-track-1": _track_details("spotify", track_id="override-track-1", artist_name="Override Artist", artist_id="spotify-artist-1")},
+        artist_details={"spotify-artist-1": {"id": "spotify-artist-1", "genres": ["pop"]}},
+    )
+
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: {"spotify": spotify_client}.get(source),
+    )
+
+    result = resolution.get_single_track_import_context(
+        "Song",
+        "Artist",
+        override_id="override-track-1",
+        from_own_tags=True,
+    )
+
+    assert result["source"] == "spotify"
+    assert result["context"]["track_info"]["id"] == "override-track-1"
+
+
 def test_get_single_track_import_context_returns_fallback_payload_when_no_source_matches(monkeypatch):
     deezer_client = FakeClient()
     spotify_client = FakeClient()

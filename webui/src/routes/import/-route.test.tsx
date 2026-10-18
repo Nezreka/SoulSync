@@ -691,6 +691,49 @@ describe('import route', () => {
     expect(screen.getByText(/Tagged as/)).toHaveTextContent('Tagged as Loose Song by Artist B');
   });
 
+  it('importing a single with no track picked sends from_own_tags and no manual match (#1772)', async () => {
+    let bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/import/singles/process', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, processed: 1, errors: [] });
+      }),
+    );
+    renderImportRoute(['/import/match/hash-2']);
+    expect(
+      await screen.findByText('No track picked: imported from its own tags'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const files = bodies[0].files as Record<string, unknown>[];
+    expect(files).toHaveLength(1);
+    expect(files[0].from_own_tags).toBe(true);
+    expect(files[0].manual_match).toBeUndefined();
+    expect(files[0].title).toBe('Loose Song');
+    expect(files[0].artist).toBe('Artist B');
+  });
+
+  it('importing a single with a track picked sends the manual match and no from_own_tags (#1772)', async () => {
+    let bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/import/singles/process', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, processed: 1, errors: [] });
+      }),
+    );
+    renderImportRoute(['/import/match/hash-2']);
+    expect(
+      await screen.findByText('No track picked: imported from its own tags'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Loose Song · Artist B/ }));
+    expect(screen.getByText(/Tagged as/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const files = bodies[0].files as Record<string, unknown>[];
+    expect(files[0].from_own_tags).toBeUndefined();
+    expect(files[0].manual_match).toMatchObject({ name: 'Loose Song' });
+  });
+
   it('the matcher opens on the worker release, keeps the source, and imports through the history row', async () => {
     let resolved: string[] = [];
     let processBodies: Record<string, unknown>[] = [];
@@ -821,6 +864,8 @@ describe('import route', () => {
       expect((bodies[0].files as { full_path: string }[])[0].full_path).toBe(
         '/music/Staging/s1.flac',
       );
+      // "from tags" must reach the server: no catalogue rematch (#1772)
+      expect((bodies[0].files as { from_own_tags?: boolean }[])[0].from_own_tags).toBe(true);
       expect(await screen.findByText('2 of 2 imported')).toBeInTheDocument();
     });
 

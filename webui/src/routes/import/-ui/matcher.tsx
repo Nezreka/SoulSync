@@ -946,7 +946,7 @@ function SingleMatcher({ item }: { item: ImportInboxItem }) {
       label: chosen ? `${chosen.name} · ${chosen.artist}` : file.title || file.filename,
       sublabel: file.filename,
       imageUrl: chosen?.image_url ?? null,
-      items: [chosen ? { ...staging, manual_match: chosen } : staging],
+      items: [chosen ? { ...staging, manual_match: chosen } : { ...staging, from_own_tags: true }],
       historyId: item.history_id,
     });
     void navigate({ to: '/import', search: { filter: 'all' } });

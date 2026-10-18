@@ -1481,6 +1481,13 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
         if not manual_match_id or not manual_match_source:
             return ("error", f"Malformed manual match for file: {file_info.get('filename', '?')}")
 
+    # "No track picked: imported from its own tags" (and the inbox's bulk
+    # "from tags" import): the user declined a catalogue match, so the file
+    # must NOT be run through another automatic lookup — that lookup could
+    # rematch it to an unrelated track (#1772). An explicit manual match is
+    # more specific and wins over the flag if both somehow arrive.
+    from_own_tags = bool(file_info.get("from_own_tags")) and not manual_match
+
     if not title and not manual_match:
         parsed = runtime.parse_filename_metadata(file_info.get("filename", ""))
         title = parsed.get("title") or os.path.splitext(file_info.get("filename", "Unknown"))[0]
@@ -1493,6 +1500,11 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             artist,
             override_id=manual_match_id,
             override_source=manual_match_source,
+            from_own_tags=from_own_tags,
+            album=file_info.get("album") or "",
+            track_number=file_info.get("track_number") or 1,
+            disc_number=file_info.get("disc_number") or 1,
+            duration_ms=file_info.get("duration_ms") or 0,
         )
         context = runtime.normalize_import_context(resolved["context"])
         context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)

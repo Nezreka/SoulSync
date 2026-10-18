@@ -314,69 +314,104 @@ def _build_single_import_context_payload(
     }
 
 
+def _coerce_tag_int(value: Any, default: int) -> int:
+    """Tag fields arrive as whatever the file (or the request JSON) carried —
+    strings, floats, None. Anything unusable becomes the default instead of
+    raising out of the import (int(float('inf')) is an OverflowError, not a
+    ValueError, so it needs naming)."""
+    try:
+        return int(value or default)
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
 def _build_single_import_fallback_context(
     requested_title: str,
     requested_artist: str,
     source_priority: List[str],
+    *,
+    album: str = '',
+    track_number: Any = 1,
+    disc_number: Any = 1,
+    duration_ms: Any = 0,
+    manual_metadata: bool = False,
 ) -> Dict[str, Any]:
     artist_name = requested_artist or 'Unknown Artist'
     title = requested_title or 'Unknown Track'
+    album_name = str(album or '').strip()
+    track_no = _coerce_tag_int(track_number, 1)
+    disc_no = _coerce_tag_int(disc_number, 1)
+    duration = _coerce_tag_int(duration_ms, 0)
+    context: Dict[str, Any] = {
+        'artist': {
+            'id': '',
+            'name': artist_name,
+            'genres': [],
+            '_source': '',
+        },
+        'album': {
+            'id': '',
+            'name': album_name,
+            'release_date': '',
+            'total_tracks': 1,
+            'album_type': 'album',
+            'image_url': '',
+            'images': [],
+            'artists': [{'name': artist_name}] if album_name else [],
+            '_source': '',
+        },
+        'track_info': {
+            'id': '',
+            'name': title,
+            'track_number': track_no,
+            'disc_number': disc_no,
+            'duration_ms': duration,
+            'artists': [{'name': artist_name}],
+            'uri': '',
+            'album': album_name,
+            'album_id': '',
+            'album_type': 'album',
+            'release_date': '',
+            '_source': '',
+        },
+        'original_search_result': {
+            'title': title,
+            'artist': artist_name,
+            'album': album_name,
+            'track_number': track_no,
+            'disc_number': disc_no,
+            'clean_title': title,
+            'clean_album': album_name,
+            'clean_artist': artist_name,
+            'artists': [{'name': artist_name}],
+            'duration_ms': duration,
+            'id': '',
+            '_source': '',
+        },
+        'is_album_download': False,
+        'has_clean_metadata': False,
+        'has_full_metadata': False,
+        'source': None,
+        'source_priority': source_priority,
+    }
+    if manual_metadata:
+        # The user explicitly chose the file's own tags over every catalogue
+        # match. That is hand-tagged metadata (core/metadata/manual.py):
+        # automatic correction — source-id lookups, the AcoustID gate, the
+        # preferred-art lookup — stands down, so the file keeps its own
+        # artist, title and embedded cover instead of a studio release's.
+        # Deliberate consequence, same as a hand-typed download: the import
+        # pipeline records a manual lock for the file, which also locks its
+        # album row against enrichment until the user unlocks the album
+        # (clear_manual_lock, on the artist page). The reporter's tested
+        # workaround for #1772 used exactly this flag.
+        context['_manual_metadata'] = True
+        context['track_info']['_manual_metadata'] = True
     return {
         'success': False,
         'source': None,
         'source_priority': source_priority,
-        'context': {
-            'artist': {
-                'id': '',
-                'name': artist_name,
-                'genres': [],
-                '_source': '',
-            },
-            'album': {
-                'id': '',
-                'name': '',
-                'release_date': '',
-                'total_tracks': 1,
-                'album_type': 'album',
-                'image_url': '',
-                'images': [],
-                'artists': [],
-                '_source': '',
-            },
-            'track_info': {
-                'id': '',
-                'name': title,
-                'track_number': 1,
-                'disc_number': 1,
-                'duration_ms': 0,
-                'artists': [{'name': artist_name}],
-                'uri': '',
-                'album': '',
-                'album_id': '',
-                'album_type': 'album',
-                'release_date': '',
-                '_source': '',
-            },
-            'original_search_result': {
-                'title': title,
-                'artist': artist_name,
-                'album': '',
-                'track_number': 1,
-                'disc_number': 1,
-                'clean_title': title,
-                'clean_album': '',
-                'clean_artist': artist_name,
-                'artists': [{'name': artist_name}],
-                'duration_ms': 0,
-                'id': '',
-                '_source': '',
-            },
-            'is_album_download': False,
-            'has_clean_metadata': False,
-            'has_full_metadata': False,
-            'source': None,
-            'source_priority': source_priority,
-        },
+        'context': context,
     }
 
 
@@ -386,11 +421,35 @@ def get_single_track_import_context(
     override_id: Optional[str] = None,
     override_source: str = 'spotify',
     source_override: Optional[str] = None,
+    from_own_tags: bool = False,
+    album: str = '',
+    track_number: Any = 1,
+    disc_number: Any = 1,
+    duration_ms: Any = 0,
 ) -> Dict[str, Any]:
-    """Build an import context for singles using source-priority metadata lookup."""
+    """Build an import context for singles using source-priority metadata lookup.
+
+    ``from_own_tags`` is the import UI's "No track picked" choice: the user
+    declined every catalogue match, so NO source is searched at all — the
+    context is built from the file's own tags alone. Without this, a search
+    that found no exact match fell through to ``_pick_best_track_match``,
+    which returns the first (unrelated) search result (#1772).
+    """
     source_priority = _get_source_chain_for_lookup(source_override=source_override, allow_fallback=True)
     title = (title or '').strip()
     artist = (artist or '').strip()
+
+    if from_own_tags and not override_id:
+        return _build_single_import_fallback_context(
+            title,
+            artist,
+            source_priority,
+            album=album,
+            track_number=track_number,
+            disc_number=disc_number,
+            duration_ms=duration_ms,
+            manual_metadata=True,
+        )
 
     if override_id:
         chosen_source = (override_source or 'spotify').strip().lower() or 'spotify'
@@ -473,4 +532,7 @@ def get_single_track_import_context(
                 logger.debug("artist genres lookup: %s", e)
         return payload
 
+    # Deliberately NOT the tag fields the caller may have passed: a failed
+    # automatic lookup keeps the historical fallback shape exactly. The tag
+    # fields only shape the explicit from_own_tags context above (#1772).
     return _build_single_import_fallback_context(title, artist, source_priority)

@@ -150,6 +150,9 @@ export interface ImportStagingFile {
   duration_ms?: number | null;
   bitrate?: number | null;
   manual_match?: ImportTrackResult;
+  /** the user declined a catalogue match: import from the file's own tags,
+   * with no further automatic lookup on the server (#1772) */
+  from_own_tags?: boolean;
 }
 
 /** While a large staging folder is still being scanned in the background (#947), the
