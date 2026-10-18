@@ -93,18 +93,28 @@ def resolve_sync_names(mirrors: Iterable[Dict[str, Any]], account_of: Dict[Any, 
 def server_account_of(db: Any, server: Optional[str], profile_id: Any) -> str:
     """the server account a profile's syncs run as: its own user, else the app account."""
     try:
-        if server == 'navidrome':
-            login = db.get_profile_navidrome_login(profile_id)
-            if login and login[0]:
-                return f"user:{_norm(login[0])}"
-        elif server == 'plex':
-            link = db.get_profile_plex_home_user(profile_id)
-            if link and link.get('token'):
-                return f"user:{_norm(link.get('title') or link.get('token'))}"
-        elif server == 'jellyfin':
-            user_id = (db.get_profile_server_library(profile_id) or {}).get('jellyfin_user_id')
-            if user_id:
-                return f"user:{_norm(user_id)}"
+        getter = getattr(db, 'get_profile_server_identity', None)
+        identity = getter(profile_id, server) if callable(getter) else None
+        if identity:
+            if server == 'jellyfin' and not identity.get('user_id'):
+                return SHARED_ACCOUNT  # a library pick alone is still the app account
+            label = identity.get('label') or identity.get('token') or ''
+            if label:
+                return f"user:{_norm(label)}"
+        elif getter is None:
+            # a db stub without the facade: the old per-server reads
+            if server == 'navidrome':
+                login = db.get_profile_navidrome_login(profile_id)
+                if login and login[0]:
+                    return f"user:{_norm(login[0])}"
+            elif server == 'plex':
+                link = db.get_profile_plex_home_user(profile_id)
+                if link and link.get('token'):
+                    return f"user:{_norm(link.get('title') or link.get('token'))}"
+            elif server == 'jellyfin':
+                user_id = (db.get_profile_server_library(profile_id) or {}).get('jellyfin_user_id')
+                if user_id:
+                    return f"user:{_norm(user_id)}"
     except Exception as e:
         logger.debug("server account for profile %s: %s", profile_id, e)
     return SHARED_ACCOUNT
