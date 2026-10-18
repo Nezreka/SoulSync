@@ -230,3 +230,20 @@ def test_history_exposes_persisted_run_metrics(tmp_path):
     metrics = {'counts': {'memory_hits': 12}, 'seconds': {'network': .5}}
     worker._record_job_finish(run_id, 'library_reconciliation', JobResult(metrics=metrics), 1.0)
     assert worker.get_history('library_reconciliation', 1)[0]['metrics'] == metrics
+
+
+@pytest.mark.parametrize('payload', [
+    {'id': 'release'},
+    {'id': 'release', 'media': None},
+    {'id': 'release', 'media': [{'track-count': 2}]},
+])
+def test_partial_rich_release_cannot_replace_complete_evidence(db, payload):
+    calls = []
+    catalogue.CatalogueSession(db).request('http://mirror', '/release/release', {}, fetcher(calls))
+    refresh = catalogue.CatalogueSession(db, force=True)
+    with pytest.raises(ValueError):
+        refresh.request('http://mirror', '/release/release', {}, fetcher([], payload))
+    assert refresh.failed
+    cached = catalogue.CatalogueSession(db).request('http://mirror', '/release/release', {}, fetcher(calls))
+    assert cached.json()['media'] == []
+    assert len(calls) == 1

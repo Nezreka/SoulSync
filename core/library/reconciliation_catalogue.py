@@ -104,7 +104,16 @@ def _valid(path, payload):
         return False
     parts = path.strip('/').split('/')
     if len(parts) == 2:
-        return isinstance(payload.get('id'), str) and bool(payload['id'])
+        if not isinstance(payload.get('id'), str) or not payload['id']:
+            return False
+        if parts[0] == 'release':
+            # All release requests include recordings. An omitted tracklist is
+            # an incomplete response, not evidence of an empty release.
+            media = payload.get('media')
+            return isinstance(media, list) and all(
+                isinstance(medium, dict) and isinstance(medium.get('tracks'), list)
+                for medium in media)
+        return True
     plural = {'release': 'releases', 'release-group': 'release-groups',
               'recording': 'recordings', 'artist': 'artists'}.get(parts[0])
     return plural is not None and isinstance(payload.get(plural), list)
