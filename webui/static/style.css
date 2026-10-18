@@ -24971,12 +24971,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a06);
 }
 
-.artists-hero-content {
-    position: relative;
-    z-index: 2;
-    padding: 32px 36px 36px;
-}
-
 .artists-hero-name {
     font-size: 2.6em;
     font-weight: 800;
@@ -25006,10 +25000,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     .artists-hero-stats {
         justify-content: center;
-    }
-
-    .artists-hero-content {
-        padding: 20px 16px 24px;
     }
 }
 
@@ -25681,27 +25671,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     vertical-align: middle;
 }
 
-/* Wishlist enhance badge */
-.wishlist-enhance-badge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: var(--radius-xs);
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #4fc3f7;
-    background: rgba(79, 195, 247, 0.12);
-    margin-left: 6px;
-}
-
-.artist-detail-info {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    flex: 1;
-}
-
 .artist-detail-image {
     width: 80px;
     height: 80px;
@@ -25727,68 +25696,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-.artist-detail-genres {
-    font-size: 16px;
-    color: var(--white-a70);
-    font-weight: 500;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
 .artist-detail-content {
     margin-bottom: 40px;
 }
 
-.artist-detail-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 30px;
-    padding: 6px;
-
-    background: var(--white-a06);
-    border-radius: 20px;
-    border: 1px solid var(--white-a10);
-}
-
-.artist-tab {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 24px;
-    font-size: 14px;
-    font-weight: 600;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-
-    background: transparent;
-    color: var(--white-a60);
-    border: none;
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    outline: none;
-}
-
-.artist-tab.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(24, 156, 71, 0.15) 100%);
-    color: rgba(var(--accent-rgb), 1.0);
-    box-shadow:
-        0 4px 12px rgba(var(--accent-rgb), 0.2),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.artist-tab:not(.active):hover {
-    background: var(--white-a08);
-    color: var(--white-a80);
-    transform: translateY(-1px);
-}
-
 .tab-icon {
     font-size: 16px;
-}
-
-.artist-detail-discography {
-    min-height: 400px;
 }
 
 .tab-content {
@@ -26164,10 +26077,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         gap: 20px;
     }
 
-    .artist-detail-info {
-        width: 100%;
-    }
-
     .artist-detail-name {
         font-size: 24px;
     }
@@ -26176,11 +26085,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .singles-cards-container {
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         gap: 16px;
-    }
-
-    .artist-detail-tabs {
-        overflow-x: auto;
-        padding-bottom: 5px;
     }
 }
 
