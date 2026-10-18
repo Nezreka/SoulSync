@@ -16618,11 +16618,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         0 3px 8px rgba(0, 0, 0, 0.3);
 }
 
-.stat-divider {
-    color: var(--white-a30);
-    font-weight: 300;
-}
-
 /* ================================= */
 /* BEATPORT NAVIGATION CARDS         */
 /* ================================= */
@@ -16677,18 +16672,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 0 8px rgba(1, 255, 149, 0.3);
 }
 
-.category-icon {
-    width: 48px;
-    height: 48px;
-    background: linear-gradient(135deg, #01FF95 0%, #00E085 100%);
-    border-radius: var(--radius-lg);
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-}
-
 .beatport-category-card h3 {
     font-size: 18px;
     font-weight: 600;
@@ -16703,19 +16686,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #888;
     margin: 0 0 15px 0;
     line-height: 1.4;
-    position: relative;
-    z-index: 2;
-}
-
-.category-count {
-    display: inline-block;
-    background: rgba(1, 255, 149, 0.15);
-    color: #01FF95;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 12px;
-    border-radius: 20px;
-    border: 1px solid rgba(1, 255, 149, 0.3);
     position: relative;
     z-index: 2;
 }
@@ -16763,37 +16733,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         0 8px 24px rgba(0, 0, 0, 0.4),
         0 4px 12px rgba(0, 0, 0, 0.3),
         inset 0 1px 0 var(--white-a10);
-}
-
-.breadcrumb-back {
-    /* Premium button matching modal action buttons */
-    background: linear-gradient(135deg, #01FF95 0%, #00E085 100%);
-    border: 1px solid rgba(1, 255, 149, 0.3);
-    border-radius: var(--radius-lg);
-    color: #000000;
-    font-size: 14px;
-    font-weight: 700;
-    padding: 12px 20px;
-    cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    white-space: nowrap;
-
-    /* Premium shadow matching modal buttons */
-    box-shadow:
-        0 4px 16px rgba(1, 255, 149, 0.3),
-        0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.breadcrumb-back:hover {
-    /* Enhanced hover state matching modal button hover */
-    background: linear-gradient(135deg, #00E085 0%, #01FF95 100%);
-    transform: translateY(-3px) scale(1.05);
-    border-color: rgba(1, 255, 149, 0.5);
-
-    /* Premium enhanced shadow matching modal hover */
-    box-shadow:
-        0 8px 24px rgba(1, 255, 149, 0.4),
-        0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .breadcrumb-path {
@@ -17917,10 +17856,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         flex-direction: column;
         align-items: stretch;
         gap: 10px;
-    }
-
-    .breadcrumb-back {
-        text-align: center;
     }
 }
 
