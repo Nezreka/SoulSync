@@ -28,7 +28,7 @@ export function MissingTracksChoice({
   );
   const ids = selected.filter((id) => available.some((item) => item.id === id));
   return (
-    <section className={styles.missingChoices} aria-label="Choose missing tracks">
+    <section className={styles.missingChoices} aria-label="Choose missing tracks" tabIndex={-1}>
       <h4>Choose tracks to request</h4>
       <p>
         Selected tracks will be added to the wishlist. Other missing tracks remain wanted for this

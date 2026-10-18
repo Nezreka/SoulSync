@@ -2147,7 +2147,7 @@
 }
 .matrixRow[data-status='settled'] {
   background: var(--surface-2);
-  border-left: 4px solid var(--accent);
+  border-left: 4px solid var(--line-strong);
 }
 .matrixRow[data-status='change'] {
   background: rgba(var(--info-rgb), 0.08);
@@ -2840,9 +2840,9 @@
 .reconciliationEvidence > .actions:empty {
   display: none;
 }
-.page .albumNotice {
+.page .albumNotice[data-tone] {
   background:
-    linear-gradient(rgba(var(--info-rgb), 0.1), rgba(var(--info-rgb), 0.1)), var(--surface-1);
+    linear-gradient(rgba(var(--info-rgb), 0.1), rgba(var(--info-rgb), 0.1)), var(--surface-overlay);
 }
 .releaseDetailHeader .factList {
   font-size: 12px;

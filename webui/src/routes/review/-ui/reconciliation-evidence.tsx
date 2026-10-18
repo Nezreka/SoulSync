@@ -1008,10 +1008,12 @@ export function AssignmentEvidence({
   album,
   onReviewAgain,
   busy,
+  controls,
 }: {
   row: AlbumAssignment;
   album: ReviewCase;
   onReviewAgain?: (findingId: number) => void;
+  controls?: ReactNode;
   busy?: boolean;
 }) {
   const details: Data = {
@@ -1043,10 +1045,10 @@ export function AssignmentEvidence({
       <p>
         {row.status === 'missing'
           ? row.fulfillment_state === 'cancelled'
-            ? 'The request was cancelled. This track is still wanted; review album completeness on the Plan tab.'
+            ? 'The request was cancelled. This track is still wanted; you can request it again or change album completeness.'
             : ['wishlisted', 'downloading', 'downloaded'].includes(row.fulfillment_state || '')
               ? 'This release track has been requested. Waiting for a verified local file.'
-              : 'This release track has no local file. Review album completeness on the Plan tab.'
+              : 'This release track has no local file. Choose which missing tracks to request, or review album completeness.'
           : row.status === 'confirmed'
             ? 'Confirmed match · no metadata edit is pending.'
             : row.status === 'not_owned'
@@ -1055,6 +1057,7 @@ export function AssignmentEvidence({
                 ? 'You previously reviewed this assignment.'
                 : row.preview_reason || 'This assignment needs review.'}
       </p>
+      {controls}
       {row.audio_conflict === 'different_recording' && (
         <p className={styles.error}>
           This file’s tags suggest it belongs on this album, but its fingerprint identifies

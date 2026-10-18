@@ -300,7 +300,7 @@ export function ReviewPage() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
-  const trackListScroll = useRef(0);
+  const trackListScroll = useRef<Array<{ element: HTMLElement; top: number }>>([]);
   const inspectorRef = useRef<HTMLElement | null>(null);
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [trackFilter, setTrackFilter] = useState('');
@@ -1296,7 +1296,14 @@ export function ReviewPage() {
         selected={selected}
         numberingMode={reviewCase?.album_plan?.numbering_mode}
         onSelect={(findingId, rowKey) => {
-          trackListScroll.current = window.scrollY;
+          trackListScroll.current = [];
+          let scrollElement = document.querySelector<HTMLElement>(
+            '[aria-label="Complete album track assignment"]',
+          );
+          while (scrollElement) {
+            trackListScroll.current.push({ element: scrollElement, top: scrollElement.scrollTop });
+            scrollElement = scrollElement.parentElement;
+          }
           selectAssignment(findingId, rowKey);
           requestAnimationFrame(() => {
             const inspector = inspectorRef.current;
@@ -2373,6 +2380,7 @@ export function ReviewPage() {
                             <section
                               className={styles.missingChoices}
                               aria-label="Choose album completeness"
+                              tabIndex={-1}
                             >
                               <h4>Choose which missing tracks you want</h4>
                               <CompletenessChoice
@@ -2524,7 +2532,9 @@ export function ReviewPage() {
                                   `[data-review-assignment][data-selected="true"]`,
                                 )
                                 ?.focus({ preventScroll: true });
-                              window.scrollTo({ top: trackListScroll.current });
+                              trackListScroll.current.forEach(({ element, top }) => {
+                                element.scrollTop = top;
+                              });
                             });
                           }}
                         >
@@ -2536,12 +2546,49 @@ export function ReviewPage() {
                             <AssignmentEvidence
                               row={assignmentsByKey.get(activeRowKey)!}
                               album={reviewCase}
+                              controls={
+                                <div className={styles.inlineActions}>
+                                  {!releaseChoicePending &&
+                                    active?.finding_type === 'reconciliation_missing' &&
+                                    !['wishlisted', 'downloading', 'downloaded'].includes(
+                                      textValue(active.details?.fulfillment_state),
+                                    ) && (
+                                      <Button
+                                        variant="primary"
+                                        disabled={mutationBusy}
+                                        onClick={() => void requestAllMissing(1, [active.id])}
+                                      >
+                                        Request this track
+                                      </Button>
+                                    )}
+                                  {!releaseChoicePending &&
+                                  reviewCase.items.some((item) =>
+                                    ['reconciliation_missing', 'reconciliation_intent'].includes(
+                                      item.finding_type,
+                                    ),
+                                  ) ? (
+                                    <Button
+                                      onClick={() => {
+                                        setInspectorOpen(false);
+                                        requestAnimationFrame(() => {
+                                          const choices = document.querySelector<HTMLElement>(
+                                            '[aria-label="Choose missing tracks"], [aria-label="Choose album completeness"]',
+                                          );
+                                          choices?.focus({ preventScroll: true });
+                                          choices?.scrollIntoView({ block: 'center' });
+                                        });
+                                      }}
+                                    >
+                                      Choose missing tracks →
+                                    </Button>
+                                  ) : (
+                                    <Button onClick={() => setAlbumView('plan')}>
+                                      Review album completeness →
+                                    </Button>
+                                  )}
+                                </div>
+                              }
                             />
-                            <div className={styles.actions}>
-                              <Button type="button" onClick={() => setAlbumView('plan')}>
-                                Review album completeness →
-                              </Button>
-                            </div>
                           </>
                         ) : activeRowKey && active ? (
                           compactSelectedActionDetail
