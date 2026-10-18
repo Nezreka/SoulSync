@@ -2890,3 +2890,33 @@
 .refreshBanner {
   box-shadow: none;
 }
+
+.applyPreview {
+  display: grid;
+  gap: var(--space-3);
+  line-height: 1.5;
+}
+.applyPreview p {
+  margin: 0;
+}
+.applyPreview details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--white-a03);
+}
+.applyPreview summary {
+  cursor: pointer;
+  padding: var(--space-3) var(--space-4);
+  min-height: 44px;
+}
+.applyPreview summary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.applyPreview ul {
+  margin: 0;
+  padding: 0 var(--space-5) var(--space-4) var(--space-6);
+}
+.applyPreview li + li {
+  margin-top: var(--space-2);
+}

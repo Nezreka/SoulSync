@@ -115,6 +115,7 @@ export function ReviewAudio({
           {playable(comparisonPath) && (
             <Button
               type="button"
+              disabled={Boolean(pendingPath)}
               onClick={() =>
                 void choose(
                   comparisonPath!,
@@ -123,7 +124,8 @@ export function ReviewAudio({
                 )
               }
             >
-              <PlayIcon size={14} /> Play other local copy
+              <PlayIcon size={14} />{' '}
+              {pendingPath === comparisonPath ? 'Starting…' : 'Play other local copy'}
             </Button>
           )}
         </div>

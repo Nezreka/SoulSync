@@ -955,21 +955,21 @@ export function ReviewPage() {
       if (!preview.action_count)
         throw new Error('No fully decided album plans are ready to apply.');
       const message = (
-        <>
+        <div className={styles.applyPreview}>
           <p>
             Apply {preview.action_count} planned actions across {preview.albums.length} fully
             decided album{preview.albums.length === 1 ? '' : 's'}?
           </p>
           {preview.file_actions > 0 && (
             <Notice tone="warning">
-              {preview.file_actions} file actions are included. Files moved to quarantine remain
-              recoverable.
+              {preview.file_actions} file action{preview.file_actions === 1 ? ' is' : 's are'}{' '}
+              included. Files moved to quarantine remain recoverable.
             </Notice>
           )}
           {preview.albums.map((album, index) => (
             <details key={`${album.album}-${index}`} open={Boolean(scopeCaseId)}>
               <summary>
-                {album.album} · {album.actions.length} actions
+                {album.album} · {album.actions.length} action{album.actions.length === 1 ? '' : 's'}
               </summary>
               <ul>
                 {album.actions.map((action, i) => (
@@ -983,7 +983,7 @@ export function ReviewPage() {
             Albums with open decisions are excluded. These plans will be checked again before
             execution. If a plan changes, review a fresh preview before applying.
           </p>
-        </>
+        </div>
       );
       const confirmed = await confirm({
         title: 'Apply ready album plans',
@@ -1318,8 +1318,12 @@ export function ReviewPage() {
                   : 'Loading queue…'}
               </strong>
               <span>
-                {queueTotals?.ready ?? 0} ready album{queueTotals?.ready === 1 ? '' : 's'} ·{' '}
-                {queue?.ready_total || 0} ready change{queue?.ready_total === 1 ? '' : 's'}
+                {queueTotals
+                  ? `${queueTotals.ready} ready album${queueTotals.ready === 1 ? '' : 's'} · `
+                  : ''}
+                {queue
+                  ? `${queue.ready_total || 0} ready change${queue.ready_total === 1 ? '' : 's'}`
+                  : 'Loading ready changes…'}
               </span>
             </div>
             <Button
@@ -1341,7 +1345,9 @@ export function ReviewPage() {
             >
               {applyBusy && !operationCase
                 ? applyProgress || 'Applying…'
-                : `Apply ready changes (${queue?.ready_total || 0})`}
+                : queue
+                  ? `Apply ready changes (${queue.ready_total || 0})`
+                  : 'Loading ready changes…'}
             </Button>
             <div className={styles.inlineActions} aria-label="Queue actions">
               <Button
@@ -1479,7 +1485,8 @@ export function ReviewPage() {
               ))}
             </Select>
           </label>
-          <div className={styles.caseList} ref={caseListRef}>
+          <div className={styles.caseList} ref={caseListRef} aria-busy={!queue}>
+            {!queue && <p role="status">Loading albums…</p>}
             {queue?.items.map((item) => (
               <Button
                 key={item.case_id}

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
 
-import { ReleaseComparison } from './reconciliation-evidence';
+import { AssignmentEvidence, ReleaseComparison } from './reconciliation-evidence';
 it('renders a missing repeated title at its release position without a duplicate footer list', () => {
   render(
     <ReleaseComparison
@@ -36,4 +36,22 @@ it('renders a missing repeated title at its release position without a duplicate
   expect(screen.getAllByText('Mrs. Rita')).toHaveLength(2);
   expect(screen.getByText('Missing')).toBeTruthy();
   expect(screen.queryByText('1 audio track missing')).toBeNull();
+});
+
+it('distinguishes a cancelled missing-track request from an active download', () => {
+  const { rerender } = render(
+    <AssignmentEvidence
+      row={{ status: 'missing', slot_title: 'Missing song', fulfillment_state: 'cancelled' }}
+      album={{ album: 'Album', folder: '/music/Album' } as never}
+    />,
+  );
+  expect(screen.getByText(/The request was cancelled/)).toBeTruthy();
+  expect(screen.queryByText(/Waiting for a verified local file/)).toBeNull();
+  rerender(
+    <AssignmentEvidence
+      row={{ status: 'missing', slot_title: 'Missing song', fulfillment_state: 'wishlisted' }}
+      album={{ album: 'Album', folder: '/music/Album' } as never}
+    />,
+  );
+  expect(screen.getByText(/Waiting for a verified local file/)).toBeTruthy();
 });

@@ -410,9 +410,9 @@ function DuplicateCopies({
                 {playlists.length > 0 && <span>Playlist: {playlists.join(', ')}</span>}
               </div>
               {onKeepCopy && trackId && (
-                <button type="button" disabled={busy} onClick={() => onKeepCopy(trackId)}>
+                <Button type="button" disabled={busy} onClick={() => onKeepCopy(trackId)}>
                   Plan to keep this copy
-                </button>
+                </Button>
               )}
             </article>
           );
@@ -739,9 +739,9 @@ export function ReleaseComparison({
                   {!pair.missing &&
                     pair.review_state !== 'reviewed' &&
                     label(pair.confidence) !== 'clear' && (
-                      <button type="button" onClick={() => setInspectedPair(index)}>
+                      <Button type="button" onClick={() => setInspectedPair(index)}>
                         Inspect match
-                      </button>
+                      </Button>
                     )}
                 </div>
               ))}
@@ -1025,19 +1025,21 @@ export function AssignmentEvidence({
     <section className={styles.findingDetail}>
       <h3>{row.current_title || row.slot_title || 'Track assignment'}</h3>
       {row.historical_finding_id != null && onReviewAgain && (
-        <button
+        <Button
           type="button"
           disabled={busy}
           onClick={() => onReviewAgain(row.historical_finding_id!)}
         >
           Review again
-        </button>
+        </Button>
       )}
       <p>
         {row.status === 'missing'
-          ? row.fulfillment_state
-            ? 'This release track has been requested. Waiting for a verified local file.'
-            : 'This release track has no local file. Review album completeness on the Plan tab.'
+          ? row.fulfillment_state === 'cancelled'
+            ? 'The request was cancelled. This track is still wanted; review album completeness on the Plan tab.'
+            : ['wishlisted', 'downloading', 'downloaded'].includes(row.fulfillment_state || '')
+              ? 'This release track has been requested. Waiting for a verified local file.'
+              : 'This release track has no local file. Review album completeness on the Plan tab.'
           : row.status === 'confirmed'
             ? 'Confirmed match · no metadata edit is pending.'
             : row.status === 'not_owned'
