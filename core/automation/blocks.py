@@ -692,7 +692,7 @@ _CATEGORY_RULES: list[tuple[str, tuple[str, ...]]] = [
                      # refresh is a cache warmer (same family as refresh_beatport_cache)
                      "recycle", "extto_fresh")),
     ("Wishlist", ("wishlist",)),
-    ("Watchlist", ("watchlist",)),
+    ("Watchlist", ("watchlist", "author", "new_release")),
     ("Playlists", ("playlist", "mirrored", "discover", "collections", "personalized")),
     ("Downloads", ("download", "grab", "batch", "import", "rss", "seeding",
                    "quarantine", "request", "search_and", "upgrade")),
