@@ -1934,8 +1934,20 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert FLAC(str(path))['title'][0] == 'Laid to Rest'
     target_path.unlink()
     finding = worker.get_review_case(case_id)['items'][0]
+    before = path.stat()
+    with db._get_connection() as conn:
+        conn.execute('''INSERT INTO reconcile_track_assignment
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            ('10', 'musicbrainz', 'ashes-mb-release', str(path), 'chosen-slot',
+             before.st_size, before.st_mtime_ns, 'verified-audio'))
     applied = worker.fix_finding(finding['id'], review_approved=True)
     assert applied['success'], applied
+    after = target_path.stat()
+    with db._get_connection() as conn:
+        assignment = conn.execute('''SELECT file_path, slot_key, size_bytes,
+            mtime_ns, fingerprint_key FROM reconcile_track_assignment''').fetchone()
+    assert tuple(assignment) == (str(target_path), 'chosen-slot', after.st_size,
+                                 after.st_mtime_ns, 'verified-audio')
     assert FLAC(str(target_path))['musicbrainz_albumid'][0] == 'ashes-mb-release'
     assert not path.exists()
     assert FLAC(str(target_path))['title'][0] == 'Hourglass'

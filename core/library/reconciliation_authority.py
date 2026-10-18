@@ -16,6 +16,7 @@ ALIASES = {
     'albumartist': 'album_artist', 'musicbrainz_albumid': 'musicbrainz_release_id',
     'musicbrainz_album_id': 'musicbrainz_release_id',
     'library_recording_disambiguation': 'recording_disambiguation',
+    'release_date': 'date', 'track_count': 'track_total',
 }
 IDENTITY = {'title', 'artist', 'album', 'album_artist', 'track_number', 'disc_number',
             'musicbrainz_recording_id', 'musicbrainz_release_id', 'filename',
@@ -42,7 +43,10 @@ def _table(conn, name):
 
 
 def _canonical(values):
-    return {ALIASES.get(k, k): v for k, v in values.items()}
+    result = {ALIASES.get(k, k): v for k, v in values.items()}
+    if result.get('date') and 'year' not in result:
+        result['year'] = str(result['date']).split('-', 1)[0]
+    return result
 
 
 def _proposed(kind, details):
@@ -185,3 +189,33 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
         return None
     finally:
         conn.close()
+
+
+def enrichment_tag_guard(db, file_path):
+    """Check provider results at their write boundary, including unplanned IDs.
+
+    Retag callers hold the maintenance lock through provider lookup and save.
+    Unrelated enrichment remains available when an identity field is protected.
+    """
+    fields = {
+        'MUSICBRAINZ_RECORDING_ID': 'musicbrainz_recording_id',
+        'MUSICBRAINZ_RELEASE_ID': 'musicbrainz_release_id',
+        'MUSICBRAINZ_TRACKCOMMENT': 'recording_disambiguation',
+        'TITLE': 'title', 'ARTIST': 'artist', 'ARTISTS': 'artist',
+        'ALBUM': 'album', 'ALBUMARTIST': 'album_artist',
+        'TRACKNUMBER': 'track_number', 'DISCNUMBER': 'disc_number',
+        'TOTALTRACKS': 'track_total', 'TOTALDISCS': 'disc_total',
+        'DATE': 'date',
+    }
+
+    def allowed(tag, value):
+        field = fields.get(tag)
+        if not field:
+            return True
+        proposed = {field: value}
+        if field == 'date':
+            proposed['year'] = str(value).split('-', 1)[0]
+        return conflict(db, 'library_retag', file_path=file_path,
+                        details={'db_data': proposed}) is None
+
+    return allowed

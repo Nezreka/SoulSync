@@ -114,7 +114,7 @@ def _read_embedded_date(file_path, symbols):
     return None
 
 
-def _run_full_enrich(file_path, full_meta, runtime=None) -> bool:
+def _run_full_enrich(file_path, full_meta, runtime=None, db=None) -> bool:
     """'full' depth: run the same multi-source enrichment a fresh download gets
     (MusicBrainz/Deezer/AudioDB/Last.fm via embed_source_ids), ADDITIVELY — it
     adds rich frames without clearing existing tags. Slow + API-heavy per track.
@@ -147,7 +147,9 @@ def _run_full_enrich(file_path, full_meta, runtime=None) -> bool:
             return False
         if getattr(audio, 'tags', None) is None and hasattr(audio, 'add_tags'):
             audio.add_tags()
-        embed_source_ids(audio, meta, context=None, runtime=runtime)
+        from core.library.reconciliation_authority import enrichment_tag_guard
+        options = {'tag_guard': enrichment_tag_guard(db, file_path)} if db is not None else {}
+        embed_source_ids(audio, meta, context=None, runtime=runtime, **options)
         audio.save()
         return True
     except Exception as e:
@@ -229,7 +231,7 @@ def apply_track_plans(track_plans, cover_action=None, cover_url=None, full=False
         # An enrichment-only plan counts here, not in the writer block.
         if full_meta and (write_ok or not needs_write):
             try:
-                if _run_full_enrich(fp, full_meta, runtime=enrich_runtime):
+                if _run_full_enrich(fp, full_meta, runtime=enrich_runtime, **({"db": db} if db is not None else {})):
                     if not needs_write:
                         result['written'] += 1
                         last_dir = _os.path.dirname(fp)

@@ -2378,7 +2378,7 @@ class LibraryReconciliationJob(RepairJob):
                 forced_pairs = {}
                 for file_index, file in enumerate(files):
                     from core.library.reconciliation_choices import assignment_for_file
-                    override = assignment_for_file(assignment_overrides, album_id, source, release_id, file, files)
+                    override = assignment_for_file(assignment_overrides, album_id, source, release_id, file, files, db=context.db)
                     if not override:
                         continue
                     slot_key, size_bytes, mtime_ns, fingerprint_key = override

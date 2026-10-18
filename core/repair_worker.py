@@ -1892,6 +1892,7 @@ class RepairWorker:
                          name='reconcile-album-review').start()
         return True
 
+    @maintenance_mutation
     def apply_review_decision(self, case_id: str, finding_id: int, *,
                               evidence_token: str, action: str,
                               fix_action: str = None,
@@ -1961,6 +1962,7 @@ class RepairWorker:
                 return result
             return {'success': False, 'error': 'Unsupported review action'}
 
+    @maintenance_mutation
     def pin_review_release(self, case_id: str, *, source: str, release_id: str,
                            expected_source: str, expected_release_id: str,
                            manual: bool = False, preview: bool = False) -> dict:
@@ -2032,6 +2034,7 @@ class RepairWorker:
             return {'success': True, 'message': 'Release pinned; updating this album plan',
                     'refresh_queued': queued}
 
+    @maintenance_mutation
     def reopen_review_assignment(self, case_id: str, finding_id: int) -> dict:
         """Reconsider a recorded decision; never undo an applied file write."""
         with self._review_apply_lock:
@@ -2063,6 +2066,7 @@ class RepairWorker:
             return {'success': True, 'refresh_queued': queued,
                     'message': 'Decision reopened. Updating the album plan; applied file changes are retained.'}
 
+    @maintenance_mutation
     def apply_review_decision_group(self, case_id: str, category: str, *,
                                     action: str) -> dict:
         """Save one album-level convention without applying file changes."""
@@ -2123,6 +2127,7 @@ class RepairWorker:
         return {'success': True, 'saved': len(findings), 'total': len(findings),
                 'message': 'Album plan saved. File changes will run only when you apply it.'}
 
+    @maintenance_mutation
     def reset_review_scope(self, case_id):
         """Reopen completeness as a plan choice without cancelling acquisitions."""
         with self._review_apply_lock:
@@ -2148,6 +2153,7 @@ class RepairWorker:
             return {'success': True, 'refresh_queued': queued,
                     'message': 'Album scope reopened. Existing wishlist requests are retained.'}
 
+    @maintenance_mutation
     def save_review_plan(self, case_id, signature):
         """Approve the current, resolved plan for a later bulk operation."""
         with self._review_apply_lock:
@@ -2186,6 +2192,7 @@ class RepairWorker:
                               'file_actions': sum(item['finding_type'] != 'reconciliation_metadata' and item['review_tier'] == 'ready' and not item['details'].get('plan_keep') for item in case['items'])})
         return cases
 
+    @maintenance_mutation
     def start_saved_review_plans(self, plans):
         with self._review_apply_lock:
             current = {row['case_id']: row for row in self.saved_review_plans()}
@@ -2462,6 +2469,7 @@ class RepairWorker:
             key=lambda g: (rank.get(g['severity_max'], 2), -g['pending'], g['finding_type']),
         )
 
+    @maintenance_mutation
     def reopen_finding(self, finding_id: int) -> bool:
         """Put a resolved/dismissed finding back to pending.
 
@@ -2489,6 +2497,7 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    @maintenance_mutation
     def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
         """Reopen all dismissed findings, optionally filtered.
 
@@ -2723,6 +2732,43 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    @maintenance_mutation
+    def _apply_reviewed_finding(self, finding_id, *, fix_action=None,
+                                reviewed_details=None, remaining_ids=None):
+        """Revalidate and execute one write without a concurrent decision change.
+
+        The scan lock is acquired by the batch before this mutation lock. Queue
+        decisions use this same mutation lock and never wait for a scan here.
+        """
+        conn = self.db._get_connection()
+        try:
+            row = conn.execute('SELECT review_case_key, details_json FROM repair_findings WHERE id=?',
+                               (finding_id,)).fetchone()
+            if not row:
+                return {'success': False, 'error': 'Finding no longer exists'}
+            key, raw = row
+            if remaining_ids is not None and key:
+                mode = repair_review_queue.effective_case_modes(
+                    conn, job_id='library_reconciliation', case_id=key).get(key) or {}
+                if set(mode.get('ready_ids') or []) != set(remaining_ids):
+                    return {'success': False, 'error': 'The album plan changed or has unresolved decisions; review it before applying.'}
+                # A different pending choice can invalidate the whole album,
+                # even before we reach that finding in the execution order.
+                for item in mode.get('items') or []:
+                    if item['id'] not in remaining_ids:
+                        continue
+                    if reviewed_details is not None and item['details'] != json.loads(reviewed_details.get(item['id']) or '{}'):
+                        return {'success': False, 'error': 'The proposed action changed during reconciliation; review the updated plan before applying.'}
+            elif reviewed_details is not None:
+                current = review_choices.project(json.loads(raw or '{}'),
+                    review_choices.load_choices(conn, finding_id).get(finding_id), case_id=key, raw_json=raw)
+                if current != json.loads(reviewed_details.get(finding_id) or '{}'):
+                    return {'success': False, 'error': 'The proposed action changed during reconciliation; review the updated plan before applying.'}
+        finally:
+            conn.close()
+        return self.fix_finding(finding_id, fix_action=fix_action, review_approved=True)
+
+    @maintenance_mutation
     def fix_finding(self, finding_id: int, fix_action: str = None,
                     *, review_approved: bool = False) -> dict:
         """Execute the appropriate fix action for a finding, then mark it resolved.
@@ -4716,7 +4762,19 @@ class RepairWorker:
             if album_title:
                 cursor.execute('''UPDATE albums SET title = ?, updated_at = CURRENT_TIMESTAMP
                                   WHERE id = ?''', (album_title, details.get('album_id')))
-            if updates or album_title:
+            if wrote_tags or renamed:
+                # This guarded operation changes tags/name only. Keep manual
+                # audio assignments bound to the resulting file, while refusing
+                # to refresh an assignment whose original evidence was stale.
+                if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
+                    final_path = target_path if renamed else file_path
+                    final_stat = os.stat(final_path)
+                    cursor.execute('''UPDATE reconcile_track_assignment
+                        SET file_path=?, size_bytes=?, mtime_ns=?
+                        WHERE file_path=? AND size_bytes=? AND mtime_ns=?''',
+                        (final_path, final_stat.st_size, final_stat.st_mtime_ns,
+                         file_path, details.get('size_bytes'), details.get('mtime_ns')))
+            if updates or album_title or wrote_tags or renamed:
                 conn.commit()
             return {'success': True, 'action': 'reconciliation_metadata',
                     'message': 'Updated file and track metadata'}
@@ -5183,7 +5241,7 @@ class RepairWorker:
         from core.repair_jobs.library_retag import apply_track_plans, build_retag_enrichment_runtime
         full = (details.get('depth') == 'full')
         res = apply_track_plans(resolved_plans, details.get('cover_action'), details.get('cover_url'),
-                                full=full,
+                                full=full, db=self.db,
                                 lyrics_action=details.get('lyrics_action', False),
                                 enrich_runtime=build_retag_enrichment_runtime(
                                     self._config_manager, self.db) if full else None)
@@ -7388,6 +7446,7 @@ class RepairWorker:
         except Exception as e:
             return {'success': False, 'error': f'Conversion error: {e}'}
 
+    @maintenance_mutation
     def dismiss_finding(self, finding_id: int) -> bool:
         """Dismiss a finding."""
         conn = None
@@ -7705,6 +7764,9 @@ class RepairWorker:
                         (json.dumps(ids),)))
                 finally:
                     conn.close()
+            remaining_by_case = {}
+            for fid, key in case_by_finding.items():
+                remaining_by_case.setdefault(key, set()).add(fid)
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
                     state['stopped'] = True
@@ -7727,14 +7789,17 @@ class RepairWorker:
                         if effective != json.loads(reviewed_details.get(fid) or '{}'):
                             raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
-                        result = self.fix_finding(
-                            fid, fix_action=fix_action, review_approved=True)
+                        result = self._apply_reviewed_finding(
+                            fid, fix_action=fix_action, reviewed_details=reviewed_details,
+                            remaining_ids=(remaining_by_case.get(case_by_finding.get(fid))
+                                           if review_case_folders else None))
                     else:
                         # Preserve the longstanding two-argument call for
                         # ordinary bulk runs and test/deployment wrappers.
                         result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
+                remaining_by_case.get(case_by_finding.get(fid), set()).discard(fid)
                 self._record_review_timing('applying', time.perf_counter() - apply_started)
                 state['done'] += 1
                 slug = types.get(fid)
@@ -7884,6 +7949,7 @@ class RepairWorker:
         self._bulk_fix_stop_event.set()
         return True
 
+    @maintenance_mutation
     def dismiss_findings_by_type(self, finding_type: str) -> int:
         """Dismiss every PENDING finding of one type. Returns count updated.
 

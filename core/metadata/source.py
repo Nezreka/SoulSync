@@ -1135,7 +1135,7 @@ def _write_genre_frame(audio_file, genres: list[str], cfg, symbols, source: str 
     logger.info("Genres %s: %s", source, genre_string)
 
 
-def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols):
+def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols, tag_guard=None):
     filtered_tags: Dict[str, str] = {}
     for tag_name, value in pp["id_tags"].items():
         config_path = SOURCE_TAG_CONFIG.get(tag_name)
@@ -1171,8 +1171,13 @@ def _write_embedded_metadata(audio_file, metadata: dict, pp: dict, cfg, symbols)
     if filtered_tags.get("DATE"):
         filtered_tags["DATE"] = _more_precise_date(metadata.get("date"), filtered_tags["DATE"])
 
+    if tag_guard:
+        filtered_tags = {tag: value for tag, value in filtered_tags.items()
+                         if tag_guard(tag, value)}
     written = []
     release_year = pp["release_year"]
+    if release_year and tag_guard and not tag_guard('DATE', release_year):
+        release_year = None
 
     from core.metadata.musicbrainz_tags import write_tag
     for tag_name, value in filtered_tags.items():
@@ -2313,7 +2318,7 @@ def _blank_post_process_state() -> dict:
     }
 
 
-def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None):
+def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=None, tag_guard=None):
     cfg = get_config_manager()
     symbols = get_mutagen_symbols()
     if not symbols:
@@ -2437,11 +2442,12 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
         if not fallback_enabled and not pp["id_tags"] and not pp["deezer_bpm"] and not pp["deezer_isrc"] and not pp["tidal_bpm"] and not pp["hifi_bpm"] and not pp["hifi_copyright"] and not pp["audiodb_mood"] and not pp["audiodb_style"] and not pp["bandcamp_url"] and not pp["bandcamp_tags"]:
             return
 
-        release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols)
+        release_year = _write_embedded_metadata(audio_file, metadata, pp, cfg, symbols, tag_guard=tag_guard)
         release_id = pp["release_mbid"]
-        if release_id:
+        if release_id and (not tag_guard or tag_guard("MUSICBRAINZ_RELEASE_ID", release_id)):
             metadata["musicbrainz_release_id"] = release_id
-            _update_album_year_in_database(db, metadata, release_year)
+            if release_year:
+                _update_album_year_in_database(db, metadata, release_year)
 
         # Expose the final ID tag set + per-source values back to the
         # import context so downstream side-effects (notably

@@ -351,3 +351,40 @@ def test_failed_album_stops_its_remaining_actions_but_other_albums_continue(tmp_
     assert len(calls)==2
     assert result['fixed']==1 and result['failed']==2
     assert any('earlier action' in row['error'] for row in result['errors'])
+
+
+def test_new_album_decision_between_writes_stops_only_that_album(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'changed-plan.db'))
+    worker = _worker(db, tmp_path)
+    for index, album in ((1, 'a'), (2, 'a'), (3, 'b')):
+        worker._create_finding(
+            job_id='library_reconciliation', finding_type='reconciliation_metadata',
+            severity='warning', entity_type='track', entity_id=str(index),
+            file_path=str(tmp_path / album / f'{index}.flac'),
+            title=f'Track {index}', description='Metadata',
+            details={'album_id': album, 'album_folder': str(tmp_path / album),
+                     'confidence': 'clear',
+                     'changes': {'title': {'old': 'song', 'new': 'Song'}}})
+    calls = []
+
+    def apply(fid, **kwargs):
+        calls.append(fid)
+        with db._get_connection() as conn:
+            conn.execute("UPDATE repair_findings SET status='resolved' WHERE id=?", (fid,))
+        if len(calls) == 1:
+            worker._create_finding(
+                job_id='library_reconciliation', finding_type='reconciliation_assignment',
+                severity='warning', entity_type='track', entity_id='new',
+                file_path=str(tmp_path / 'a' / 'new.flac'), title='New uncertainty',
+                description='Needs review',
+                details={'album_id': 'a', 'album_folder': str(tmp_path / 'a'),
+                         'confidence': 'ambiguous'})
+        return {'success': True}
+
+    worker.fix_finding = apply
+    worker._schedule_album_refresh = lambda *args, **kwargs: True
+    assert worker.start_review_safe()['started']
+    result = _wait_done(worker)
+    assert len(calls) == 2
+    assert result['fixed'] == 2 and result['failed'] == 1
+    assert 'unresolved decisions' in result['errors'][0]['error']

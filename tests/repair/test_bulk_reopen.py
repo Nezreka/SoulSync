@@ -120,7 +120,8 @@ def test_bulk_reopen_resets_user_action_and_resolved_at(worker_with_findings):
     # Set user_action on a dismissed row first
     conn = sqlite3.connect(db_path)
     conn.execute(
-        "UPDATE repair_findings SET user_action = 'dismissed by test' WHERE status = 'dismissed' LIMIT 1"
+        "UPDATE repair_findings SET user_action = 'dismissed by test' "
+        "WHERE id = (SELECT id FROM repair_findings WHERE status = 'dismissed' ORDER BY id LIMIT 1)"
     )
     conn.commit()
     conn.close()

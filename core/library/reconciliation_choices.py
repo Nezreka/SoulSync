@@ -127,7 +127,7 @@ def same_relocated_evidence(previous, current):
             {k: v for k, v in current.items() if k not in volatile})
 
 
-def assignment_for_file(overrides, album_id, source, release_id, file, files):
+def assignment_for_file(overrides, album_id, source, release_id, file, files, *, db=None):
     """Retain an assignment after a unique, verified move of the same audio."""
     import os
     prefix = (str(album_id), source, release_id)
@@ -137,12 +137,37 @@ def assignment_for_file(overrides, album_id, source, release_id, file, files):
     fingerprint = (file.get('acoustid') or {}).get('fingerprint_key')
     if not fingerprint:
         return None
-    matches = [value for key, value in overrides.items()
+    matches = [(key, value) for key, value in overrides.items()
                if key[:3] == prefix and not os.path.exists(key[3])
                and value[1] == file['size_bytes'] and value[3] == fingerprint]
     copies = [row for row in files if row['size_bytes'] == file['size_bytes']
               and (row.get('acoustid') or {}).get('fingerprint_key') == fingerprint]
     if len(matches) == len(copies) == 1:
-        slot, size, _, key = matches[0]
-        return slot, size, file['mtime_ns'], key
+        old_key, previous = matches[0]
+        slot, size, _, fingerprint_key = previous
+        recovered = (slot, size, file['mtime_ns'], fingerprint_key)
+        if db is not None:
+            from core.library.maintenance_lock import mutation_lock
+            with mutation_lock:
+                # All consumers (reset, reopen, authority and slot ownership)
+                # must see the same verified move. Do not overwrite a choice
+                # that changed after this scan loaded its assignment snapshot.
+                if os.path.exists(old_key[3]):
+                    return None
+                conn = db._get_connection()
+                try:
+                    changed = conn.execute('''UPDATE reconcile_track_assignment
+                        SET file_path=?, mtime_ns=? WHERE album_id=? AND source=?
+                        AND release_id=? AND file_path=? AND slot_key=?
+                        AND size_bytes=? AND mtime_ns=? AND fingerprint_key=?''',
+                        (file['path'], file['mtime_ns'], *old_key, *previous)).rowcount
+                    if changed != 1:
+                        conn.rollback()
+                        return None
+                    conn.commit()
+                finally:
+                    conn.close()
+                overrides.pop(old_key, None)
+                overrides[(*prefix, file['path'])] = recovered
+        return recovered
     return None

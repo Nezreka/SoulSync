@@ -167,3 +167,31 @@ Under concurrent browser loading and reconciliation, some requests still exceede
 - Automatic music downloads were restored to their original enabled state after active transfers finished and the rollout completed. Flux remains suspended only for the SoulSync feature-review image. No live user plan has been applied.
 - The implementation is ready for focused PR review. Remaining follow-ups are the intermittent download-storage issue and further performance work on the shared app bundle / large evidence payloads; the Operations redesign remains outside this PR.
 
+
+## Adversarial review corrections (2026-10-18)
+
+A subsequent review found four gaps in the preceding readiness assessment. These
+are corrected in the current source:
+
+- Full provider enrichment now checks accepted identity fields at the tag-write
+  boundary, including recording/release IDs and dates that were absent from the
+  original retag proposal. Independent BPM and genre enrichment remains available.
+  Legacy release-date and track-count field aliases use the same ownership rules.
+- Queue choices, pins, reopening and legacy mutations share the maintenance lock.
+  Each batch write revalidates the remaining whole-album plan while holding that
+  lock. A new unanswered decision stops that album, and unrelated albums continue.
+- A verified unique assignment relocation updates the stored assignment path,
+  so reset, slot ownership and legacy protection all refer to the same file.
+  Concurrently removed or changed decisions are not recreated by stale scans.
+  Authorized tag edits/renames also refresh assignment file evidence; stale
+  assignments are not silently refreshed.
+- Fulfillment relocation merges conflicting destination records by update time,
+  with an explicit progress rule for equal timestamps. A newer publication is
+  retained, as are newer cancellations and deliberate re-requests. Profile and
+  selected-release boundaries still apply; completion intent is unchanged.
+
+Regression coverage includes real FLAC writes preserving accepted recording ID,
+release ID and date while adding genre/BPM; reset and legacy protection after a
+move; a concurrent release-pin change; a new unresolved decision between batch
+writes; five fulfillment-state collisions; and assignment survival after an
+approved tag edit and rename. Mutating tests continue to use disposable data.
