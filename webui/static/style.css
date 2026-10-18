@@ -1076,20 +1076,6 @@ body.max-performance .nav-button.active:hover {
     opacity: 1;
 }
 
-/* Time display - left/right under progress */
-.player-top-progress .time-display {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
-    font-size: 9px;
-    font-weight: 500;
-    color: var(--white-a35);
-    letter-spacing: 0.3px;
-    padding: 0 1px;
-    margin-top: -1px;
-}
-
 .current-time {
     min-width: 28px;
     text-align: left;
@@ -1239,27 +1225,6 @@ body.max-performance .nav-button.active:hover {
 
 .player-preview-badge[hidden] {
     display: none;
-}
-
-.album-name.header-album {
-    font-family: -apple-system, 'Segoe UI', sans-serif;
-    font-size: 10px;
-    font-weight: 400;
-    color: var(--white-a30);
-    letter-spacing: 0.1px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin: 0;
-    font-style: normal;
-}
-
-/* Controls row — always visible below track info */
-.media-controls-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 14px 10px;
 }
 
 /* Play Button */
@@ -1463,10 +1428,6 @@ body.max-performance .nav-button.active:hover {
     letter-spacing: 0.2px;
     font-family: -apple-system, 'Segoe UI', sans-serif;
     line-height: 1.4;
-}
-
-.no-track-icon {
-    opacity: 0.6;
 }
 
 /* Crypto Donation Section */
