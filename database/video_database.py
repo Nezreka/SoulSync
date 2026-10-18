@@ -7799,17 +7799,30 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def tvdb_season_store(self, tvdb_id, season_number, episodes) -> None:
+    def tvdb_season_store(self, tvdb_id, season_number, episodes, fetched_at=None) -> None:
         """cache a TVDB season's [(episode_number, air_date), ...]; an empty list
         is stored too, so a season TVDB doesn't have isn't asked again all week."""
         conn = self._get_connection()
         try:
-            conn.execute(
-                "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
-                "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
-                "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
-                (int(tvdb_id), int(season_number),
-                 json.dumps([[int(n), d] for n, d in episodes or []])))
+            if fetched_at is not None:
+                if hasattr(fetched_at, "strftime"):
+                    fetched_str = fetched_at.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    fetched_str = str(fetched_at)
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []]),
+                     fetched_str))
+            else:
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []])))
             conn.commit()
         finally:
             conn.close()
