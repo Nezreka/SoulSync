@@ -562,3 +562,80 @@ Final deployed code: `7d2a4691c81b`, healthy 1/1. Music and video automation are
 both enabled as before. Only the SoulSync test Kustomization remains suspended
 under the established feature-review workflow. The subsequent documentation
 commit does not require another application rollout.
+
+## Matching-result reuse (milestone 4, 2026-10-18)
+
+The optimization caches only the pure file-to-release matching result. It does
+not skip album analysis. Every scan still inventories files, obtains current
+catalogue evidence, discovers and ranks candidates, validates manual assignments,
+and projects current pins, numbering, metadata, locks, playlist membership,
+completion intent, wishlist fulfillment, findings, and ready actions. Existing
+apply-time file, release, approval, and destination checks are unchanged.
+
+The persistent key includes the ordered file and slot sequences, paths, sizes,
+modification times, complete tag and audio evidence, the database identity fields
+used by matching, profile/provider/release identity, validated forced pairs, and
+a policy digest covering the matcher and its semantic helpers plus Python and
+Unicode versions. Reordering files or slots cannot reuse stale numeric indices.
+Changes to AcoustID candidates or scores invalidate results even when the audio
+fingerprint is unchanged. Unrelated database timestamps and presentation URLs do
+not invalidate matching; current values are still used by downstream projection.
+
+There is no additional full-file byte hashing. The existing evidence layer's
+file-change boundary remains path/size/mtime, with its existing apply guards.
+This cache cannot detect a byte change deliberately hidden from that upstream
+boundary. Nor does it freeze catalogue discovery: a refreshed tracklist produces
+a different key, while an unchanged refreshed response can safely reuse matching.
+
+`repair.jobs.library_reconciliation.settings.matching_cache_mode` supports:
+
+- `off`: calculate every match and report timing, without cache access;
+- `shadow`: calculate every match, populate misses, and compare hits against the
+  complete fresh result, including confidence and explanations;
+- `reuse`: return validated cached results and calculate misses normally.
+
+A shadow discrepancy returns the fresh result, records an error diagnostic and
+`shadow_mismatches`, and disables caching for the rest of that run. It is a
+release-validation failure, not permission to publish the cached result. Invalid
+payloads/checksums fall back to fresh matching and are replaced. Database failures
+and unsupported input serialization also fall back; transient audio failures and
+albums with failed catalogue evidence bypass caching.
+
+Storage is disposable and bounded to 25,000 results / 128 MiB, 1 MiB per result,
+with 30-day idle expiry and a 32 MiB run-local payload cache. Maintenance runs
+periodically during writes, at scan completion, and in the existing cache
+maintenance job. Cache output contains matching indices and explanations, not
+approval/readiness state. JSON decoding restores integer competitor keys and
+checks one-to-one assignments, complete file/slot partitions, and manual-pair
+confidence. Consumers receive independent decoded objects.
+
+Diagnostics distinguish automatic/manual matching, signature creation, cache
+reads/writes, persistent/run-local hits, misses, bypasses, shadow comparisons,
+corruption/errors, and estimated computation time avoided. The estimate comes
+from the original calculation and is not a substitute for measured wall time.
+
+Local verification passed 1,115 wider backend tests and 197 final focused tests.
+Every existing real-world matcher regression also runs through persisted reuse.
+The completion-intent/wishlist/release-pin lifecycle runs in all three modes and
+asserts actual warm hits while downstream decisions change. Focused tests cover
+manual constraints, duplicate competitors, input ordering, evidence changes,
+corruption recovery, expiry/limits, isolation, and fresh fallback.
+
+The initial live shadow run (846) took 523.86 seconds with zero errors/new
+findings. Its 268 audio lookups consumed 71.30 seconds (the earlier baseline
+needed 44 / 11.22 seconds), so wall time alone overstated new cache overhead.
+The new stage timers nevertheless exposed 31.54 seconds reading and 44.20 seconds
+writing matching entries through a fresh SQLite connection per candidate.
+A scan-local connection now avoids that repeated setup. Reads retain no
+transaction, writes commit before returning to matching, and scan completion
+closes the connection. A regression test verifies another connection can write
+while this scan connection remains open. The corrected focused suites pass
+222 tests.
+
+Run 846's comparison found no changes across all 1,569 stored plans, 14,714
+findings, 59 choices, or the complete 558-action ready preview, including its
+signature. This stronger plan comparison retains candidate presentation and
+inventory membership; only directory-observation bookkeeping and expiring
+preview URLs are excluded. The initial cache held 10,053 results / 25.9 MiB;
+31 requests bypassed caching because their audio evidence was not a successful
+or confirmed-no-match outcome. Corrected deployment measurements follow below.

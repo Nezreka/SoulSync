@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter, OrderedDict
+from contextlib import contextmanager
 from functools import lru_cache
 import hashlib
 import json
@@ -12,14 +13,14 @@ import sys
 import time
 import unicodedata
 
-from core.library.reconciliation_catalogue import connection, current, stage
+from core.library.reconciliation_catalogue import current, stage
 
 MAX_ROWS = 25_000
 MAX_BYTES = 128 * 1024 * 1024
 MAX_RESULT = 1024 * 1024
 MAX_MEMORY = 32 * 1024 * 1024
 RETENTION = 30 * 86400
-SCHEMA = 1
+SCHEMA = 1  # Bump for incompatible key/output formats. Storage mechanics are not matching policy.
 log = logging.getLogger(__name__)
 
 
@@ -68,7 +69,7 @@ def policy_identity():
     root = Path(__file__).resolve().parents[2]
     paths = ('core/library/reconciliation_plan.py', 'core/matching/assignment.py',
              'core/matching/audio_verification.py', 'core/text/fold.py',
-             'core/text/title_match.py', 'core/library/reconciliation_match_cache.py')
+             'core/text/title_match.py')
     sources = [hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths]
     return digest(canonical([SCHEMA, sys.implementation.name, list(sys.version_info[:3]),
                              unicodedata.unidata_version, sources]))
@@ -146,6 +147,7 @@ def decode(raw, files, slots, forced_pairs):
 class MatchingCache:
     def __init__(self, db, mode='off'):
         self.db = db
+        self.conn = None
         self.mode = mode if mode in ('off', 'shadow', 'reuse') else 'off'
         self.counts = Counter()
         self.memory = OrderedDict()
@@ -159,12 +161,27 @@ class MatchingCache:
         if self.store:
             try:
                 self.policy = policy_identity()
-                with connection(db) as conn:
+                with self._connection() as conn:
                     ensure_schema(conn)
             except Exception:
                 self.counts['cache_errors'] += 1
                 self.store = False
                 self.disabled = True
+
+    @contextmanager
+    def _connection(self):
+        # Scan-local, used on its owning worker thread only. A completed SELECT
+        # holds no transaction; every write commits before matching or other DB
+        # work resumes. Avoid reopening SQLite and its pragmas for every candidate.
+        if self.conn is None:
+            self.conn = self.db._get_connection()
+        try:
+            with self.conn:
+                yield self.conn
+        except Exception:
+            self.conn.close()
+            self.conn = None
+            raise
 
     def _remember(self, key, raw, cost):
         size = len(raw.encode())
@@ -184,7 +201,7 @@ class MatchingCache:
             self.counts['memory_hits'] += 1
             return self.memory[key]
         if self.store:
-            with connection(self.db) as conn:
+            with self._connection() as conn:
                 row = conn.execute('SELECT payload,checksum,compute_seconds,last_access,policy FROM reconcile_match_cache WHERE cache_key=?', (key,)).fetchone()
             if row and row[3] >= self.started - RETENTION and row[4] == self.policy:
                 if len(row[0].encode()) > MAX_RESULT or not math.isfinite(row[2]) or row[2] < 0:
@@ -205,7 +222,7 @@ class MatchingCache:
         self._remember(key, raw, cost)
         if self.store:
             now = time.time()
-            with connection(self.db) as conn:
+            with self._connection() as conn:
                 conn.execute('INSERT OR REPLACE INTO reconcile_match_cache VALUES (?,?,?,?,?,?,?,?)',
                              (key, self.policy, raw, digest(raw), size, now, now, cost))
                 self.writes += 1
@@ -275,7 +292,7 @@ class MatchingCache:
         storage = {}
         if self.store:
             try:
-                with connection(self.db) as conn:
+                with self._connection() as conn:
                     conn.executemany('UPDATE reconcile_match_cache SET last_access=? WHERE cache_key=? AND last_access<?',
                                      [(self.started, k, self.started - 3600) for k in self.touches])
                     evict(conn)
@@ -283,6 +300,9 @@ class MatchingCache:
                     storage = {'results': rows, 'bytes': size}
             except Exception:
                 self.counts['cache_errors'] += 1
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
         return {'mode': self.mode, 'disabled': self.disabled, 'counts': dict(self.counts),
                 'storage': storage, 'memory_bytes': self.memory_bytes, 'policy': self.policy}
 

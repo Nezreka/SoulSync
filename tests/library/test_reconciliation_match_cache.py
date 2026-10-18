@@ -196,3 +196,27 @@ def test_unsupported_inputs_bypass_and_off_does_not_write(db, evidence):
     off = cache.MatchingCache(db, 'off')
     assert run(off, evidence) == reconcile_folder(*evidence)
     assert not off.store and off.counts['bypassed'] == 1
+
+
+def test_scan_connection_is_reused_without_holding_writer_lock(db, evidence):
+    original = db._get_connection
+    db._get_connection = Mock(side_effect=original)
+    session = cache.MatchingCache(db, 'reuse')
+    run(session, evidence)
+    evidence[0][0]['mtime_ns'] += 1
+    run(session, evidence)
+    assert db._get_connection.call_count == 1
+    # The persistent connection must not lock out current decision/file writes.
+    other = original()
+    try:
+        other.execute('PRAGMA busy_timeout=1')
+        with other:
+            other.execute('CREATE TABLE decisions (choice TEXT)')
+            other.execute("INSERT INTO decisions VALUES ('complete')")
+    finally:
+        other.close()
+    held = session.conn
+    session.finish()
+    assert session.conn is None
+    with pytest.raises(sqlite3.ProgrammingError):
+        held.execute('SELECT 1')
