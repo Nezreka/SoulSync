@@ -1207,7 +1207,7 @@ class MusicBrainzSearchClient:
         # response by default, so we read them below without requesting an
         # include.
         release = self._client.get_release(
-            release_mbid, includes=['recordings', 'artist-credits', 'release-groups']
+            release_mbid, includes=['recordings', 'artist-credits', 'release-groups', 'labels']
         )
         if not release:
             return None
@@ -1288,6 +1288,9 @@ class MusicBrainzSearchClient:
             'country': release.get('country') or '',
             'status': release.get('status') or '',
             'label': self._release_label(release),
+            'catalog_number': ', '.join(dict.fromkeys(str(row.get('catalog-number')) for row in release.get('label-info', []) if row.get('catalog-number'))),
+            'barcode': release.get('barcode') or '',
+            'disc_count': len(release.get('media') or []),
             'disambiguation': release.get('disambiguation') or '',
             'release_group_id': rg_mbid,
         }

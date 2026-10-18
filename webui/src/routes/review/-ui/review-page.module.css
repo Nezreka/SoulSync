@@ -2762,3 +2762,39 @@
 .technicalCard .recordingLink:focus-visible {
   color: #cfc0ff;
 }
+
+.editPlan {
+  margin-block: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-color, #383e50);
+  border-radius: 10px;
+}
+.editPlan summary {
+  cursor: pointer;
+  color: var(--text-secondary, #aeb7cb);
+}
+.editPlan .inlineActions {
+  margin-top: 12px;
+}
+.albumApplyAll {
+  margin-bottom: 20px;
+  gap: 20px;
+}
+
+.releaseBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block: 6px;
+}
+.releaseBadges > span {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid #454d63;
+  border-radius: 6px;
+  color: #bdc6d8;
+  font-size: 12px;
+  font-weight: 500;
+  background: #242939;
+}

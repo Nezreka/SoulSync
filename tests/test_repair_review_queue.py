@@ -370,7 +370,7 @@ def test_album_plan_separates_safe_metadata_from_numbering_and_file_actions():
             'The release uses a different disc or track numbering scheme',
             'This action moves or removes a file and requires review',
         ],
-        'can_apply_ready': True, 'can_organize': False,
+        'can_apply_ready': False, 'can_organize': False,
     }
     assert plan['decision_count'] == 3
     assert plan['categories'] == ['extra_files', 'metadata', 'numbering']
@@ -845,12 +845,12 @@ def test_safe_finding_ids_returns_only_planner_approved_metadata():
            job_id='library_reconciliation', kind='reconciliation_metadata')
     case_id = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
 
-    assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 1
+    assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 0
 
     ids, cases = safe_finding_ids(db, case_id=case_id)
 
-    assert ids == [1]
-    assert cases == [case_id]
+    assert ids == []
+    assert cases == []
 
 
 def test_stale_review_action_cannot_run_fix():
@@ -916,6 +916,7 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     }
     response = client.post('/api/repair/review-queue/apply-ready', json={
         'case_id': case_id, 'organize': True,
+        'signature': client.get('/api/repair/review-queue/apply-ready', query_string={'case_id': case_id}).json['signature'],
     })
     assert response.status_code == 200
     assert response.json == {'started': True, 'total': 4}
@@ -1117,7 +1118,7 @@ def test_summary_matches_paginated_modes_without_loading_plans(monkeypatch):
             expected = {label: list_cases(db, job_id='library_reconciliation',
                                          category=category, q=query, risk=risk)['total']
                         for label, risk in [('all', ''), ('review', 'manual'),
-                                            ('ready', 'ready'), ('files', 'destructive')]}
+                                            ('ready', 'ready'), ('files', 'destructive'), ('waiting', 'waiting')]}
             expected['ready_total'] = list_cases(db, job_id='library_reconciliation')['ready_total']
             with monkeypatch.context() as patch:
                 patch.setattr(queue, 'classify_case', lambda *a: (_ for _ in ()).throw(
@@ -1307,7 +1308,7 @@ def test_saved_approval_readiness_agrees_after_evidence_is_reserialized():
     assert safe_finding_ids(db)[0] == []
 
 
-def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidence():
+def test_saved_file_choice_is_automatically_ready_and_revalidates_evidence():
     db = _Database()
     db.add(1, '/music/Album/extra.flac', {'album_id': 10, 'album_title': 'Album'},
            job_id='library_reconciliation', kind='reconciliation_extra')
@@ -1323,8 +1324,8 @@ def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidenc
     case = get_case(db, key)
     assert case['plan']['ready'] == 1
     assert case['items'][0]['last_error'] is None
-    assert safe_finding_ids(db)[0] == []
-    assert safe_finding_ids(db, include_planned_files=True)[0] == []
+    assert safe_finding_ids(db)[0] == [1]
+    assert safe_finding_ids(db, include_planned_files=True)[0] == [1]
     assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == [1]
     assert worker.save_review_plan(key, case['plan_signature'])['success']
     saved = worker.saved_review_plans()
@@ -1333,3 +1334,59 @@ def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidenc
     db.conn.commit()
     assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == []
     assert worker.saved_review_plans() == []
+
+
+def test_whole_album_readiness_counts_choices_and_waiting_consistently():
+    from core.repair_review_queue import queue_summary, ready_batch_preview
+    from core.library import reconciliation_choices as choices
+    db = _Database()
+    for fid, folder, kind, details in [
+        (1, 'mixed', 'reconciliation_metadata', {'changes': {'title': {'new': 'One'}}}),
+        (2, 'mixed', 'reconciliation_metadata', {'changes': {'track_number': {'new': 2}}}),
+        (3, 'waiting', 'reconciliation_missing', {'fulfillment_state': 'wishlisted'}),
+        (4, 'ready', 'reconciliation_metadata', {'changes': {'title': {'new': 'Four'}}}),
+        (5, 'files', 'reconciliation_extra', {}),
+    ]:
+        db.add(fid, f'/music/{folder}/{fid}.flac', {'album_folder': f'/music/{folder}', **details},
+               job_id='library_reconciliation', kind=kind)
+    totals = queue_summary(db, job_id='library_reconciliation')
+    assert totals == {'all': 4, 'review': 1, 'ready': 1, 'files': 1, 'waiting': 1, 'ready_total': 1}
+    assert safe_finding_ids(db)[0] == [4]
+    db.conn.rollback()
+    # Saving the only remaining choice automatically makes the entire album ready.
+    choices.ensure_schema(db.conn)
+    key, raw = db.conn.execute('SELECT review_case_key, details_json FROM repair_findings WHERE id=2').fetchone()
+    db.conn.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (2,?,?, 'numbering','fix')", (key, raw))
+    db.conn.commit()
+    assert set(safe_finding_ids(db)[0]) == {1, 2, 4}
+    preview = ready_batch_preview(db)
+    assert preview['action_count'] == 3 and len(preview['albums']) == 2
+    db.add(6, '/music/mixed/6.flac', {'album_folder': '/music/mixed'}, job_id='library_reconciliation', kind='reconciliation_unresolved')
+    assert safe_finding_ids(db)[0] == [4]
+    assert ready_batch_preview(db)['signature'] != preview['signature']
+
+
+def test_only_exact_audio_supported_version_metadata_is_ready():
+    details = {'confidence': 'clear', 'title_difference_kind': 'version',
+               'changes': {'title': {'old': 'Song', 'new': 'Song (demo)'}},
+               'recording_mbid': 'demo-recording', 'current_tags': {'duration_ms': 200000},
+               'expected_duration_ms': 200050,
+               'acoustid': {'recordings': [{'mbid': 'demo-recording', 'score': .98}]}}
+    def ready():
+        return classify_case([{'finding_type': 'reconciliation_metadata', 'details': details}])['can_apply_ready']
+    assert ready()
+    details['acoustid']['recordings'][0]['mbid'] = 'studio-recording'
+    assert not ready()
+    details['acoustid']['recordings'][0]['mbid'] = 'demo-recording'
+    details['expected_duration_ms'] = 240000
+    assert not ready()
+
+
+def test_verified_case_redirect_follows_new_case_without_title_guessing():
+    from core.library.reconciliation_redirects import record_relocation, resolve_case
+    db = _Database()
+    old = persist_album_plan(db, {'album_id': 10, 'album_folder': '/music/old'}, {'assignments': []})
+    new = persist_album_plan(db, {'album_id': 10, 'album_folder': '/music/new'}, {'assignments': []})
+    record_relocation(db, '/music/old', new)
+    assert resolve_case(db, old) == new
+    assert resolve_case(db, 'unrelated-case') == 'unrelated-case'

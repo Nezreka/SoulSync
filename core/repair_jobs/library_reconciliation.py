@@ -1104,6 +1104,7 @@ def _candidate_evidence(files: list[dict], scored: tuple,
                             if isinstance(image, dict) and image.get('url')), '') or
                       (f'https://coverartarchive.org/release/{release_id}/front-250'
                        if source == 'musicbrainz' else '')),
+        **release_catalog_details(release_meta),
         'country': release_meta.get('country') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
         'format': ', '.join(value for value in formats if value),
@@ -1227,6 +1228,18 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
     return assignments, sorted(categories)
 
 
+def release_catalog_details(meta: dict) -> dict:
+    labels = meta.get('label-info') or meta.get('label_info') or []
+    names = [str((row.get('label') or {}).get('name') or '') for row in labels if isinstance(row, dict) and isinstance(row.get('label'), dict)]
+    numbers = [str(row.get('catalog-number') or row.get('catalog_number') or '') for row in labels if isinstance(row, dict)]
+    return {
+        'label': ', '.join(dict.fromkeys(filter(None, names))) or (meta.get('label') if isinstance(meta.get('label'), str) else ''),
+        'catalog_number': ', '.join(dict.fromkeys(filter(None, numbers))) or meta.get('catalog_number') or '',
+        'barcode': meta.get('barcode') or '',
+        'disc_count': len(meta.get('media') or []) or meta.get('disc_count') or None,
+    }
+
+
 def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
                       numbering_mode: str = '') -> dict:
     candidate = ScoredCandidate(*row)
@@ -1237,6 +1250,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
     return {
         'source': candidate.source, 'release_id': candidate.release_id, 'clear': candidate.clear,
         'release_title': release_meta.get('name') or release_meta.get('title') or '',
+        **release_catalog_details(release_meta),
         'country': release_meta.get('country') or '',
         'date': release_meta.get('date') or release_meta.get('release_date') or '',
         'disambiguation': release_meta.get('disambiguation') or '',
@@ -1924,6 +1938,7 @@ class LibraryReconciliationJob(RepairJob):
                     lambda path: discovery_cache.read_tags(path, _read_reconciliation_tags))
             finally:
                 discovery_cache.close()
+        relocated_from = None
         target_member_folders: set[str] = set()
         if target_folder is not None:
             target_folder = os.path.normpath(target_folder)
@@ -1937,10 +1952,22 @@ class LibraryReconciliationJob(RepairJob):
                 if len(matches) == 1:
                     target_folder = matches[0]
             if target_folder not in folders:
-                result.stopped_early = 'The album folder was moved; run a library scan'
+                # Database track IDs survive a rename. Only follow a move when
+                # all surviving known members have one unambiguous folder owner.
+                known_ids = set((inventory_request.saved or {}).get('track_ids') or [])
+                current_paths = {path for path, row in tracks.items()
+                                 if row.get('id') in known_ids and os.path.isfile(path)}
+                owners = [folder for folder, paths in folders.items()
+                          if current_paths and current_paths.issubset(set(paths))]
+                if len(owners) == 1:
+                    relocated_from, target_folder = target_folder, owners[0]
+            if target_folder not in folders:
+                result.stopped_early = 'The album location could not be verified; refresh the library inventory'
                 return result
             target_member_folders = {target_folder} | {
                 os.path.dirname(path) for path in folders[target_folder]}
+            if relocated_from:
+                target_member_folders.add(relocated_from)
         inventory_seconds = time.perf_counter() - scan_started
         observed: set[tuple[str, str, str]] = set()
         observed_plans: set[str] = set()
@@ -2879,10 +2906,15 @@ class LibraryReconciliationJob(RepairJob):
                 if context.update_progress:
                     context.update_progress(folder_index + 1, len(folders))
             if completed and not context.check_stop() and context.create_finding:
+                if relocated_from and plans_complete and len(observed_plans) == 1:
+                    from core.library.reconciliation_redirects import record_relocation
+                    record_relocation(context.db, relocated_from, next(iter(observed_plans)))
                 cache.checkpoint()
                 if target_folder is None:
                     _retire_stale_findings(context.db, observed)
                     if plans_complete:
+                        from core.library.reconciliation_redirects import record_observed_relocations
+                        record_observed_relocations(context.db, observed_plans)
                         retire_unseen_plans(context.db, observed_plans)
                 else:
                     for member_folder in target_member_folders:

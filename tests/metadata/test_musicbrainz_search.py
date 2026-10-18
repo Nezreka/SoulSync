@@ -594,7 +594,7 @@ def test_get_album_resolves_release_group_mbid_to_release():
         'rg-damn', includes=['releases', 'artist-credits']
     )
     client._client.get_release.assert_called_once_with(
-        'rel-official', includes=['recordings', 'artist-credits', 'release-groups']
+        'rel-official', includes=['recordings', 'artist-credits', 'release-groups', 'labels']
     )
     assert album is not None
     assert album['id'] == 'rg-damn'  # Canonical ID stays the release-group MBID.
@@ -648,7 +648,7 @@ def test_get_release_album_skips_release_group_probe():
     assert album['musicbrainz_release_id'] == 'rel-abc'
     client._client.get_release_group.assert_not_called()
     client._client.get_release.assert_called_once_with(
-        'rel-abc', includes=['recordings', 'artist-credits', 'release-groups'])
+        'rel-abc', includes=['recordings', 'artist-credits', 'release-groups', 'labels'])
 
 
 # ---------------------------------------------------------------------------

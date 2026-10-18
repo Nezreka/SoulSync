@@ -39,6 +39,7 @@ def build_runner(
     get_download_path: Callable[[], str],
     get_transfer_path: Callable[[], str],
     build_final_path_fn: Optional[Callable] = None,
+    on_album_moved: Optional[Callable] = None,
 ) -> Callable[[object], dict]:
     """Return the closure the queue worker invokes per item.
 
@@ -243,4 +244,13 @@ def build_runner(
             profile_id=profile_id,
         )
 
-    return runner
+    def notifying_runner(item):
+        result = runner(item)
+        if on_album_moved and result.get('moved', 0):
+            try:
+                on_album_moved(item.album_id)
+            except Exception:
+                logger.exception('Could not refresh review queue after organizing album %s', item.album_id)
+        return result
+
+    return notifying_runner

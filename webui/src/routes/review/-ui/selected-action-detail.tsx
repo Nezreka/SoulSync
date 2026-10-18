@@ -258,6 +258,13 @@ export function SelectedActionDetail({
               Reset plan assignment
             </button>
           )}
+          <button
+            type="button"
+            disabled={busy || numberingPreview}
+            onClick={() => onAct('dismiss')}
+          >
+            Keep current values
+          </button>
           <small>
             This saves your plan choice and recalculates proposed edits. Files stay unchanged until
             you apply them.
@@ -340,13 +347,15 @@ export function SelectedActionDetail({
                 )}
             </>
           )}
-          <button
-            type="button"
-            disabled={busy || numberingPreview}
-            onClick={() => onAct('dismiss')}
-          >
-            {versionConflict ? 'Keep local version' : 'Keep current values'}
-          </button>
+          {assignmentOptions.length === 0 && (
+            <button
+              type="button"
+              disabled={busy || numberingPreview}
+              onClick={() => onAct('dismiss')}
+            >
+              {versionConflict ? 'Keep local version' : 'Keep current values'}
+            </button>
+          )}
         </div>
       )}
 
@@ -358,16 +367,16 @@ export function SelectedActionDetail({
         !versionConflict &&
         !duplicateChoice &&
         !(details.competing_copies as unknown[] | undefined)?.length && (
-          <div className={styles.extraAction}>
-            <strong>Move this file out of the album</strong>
+          <details className={styles.extraAction}>
+            <summary>Move this file out of the album</summary>
             <span>
               If this copy does not belong here, move it to recoverable quarantine and remove its
               library entry.
             </span>
             <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-              Move this file out of the album
+              Plan move to quarantine
             </button>
-          </div>
+          </details>
         )}
     </section>
   );

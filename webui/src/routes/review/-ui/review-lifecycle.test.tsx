@@ -53,7 +53,7 @@ const album = {
     ],
   },
 };
-const next = { ...album, case_id: 'album:1:next', album: 'Next album' };
+const next = { ...album, case_id: 'album:1:next', album: 'Another album' };
 const fetchMock = vi.fn();
 function reply(body: unknown, status = 200) {
   return { ok: status < 400, status, json: async () => body };
@@ -89,20 +89,20 @@ afterEach(() => {
 it('advances only for an explicit completed album outcome', async () => {
   setup({ ...album, status: 'completed', count: 0, refresh: { state: 'complete' } });
   render(<ReviewPage />);
-  await screen.findByRole('heading', { name: 'Next album' });
+  await screen.findByRole('heading', { name: 'Another album' });
   expect(screen.queryByText('Review case not found')).toBeNull();
 });
 it('keeps a still-pending album open even when it leaves the current queue filter', async () => {
   setup();
   render(<ReviewPage />);
   await screen.findByRole('heading', { name: 'First album' });
-  expect(screen.queryByRole('heading', { name: 'Next album' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Another album' })).toBeNull();
 });
 it('does not report completion or advance on a failed album request', async () => {
   setup({ error: 'Temporary connection failure' }, 503);
   render(<ReviewPage />);
   await screen.findByText('Temporary connection failure');
-  expect(screen.queryByRole('heading', { name: 'Next album' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Another album' })).toBeNull();
   expect(screen.queryByText('Album review completed.')).toBeNull();
 });
 it('opens evidence for confirmed rows without manufacturing a pending action', async () => {
@@ -188,8 +188,8 @@ it('keeps navigation on the new album when an earlier reanalysis request finishe
   await screen.findByRole('heading', { name: 'First album' });
   fireEvent.click(screen.getByRole('button', { name: 'Reanalyze album' }));
   expect(screen.getAllByText(/Reanalyzing this album\./)).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
-  await screen.findByRole('heading', { name: 'Next album' });
+  fireEvent.click(screen.getByRole('button', { name: /Another album/ }));
+  await screen.findByRole('heading', { name: 'Another album' });
   expect(screen.queryByText(/Reanalyzing this album\./)).toBeNull();
   await act(async () => {
     finishReanalysis();
@@ -215,8 +215,8 @@ it('returns to Plan when another queue album is selected from Tracks', async () 
   await screen.findByRole('heading', { name: 'First album' });
   const nav = screen.getByRole('navigation', { name: 'Album review views' });
   fireEvent.click(within(nav).getByRole('button', { name: /^Tracks/ }));
-  fireEvent.click(screen.getByRole('button', { name: /Next album/ }));
-  await screen.findByRole('heading', { name: 'Next album' });
+  fireEvent.click(screen.getByRole('button', { name: /Another album/ }));
+  await screen.findByRole('heading', { name: 'Another album' });
   expect(
     within(screen.getByRole('navigation', { name: 'Album review views' }))
       .getByRole('button', { name: /^Plan/ })

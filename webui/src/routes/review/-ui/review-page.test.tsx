@@ -709,10 +709,24 @@ describe('library reconciliation review queue', () => {
             ],
           }),
         );
+      if (url.includes('/reorganize/preview'))
+        return Promise.resolve(reply({ success: true, tracks: [] }));
+      if (url.startsWith('/api/repair/review-queue/apply-ready?'))
+        return Promise.resolve(
+          reply({
+            signature: 'reviewed',
+            action_count: 1,
+            file_actions: 0,
+            albums: [
+              { album: 'Ashes of the Wake', actions: [{ description: 'Update artist metadata' }] },
+            ],
+          }),
+        );
       if (url === '/api/repair/review-queue/apply-ready') {
         expect(JSON.parse(String(options?.body))).toEqual({
           case_id: 'album:1:ashes',
           organize: false,
+          signature: 'reviewed',
         });
         return Promise.resolve(reply({ started: true, total: 1 }));
       }
@@ -761,7 +775,7 @@ describe('library reconciliation review queue', () => {
     render(<ReviewPage />);
 
     expect((await screen.findAllByText('Various Artists → Lamb of God')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('1 ready').length).toBeGreaterThan(0);
+    expect(screen.getByText('Plan ready to apply · 1 actions')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
@@ -1214,7 +1228,7 @@ describe('library reconciliation review queue', () => {
       await screen.findByRole('heading', { name: 'Choose the edition for this album' }),
     ).toBeTruthy();
     const images = [...document.querySelectorAll('img')];
-    expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(3);
+    expect(images.filter((image) => image.src.includes('local-album'))).toHaveLength(2);
     expect(images.some((image) => image.src.includes('first-release'))).toBe(true);
     expect(
       screen.getAllByText('12/12 assigned')[0].closest('[data-tone]')?.getAttribute('data-tone'),

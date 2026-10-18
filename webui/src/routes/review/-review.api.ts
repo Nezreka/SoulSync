@@ -8,7 +8,7 @@ export interface ReviewPlan {
   destructive: number;
   blocked: number;
   total: number;
-  status: 'ready' | 'needs_review';
+  status: 'ready' | 'needs_review' | 'waiting';
   blocker_reasons: string[];
   can_apply_ready: boolean;
   can_organize: boolean;
@@ -62,6 +62,7 @@ export interface AlbumAssignment {
   counterpart_disc_number?: number | string | null;
   audio_conflict?: 'different_recording' | '';
   file_path?: string;
+  track_id?: string | number;
   file?: string;
   finding_id?: number;
   review_tier?: string;
@@ -125,6 +126,7 @@ export interface AlbumReconciliationPlan {
     pairs?: Array<{
       file: string;
       file_path?: string;
+      track_id?: string | number;
       local_title: string;
       file_duration_ms?: number;
       slot_title: string;
@@ -166,6 +168,7 @@ export interface ReviewQueueModeTotals {
   review: number;
   ready: number;
   files: number;
+  waiting: number;
 }
 
 export interface ReviewFinding extends RepairFinding {

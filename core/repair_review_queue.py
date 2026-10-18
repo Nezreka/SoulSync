@@ -18,7 +18,7 @@ from core.text.fold import fold_title
 from core.repair_review_policy import (
     _DETAILS, _GLOBAL_BLOCKER_TYPES, _TRACK_ARTIST_CHANGE_KEYS,
     _RECORDING_ID_CHANGE_KEYS, _change_value, _finding_tier,
-    finding_category, queue_filter, count_ready_findings,
+    finding_category, queue_filter, count_ready_findings, effective_case_modes, case_mode,
 )
 
 
@@ -318,10 +318,9 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         **counts,
         'total': len(items),
-        'status': ('needs_review' if counts['manual'] or counts['destructive'] or
-                   counts['blocked'] else 'ready'),
+        'status': ('needs_review' if case_mode(items) in ('manual', 'destructive') else 'waiting' if items and case_mode(items) == 'waiting' else 'ready'),
         'blocker_reasons': reasons,
-        'can_apply_ready': counts['ready'] > 0,
+        'can_apply_ready': counts['ready'] > 0 and not any(item['review_tier'] != 'ready' and finding_category(item) != 'pending_fulfillment' for item in items),
         'can_organize': bool(items and all(item.get('finding_type') == 'reconciliation_metadata' for item in items) and not counts['manual'] and
                              not counts['destructive'] and not counts['blocked']),
         'decision_count': len(decisions),
@@ -344,7 +343,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     conn = db._get_connection()
     choices.ensure_schema(conn)
     try:
-        where, params = queue_filter(status=status, job_id=job_id, q=q,
+        where, params = queue_filter(conn=conn, status=status, job_id=job_id, q=q,
                                      category=category, risk=risk)
         job_filter = 'AND job_id = ?' if job_id else ''
         total = conn.execute(
@@ -425,8 +424,8 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
     """Check refresh overlays against the entire filtered queue, not one page."""
     if not case_ids:
         return set()
-    where, params = queue_filter(**filters)
     conn = db._get_connection()
+    where, params = queue_filter(conn=conn, **filters)
     choices.ensure_schema(conn)
     try:
         placeholders = ','.join('?' for _ in case_ids)
@@ -450,8 +449,8 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
         conn.execute('BEGIN')
         projections = []
         params = []
-        for mode in ('', 'manual', 'ready', 'destructive'):
-            where, values = queue_filter(status=status, job_id=job_id, q=q,
+        for mode in ('', 'manual', 'ready', 'destructive', 'waiting'):
+            where, values = queue_filter(conn=conn, status=status, job_id=job_id, q=q,
                                          category=category, risk=mode)
             projections.append(
                 f'COUNT(DISTINCT CASE WHEN {where} THEN review_case_key END)')
@@ -464,7 +463,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
             (' AND job_id = ?' if job_id else ''),
             [*params, status, *([job_id] if job_id else [])],
         ).fetchone()
-        return dict(zip(('all', 'review', 'ready', 'files'), values)) | {
+        return dict(zip(('all', 'review', 'ready', 'files', 'waiting'), values)) | {
             'ready_total': count_ready_findings(conn, status=status, job_id=job_id),
         }
     finally:
@@ -702,29 +701,56 @@ def get_case(db, case_id: str, *, status: str = 'pending',
 def safe_finding_ids(db, *, case_id: str = '', include_planned_files: bool = False) -> tuple[list[int], list[str]]:
     """Select the same effective draft proposals that the album view displays."""
     conn = db._get_connection()
-    choices.ensure_schema(conn)
     try:
-        saved = choices.load_choices(conn)
-        rows = conn.execute("""SELECT id, review_case_key, finding_type,
-                    last_error, details_json FROM repair_findings
-                WHERE job_id = 'library_reconciliation' AND status = 'pending'
-                  AND (? = '' OR review_case_key = ?)
-                ORDER BY review_case_key, id""", (case_id, case_id)).fetchall()
+        cases = effective_case_modes(conn, job_id='library_reconciliation')
+        selected = {key: value for key, value in cases.items()
+                    if (not case_id or key == case_id) and value['ready_ids']}
+        return [fid for value in selected.values() for fid in value['ready_ids']], list(selected)
     finally:
         conn.close()
-    grouped = {}
-    for finding_id, key, kind, error, raw in rows:
-        details = choices.project(json.loads(raw or '{}'), saved.get(finding_id), case_id=key, raw_json=raw)
-        grouped.setdefault(key, []).append({
-            'id': finding_id, 'finding_type': kind, 'details': details,
-            'last_error': error,
-        })
-    ready, cases = [], []
-    for key, items in grouped.items():
-        classify_case(items)
-        ids = [item['id'] for item in items if item['review_tier'] == 'ready' and
-               (item['finding_type'] == 'reconciliation_metadata' or (include_planned_files and case_id))]
-        if ids:
-            ready.extend(ids)
-            cases.append(key)
-    return ready, cases
+
+
+def ready_batch_preview(db, *, case_id: str = '') -> dict:
+    """Reviewable, immutable batch selection used by confirmation and execution."""
+    conn = db._get_connection()
+    try:
+        modes = effective_case_modes(conn, job_id='library_reconciliation')
+        selected = {key: value for key, value in modes.items()
+                    if (not case_id or key == case_id) and value['ready_ids']}
+        snapshot, albums = [], []
+        for key, value in selected.items():
+            actions = []
+            for item in value['items']:
+                if item['id'] not in value['ready_ids']:
+                    continue
+                details = item['details']
+                snapshot.append((key, item['id'], details))
+                choice = details.get('planned_choice') or {}
+                action = choice.get('fix_action') or ''
+                path = details.get('target_path') or ''
+                row = conn.execute('SELECT file_path, title FROM repair_findings WHERE id = ?', (item['id'],)).fetchone()
+                filename = os.path.basename(row[0] or '') if row else ''
+                if details.get('plan_keep'):
+                    description = f'Keep current values: {filename or (row[1] if row else "track")}'
+                elif item['finding_type'] == 'reconciliation_metadata':
+                    fields = ', '.join(name.replace('_', ' ') for name in details.get('changes') or {})
+                    description = f'Update {filename}: {fields}'
+                elif item['finding_type'] == 'reconciliation_duplicate':
+                    copies = details.get('copies') or details.get('competing_copies') or []
+                    keeper = action.split(':', 1)[-1]
+                    keep_path = next((copy.get('file_path') for copy in copies if str(copy.get('track_id') or copy.get('id')) == keeper), keeper)
+                    description = f'Keep {keep_path}; move the other duplicate copies to recoverable quarantine'
+                elif action == 'replace':
+                    description = f'Move {filename} to recoverable quarantine and request its release-track replacement'
+                elif action == 'request_missing':
+                    description = f'Request the missing release track for {filename}'
+                else:
+                    description = f'Move {filename} to recoverable quarantine and remove its library entry'
+                actions.append({'id': item['id'], 'description': description,
+                                'file_action': item['finding_type'] != 'reconciliation_metadata' and not details.get('plan_keep')})
+            albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
+        signature = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
+        return {'signature': signature, 'albums': albums, 'action_count': len(snapshot),
+                'file_actions': sum(action['file_action'] for album in albums for action in album['actions'])}
+    finally:
+        conn.close()

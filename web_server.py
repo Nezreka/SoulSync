@@ -10700,6 +10700,7 @@ try:
         # Rename-only mode (#875) computes destinations via the same path builder the
         # preview uses, so apply matches exactly what the user saw.
         build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
+        on_album_moved=lambda album_id: repair_worker.refresh_moved_review_album(album_id) if repair_worker else None,
     ))
 except Exception as _runner_init_err:
     logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")

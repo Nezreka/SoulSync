@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { AudioFormatBadge } from '@/components/audio-format-badge/audio-format-badge';
 
@@ -33,104 +33,72 @@ export function ReviewAudio({
   previewTrackId?: string;
   artist?: string;
 }) {
-  const localFormat = localPath.split('.').pop()?.toUpperCase() || '';
-  const searchQuery = [artist, comparisonTitle || localTitle].filter(Boolean).join(' ');
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const shouldPlayRef = useRef(false);
-  const [selected, setSelected] = useState<'local' | 'comparison' | 'preview'>('local');
-  const [playing, setPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [playError, setPlayError] = useState('');
-  const comparisonSource = comparisonPath
-    ? `/stream/library-audio?path=${encodeURIComponent(comparisonPath)}`
-    : '';
   const catalogSource =
     previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '')
       ? `/api/repair/release-preview/deezer/${previewTrackId}`
       : previewUrl && /^https?:\/\//i.test(previewUrl)
         ? previewUrl
         : '';
-  const source =
-    selected === 'comparison'
-      ? comparisonSource
-      : selected === 'preview'
-        ? catalogSource
-        : `/stream/library-audio?path=${encodeURIComponent(localPath)}`;
-  const knownDuration =
-    selected === 'local' ? localDurationMs : selected === 'comparison' ? comparisonDurationMs : 0;
-  const playbackError = () =>
-    setPlayError(
-      selected === 'preview'
-        ? 'The catalog preview could not be played in this browser.'
-        : 'This local audio could not be played.',
-    );
-
-  useEffect(() => {
-    setPlaying(false);
-    setPosition(0);
-    setDuration(0);
+  const localFormat = localPath.split('.').pop()?.toUpperCase() || '';
+  const searchQuery = [artist, comparisonTitle || localTitle].filter(Boolean).join(' ');
+  const [playError, setPlayError] = useState('');
+  // Only submit an exact local path. A missing slot must never trigger the
+  // shared player's metadata search/download fallback.
+  const playable = (path?: string) => Boolean(path && /\.[a-z0-9]{2,5}$/i.test(path));
+  const choose = async (path: string, title: string, durationMs?: number) => {
     setPlayError('');
-    if (shouldPlayRef.current) {
-      shouldPlayRef.current = false;
-      void audioRef.current?.play().catch(playbackError);
+    try {
+      if (!window.playTrackList) throw new Error('The library player is unavailable.');
+      const result = await window.playTrackList(
+        [
+          {
+            file_path: path,
+            title,
+            artist: artist || '',
+            duration: (durationMs || 0) / 1000,
+          },
+        ],
+        'Review Queue',
+      );
+      if (result && !['played', 'superseded'].includes(result.status)) {
+        throw new Error(result.error || 'This local audio could not be played.');
+      }
+    } catch (error) {
+      setPlayError((error as Error).message);
     }
-  }, [source]);
-
-  const choose = async (next: 'local' | 'comparison' | 'preview') => {
-    if (selected === next) {
-      const audio = audioRef.current;
-      if (!audio) return;
-      if (audio.paused) {
-        try {
-          await audio.play();
-        } catch {
-          playbackError();
-        }
-      } else audio.pause();
-      return;
-    }
-    shouldPlayRef.current = true;
-    setSelected(next);
   };
-
   return (
     <section className={styles.reviewAudio} aria-label="Compare audio">
-      <div className={styles.reviewAudioChoices}>
-        {localFormat && <AudioFormatBadge format={localFormat} />}
-        <button
-          type="button"
-          aria-pressed={selected === 'local' && playing}
-          data-active={selected === 'local' || undefined}
-          onClick={() => void choose('local')}
-        >
-          {!(selected === 'local' && playing) && <PlayIcon size={14} />}
-          {selected === 'local' && playing ? 'Pause' : 'Listen'} · Local file
-          {localDurationMs ? <small>{clock(localDurationMs / 1000)}</small> : null}
-        </button>
-        {comparisonSource && (
-          <button
-            type="button"
-            aria-pressed={selected === 'comparison' && playing}
-            data-active={selected === 'comparison' || undefined}
-            onClick={() => void choose('comparison')}
-          >
-            {!(selected === 'comparison' && playing) && <PlayIcon size={14} />}
-            {selected === 'comparison' && playing ? 'Pause' : 'Listen'} · Other local copy
-            {comparisonDurationMs ? <small>{clock(comparisonDurationMs / 1000)}</small> : null}
-          </button>
-        )}
-        {catalogSource && (
-          <button
-            type="button"
-            data-active={selected === 'preview' || undefined}
-            onClick={() => void choose('preview')}
-          >
-            {!(selected === 'preview' && playing) && <PlayIcon size={14} />}
-            {selected === 'preview' && playing ? 'Pause' : 'Listen'} · Release preview
-          </button>
-        )}
-      </div>
+      {(playable(localPath) || playable(comparisonPath)) && (
+        <div className={styles.reviewAudioChoices}>
+          {playable(localPath) && (
+            <>
+              {localFormat && <AudioFormatBadge format={localFormat} />}
+              <button
+                type="button"
+                onClick={() => void choose(localPath, localTitle, localDurationMs)}
+              >
+                <PlayIcon size={14} /> Play local file
+                {localDurationMs ? <small>{clock(localDurationMs / 1000)}</small> : null}
+              </button>
+            </>
+          )}
+          {playable(comparisonPath) && (
+            <button
+              type="button"
+              onClick={() =>
+                void choose(
+                  comparisonPath!,
+                  comparisonTitle || 'Other local copy',
+                  comparisonDurationMs,
+                )
+              }
+            >
+              <PlayIcon size={14} /> Play other local copy
+            </button>
+          )}
+        </div>
+      )}
       <div className={styles.listeningLinks} aria-label="Find this recording online">
         {previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '') && (
           <a
@@ -163,46 +131,12 @@ export function ReviewAudio({
           Search YouTube ↗
         </a>
       </div>
-      <div className={styles.reviewAudioTimeline}>
-        <strong>
-          {selected === 'local' ? localTitle : comparisonTitle || 'Release recording'}
-        </strong>
-        <input
-          type="range"
-          min={0}
-          max={duration || knownDuration ? duration || (knownDuration || 0) / 1000 : 1}
-          step={0.1}
-          value={position}
-          aria-label="Audio position"
-          onChange={(event) => {
-            if (audioRef.current) audioRef.current.currentTime = Number(event.target.value);
-          }}
-        />
-        <span>
-          {clock(position)} / {clock(duration || (knownDuration || 0) / 1000)}
-        </span>
-      </div>
-      {playError && (
-        <small role="alert">
-          {playError}{' '}
-          {selected === 'preview' && catalogSource && (
-            <a href={catalogSource} target="_blank" rel="noopener noreferrer">
-              Open the preview source
-            </a>
-          )}
-        </small>
+      {catalogSource && (
+        <a href={catalogSource} target="_blank" rel="noreferrer">
+          Open release preview ↗
+        </a>
       )}
-      <audio
-        ref={audioRef}
-        src={source}
-        preload="metadata"
-        onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
-        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => setPlaying(false)}
-        onError={playbackError}
-      />
+      {playError && <small role="alert">{playError}</small>}
     </section>
   );
 }

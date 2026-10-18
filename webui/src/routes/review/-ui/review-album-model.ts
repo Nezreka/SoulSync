@@ -31,6 +31,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
   const versionConflictAssignments = pendingAssignments
     .filter(
       (row) =>
+        !row.planned_choice &&
         row.relationship === 'version_conflict' &&
         row.status !== 'change' &&
         row.status !== 'missing',
@@ -47,6 +48,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     ...pendingAssignments
       .filter(
         (row) =>
+          !row.planned_choice &&
           row.relationship !== 'version_conflict' &&
           row.status !== 'change' &&
           row.status !== 'missing' &&
@@ -64,7 +66,9 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
         return (order[left.status] ?? 9) - (order[right.status] ?? 9);
       }),
   ];
-  const changeAssignments = pendingAssignments.filter((row) => row.status === 'change');
+  const changeAssignments = pendingAssignments.filter(
+    (row) => row.status === 'change' || Boolean(row.planned_choice),
+  );
   const missingAssignments = pendingAssignments.filter(
     (row) => row.status === 'missing' && row.relationship !== 'version_conflict',
   );

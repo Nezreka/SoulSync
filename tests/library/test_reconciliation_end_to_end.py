@@ -2347,3 +2347,39 @@ def test_kept_numbering_survives_other_metadata_apply_and_can_be_reopened(tmp_pa
     LibraryReconciliationJob().scan(context)
     case = worker.get_review_case(key)
     assert any('track_number' in item['details'].get('changes', {}) for item in case['items'])
+
+
+def test_targeted_reanalysis_follows_organized_album_and_retires_old_case(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+    root = tmp_path / 'music'
+    old = root / 'Lamb of God' / 'Old folder'
+    old.mkdir(parents=True)
+    path = old / '01 - Laid to Rest.flac'
+    path.write_bytes(b'fixture')
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    worker = RepairWorker(database=db, transfer_folder=str(root))
+    client = _Acoustid({path.name: {'mbid': 'laid', 'title': 'Laid to Rest', 'artist': 'Lamb of God', 'score': .98}})
+    monkeypatch.setattr(module, 'all_library_roots', lambda _: [str(root)])
+    monkeypatch.setattr(module, '_read_file_tags', lambda _: {'title': 'Laid to Rest', 'artist': 'Lamb of God', 'album': 'Ashes of the Wake', 'track_number': 1, 'disc_number': 1, 'duration_ms': 200000})
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *a, **kw: [
+        {'id': 'laid', 'name': 'Laid to Rest', 'artists': [{'name': 'Lamb of God'}], 'track_number': 1, 'duration_ms': 200000},
+        {'id': 'missing', 'name': 'Hourglass', 'artists': [{'name': 'Lamb of God'}], 'track_number': 2, 'duration_ms': 240000}])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *a, **kw: {'name': 'Ashes of the Wake'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None, acoustid_client=client, create_finding=worker._create_finding)
+    job = LibraryReconciliationJob()
+    assert not job.scan(context).stopped_early
+    old_case = worker.get_review_cases()['items'][0]['case_id']
+    new = old.with_name('Ashes of the Wake')
+    old.rename(new)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE tracks SET file_path=? WHERE id=1', (str(new / path.name),))
+        conn.commit()
+    result = job.scan(context, target_folder=str(old), scope='discovery')
+    assert not result.stopped_early
+    assert result.scanned == 1
+    current = worker.get_review_case(old_case)
+    assert current['case_id'] != old_case
+    assert current['folder'] == str(new)
+    assert current['status'] != 'completed'
+    assert worker.get_review_cases()['total'] == 1

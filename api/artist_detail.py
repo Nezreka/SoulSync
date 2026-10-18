@@ -2116,6 +2116,27 @@ def artist_concerts(artist_id):
                         "providers": {}, "error": str(e)}), 200
 
 
+@bp.route('/api/track/<track_id>/record', methods=['GET'])
+def get_track_db_record(track_id):
+    """Read the complete local track row for the shared record inspector."""
+    conn = get_database()._get_connection()
+    try:
+        cursor = conn.execute('SELECT * FROM tracks WHERE id = ?', (str(track_id),))
+        row = cursor.fetchone()
+        if row is None:
+            return jsonify({'success': False, 'error': 'Track not found in library'}), 404
+        record = dict(zip((col[0] for col in cursor.description), row))
+        for key, value in record.items():
+            if isinstance(value, str) and value.strip().startswith(('[', '{')):
+                try:
+                    record[key] = json.loads(value)
+                except ValueError:
+                    pass
+        return jsonify({'success': True, 'record': record})
+    finally:
+        conn.close()
+
+
 @bp.route('/api/artist/<artist_id>/record', methods=['GET'])
 def get_artist_db_record(artist_id):
     """Return the COMPLETE database record for a library artist — every column of

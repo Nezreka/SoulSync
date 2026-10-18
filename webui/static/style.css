@@ -8032,6 +8032,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .confirm-modal-content {
+    overflow-y: auto;
+    min-height: 0;
     padding: 20px 24px;
 }
 

@@ -1703,24 +1703,36 @@ class RepairWorker:
                 if (not q or q.casefold() in
                     f"{snapshot.get('album') or ''} {snapshot.get('artist') or ''}".casefold())
                 and (not category or any(item.get('category') == category for item in snapshot['items']))
-                and (not risk or any(item.get('review_tier') == risk for item in snapshot['items']))]
+                and (not risk or self._snapshot_review_mode(snapshot) == risk)]
+
+    @staticmethod
+    def _snapshot_review_mode(snapshot):
+        items = [item for item in snapshot.get('items', [])
+                 if repair_review_queue.finding_category(item) != 'pending_fulfillment']
+        if any(item.get('review_tier') == 'destructive' for item in items):
+            return 'destructive'
+        if any(item.get('review_tier') != 'ready' for item in items):
+            return 'manual'
+        return 'ready' if items else 'waiting'
 
     def get_review_summary(self, *, status='pending', q='', job_id='', category=''):
         result = repair_review_queue.queue_summary(
             self.db, status=status, q=q, job_id=job_id, category=category)
         if status == 'pending' and job_id in ('', 'library_reconciliation'):
             for label, risk in (('all', ''), ('review', 'manual'),
-                                ('ready', 'ready'), ('files', 'destructive')):
+                                ('ready', 'ready'), ('files', 'destructive'), ('waiting', 'waiting')):
                 cases = [key for key, _ in self._refreshing_review_cases(
                     q=q, category=category, risk=risk)]
                 matching = repair_review_queue.matching_case_ids(
                     self.db, cases, status=status, q=q, job_id=job_id,
-                    category=category, risk=risk)
+                    category=category, risk='')
                 result[label] += len(set(cases) - matching)
         return result
 
     def get_review_case(self, case_id: str, *, status: str = 'pending',
                         job_id: str = '') -> Optional[dict]:
+        from core.library.reconciliation_redirects import resolve_case
+        case_id = resolve_case(self.db, case_id)
         case = repair_review_queue.get_case(self.db, case_id, status=status, job_id=job_id)
         if case is None and status == 'pending' and hasattr(self, '_album_refresh_lock'):
             with self._album_refresh_lock:
@@ -1737,6 +1749,20 @@ class RepairWorker:
             if history:
                 case = {**history, 'items': [], 'count': 0, 'status': 'completed',
                         'plan': repair_review_queue.classify_case([]), 'decisions': []}
+        if case is None and status == 'pending':
+            # A verified relocation can end with no findings at the new path.
+            # Return a terminal case so clients can finish navigation cleanly.
+            conn = self.db._get_connection()
+            try:
+                exists = conn.execute("SELECT 1 FROM sqlite_master WHERE name='reconcile_album_plans'").fetchone()
+                row = conn.execute('SELECT album_id, album_title, artist_name, album_folder, plan_json FROM reconcile_album_plans WHERE case_id=?', (case_id,)).fetchone() if exists else None
+                if row:
+                    case = {'case_id': case_id, 'album_id': row[0], 'album': row[1],
+                            'artist': row[2], 'folder': row[3], 'album_plan': json.loads(row[4]),
+                            'items': [], 'count': 0, 'status': 'completed',
+                            'plan': repair_review_queue.classify_case([]), 'decisions': []}
+            finally:
+                conn.close()
         if case is not None:
             if hasattr(self, '_album_refresh_lock'):
                 with self._album_refresh_lock:
@@ -1757,11 +1783,26 @@ class RepairWorker:
         return (self._schedule_album_refresh(case_id, folder) if scope == 'album' else
                 self._schedule_album_refresh(case_id, folder, scope=scope))
 
+    def refresh_moved_review_album(self, album_id) -> None:
+        """Organization updates paths first; then rediscover exact saved members."""
+        conn = self.db._get_connection()
+        try:
+            rows = conn.execute("SELECT case_id, album_folder, plan_json FROM reconcile_album_plans WHERE state != 'retired'").fetchall()
+        finally:
+            conn.close()
+        for key, folder, raw in rows:
+            document = json.loads(raw or '{}')
+            ids = (document.get('inventory') or {}).get('album_ids') or []
+            if str(album_id) in {str(value) for value in ids}:
+                case = self.get_review_case(key)
+                if case:
+                    self._schedule_review_refresh(key, folder, case, scope='discovery')
+
     def reanalyze_review_case(self, case_id: str, *, scope: str = 'discovery') -> bool:
         """Refresh one current album case without queuing a full library job."""
         case = self.get_review_case(case_id)
         return bool(case and self._schedule_review_refresh(
-            case_id, case.get('folder') or '', case, scope=scope))
+            case.get('case_id') or case_id, case.get('folder') or '', case, scope=scope))
 
     def _schedule_album_refresh(self, case_id: str, folder: str, *, scope: str = 'album') -> bool:
         """Replan only the changed logical album after a review action."""
@@ -7587,6 +7628,25 @@ class RepairWorker:
                     return
                 self._record_review_timing('waiting_for_scan', time.perf_counter() - wait_started)
                 state['phase'] = 'metadata'
+            # Revalidate the entire selected album after waiting for a scan.
+            # A newly introduced decision must prevent every action in that album.
+            eligible_ids = None
+            if review_approved and review_case_folders:
+                current_ids, _ = repair_review_queue.safe_finding_ids(self.db)
+                eligible_ids = set(current_ids)
+                conn = self.db._get_connection()
+                try:
+                    selected_cases = {}
+                    for fid in ids:
+                        row = conn.execute('SELECT review_case_key FROM repair_findings WHERE id = ?', (fid,)).fetchone()
+                        if row:
+                            selected_cases.setdefault(row[0], set()).add(fid)
+                    for key, selected_ids in selected_cases.items():
+                        current_case_ids, _ = repair_review_queue.safe_finding_ids(self.db, case_id=key)
+                        if selected_ids != set(current_case_ids):
+                            eligible_ids.difference_update(selected_ids)
+                finally:
+                    conn.close()
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
                     state['stopped'] = True
@@ -7595,6 +7655,8 @@ class RepairWorker:
                     break
                 apply_started = time.perf_counter()
                 try:
+                    if eligible_ids is not None and fid not in eligible_ids:
+                        raise ValueError('The album plan changed or has unresolved decisions; review it before applying.')
                     if reviewed_details is not None:
                         conn = self.db._get_connection()
                         try:

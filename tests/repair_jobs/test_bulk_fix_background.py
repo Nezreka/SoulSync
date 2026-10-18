@@ -253,7 +253,7 @@ def test_review_apply_waits_for_scan_and_rejects_changed_proposal(tmp_path):
     assert 'changed during reconciliation' in status['errors'][0]['error']
 
 
-def test_saved_file_decision_runs_only_in_explicit_album_batch(tmp_path):
+def test_saved_file_decision_is_included_in_ready_album_batch(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     worker = _worker(db, tmp_path)
     worker._create_finding(job_id='library_reconciliation',
@@ -270,10 +270,9 @@ def test_saved_file_decision_runs_only_in_explicit_album_batch(tmp_path):
     assert worker.apply_review_decision(case_id, item['id'],
         evidence_token=item['evidence_token'], action='fix', fix_action='quarantine')['success']
     assert not calls
-    assert not worker.start_review_safe()['started']
     assert not worker.start_bulk_fix(job_id='library_reconciliation')['started']
-    assert worker.start_review_safe(case_id=case_id)['started']
+    assert worker.start_review_safe()['started']
     result = _wait_done(worker)
     assert result['fixed'] == 1 and result['failed'] == 0
     assert calls == [('reconciliation_extra', 'quarantine')]
-    assert result['review_scope'] == 'album'
+    assert result['review_scope'] == 'global'

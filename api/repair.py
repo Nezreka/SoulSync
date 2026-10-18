@@ -106,7 +106,7 @@ def repair_review_queue_list():
 def repair_review_queue_summary():
     worker = _repair_worker()
     if worker is None:
-        return jsonify(dict.fromkeys(('all', 'review', 'ready', 'files', 'ready_total'), 0))
+        return jsonify(dict.fromkeys(('all', 'review', 'ready', 'files', 'waiting', 'ready_total'), 0))
     status = request.args.get('status') or 'pending'
     if status not in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
         return jsonify({'error': 'Invalid finding status'}), 400
@@ -270,7 +270,7 @@ def repair_review_saved_plans():
 
 
 
-@bp.route('/api/repair/review-queue/apply-ready', methods=['POST'])
+@bp.route('/api/repair/review-queue/apply-ready', methods=['GET', 'POST'])
 def repair_review_queue_apply_ready():
     """Start the planner-approved reconciliation subset as a background run."""
     worker = _repair_worker()
@@ -278,6 +278,13 @@ def repair_review_queue_apply_ready():
         return jsonify({'error': 'Repair worker not initialized'}), 503
     data = request.get_json(silent=True) or {}
     try:
+        from core.repair_review_queue import ready_batch_preview
+        case_id = str(request.args.get('case_id') or data.get('case_id') or '')
+        preview = ready_batch_preview(worker.db, case_id=case_id)
+        if request.method == 'GET':
+            return jsonify(preview)
+        if data.get('signature') != preview['signature']:
+            return jsonify({'started': False, 'error': 'The ready album plans changed; review the updated batch before applying.'}), 409
         result = worker.start_review_safe(
             case_id=str(data.get('case_id') or ''),
             organize=bool(data.get('organize')),

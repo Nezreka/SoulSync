@@ -68,12 +68,18 @@ export function ArtistDbRecord({ artist, isSourceArtist }: Props) {
   );
 }
 
-function ArtistRecordModal({
+export function ArtistRecordModal({
   artistId,
   artistName,
   onClose,
+  endpoint,
+  recordKind = 'Artist',
+  extraRecord,
 }: {
-  artistId: unknown;
+  artistId?: unknown;
+  endpoint?: string;
+  recordKind?: string;
+  extraRecord?: Record<string, unknown>;
   artistName: string;
   onClose: () => void;
 }) {
@@ -102,9 +108,16 @@ function ArtistRecordModal({
     const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(`/api/artist/${encodeURIComponent(String(artistId))}/record`, {
-          signal: controller.signal,
-        });
+        if (!endpoint && artistId == null) {
+          setPayload({ success: true, record: {} } as ArtistRecordPayload);
+          return;
+        }
+        const response = await fetch(
+          endpoint || `/api/artist/${encodeURIComponent(String(artistId))}/record`,
+          {
+            signal: controller.signal,
+          },
+        );
         const data = (await response.json()) as ArtistRecordPayload;
         if (!data?.success) throw new Error(data?.error || 'Request failed');
         setPayload(data);
@@ -114,9 +127,9 @@ function ArtistRecordModal({
       }
     })();
     return () => controller.abort();
-  }, [artistId]);
+  }, [artistId, endpoint]);
 
-  const record = payload?.record ?? {};
+  const record = { ...(payload?.record ?? {}), ...extraRecord };
   const stats = payload ? recordFooterStats(payload) : null;
 
   return (
@@ -130,12 +143,12 @@ function ArtistRecordModal({
           if (e.target === e.currentTarget) onClose();
         }}
       >
-        <div className="arec-card" role="dialog" aria-label="Artist database record">
+        <div className="arec-card" role="dialog" aria-label={`${recordKind} database record`}>
           <div className="arec-header">
             <div className="arec-title-wrap">
               <div className="arec-title">
                 <span className="arec-dot" />
-                Artist DB Record
+                {recordKind} DB Record
               </div>
               <div className="arec-sub" id="arec-sub">
                 {artistName}
@@ -253,7 +266,7 @@ function ArtistRecordModal({
           </div>
 
           <div className="arec-footer" id="arec-footer">
-            {stats ? (
+            {stats && recordKind === 'Artist' ? (
               <>
                 <span>
                   <b>{stats.fields}</b> fields

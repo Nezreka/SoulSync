@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 
 import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
+import { ArtistRecordModal } from '../../artist-detail/-ui/artist-db-record';
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
 import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
@@ -494,6 +495,28 @@ function candidateAssignments(candidate: Data): string {
   return `${label(candidate.total_slots)}::${pairs}::missing=${missing}::extra=${extra}`;
 }
 
+function ReleaseBadges({ release }: { release: Data }) {
+  const country = label(release.country);
+  const flag =
+    /^[A-Z]{2}$/.test(country) && country !== 'XE' && country !== 'XW'
+      ? String.fromCodePoint(...country.split('').map((letter) => letter.charCodeAt(0) + 127397))
+      : '🌐';
+  const badges = [
+    label(release.format),
+    country
+      ? `${flag} ${country === 'XW' ? 'Worldwide' : country === 'XE' ? 'Europe' : country}`
+      : '',
+    label(release.disambiguation),
+  ].filter(Boolean);
+  return (
+    <span className={styles.releaseBadges}>
+      {badges.map((value) => (
+        <span key={value}>{value}</span>
+      ))}
+    </span>
+  );
+}
+
 export function ReleaseComparison({
   candidates,
   selected,
@@ -501,7 +524,6 @@ export function ReleaseComparison({
   onPin,
   busy = false,
   currentRelease,
-  fallbackArtwork,
   numberingMode,
   view = 'all',
 }: {
@@ -584,23 +606,14 @@ export function ReleaseComparison({
                     <ReviewArtwork
                       title={label(candidate.release_title) || 'Release'}
                       url={label(candidate.image_url)}
-                      fallbackUrl={fallbackArtwork}
                       size="release"
                     />
                     <span>
                       <strong>{label(candidate.release_title) || `Candidate ${index + 1}`}</strong>
                       <small>
-                        {[
-                          candidate.source,
-                          candidate.country,
-                          candidate.format,
-                          candidate.date,
-                          candidate.disambiguation,
-                        ]
-                          .map(label)
-                          .filter(Boolean)
-                          .join(' · ')}
+                        {[candidate.source, candidate.date].map(label).filter(Boolean).join(' · ')}
                       </small>
+                      <ReleaseBadges release={candidate} />
                       {isCurrent && <small>Current library release</small>}
                     </span>
                     <CandidateFit candidate={candidate} />
@@ -619,11 +632,6 @@ export function ReleaseComparison({
               );
             })}
           </div>
-          {fallbackArtwork && (
-            <p className={styles.muted}>
-              Candidates without catalog artwork show the current library cover.
-            </p>
-          )}
         </>
       )}
       {view !== 'list' && (
@@ -631,15 +639,23 @@ export function ReleaseComparison({
           <div className={styles.releaseDetailHeader}>
             <div>
               <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
-              {Boolean(active.disambiguation) && (
-                <p className={styles.editionNote}>{label(active.disambiguation)}</p>
-              )}
-              <p className={styles.editionMeta}>
-                {[active.format, active.country, active.date]
-                  .map(label)
-                  .filter(Boolean)
-                  .join(' · ')}
-              </p>
+              <ReleaseBadges release={active} />
+              <dl className={styles.factList}>
+                {[
+                  ['Release date', active.date],
+                  ['Label', active.label],
+                  ['Catalog number', active.catalog_number],
+                  ['Discs', active.disc_count],
+                  ['Barcode', active.barcode],
+                ]
+                  .filter(([, value]) => Boolean(value))
+                  .map(([name, value]) => (
+                    <div key={label(name)}>
+                      <dt>{label(name)}</dt>
+                      <dd>{label(value)}</dd>
+                    </div>
+                  ))}
+              </dl>
               <CandidateFit candidate={active} />
               {count(active.excluded_video_tracks) > 0 && (
                 <p className={styles.muted}>
@@ -808,6 +824,7 @@ function CheckedFiles({ details }: { details: Data }) {
 }
 
 function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>; details: Data }) {
+  const [recordOpen, setRecordOpen] = useState(false);
   const tags = object(details.current_tags);
   const currentTitle = label(tags.title || details.current_title);
   const replacement = object(details.replacement_track);
@@ -818,7 +835,37 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
   return (
     <div className={styles.evidenceColumns}>
       <section className={styles.technicalCard}>
-        <h5>Local evidence</h5>
+        <div className={styles.sectionHeading}>
+          <h5>Local evidence</h5>
+          {finding.file_path && (
+            <button
+              type="button"
+              className="artist-db-record-btn"
+              onClick={() => setRecordOpen(true)}
+            >
+              DB Record
+            </button>
+          )}
+        </div>
+        {recordOpen && (
+          <ArtistRecordModal
+            artistName={currentTitle || finding.file_path?.split('/').pop() || 'Track'}
+            recordKind="Track"
+            endpoint={
+              details.track_id != null
+                ? `/api/track/${encodeURIComponent(label(details.track_id))}/record`
+                : undefined
+            }
+            extraRecord={{
+              'Embedded tags (review snapshot)': tags,
+              'Audio identity (review snapshot)': details.acoustid,
+              ...(!details.track_id
+                ? { 'Library metadata (review snapshot)': details.current_library_metadata }
+                : {}),
+            }}
+            onClose={() => setRecordOpen(false)}
+          />
+        )}
         <dl className={styles.factList}>
           {finding.file_path && (
             <div>
@@ -953,6 +1000,7 @@ export function AssignmentEvidence({
   busy?: boolean;
 }) {
   const details: Data = {
+    track_id: row.track_id,
     current_tags: row.current_tags || { title: row.current_title },
     current_title: row.current_title,
     expected_title: row.slot_title,

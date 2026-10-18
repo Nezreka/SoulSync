@@ -1,8 +1,7 @@
 """Review decision policy shared by queue readers and action selection.
 
-Finding readiness, whole-album queue buckets, and the global ready count
-are separate projections. Keep their contracts explicit; a ready finding may
-belong to an album that still needs input.
+Queue buckets and execution use the same effective album plan. Individual
+proposals are executable only after every required album decision is settled.
 """
 from __future__ import annotations
 from typing import Any
@@ -81,6 +80,21 @@ def finding_category(item: dict[str, Any]) -> str:
     return 'metadata'
 
 
+def supported_version_metadata(details: dict) -> bool:
+    """An exact fingerprint-backed recording can supply omitted version text."""
+    if details.get('title_difference_kind') != 'version' or details.get('confidence') != 'clear':
+        return False
+    if details.get('audio_conflict') or details.get('version_conflict'):
+        return False
+    expected = details.get('recording_mbid')
+    tags = details.get('current_tags') or {}
+    local, remote = tags.get('duration_ms'), details.get('expected_duration_ms')
+    if not expected or not local or not remote or abs(float(local) - float(remote)) > 3000:
+        return False
+    return any(row.get('mbid') == expected and float(row.get('score') or 0) >= .9
+               for row in (details.get('acoustid') or {}).get('recordings') or [])
+
+
 def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tuple[str, str]:
     """Classify one reconciliation action for review and bulk application."""
     finding_type = str(item.get('finding_type') or '')
@@ -115,7 +129,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if details.get('plan_approved') or details.get('plan_keep'):
         return 'ready', 'Saved in the album plan; no file changes applied yet'
     if (details.get('title_difference_kind') in ('material', 'version') and
-            _TITLE_CHANGE_KEYS.intersection(changes)):
+            _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
         return 'manual', 'The title may identify a different song or recording version'
     if _POSITION_CHANGE_KEYS.intersection(changes):
         return 'manual', 'The release uses a different disc or track numbering scheme'
@@ -158,7 +172,7 @@ def _related_finding_sql(alias: str) -> str:
             f'{alias}.review_case_key = repair_findings.review_case_key')
 
 
-def queue_filter(*, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
+def queue_filter(*, conn, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
     params: list[Any] = [status]
     job_filter = ''
     if job_id:
@@ -219,52 +233,50 @@ def queue_filter(*, status: str, job_id: str = "", q: str = "", category: str = 
     }
     if category in category_conditions:
         search += f' AND ({category_conditions[category]})'
-    manual = _metadata_review_sql(_DETAILS, 'last_error')
-    blocker_details = "CASE WHEN json_valid(blocker.details_json) THEN blocker.details_json ELSE '{}' END"
-    blockers = _metadata_review_sql(blocker_details, 'blocker.last_error')
-    related = _related_finding_sql('blocker')
-    if risk == 'ready':
-        search += (" AND finding_type = 'reconciliation_metadata' AND NOT " + manual +
-                   " AND NOT EXISTS (SELECT 1 FROM repair_findings blocker WHERE " + related +
-                   " AND (blocker.finding_type != 'reconciliation_metadata' OR " + blockers + '))')
-    elif risk == 'destructive':
-        search += " AND finding_type IN ('reconciliation_extra','reconciliation_duplicate')"
-    elif risk == 'manual':
-        search += (
-            ' AND NOT EXISTS (SELECT 1 FROM repair_findings file_action WHERE ' +
-            _related_finding_sql('file_action') +
-            " AND file_action.finding_type IN ('reconciliation_extra','reconciliation_duplicate')) "
-            "AND (finding_type NOT IN ('reconciliation_metadata','reconciliation_extra',"
-            "'reconciliation_duplicate') OR " + manual +
-            " OR (finding_type = 'reconciliation_metadata' AND EXISTS ("
-            'SELECT 1 FROM repair_findings blocker WHERE ' + related +
-            " AND blocker.finding_type != 'reconciliation_metadata'))) ")
+    if risk:
+        modes = effective_case_modes(conn, status=status, job_id=job_id)
+        keys = [key for key, value in modes.items() if value['mode'] == risk]
+        search += ' AND review_case_key IN (' + ','.join('?' for _ in keys) + ')' if keys else ' AND 0'
+        params.extend(keys)
     where = f"status = ? {job_filter} {search}"
     return where, params
 
+def case_mode(items: list[dict]) -> str:
+    required = [item for item in items if finding_category(item) != 'pending_fulfillment']
+    unresolved = [item for item in required if item.get('review_tier') != 'ready']
+    if any(item.get('review_tier') == 'destructive' for item in unresolved):
+        return 'destructive'
+    return 'manual' if unresolved else 'ready' if required else 'waiting'
+
+
+def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '') -> dict:
+    """One classification for counts, filtering and execution, including draft choices."""
+    import json
+    from core.library import reconciliation_choices as choices
+    choices.ensure_schema(conn)
+    saved = choices.load_choices(conn)
+    grouped = {}
+    for fid, key, kind, error, raw in conn.execute(
+            "SELECT id, review_case_key, finding_type, last_error, details_json FROM repair_findings "
+            "WHERE status = ? AND (? = '' OR job_id = ?)", (status, job_id, job_id)):
+        try:
+            details = json.loads(raw or '{}')
+        except (TypeError, ValueError):
+            details = {}
+        details = choices.project(details if isinstance(details, dict) else {}, saved.get(fid), case_id=key, raw_json=raw)
+        grouped.setdefault(key, []).append({'id': fid, 'finding_type': kind, 'details': details, 'last_error': error})
+    result = {}
+    for key, items in grouped.items():
+        blocked = any(item['finding_type'] in _GLOBAL_BLOCKER_TYPES for item in items)
+        for item in items:
+            item['review_tier'], _ = _finding_tier(item, global_blocked=blocked)
+        required = [item for item in items if finding_category(item) != 'pending_fulfillment']
+        unresolved = [item for item in required if item['review_tier'] != 'ready']
+        ready = [item['id'] for item in required if item['review_tier'] == 'ready'] if not unresolved else []
+        mode = case_mode(items)
+        result[key] = {'mode': mode, 'ready_ids': ready, 'items': items}
+    return result
+
+
 def count_ready_findings(conn, *, status: str, job_id: str = "") -> int:
-    from core.library.reconciliation_choices import ensure_schema
-    ensure_schema(conn)
-    ready_total = 0
-    if not job_id or job_id == 'library_reconciliation':
-        ready_params: list[Any] = [status]
-        ready_job_filter = ''
-        if job_id:
-            ready_job_filter = 'AND f.job_id = ?'
-            ready_params.append(job_id)
-        ready_total = conn.execute(f"""
-            SELECT COUNT(*) FROM repair_findings f
-            WHERE f.status = ? {ready_job_filter}
-              AND f.finding_type = 'reconciliation_metadata'
-              AND NOT {_metadata_review_sql(
-                  "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END",
-                  'f.last_error')}
-              AND NOT EXISTS (
-                  SELECT 1 FROM repair_findings blocker
-                  WHERE blocker.status = f.status
-                    AND blocker.job_id = f.job_id
-                    AND blocker.review_case_key = f.review_case_key
-                    AND blocker.finding_type = 'reconciliation_release'
-              )
-        """, ready_params).fetchone()[0]
-    return ready_total
+    return sum(len(case['ready_ids']) for case in effective_case_modes(conn, status=status, job_id=job_id).values())
