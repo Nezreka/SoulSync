@@ -5341,18 +5341,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.reset-button {
-    background: rgba(255, 107, 107, 0.1);
-    color: #ff6b6b;
-    border: 1px solid rgba(255, 107, 107, 0.25);
-}
-
-.reset-button:hover {
-    background: rgba(255, 107, 107, 0.2);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(255, 107, 107, 0.15);
-}
-
 .export-button,
 .import-button {
     background: var(--white-a05);
@@ -5367,21 +5355,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     transform: translateY(-1px);
 }
 
-.cancel-button {
-    padding: 6px 12px;
-    background: rgba(255, 107, 107, 0.1);
-    color: #ff6b6b;
-    border: 1px solid rgba(255, 107, 107, 0.3);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
-    cursor: pointer;
-    margin-top: 8px;
-}
-
-.cancel-button:hover {
-    background: rgba(255, 107, 107, 0.2);
-}
-
 .status-display {
     margin-top: 12px;
     padding: 8px 12px;
@@ -5389,18 +5362,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid var(--white-a05);
     border-radius: var(--radius-sm);
     font-size: 12px;
-}
-
-.status-display .status-text {
-    color: var(--white-a70);
-}
-
-.status-display.connected .status-text {
-    color: rgb(var(--accent-light-rgb));
-}
-
-.status-display.error .status-text {
-    color: #ff6b6b;
 }
 
 .detection-progress {
@@ -5451,13 +5412,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Sync Page Styling */
-.sync-content {
-    max-width: 600px;
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
 .playlist-section {
     background: var(--white-a02);
     border: 1px solid var(--white-a05);
@@ -5469,32 +5423,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 16px;
     color: var(--white-a90);
     margin-bottom: 16px;
-}
-
-.playlist-selector {
-    width: 100%;
-    padding: 12px 16px;
-    background: var(--white-a05);
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-md);
-    color: #ffffff;
-    font-size: 14px;
-    margin-bottom: 16px;
-}
-
-.sync-button {
-    background: rgb(var(--accent-light-rgb));
-    color: #000000;
-    padding: 12px 24px;
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.sync-button:hover {
-    background: #1fdf64;
 }
 
 .sync-progress {
