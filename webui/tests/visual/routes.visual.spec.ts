@@ -200,6 +200,10 @@ async function settle(page: Page) {
     timeout: 15_000,
   });
   await page.waitForLoadState('networkidle');
+  // networkidle only covers the first quiet moment. On a loaded machine a
+  // page's own fetch can start after it, and the shot catches a loading state.
+  // Wait for those to land too.
+  await networkQuiet(page);
   await page.evaluate(() => document.fonts.ready);
   await freezeAnimations(page);
 }
