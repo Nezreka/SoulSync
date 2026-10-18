@@ -49,7 +49,7 @@ export interface AlbumAssignment {
     | 'preview'
     | 'resolved'
     | 'waiting';
-  fulfillment_state?: 'wishlisted' | 'downloading' | 'downloaded';
+  fulfillment_state?: 'wishlisted' | 'downloading' | 'downloaded' | 'cancelled';
   numbering_preview?: boolean;
   preview_reason?: string;
   relationship?: 'version_conflict';

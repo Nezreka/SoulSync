@@ -77,6 +77,7 @@ export function AssignmentRow({
         <i>{statusLabel(row.status, row)}</i>
         {row.status === 'settled' && row.audio_conflict && <small>Previously reviewed</small>}
         {row.fulfillment_state === 'wishlisted' && <small>Waiting for download</small>}
+        {row.fulfillment_state === 'cancelled' && <small>Request cancelled · still wanted</small>}
         {row.fulfillment_state === 'downloaded' && (
           <small>Downloaded · checking library assignment</small>
         )}

@@ -40,3 +40,21 @@ it('does not turn a wanted download into a new review decision', () => {
   expect(model.wishlistedCount).toBe(1);
   expect(model.decisionMembers.get('waiting')?.has(9)).toBe(true);
 });
+
+it('keeps a cancelled request as a missing-track decision without counting it as waiting', () => {
+  const decision = {
+    id: 'missing',
+    category: 'album_completeness',
+    risk: 'manual',
+    finding_ids: [9],
+  };
+  const row = { status: 'missing', finding_id: 9, fulfillment_state: 'cancelled' };
+  const model = buildAlbumModel({
+    items: [],
+    decisions: [decision],
+    album_plan: { assignments: [row] },
+  } as unknown as ReviewCase);
+  expect(model.wishlistedCount).toBe(0);
+  expect(model.reviewDecisions).toEqual([decision]);
+  expect(model.missingAssignments).toEqual([row]);
+});
