@@ -27897,12 +27897,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-wrap: wrap;
 }
 
-.artist-stat {
-    color: #b3b3b3;
-    font-size: 14px;
-    font-weight: 500;
-}
-
 /* Artist Detail Content */
 .artist-detail-content {
     flex: 1;
@@ -28054,19 +28048,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 12px;
     font-weight: 500;
     text-transform: capitalize;
-}
-
-.artist-summary-stats {
-    display: flex;
-    gap: 40px;
-    flex-wrap: wrap;
-}
-
-.summary-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
 }
 
 .stat-number {
@@ -28391,11 +28372,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         font-size: 36px;
         white-space: normal;
         text-align: center;
-    }
-
-    .artist-summary-stats {
-        justify-content: center;
-        gap: 30px;
     }
 
     .section-header {
