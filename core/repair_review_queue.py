@@ -343,14 +343,15 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     conn = db._get_connection()
     choices.ensure_schema(conn)
     try:
-        where, params = queue_filter(conn=conn, status=status, job_id=job_id, q=q,
+        modes = effective_case_modes(conn, status=status, job_id=job_id)
+        where, params = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
                                      category=category, risk=risk)
         job_filter = 'AND job_id = ?' if job_id else ''
         total = conn.execute(
             f"SELECT COUNT(DISTINCT review_case_key) FROM repair_findings WHERE {where}",
             params,
         ).fetchone()[0]
-        ready_total = count_ready_findings(conn, status=status, job_id=job_id)
+        ready_total = count_ready_findings(conn, status=status, job_id=job_id, case_modes=modes)
         rows = conn.execute(f"""
             WITH matching_cases AS (
                 SELECT DISTINCT review_case_key FROM repair_findings WHERE {where}
@@ -438,7 +439,7 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
 
 def queue_summary(db, *, status: str = 'pending', q: str = '',
                   job_id: str = '', category: str = '') -> dict[str, int]:
-    """Count modes without loading findings, plans, or artwork.
+    """Count modes from one effective proposal snapshot without hydrating album views.
 
     All counts share one read transaction, including the deliberately unfiltered
     ready-action total. Use the exact same predicates as the paginated reader.
@@ -447,10 +448,11 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     choices.ensure_schema(conn)
     try:
         conn.execute('BEGIN')
+        modes = effective_case_modes(conn, status=status, job_id=job_id)
         projections = []
         params = []
         for mode in ('', 'manual', 'ready', 'destructive', 'waiting'):
-            where, values = queue_filter(conn=conn, status=status, job_id=job_id, q=q,
+            where, values = queue_filter(conn=conn, case_modes=modes, status=status, job_id=job_id, q=q,
                                          category=category, risk=mode)
             projections.append(
                 f'COUNT(DISTINCT CASE WHEN {where} THEN review_case_key END)')
@@ -464,7 +466,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
             [*params, status, *([job_id] if job_id else [])],
         ).fetchone()
         return dict(zip(('all', 'review', 'ready', 'files', 'waiting'), values)) | {
-            'ready_total': count_ready_findings(conn, status=status, job_id=job_id),
+            'ready_total': count_ready_findings(conn, status=status, job_id=job_id, case_modes=modes),
         }
     finally:
         conn.close()
@@ -702,7 +704,7 @@ def safe_finding_ids(db, *, case_id: str = '', include_planned_files: bool = Fal
     """Select the same effective draft proposals that the album view displays."""
     conn = db._get_connection()
     try:
-        cases = effective_case_modes(conn, job_id='library_reconciliation')
+        cases = effective_case_modes(conn, job_id='library_reconciliation', case_id=case_id)
         selected = {key: value for key, value in cases.items()
                     if (not case_id or key == case_id) and value['ready_ids']}
         return [fid for value in selected.values() for fid in value['ready_ids']], list(selected)
@@ -710,11 +712,11 @@ def safe_finding_ids(db, *, case_id: str = '', include_planned_files: bool = Fal
         conn.close()
 
 
-def ready_batch_preview(db, *, case_id: str = '') -> dict:
+def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False) -> dict:
     """Reviewable, immutable batch selection used by confirmation and execution."""
     conn = db._get_connection()
     try:
-        modes = effective_case_modes(conn, job_id='library_reconciliation')
+        modes = effective_case_modes(conn, job_id='library_reconciliation', case_id=case_id)
         selected = {key: value for key, value in modes.items()
                     if (not case_id or key == case_id) and value['ready_ids']}
         snapshot, albums = [], []
@@ -727,7 +729,6 @@ def ready_batch_preview(db, *, case_id: str = '') -> dict:
                 snapshot.append((key, item['id'], details))
                 choice = details.get('planned_choice') or {}
                 action = choice.get('fix_action') or ''
-                path = details.get('target_path') or ''
                 row = conn.execute('SELECT file_path, title FROM repair_findings WHERE id = ?', (item['id'],)).fetchone()
                 filename = os.path.basename(row[0] or '') if row else ''
                 if details.get('plan_keep'):
@@ -736,21 +737,26 @@ def ready_batch_preview(db, *, case_id: str = '') -> dict:
                     fields = ', '.join(name.replace('_', ' ') for name in details.get('changes') or {})
                     description = f'Update {filename}: {fields}'
                 elif item['finding_type'] == 'reconciliation_duplicate':
-                    copies = details.get('copies') or details.get('competing_copies') or []
+                    copies = details.get('duplicate_copies') or details.get('competing_copies') or []
                     keeper = action.split(':', 1)[-1]
                     keep_path = next((copy.get('file_path') for copy in copies if str(copy.get('track_id') or copy.get('id')) == keeper), keeper)
-                    description = f'Keep {keep_path}; move the other duplicate copies to recoverable quarantine'
+                    removed = [copy.get('file_path') or str(copy.get('track_id')) for copy in copies if str(copy.get('track_id') or copy.get('id')) != keeper]
+                    description = f'Keep {keep_path}; move to recoverable quarantine: {", ".join(removed) or "the other duplicate copies"}'
                 elif action == 'replace':
                     description = f'Move {filename} to recoverable quarantine and request its release-track replacement'
                 elif action == 'request_missing':
-                    description = f'Request the missing release track for {filename}'
+                    description = f'Request {(details.get("replacement_track") or {}).get("title") or details.get("expected_title") or filename or "the missing release track"}'
                 else:
                     description = f'Move {filename} to recoverable quarantine and remove its library entry'
                 actions.append({'id': item['id'], 'description': description,
                                 'file_action': item['finding_type'] != 'reconciliation_metadata' and not details.get('plan_keep')})
+            actions.sort(key=lambda action: not action['file_action'])
             albums.append({'case_id': key, 'album': next((item['details'].get('album_title') for item in value['items'] if item['details'].get('album_title')), key), 'actions': actions})
         signature = hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest()
-        return {'signature': signature, 'albums': albums, 'action_count': len(snapshot),
-                'file_actions': sum(action['file_action'] for album in albums for action in album['actions'])}
+        result = {'signature': signature, 'albums': albums, 'action_count': len(snapshot),
+                  'file_actions': sum(action['file_action'] for album in albums for action in album['actions'])}
+        if include_snapshot:
+            result['reviewed_details'] = {fid: json.dumps(details) for _, fid, details in snapshot}
+        return result
     finally:
         conn.close()

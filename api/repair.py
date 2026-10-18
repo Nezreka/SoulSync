@@ -280,16 +280,16 @@ def repair_review_queue_apply_ready():
     try:
         from core.repair_review_queue import ready_batch_preview
         case_id = str(request.args.get('case_id') or data.get('case_id') or '')
-        preview = ready_batch_preview(worker.db, case_id=case_id)
         if request.method == 'GET':
-            return jsonify(preview)
-        if data.get('signature') != preview['signature']:
+            return jsonify(ready_batch_preview(worker.db, case_id=case_id))
+        if not data.get('signature'):
             return jsonify({'started': False, 'error': 'The ready album plans changed; review the updated batch before applying.'}), 409
         result = worker.start_review_safe(
-            case_id=str(data.get('case_id') or ''),
+            case_id=case_id,
             organize=bool(data.get('organize')),
+            expected_signature=data['signature'],
         )
-        return jsonify(result), 200 if result.get('started') else 400
+        return jsonify(result), 200 if result.get('started') else (409 if result.get('stale') else 400)
     except Exception as exc:
         logger.error('Error starting ready reconciliation changes: %s', exc, exc_info=True)
         return jsonify({'started': False, 'error': 'Could not start ready changes'}), 500

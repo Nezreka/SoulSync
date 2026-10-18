@@ -770,14 +770,23 @@ describe('library reconciliation review queue', () => {
         );
       throw new Error(`Unexpected request: ${url}`);
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true);
 
     render(<ReviewPage />);
 
     expect((await screen.findAllByText('Various Artists → Lamb of God')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Plan ready to apply · 1 actions')).toBeTruthy();
+    expect(screen.getByText('Plan ready to apply · 1 action')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
+    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, options]) =>
+          url === '/api/repair/review-queue/apply-ready' && options?.method === 'POST',
+      ),
+    ).toHaveLength(0);
+    expect(screen.queryByText(/Applying album changes/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
     await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy(), {
       timeout: 3000,

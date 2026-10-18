@@ -920,7 +920,8 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     })
     assert response.status_code == 200
     assert response.json == {'started': True, 'total': 4}
-    assert calls == [{'case_id': case_id, 'organize': True}]
+    assert calls == [{'case_id': case_id, 'organize': True,
+                      'expected_signature': client.get('/api/repair/review-queue/apply-ready', query_string={'case_id': case_id}).json['signature']}]
 
 
 def test_grouped_title_convention_decision_stages_without_applying():
@@ -1390,3 +1391,39 @@ def test_verified_case_redirect_follows_new_case_without_title_guessing():
     record_relocation(db, '/music/old', new)
     assert resolve_case(db, old) == new
     assert resolve_case(db, 'unrelated-case') == 'unrelated-case'
+
+
+def test_redundant_disc_markers_on_complete_continuous_sequence_are_ready():
+    details = {'numbering_mode': 'digital', 'confidence': 'clear',
+               'release_disc_count': 1, 'release_track_count': 19, 'local_file_count': 19,
+               'changes': {'disc_number': {'old': '2', 'new': '1'},
+                           'library_disc_number': {'old': '2', 'new': '1'}}}
+    item = {'finding_type': 'reconciliation_metadata', 'details': details}
+    assert classify_case([item])['can_apply_ready']
+    details['changes']['track_number'] = {'old': '1', 'new': '11'}
+    assert not classify_case([item])['can_apply_ready']
+    del details['changes']['track_number']
+    details['local_file_count'] = 10
+    assert not classify_case([item])['can_apply_ready']
+    details['local_file_count'] = 19
+    details['numbering_mode'] = 'release'
+    assert not classify_case([item])['can_apply_ready']
+
+
+def test_refresh_snapshot_does_not_restore_case_to_old_bucket():
+    db = _Database()
+    db.add(1, '/music/Album/01.flac', {'album_id': 10, 'album_title': 'Album',
+        'changes': {'track_number': {'new': 1}}},
+        job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db)['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._album_refresh_lock = threading.Lock()
+    worker._album_refreshes = {key: {'state': 'running', 'snapshot': get_case(db, key)}}
+    db.conn.rollback()
+    db.conn.execute("UPDATE repair_findings SET details_json=json_set(details_json, '$.changes', json('{}'))")
+    db.conn.commit()
+    assert worker.get_review_cases(risk='manual')['items'] == []
+    summary = worker.get_review_summary()
+    assert summary['all'] == summary['ready'] == 1
+    assert summary['review'] == 0

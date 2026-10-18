@@ -395,6 +395,7 @@ export async function reopenReviewAssignment(
 }
 
 export async function startReadyChanges(
+  signature: string,
   caseId?: string,
   organize = false,
 ): Promise<{
@@ -408,7 +409,7 @@ export async function startReadyChanges(
     await fetch('/api/repair/review-queue/apply-ready', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: caseId || '', organize }),
+      body: JSON.stringify({ case_id: caseId || '', organize, signature }),
     }),
   );
 }

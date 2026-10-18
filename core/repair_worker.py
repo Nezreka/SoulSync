@@ -1678,8 +1678,11 @@ class RepairWorker:
             matching = repair_review_queue.matching_case_ids(
                 self.db, [key for key, _ in running], status=status, job_id=job_id,
                 q=q, category=category, risk=risk)
+            present = repair_review_queue.matching_case_ids(
+                self.db, [key for key, _ in running], status=status, job_id=job_id,
+                q=q, category=category, risk='')
             for key, snapshot in running:
-                if key in existing:
+                if key in existing or (key in present and key not in matching):
                     continue
                 result['items'].insert(0, {
                     'case_id': key, 'album': snapshot.get('album'),
@@ -2180,9 +2183,15 @@ class RepairWorker:
                                       allow_review_ids=True, review_approved=True,
                                       review_case_folders=folders)
 
-    def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
+    def start_review_safe(self, *, case_id: str = '', organize: bool = False,
+                          expected_signature: str = None) -> dict:
         """Apply the planner-approved reconciliation subset in the background."""
-        ids, cases = repair_review_queue.safe_finding_ids(self.db, case_id=case_id, include_planned_files=bool(case_id))
+        preview = repair_review_queue.ready_batch_preview(self.db, case_id=case_id, include_snapshot=True)
+        if expected_signature is not None and expected_signature != preview['signature']:
+            return {'started': False, 'stale': True,
+                    'error': 'The ready album plans changed; review the updated batch before applying.'}
+        ids = list(preview['reviewed_details'])
+        cases = [album['case_id'] for album in preview['albums']]
         if not ids:
             return {'started': False, 'error': 'No ready reconciliation changes match'}
         refresh_cases = [(key, (self.get_review_case(key) or {}).get('folder') or '')
@@ -2199,6 +2208,7 @@ class RepairWorker:
             finding_ids=ids, allow_review_ids=True, review_approved=True,
             organize_album_ids=organize_album_ids,
             review_case_folders=refresh_cases, review_scope='album' if case_id else 'global',
+            review_expected_details=preview['reviewed_details'],
         )
 
     def start_review_album_metadata(self, case_id: str) -> dict:
@@ -7482,7 +7492,8 @@ class RepairWorker:
                        review_approved: bool = False,
                        organize_album_ids: List[str] = None,
                        review_case_folders: List[Tuple[str, str]] = None,
-                       review_scope: str = 'global', review_case_id: str = '') -> dict:
+                       review_scope: str = 'global', review_case_id: str = '',
+                       review_expected_details: dict = None) -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
         ``fix_action`` may only reach ONE finding type per run. The string is
@@ -7524,8 +7535,11 @@ class RepairWorker:
                         "KEEP). Narrow the run to a single type, or run it without an "
                         "action.")}
 
-            reviewed_details = None
-            if review_approved:
+            reviewed_details = review_expected_details
+            if reviewed_details is not None and set(ids) != set(reviewed_details):
+                return {'started': False, 'stale': True,
+                        'error': 'The selected album plans changed; review them before applying.'}
+            if review_approved and reviewed_details is None:
                 conn = self.db._get_connection()
                 try:
                     placeholders = ','.join('?' for _ in ids)
@@ -7632,18 +7646,26 @@ class RepairWorker:
             # A newly introduced decision must prevent every action in that album.
             eligible_ids = None
             if review_approved and review_case_folders:
-                current_ids, _ = repair_review_queue.safe_finding_ids(self.db)
-                eligible_ids = set(current_ids)
                 conn = self.db._get_connection()
                 try:
+                    modes = repair_review_queue.effective_case_modes(conn, job_id='library_reconciliation')
+                    eligible_ids = {fid for value in modes.values() for fid in value['ready_ids']}
                     selected_cases = {}
                     for fid in ids:
                         row = conn.execute('SELECT review_case_key FROM repair_findings WHERE id = ?', (fid,)).fetchone()
                         if row:
                             selected_cases.setdefault(row[0], set()).add(fid)
                     for key, selected_ids in selected_cases.items():
-                        current_case_ids, _ = repair_review_queue.safe_finding_ids(self.db, case_id=key)
-                        if selected_ids != set(current_case_ids):
+                        current_case_ids = (modes.get(key) or {}).get('ready_ids', [])
+                        evidence_changed = False
+                        saved = review_choices.load_choices(conn)
+                        for selected_id in selected_ids:
+                            row = conn.execute('SELECT details_json FROM repair_findings WHERE id=?', (selected_id,)).fetchone()
+                            current = review_choices.project(json.loads(row[0] or '{}'), saved.get(selected_id), case_id=key, raw_json=row[0]) if row else None
+                            if reviewed_details is not None and current != json.loads(reviewed_details.get(selected_id) or '{}'):
+                                evidence_changed = True
+                                break
+                        if selected_ids != set(current_case_ids) or evidence_changed:
                             eligible_ids.difference_update(selected_ids)
                 finally:
                     conn.close()

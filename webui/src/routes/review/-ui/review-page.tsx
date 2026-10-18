@@ -908,7 +908,7 @@ export function ReviewPage() {
   };
 
   const applyReady = async (scopeCaseId?: string, organize = false) => {
-    setApplyBusy(true);
+    setBusy(true);
     setError('');
     setNotice('');
     try {
@@ -951,10 +951,8 @@ export function ReviewPage() {
             confirmText: 'Apply plans',
           })
         : window.confirm(message);
-      if (!confirmed) {
-        setApplyBusy(false);
-        return;
-      }
+      if (!confirmed) return;
+      setApplyBusy(true);
       const result = await fetch('/api/repair/review-queue/apply-ready', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -967,6 +965,8 @@ export function ReviewPage() {
       setApplyBusy(false);
       setApplyProgress('');
       setError((cause as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1266,8 +1266,9 @@ export function ReviewPage() {
         <div className={styles.headerTools}>
           <div className={styles.headerCount}>
             <strong>
-              {queueTotals?.all ?? queue?.total ?? 0} album
-              {(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}
+              {queueTotals || queue
+                ? `${queueTotals?.all ?? queue?.total} album${(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}`
+                : 'Loading queue…'}
             </strong>
             <span>
               {queueTotals?.ready ?? 0} ready album{queueTotals?.ready === 1 ? '' : 's'} ·{' '}
@@ -1287,7 +1288,7 @@ export function ReviewPage() {
           <button
             type="button"
             className={styles.safeAction}
-            disabled={applyBusy || !queue?.ready_total}
+            disabled={mutationBusy || !queue?.ready_total}
             onClick={() => void applyReady()}
           >
             {applyBusy && !operationCase
@@ -1676,7 +1677,9 @@ export function ReviewPage() {
                   {albumView === 'plan' && plan.can_apply_ready && (
                     <section className={styles.albumApplyAll} aria-label="Apply album changes">
                       <div>
-                        <strong>Plan ready to apply · {plan.ready} actions</strong>
+                        <strong>
+                          Plan ready to apply · {plan.ready} action{plan.ready === 1 ? '' : 's'}
+                        </strong>
                         <p>
                           Your choices are saved automatically. Apply this album now, or include it
                           in the next ready batch.
@@ -2333,9 +2336,11 @@ export function ReviewPage() {
                               row={assignmentsByKey.get(activeRowKey)!}
                               album={reviewCase}
                             />
-                            <button type="button" onClick={() => setAlbumView('plan')}>
-                              Review album completeness →
-                            </button>
+                            <div className={styles.actions}>
+                              <button type="button" onClick={() => setAlbumView('plan')}>
+                                Review album completeness →
+                              </button>
+                            </div>
                           </>
                         ) : activeRowKey && active ? (
                           compactSelectedActionDetail
@@ -2493,7 +2498,9 @@ export function ReviewPage() {
                                 (hasIntentDecision
                                   ? 'Choice pending'
                                   : reviewCase.album_plan.counts.missing
-                                    ? 'Resolve track assignments first'
+                                    ? plan.can_apply_ready
+                                      ? 'Missing tracks have planned resolutions'
+                                      : 'Resolve track assignments first'
                                     : 'Full release coverage')}
                             </dd>
                           </div>

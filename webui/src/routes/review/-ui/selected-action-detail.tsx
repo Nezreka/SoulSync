@@ -138,7 +138,9 @@ export function SelectedActionDetail({
         </div>
       )}
       {finding.file_path &&
-        ['reconciliation_unresolved', 'reconciliation_extra'].includes(finding.finding_type) && (
+        ['reconciliation_metadata', 'reconciliation_unresolved', 'reconciliation_extra'].includes(
+          finding.finding_type,
+        ) && (
           <ReviewAudio
             localPath={finding.file_path}
             localTitle={

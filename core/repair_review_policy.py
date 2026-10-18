@@ -9,14 +9,6 @@ from typing import Any
 _DETAILS = "CASE WHEN json_valid(details_json) THEN details_json ELSE '{}' END"
 
 
-def _artist_replacement_sql(details: str = _DETAILS) -> str:
-    return '(' + ' OR '.join(
-        f"(COALESCE(json_extract({details}, '$.changes.{field}.old'), '') != '' "
-        f"AND lower(COALESCE(json_extract({details}, '$.changes.{field}.old'), '')) "
-        f"!= lower(COALESCE(json_extract({details}, '$.changes.{field}.new'), '')))"
-        for field in ('artist', 'track_artist', 'library_track_artist')
-    ) + ')'
-
 _DESTRUCTIVE_TYPES = frozenset({
     'reconciliation_extra', 'reconciliation_duplicate',
 })
@@ -48,6 +40,23 @@ def _change_value(change: Any, key: str) -> str:
     return str(value or '').strip()
 
 
+def needs_numbering_review(details: dict) -> bool:
+    changes = details.get('changes') or {}
+    positions = _POSITION_CHANGE_KEYS.intersection(changes)
+    if not positions:
+        return False
+    # A fully assigned continuous sequence already has its final track numbers.
+    # Clearing redundant disc markers is metadata normalization, not renumbering.
+    normalized_disc = (positions <= {'disc_number', 'library_disc_number'}
+        and details.get('numbering_mode') == 'digital'
+        and details.get('confidence') == 'clear'
+        and details.get('release_disc_count') == 1
+        and details.get('local_file_count') == details.get('release_track_count')
+        and bool(details.get('release_track_count'))
+        and all(str(_change_value(changes[key], 'new')) == '1' for key in positions))
+    return not normalized_disc
+
+
 def finding_category(item: dict[str, Any]) -> str:
     """User-facing reconciliation category, independent of scanner wording."""
     finding_type = str(item.get('finding_type') or '')
@@ -70,9 +79,9 @@ def finding_category(item: dict[str, Any]) -> str:
     # when its atomic repair also carries track-number or filename changes.
     # The grouped numbering button must never conceal a material title edit.
     if (details.get('title_difference_kind') in ('material', 'version') and
-            _TITLE_CHANGE_KEYS.intersection(changes)):
+            _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
         return 'title_issues'
-    if _POSITION_CHANGE_KEYS.intersection(changes):
+    if needs_numbering_review(details):
         return 'numbering'
     if (details.get('title_difference_kind') in ('typography', 'flavor') and
             _TITLE_CHANGE_KEYS.intersection(changes)):
@@ -131,7 +140,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if (details.get('title_difference_kind') in ('material', 'version') and
             _TITLE_CHANGE_KEYS.intersection(changes) and not supported_version_metadata(details)):
         return 'manual', 'The title may identify a different song or recording version'
-    if _POSITION_CHANGE_KEYS.intersection(changes):
+    if needs_numbering_review(details):
         return 'manual', 'The release uses a different disc or track numbering scheme'
     if details.get('confidence') not in (None, '', 'clear'):
         return 'manual', 'The file-to-track assignment is not clear'
@@ -140,39 +149,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     return 'ready', 'Audio and release evidence support this metadata repair'
 
 
-def _position_change_sql(details: str) -> str:
-    return '(' + ' OR '.join(
-        f"json_type({details}, '$.changes.{field}') IS NOT NULL"
-        for field in sorted(_POSITION_CHANGE_KEYS)) + ')'
-
-
-def _metadata_review_sql(details: str, error: str, *, artist_credit: bool = True) -> str:
-    """SQL projection of the same approval requirements shown in the album plan."""
-    alias = error.rsplit('.', 1)[0] + '.' if '.' in error else 'repair_findings.'
-    saved = ("SELECT 1 FROM reconcile_review_choices choice WHERE "
-             f"choice.finding_id = {alias}id AND choice.case_id = {alias}review_case_key "
-             f"AND choice.evidence_json = {alias}details_json")
-    approved = f"EXISTS ({saved} AND choice.choice = 'fix')"
-    kept = f"EXISTS ({saved} AND choice.choice = 'dismiss' AND choice.category != 'numbering')"
-    kept_numbers = f"EXISTS ({saved} AND choice.choice = 'dismiss' AND choice.category = 'numbering')"
-    predicates = [
-        f'({_position_change_sql(details)} AND NOT {kept_numbers})',
-        f"COALESCE({error}, '') != ''",
-        f"COALESCE(json_extract({details}, '$.confidence'), 'clear') NOT IN ('','clear')",
-        f"COALESCE(json_extract({details}, '$.title_difference_kind'), '') IN ('material','version')",
-    ]
-    if artist_credit:
-        predicates.append(_artist_replacement_sql(details))
-    return f"(COALESCE({error}, '') != '' OR (NOT ({approved} OR {kept}) AND (" + ' OR '.join(predicates) + ')))'
-
-
-def _related_finding_sql(alias: str) -> str:
-    return (f'{alias}.status = repair_findings.status AND '
-            f'{alias}.job_id = repair_findings.job_id AND '
-            f'{alias}.review_case_key = repair_findings.review_case_key')
-
-
-def queue_filter(*, conn, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
+def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
     params: list[Any] = [status]
     job_filter = ''
     if job_id:
@@ -183,61 +160,19 @@ def queue_filter(*, conn, status: str, job_id: str = "", q: str = "", category: 
         search = "AND (title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)"
         needle = f'%{q.strip()}%'
         params.extend([needle] * 3)
-    category_conditions = {
-        'numbering': ("""finding_type = 'reconciliation_metadata'
-            AND COALESCE(json_extract(%s, '$.title_difference_kind'), '')
-                NOT IN ('material','version') AND (
-            json_type(%s, '$.changes.track_number') IS NOT NULL OR
-            json_type(%s, '$.changes.disc_number') IS NOT NULL OR
-            json_type(%s, '$.changes.library_track_number') IS NOT NULL OR
-            json_type(%s, '$.changes.library_disc_number') IS NOT NULL)""" %
-            (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
-        'title_conventions': ("finding_type = 'reconciliation_metadata' AND "
-            "json_extract(%s, '$.title_difference_kind') IN ('typography','flavor') "
-            "AND (json_type(%s, '$.changes.title') IS NOT NULL OR "
-            "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
-            "json_type(%s, '$.changes.filename') IS NOT NULL) "
-            "AND json_type(%s, '$.changes.track_number') IS NULL "
-            "AND json_type(%s, '$.changes.disc_number') IS NULL "
-            "AND json_type(%s, '$.changes.library_track_number') IS NULL "
-            "AND json_type(%s, '$.changes.library_disc_number') IS NULL" %
-            (_DETAILS, _DETAILS, _DETAILS, _DETAILS, _DETAILS,
-             _DETAILS, _DETAILS, _DETAILS)),
-        'title_issues': ("json_extract(%s, '$.title_difference_kind') "
-            "IN ('material','version') AND ("
-            "json_type(%s, '$.changes.title') IS NOT NULL OR "
-            "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
-            "json_type(%s, '$.changes.filename') IS NOT NULL)" %
-            (_DETAILS, _DETAILS, _DETAILS, _DETAILS)),
-        'release_conflicts': "finding_type = 'reconciliation_release'",
-        'audio_conflicts': ("finding_type = 'reconciliation_unresolved' OR "
-            "(finding_type = 'reconciliation_extra' AND "
-            "json_extract(%s, '$.audio_conflict') = 'different_recording')" % _DETAILS),
-        'album_completeness': (
-            "finding_type IN ('reconciliation_intent','reconciliation_missing')"),
-        'duplicates': "finding_type = 'reconciliation_duplicate'",
-        'extra_files': ("finding_type = 'reconciliation_extra' AND "
-            "COALESCE(json_extract(%s, '$.audio_conflict'), '') != 'different_recording'" % _DETAILS),
-        'metadata': ("finding_type = 'reconciliation_metadata' AND "
-                     "NOT (COALESCE(json_extract(%s, '$.title_difference_kind'), '') "
-                     "IN ('typography','flavor','material','version') AND ("
-                     "json_type(%s, '$.changes.title') IS NOT NULL OR "
-                     "json_type(%s, '$.changes.library_title') IS NOT NULL OR "
-                     "json_type(%s, '$.changes.filename') IS NOT NULL)) AND "
-                     "json_type(%s, '$.changes.track_number') IS NULL AND "
-                     "json_type(%s, '$.changes.disc_number') IS NULL AND "
-                     "json_type(%s, '$.changes.library_track_number') IS NULL AND "
-                     "json_type(%s, '$.changes.library_disc_number') IS NULL" %
-                     (_DETAILS, _DETAILS, _DETAILS, _DETAILS,
-                      _DETAILS, _DETAILS, _DETAILS, _DETAILS)),
-    }
-    if category in category_conditions:
-        search += f' AND ({category_conditions[category]})'
+    if category:
+        import json
+        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
+        categories = {category, 'pending_fulfillment'} if category == 'album_completeness' else {category}
+        keys = [key for key, value in modes.items() if any(finding_category(item) in categories for item in value['items'])]
+        search += ' AND review_case_key IN (SELECT value FROM json_each(?))'
+        params.append(json.dumps(keys))
     if risk:
-        modes = effective_case_modes(conn, status=status, job_id=job_id)
+        modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
         keys = [key for key, value in modes.items() if value['mode'] == risk]
-        search += ' AND review_case_key IN (' + ','.join('?' for _ in keys) + ')' if keys else ' AND 0'
-        params.extend(keys)
+        import json
+        search += ' AND review_case_key IN (SELECT value FROM json_each(?))'
+        params.append(json.dumps(keys))
     where = f"status = ? {job_filter} {search}"
     return where, params
 
@@ -249,7 +184,7 @@ def case_mode(items: list[dict]) -> str:
     return 'manual' if unresolved else 'ready' if required else 'waiting'
 
 
-def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '') -> dict:
+def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', case_id: str = '') -> dict:
     """One classification for counts, filtering and execution, including draft choices."""
     import json
     from core.library import reconciliation_choices as choices
@@ -258,7 +193,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '') -> 
     grouped = {}
     for fid, key, kind, error, raw in conn.execute(
             "SELECT id, review_case_key, finding_type, last_error, details_json FROM repair_findings "
-            "WHERE status = ? AND (? = '' OR job_id = ?)", (status, job_id, job_id)):
+            "WHERE status = ? AND (? = '' OR job_id = ?) AND (? = '' OR review_case_key = ?)", (status, job_id, job_id, case_id, case_id)):
         try:
             details = json.loads(raw or '{}')
         except (TypeError, ValueError):
@@ -278,5 +213,6 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '') -> 
     return result
 
 
-def count_ready_findings(conn, *, status: str, job_id: str = "") -> int:
-    return sum(len(case['ready_ids']) for case in effective_case_modes(conn, status=status, job_id=job_id).values())
+def count_ready_findings(conn, *, status: str, job_id: str = "", case_modes=None) -> int:
+    modes = case_modes if case_modes is not None else effective_case_modes(conn, status=status, job_id=job_id)
+    return sum(len(case['ready_ids']) for case in modes.values())

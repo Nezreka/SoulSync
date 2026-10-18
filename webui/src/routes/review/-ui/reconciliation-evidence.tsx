@@ -1026,13 +1026,17 @@ export function AssignmentEvidence({
         </button>
       )}
       <p>
-        {row.status === 'confirmed'
-          ? 'Confirmed match · no metadata edit is pending.'
-          : row.status === 'not_owned'
-            ? 'This track is intentionally not collected.'
-            : row.review_state === 'reviewed' || row.status === 'settled'
-              ? 'You previously reviewed this assignment.'
-              : row.preview_reason || 'This assignment needs review.'}
+        {row.status === 'missing'
+          ? row.fulfillment_state
+            ? 'This release track has been requested. Waiting for a verified local file.'
+            : 'This release track has no local file. Review album completeness on the Plan tab.'
+          : row.status === 'confirmed'
+            ? 'Confirmed match · no metadata edit is pending.'
+            : row.status === 'not_owned'
+              ? 'This track is intentionally not collected.'
+              : row.review_state === 'reviewed' || row.status === 'settled'
+                ? 'You previously reviewed this assignment.'
+                : row.preview_reason || 'This assignment needs review.'}
       </p>
       {row.audio_conflict === 'different_recording' && (
         <p className={styles.error}>
