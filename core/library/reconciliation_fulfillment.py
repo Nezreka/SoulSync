@@ -26,7 +26,7 @@ def record_request(db, details, slot):
             (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
             VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
                 state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
-                WHERE reconcile_fulfillment.state='fulfilled' ''', (
+                WHERE reconcile_fulfillment.state IN ('fulfilled', 'untracked') ''', (
                 review_case_key(details, None), int(details.get('profile_id') or 1),
                 str(details['album_id']), details.get('album_folder') or '',
                 details.get('source') or '', details.get('exact_release_id') or details.get('release_id') or '',
@@ -66,7 +66,7 @@ def published_wishlist_track(db, stored_id, profiles, path):
 def outstanding(conn):
     ensure_schema(conn)
     return conn.execute('''SELECT profile_id, source_track_id, release_id, state, source
-        FROM reconcile_fulfillment WHERE state != 'fulfilled' ''').fetchall()
+        FROM reconcile_fulfillment WHERE state IN ('requested', 'published') ''').fetchall()
 
 
 def settle_assignments(db, case_id, assignments, release_id, source):
@@ -93,6 +93,14 @@ def backfill_requests(conn):
     ensure_schema(conn)
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='repair_findings'").fetchone():
         return
+    active_requests = set()
+    for profile, raw in conn.execute('SELECT profile_id, spotify_data FROM wishlist_tracks'):
+        try:
+            payload = json.loads(raw or '{}')
+            active_requests.add((int(profile or 1), str(payload.get('provider') or 'spotify'),
+                str((payload.get('album') or {}).get('id') or ''), str(payload.get('id') or '')))
+        except (ValueError, TypeError, AttributeError):
+            continue
     rows = conn.execute("""SELECT review_case_key, details_json FROM repair_findings
         WHERE finding_type='reconciliation_missing' AND
           (user_action='wishlisted' OR (status='pending' AND
@@ -104,9 +112,25 @@ def backfill_requests(conn):
         for slot in details.get('missing_tracks') or []:
             if not slot.get('source_track_id'):
                 continue
+            identity = (int(details.get('profile_id') or 1), details.get('source') or '',
+                        details.get('exact_release_id') or details.get('release_id') or '',
+                        str(slot['source_track_id']))
+            if identity not in active_requests:
+                # Legacy 'wishlisted' history cannot prove a request is still
+                # active after the old wishlist row has disappeared. Preserve
+                # publication records and any currently active album finding.
+                conn.execute("""UPDATE reconcile_fulfillment SET state='untracked'
+                    WHERE case_id=? AND source=? AND release_id=? AND source_track_id=?
+                      AND state='requested' AND published_path=''
+                      AND NOT EXISTS (SELECT 1 FROM repair_findings f
+                        WHERE f.review_case_key=? AND f.status='pending')""",
+                    (key, identity[1], identity[2], identity[3], key))
+                continue
             conn.execute('''INSERT INTO reconcile_fulfillment
                 (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING''', (
+                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
+                  state='requested', updated_at=CURRENT_TIMESTAMP
+                  WHERE reconcile_fulfillment.state='untracked' ''', (
                     key, int(details.get('profile_id') or 1), str(details['album_id']),
                     details.get('album_folder') or '', details.get('source') or '',
                     details.get('exact_release_id') or details.get('release_id') or '',

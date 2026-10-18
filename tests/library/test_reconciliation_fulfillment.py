@@ -78,3 +78,29 @@ def test_request_identity_includes_provider_when_numeric_ids_overlap(tmp_path):
     settle_assignments(db, key, assignment, '123', 'deezer')
     with db._get_connection() as conn:
         assert outstanding(conn) == []
+
+
+def test_legacy_wishlist_history_does_not_resurrect_completed_or_cancelled_requests(tmp_path):
+    from core.library.reconciliation_fulfillment import backfill_requests
+
+    db = Database(tmp_path / 'legacy.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'musicbrainz', 'release_id': 'release',
+               'missing_tracks': [{'source_track_id': 'slot'}]}
+    key = review_case_key(details, None)
+    with db._get_connection() as conn:
+        conn.execute('CREATE TABLE repair_findings(review_case_key TEXT, details_json TEXT, finding_type TEXT, user_action TEXT, status TEXT)')
+        conn.execute('INSERT INTO repair_findings VALUES (?,?,?,?,?)',
+                     (key, json.dumps(details), 'reconciliation_missing', 'wishlisted', 'resolved'))
+        backfill_requests(conn)
+        assert outstanding(conn) == []
+    # Correct an older migration's inferred request, without asserting delivery.
+    record_request(db, details, {'source_track_id': 'slot'})
+    with db._get_connection() as conn:
+        backfill_requests(conn)
+        assert outstanding(conn) == []
+        assert conn.execute('SELECT state FROM reconcile_fulfillment').fetchone()[0] == 'untracked'
+        payload = {'provider': 'musicbrainz', 'id': 'slot', 'album': {'id': 'release'}}
+        conn.execute('INSERT INTO wishlist_tracks VALUES (?,?,?)', (1, 'slot', json.dumps(payload)))
+        backfill_requests(conn)
+        assert len(outstanding(conn)) == 1

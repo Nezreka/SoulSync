@@ -1984,6 +1984,9 @@ class RepairWorker:
                 folder = details.get('album_folder') or os.path.dirname(row[0] or '')
                 if not self.reopen_finding(finding_id):
                     return {'success': False, 'error': 'Could not reopen this decision'}
+                review_choices.ensure_schema(conn)
+                conn.execute('DELETE FROM reconcile_review_choices WHERE finding_id=?', (finding_id,))
+                conn.commit()
                 if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
                     conn.execute('''DELETE FROM reconcile_track_assignment
                         WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
@@ -2711,6 +2714,8 @@ class RepairWorker:
                     conn.commit()
                     conn.close()
                     conn = None
+                elif result.get('action') == 'kept_current_values':
+                    self.dismiss_finding(finding_id)
                 else:
                     self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
                 self._set_finding_error(finding_id, None)

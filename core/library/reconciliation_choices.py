@@ -76,3 +76,36 @@ def plan_signature(items):
                 'type': item['finding_type'], 'error': item.get('last_error')}
                for item in sorted(items, key=lambda row: row['id'])]
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def applied_numbering_choices(db):
+    """Keep an applied rejection of unchanged numbering across metadata repairs."""
+    conn = db._get_connection()
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
+            return {}
+        result, seen = {}, set()
+        for path, status, action, choice, raw in conn.execute('''
+            SELECT f.file_path, f.status, f.user_action, c.choice, c.evidence_json
+            FROM reconcile_review_choices c JOIN repair_findings f ON f.id=c.finding_id
+            WHERE c.category='numbering' ORDER BY f.id DESC'''):
+            if path in seen:
+                continue
+            seen.add(path)
+            if status in ('resolved', 'dismissed') and action != 'obsolete' and choice == 'dismiss':
+                result[path] = json.loads(raw)
+        return result
+    finally:
+        conn.close()
+
+
+def retains_numbering(previous, current):
+    if not previous or not previous.get('fingerprint_key'):
+        return False
+    if any(previous.get(key) != current.get(key) for key in
+           ('source', 'release_id', 'fingerprint_key', 'expected_title')):
+        return False
+    fields = {'track_number', 'disc_number', 'library_track_number', 'library_disc_number'}
+    before = {k: v for k, v in (previous.get('changes') or {}).items() if k in fields}
+    after = {k: v for k, v in (current.get('changes') or {}).items() if k in fields}
+    return bool(before) and before == after

@@ -2306,3 +2306,44 @@ def test_same_positioned_musicbrainz_recordings_ignore_release_title_translation
     right[5][0]['recording_mbid'] = 'same-performance'
     right[5][0]['track_number'] = 4
     assert not _candidate_shapes_equivalent(left, right)
+
+
+def test_kept_numbering_survives_other_metadata_apply_and_can_be_reopened(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+    from mutagen.flac import FLAC
+
+    root = tmp_path / 'music'
+    root.mkdir()
+    path = root / '09 - Laid to Rest.flac'
+    _minimal_flac(path, {'title': 'Laid to Rest', 'artist': 'Lamb of God',
+                         'album': 'Ashes of the Wake', 'tracknumber': '9',
+                         'musicbrainz_albumid': 'old-pressing'})
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    _album(db, path)
+    db.set_album_canonical(10, 'musicbrainz', 'ashes-mb-release', 0.9, locked=True)
+    worker = RepairWorker(database=db)
+    client = _Acoustid({path.name: {'mbid': 'laid-id', 'title': 'Laid to Rest',
+                                   'artist': 'Lamb of God', 'score': 0.99}})
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args: [
+        {'id': 'laid-id', 'name': 'Laid to Rest', 'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000}])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args: {'name': 'Ashes of the Wake'})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    LibraryReconciliationJob().scan(context)
+    key = worker.get_review_cases()['items'][0]['case_id']
+    finding = worker.get_review_case(key)['items'][0]
+    assert finding['category'] == 'numbering'
+    assert worker.apply_review_decision_group(key, 'numbering', action='dismiss')['success']
+    assert worker.fix_finding(finding['id'], review_approved=True)['success']
+    assert FLAC(str(path))['tracknumber'][0] == '9'
+    assert FLAC(str(path))['musicbrainz_albumid'][0] == 'ashes-mb-release'
+    LibraryReconciliationJob().scan(context)
+    case = worker.get_review_case(key)
+    assert not any('track_number' in item['details'].get('changes', {}) for item in case['items'])
+    assert worker.reopen_review_assignment(key, finding['id'])['success']
+    LibraryReconciliationJob().scan(context)
+    case = worker.get_review_case(key)
+    assert any('track_number' in item['details'].get('changes', {}) for item in case['items'])

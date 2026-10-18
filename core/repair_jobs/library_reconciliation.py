@@ -1888,6 +1888,8 @@ class LibraryReconciliationJob(RepairJob):
         intents = self._intents(context)
         wishlisted_by_profile = self._wishlisted_slots(context)
         assignment_overrides = self._assignment_overrides(context)
+        from core.library import reconciliation_choices as review_choices
+        kept_numbering = review_choices.applied_numbering_choices(context.db)
         playlist_membership = {}
         if context.playlist_membership:
             try:
@@ -2676,6 +2678,16 @@ class LibraryReconciliationJob(RepairJob):
                                'db_track_updates': db_updates,
                                'db_album_title': db_album_title,
                                'target_path': target_path}
+                    if review_choices.retains_numbering(kept_numbering.get(file['path']), details):
+                        projected = review_choices.project(details, ('', json.dumps(details), 'numbering', 'dismiss', ''))
+                        for key in ('planned_choice', 'plan_keep'):
+                            projected.pop(key, None)
+                        details = projected
+                        changed = details['changes']
+                        plan_action_changes[file['path']] = {'changes': dict(changed),
+                            'status': 'change' if changed else 'confirmed'}
+                        if not changed:
+                            continue
                     if emit(
                         job_id=self.job_id, finding_type='reconciliation_metadata',
                         severity='warning', entity_type='track',
