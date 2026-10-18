@@ -17073,126 +17073,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* BEATPORT GENRE CHARTS LIST VIEW   */
 /* ================================= */
 
-.genre-charts-list-header {
-    margin-bottom: 30px;
-    padding: 20px 0;
-    border-bottom: 1px solid var(--white-a10);
-}
-
-.genre-charts-list-info h2 {
-    font-size: 28px;
-    font-weight: 700;
-    color: #ffffff;
-    margin: 0 0 8px 0;
-    background: linear-gradient(135deg, #8a2be2, #4b0082);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.genre-charts-list-info p {
-    font-size: 16px;
-    color: var(--white-a70);
-    margin: 0;
-}
-
-.genre-charts-list-container {
-    position: relative;
-    min-height: 400px;
-}
-
-.charts-loading-placeholder {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    color: var(--white-a60);
-}
-
-.charts-loading-placeholder .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 4px solid rgba(138, 43, 226, 0.3);
-    border-top: 4px solid #8a2be2;
-    border-radius: var(--radius-circle);
-    animation: spin 1s linear infinite;
-    margin: 0 auto 16px auto;
-}
-
-
-.charts-loading-placeholder p {
-    font-size: 16px;
-    margin: 0;
-}
-
-.genre-charts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 20px;
-    padding: 10px 0;
-}
-
-.genre-chart-item {
-    /* Premium glassmorphic foundation matching modal card design */
-    background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-
-    /* Enhanced borders matching modal */
-    border-radius: var(--radius-xl);
-    border: 1px solid rgba(138, 43, 226, 0.3);
-    border-top: 1px solid rgba(138, 43, 226, 0.4);
-
-    padding: 24px;
-    cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-
-    /* Premium shadow effect matching modal cards */
-    box-shadow:
-        0 8px 24px rgba(138, 43, 226, 0.2),
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.genre-chart-item::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg,
-            rgba(138, 43, 226, 0.1) 0%,
-            transparent 50%);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.genre-chart-item:hover {
-    /* Enhanced glassmorphic hover state matching modal card hover */
-    background: linear-gradient(135deg,
-            rgba(30, 30, 30, 0.98) 0%,
-            rgba(22, 22, 22, 1.0) 100%);
-
-    transform: translateY(-6px) scale(1.02);
-    border-color: rgba(138, 43, 226, 0.5);
-    border-top-color: rgba(138, 43, 226, 0.7);
-
-    /* Premium enhanced shadow matching modal hover */
-    box-shadow:
-        0 20px 48px rgba(138, 43, 226, 0.3),
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 0 40px rgba(138, 43, 226, 0.25),
-        inset 0 1px 0 var(--white-a15);
-}
-
-.genre-chart-item:hover::before {
-    opacity: 1;
-}
-
 .chart-item-header {
     display: flex;
     align-items: center;
@@ -17272,24 +17152,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 4px;
 }
 
-.genre-charts-empty {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--white-a60);
-}
-
-.genre-charts-empty h3 {
-    font-size: 20px;
-    margin: 0 0 12px 0;
-    color: var(--white-a80);
-}
-
-.genre-charts-empty p {
-    font-size: 14px;
-    margin: 0;
-    line-height: 1.5;
-}
-
 /* ================================= */
 /* RESPONSIVE DESIGN                 */
 /* ================================= */
@@ -17312,20 +17174,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     .section-title {
         font-size: 18px;
-    }
-
-    /* Genre Charts List Responsive */
-    .genre-charts-list-info h2 {
-        font-size: 22px;
-    }
-
-    .genre-charts-grid {
-        grid-template-columns: 1fr;
-        gap: 16px;
-    }
-
-    .genre-chart-item {
-        padding: 16px;
     }
 
     .chart-item-header {
