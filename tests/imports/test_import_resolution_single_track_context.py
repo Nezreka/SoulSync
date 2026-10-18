@@ -242,8 +242,8 @@ def test_get_single_track_import_context_from_own_tags_never_searches(monkeypatc
 
 def test_get_single_track_import_context_from_own_tags_tolerates_garbage_tag_numbers(monkeypatch):
     """Tag numbers arrive as whatever the file/request carried; unusable
-    values (including inf, whose int() is an OverflowError) must fall back
-    to defaults, never raise out of the import."""
+    values (including inf, whose int() is an OverflowError, and booleans) must
+    fall back to defaults, never raise out of the import."""
     monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
     monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
     monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: None)
@@ -260,6 +260,34 @@ def test_get_single_track_import_context_from_own_tags_tolerates_garbage_tag_num
     assert result["context"]["track_info"]["track_number"] == 1
     assert result["context"]["track_info"]["disc_number"] == 1
     assert result["context"]["track_info"]["duration_ms"] == 0
+
+    # Booleans (bool subclasses int in Python) must not masquerade as 1 or 0
+    bool_result = resolution.get_single_track_import_context(
+        "Song",
+        "Artist",
+        from_own_tags=True,
+        track_number=True,
+        disc_number=False,
+        duration_ms=True,
+    )
+    assert bool_result["context"]["track_info"]["track_number"] == 1
+    assert bool_result["context"]["track_info"]["disc_number"] == 1
+    assert bool_result["context"]["track_info"]["duration_ms"] == 0
+
+
+def test_build_single_import_fallback_context_tolerates_nonstring_args():
+    """_build_single_import_fallback_context directly called with non-strings
+    safely coerces to Unknown Artist and Unknown Track."""
+    result = resolution._build_single_import_fallback_context(
+        123,
+        456,
+        ["spotify"],
+        album=["not", "a", "string"],
+    )
+    context = result["context"]
+    assert context["artist"]["name"] == "Unknown Artist"
+    assert context["track_info"]["name"] == "Unknown Track"
+    assert context["album"]["name"] == ""
 
 
 def test_get_single_track_import_context_from_own_tags_honours_tag_string_conventions(monkeypatch):

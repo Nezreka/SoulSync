@@ -711,6 +711,47 @@ def test_process_single_import_file_from_own_tags_requires_a_real_true(tmp_path)
     assert captured["from_own_tags"] is False
 
 
+def test_process_single_import_file_nonstring_title_artist_falls_back_to_filename(tmp_path):
+    """If title and artist are non-strings (e.g. invalid JSON data from an
+    external caller), process_single_import_file treats them as absent and
+    parses the filename instead of passing non-strings into the pipeline."""
+    audio_file = tmp_path / "Parsed Artist - Parsed Title.mp3"
+    _touch(audio_file)
+    captured = {}
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(title=title, artist=artist)
+        return {
+            "source": None,
+            "context": {"track_info": {"name": title}, "artist": {"name": artist}},
+        }
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        normalize_import_context=lambda context: context,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": 12345,
+            "artist": ["invalid"],
+            "from_own_tags": True,
+        },
+    )
+
+    assert outcome == ("ok", "Parsed Title")
+    assert captured["title"] == "Parsed Title"
+    assert captured["artist"] == "Parsed Artist"
+
+
 def test_process_single_import_file_empty_manual_match_counts_as_no_pick(tmp_path):
     """An empty manual_match dict is "no match picked" (its pre-flag
     meaning), so the own-tags flag still applies and no override is sent."""

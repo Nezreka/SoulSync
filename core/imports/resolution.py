@@ -322,6 +322,8 @@ def _coerce_tag_int(value: Any, default: int) -> int:
     position written "3/12" means track 3 (the staging reader splits the
     same way), a float-string duration keeps its whole part, and zero or
     negative positions/distances are not real, so they take the default."""
+    if isinstance(value, bool):
+        return default
     if isinstance(value, str):
         value = value.strip().split('/', 1)[0].strip()
         if not value:
@@ -353,8 +355,16 @@ def _build_single_import_fallback_context(
     duration_ms: Any = 0,
     manual_metadata: bool = False,
 ) -> Dict[str, Any]:
-    artist_name = requested_artist or 'Unknown Artist'
-    title = requested_title or 'Unknown Track'
+    artist_name = (
+        requested_artist.strip()
+        if isinstance(requested_artist, str) and requested_artist.strip()
+        else 'Unknown Artist'
+    )
+    title = (
+        requested_title.strip()
+        if isinstance(requested_title, str) and requested_title.strip()
+        else 'Unknown Track'
+    )
     # A non-string album (list/dict from raw request JSON) is not an album
     # name; stringifying it would file the track under "['x']".
     album_name = album.strip() if isinstance(album, str) else ''

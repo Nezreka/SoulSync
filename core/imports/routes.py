@@ -1467,8 +1467,8 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
     if runtime.post_process_matched_download is None:
         return ("error", "Import post-processing not available")
 
-    title = file_info.get("title", "")
-    artist = file_info.get("artist", "")
+    title = file_info.get("title") if isinstance(file_info.get("title"), str) else ""
+    artist = file_info.get("artist") if isinstance(file_info.get("artist"), str) else ""
     manual_match = file_info.get("manual_match")
     if manual_match is not None and not isinstance(manual_match, dict):
         manual_match = None
