@@ -15,8 +15,9 @@ def harness(tmp_path, monkeypatch):
     path = tmp_path / 'fixture.sqlite'
     conn = sqlite3.connect(path)
     conn.executescript('''
-        CREATE TABLE profiles (id INTEGER PRIMARY KEY);
-        INSERT INTO profiles VALUES (7);
+        CREATE TABLE profiles (id INTEGER PRIMARY KEY, is_admin INTEGER, disabled INTEGER, can_download INTEGER,
+                               library_mode TEXT, library_root TEXT, navidrome_library_id TEXT);
+        INSERT INTO profiles VALUES (7, 1, 0, 1, 'shared', NULL, NULL);
         CREATE TABLE artists (id TEXT, name TEXT, thumb_url TEXT);
         CREATE TABLE albums (id TEXT, artist_id TEXT, title TEXT, spotify_album_id TEXT,
                              thumb_url TEXT, owner_profile_id INTEGER, metadata_locked INTEGER);
@@ -95,7 +96,7 @@ def test_fixture_preview_json(harness, capsys):
     assert 'Second' in capsys.readouterr().out
 
 
-@pytest.mark.parametrize('owner', [None, 0, -1, 'invalid', 7.5, 999])
+@pytest.mark.parametrize('owner', [0, -1, 'invalid', 7.5, 999])
 @pytest.mark.parametrize('dry_run', [True, False])
 def test_unverified_owner_skips_before_provider_lookup(harness, monkeypatch, owner, dry_run):
     context, settings, queued, report, path = harness
@@ -245,3 +246,177 @@ def test_complete_cache_is_bounded(harness, monkeypatch):
     monkeypatch.setattr(job, '_standard_complete_limit', 1)
     assert job.scan(context).scanned == 2
     assert len(job._standard_complete_cache) == 1
+
+
+def legacy_shared_fixture(path, admin_id=1):
+    """The reported Admin + Kiwi configuration, in an isolated database."""
+    with sqlite3.connect(path) as conn:
+        conn.execute('DELETE FROM profiles')
+        conn.executemany('INSERT INTO profiles VALUES (?, ?, ?, ?, ?, ?, ?)', [
+            (admin_id, 1, 0, 1, 'shared', None, None),
+            (2, 0, 0, 1, 'shared', None, None)])
+        conn.execute('UPDATE albums SET owner_profile_id = NULL')
+
+
+@pytest.mark.parametrize('admin_id', [1, 5])
+@pytest.mark.parametrize('dry_run', [True, False])
+def test_legacy_shared_admin_and_kiwi_scenario(harness, admin_id, dry_run):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path, admin_id)
+    settings['dry_run'] = dry_run
+    before = path.read_bytes()
+    result = AlbumCompletenessJob().scan(context)
+    plan = report.call_args.kwargs['details']
+    assert plan['status'] == 'ready'
+    assert plan['completion_profile_id'] == admin_id
+    assert plan['ownership_mode'] == 'legacy_shared_admin'
+    assert result.auto_fixed == (0 if dry_run else 2)
+    assert set(queued) == (set() if dry_run else {('2', admin_id), ('3', admin_id)})
+    assert path.read_bytes() == before  # no ownership backfill, even in live mode
+
+
+@pytest.mark.parametrize('change,reason', [
+    ("UPDATE profiles SET is_admin=1 WHERE id=2", 'exactly one active administrator'),
+    ("UPDATE profiles SET disabled=1 WHERE id=1", 'exactly one active administrator'),
+    ("UPDATE profiles SET can_download=0 WHERE id=1", 'not permitted to download'),
+    ("UPDATE profiles SET library_mode='own', library_root='/other' WHERE id=2", 'same shared library'),
+    ("UPDATE profiles SET library_mode='own', library_root='/other', disabled=1 WHERE id=2", 'same shared library'),
+    ("UPDATE profiles SET library_root='/stale-own-root' WHERE id=2", 'same shared library'),
+    ("UPDATE profiles SET navidrome_library_id='other' WHERE id=2", 'conflicting shared server library'),
+    ("UPDATE profiles SET disabled=NULL WHERE id=1", 'status cannot be verified'),
+    ("UPDATE profiles SET library_mode=NULL WHERE id=2", 'same shared library'),
+    ("ALTER TABLE profiles DROP COLUMN library_mode", 'complete profile/library configuration'),
+    ("DELETE FROM profiles", 'No configured profiles'),
+])
+@pytest.mark.parametrize('dry_run', [True, False])
+def test_legacy_shared_routing_fails_closed(harness, monkeypatch, change, reason, dry_run):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path)
+    settings['dry_run'] = dry_run
+    with sqlite3.connect(path) as conn:
+        conn.execute(change)
+    lookup = Mock(side_effect=AssertionError('Ambiguous ownership must skip before providers'))
+    monkeypatch.setattr(standard, 'get_artist_albums_for_source', lookup)
+    assert AlbumCompletenessJob().scan(context).skipped == 1
+    assert reason in report.call_args.kwargs['details']['reason']
+    assert not queued
+    lookup.assert_not_called()
+
+
+def test_disabled_second_admin_does_not_count_as_active(harness):
+    context, settings, queued, _, path = harness
+    legacy_shared_fixture(path)
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO profiles VALUES (3,1,1,1,'shared',NULL,NULL)")
+    assert AlbumCompletenessJob().scan(context).auto_fixed == 2
+    assert set(queued) == {('2', 1), ('3', 1)}
+
+
+@pytest.mark.parametrize('mode', ['shared', 'own'])
+def test_explicit_owner_is_preserved_with_multiple_admins_and_libraries(harness, mode):
+    context, settings, queued, report, path = harness
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE profiles SET is_admin=0, library_mode=?, library_root=? WHERE id=7",
+                     (mode, '/kiwi' if mode == 'own' else None))
+        conn.execute("INSERT INTO profiles VALUES (1,1,0,1,'shared',NULL,NULL)")
+        conn.execute("INSERT INTO profiles VALUES (3,1,0,1,'own','/other',NULL)")
+    assert AlbumCompletenessJob().scan(context).auto_fixed == 2
+    assert set(queued) == {('2', 7), ('3', 7)}
+    assert report.call_args.kwargs['details']['ownership_mode'] == 'explicit'
+
+
+@pytest.mark.parametrize('change', ['disabled=1', 'can_download=0'])
+def test_explicit_owner_permissions_are_required(harness, change):
+    context, settings, queued, report, path = harness
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute('UPDATE profiles SET ' + change)
+    assert AlbumCompletenessJob().scan(context).skipped == 1
+    assert 'disabled or not permitted' in report.call_args.kwargs['details']['reason']
+    assert not queued
+
+
+@pytest.mark.parametrize('other_owner', [1, 2, 999])
+def test_conflicting_locked_fragment_blocks_legacy_inference(harness, other_owner):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path)
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO albums VALUES ('fragment','artist','Fixture Album (Deluxe Edition)',NULL,NULL,?,1)",
+                     (other_owner,))
+    assert AlbumCompletenessJob().scan(context).skipped == 1
+    assert 'Conflicting or changed legacy album fragments' in report.call_args.kwargs['details']['reason']
+    assert not queued
+
+
+def test_all_null_legacy_fragments_share_one_verified_route(harness):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path)
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute("INSERT INTO albums VALUES ('fragment','artist','Fixture Album (Deluxe Edition)',NULL,NULL,NULL,0)")
+        conn.execute("INSERT INTO tracks VALUES ('second','fragment','Second',2,1,180000)")
+    assert AlbumCompletenessJob().scan(context).auto_fixed == 1
+    assert set(queued) == {('3', 1)}
+    assert len(report.call_args.kwargs['details']['existing_tracks']) == 2
+
+
+@pytest.mark.parametrize('change', [
+    "UPDATE albums SET owner_profile_id=1",  # still the same ID, but no longer NULL-owned
+    "UPDATE profiles SET disabled=1 WHERE id=1",
+    "UPDATE profiles SET can_download=0 WHERE id=1",
+    "UPDATE profiles SET is_admin=1 WHERE id=2",
+    "UPDATE profiles SET library_mode='own',library_root='/separate' WHERE id=2",
+    "UPDATE profiles SET navidrome_library_id='separate' WHERE id=2",
+    "UPDATE profiles SET is_admin=0 WHERE id=1",  # unique admin switches during resolution
+    "INSERT INTO albums VALUES ('fragment','artist','Fixture Album',NULL,NULL,NULL,0)",
+])
+def test_shared_route_is_revalidated_after_metadata_lookup(harness, monkeypatch, change):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path)
+    settings['dry_run'] = False
+    original = standard.get_album_for_source
+
+    def mutate(*args):
+        with sqlite3.connect(path) as conn:
+            conn.execute(change)
+            if 'is_admin=0' in change:
+                conn.execute('UPDATE profiles SET is_admin=1 WHERE id=2')
+        return original(*args)
+    monkeypatch.setattr(standard, 'get_album_for_source', mutate)
+    assert AlbumCompletenessJob().scan(context).errors == 1
+    assert report.call_args.kwargs['details']['status'] == 'skipped'
+    assert not report.call_args.kwargs['details']['proposed_downloads']
+    assert not queued
+
+
+def test_cached_complete_legacy_report_cannot_bypass_library_revalidation(harness):
+    context, settings, queued, report, path = harness
+    legacy_shared_fixture(path)
+    complete_fixture(path)
+    job = AlbumCompletenessJob()
+    job.scan(context)
+    settings['dry_run'] = False
+    with sqlite3.connect(path) as conn:
+        conn.execute("UPDATE profiles SET library_mode='own',library_root='/other' WHERE id=2")
+    assert job.scan(context).skipped == 1
+    assert not report.call_args.kwargs['details'].get('verification_cached')
+    assert not queued
+
+
+@pytest.mark.parametrize('change', ['disabled=1', 'can_download=0'])
+def test_explicit_profile_permissions_revalidated_after_lookup(harness, monkeypatch, change):
+    context, settings, queued, report, path = harness
+    settings['dry_run'] = False
+    original = standard.get_album_for_source
+
+    def mutate(*args):
+        with sqlite3.connect(path) as conn:
+            conn.execute('UPDATE profiles SET ' + change + ' WHERE id=7')
+        return original(*args)
+    monkeypatch.setattr(standard, 'get_album_for_source', mutate)
+    assert AlbumCompletenessJob().scan(context).errors == 1
+    assert 'disabled or not permitted' in report.call_args.kwargs['details']['reason']
+    assert not queued

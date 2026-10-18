@@ -2042,6 +2042,8 @@ describe('the detail renderer', () => {
     const detail = await openDetail({
       finding_type: 'standard_album_preview',
       details: {
+        completion_profile_id: 1,
+        ownership_mode: 'legacy_shared_admin',
         artist: 'Band',
         album: 'LP Deluxe',
         release: 'LP',
@@ -2059,6 +2061,11 @@ describe('the detail renderer', () => {
     expect(gridPairs(detail)).toContainEqual(['Release ID', 'std-1']);
     expect(gridPairs(detail)).toContainEqual(['Existing matching tracks', 'Owned']);
     expect(gridPairs(detail)).toContainEqual(['Proposed downloads', 'Missing']);
+    expect(gridPairs(detail)).toContainEqual(['Download Profile', '1']);
+    expect(gridPairs(detail)).toContainEqual([
+      'Ownership',
+      'Verified shared-library administrator',
+    ]);
     expect(gridPairs(detail)).toContainEqual(['Mode', 'Dry run']);
   });
 

@@ -52,12 +52,37 @@ needed: this reuses the existing scheduled scan. Set a suitable interval after
 normal sync/import rather than expecting immediate completion on playlist update.
 The usual server scan makes successful imports visible in Navidrome.
 
-Requests require an explicit positive `owner_profile_id` on every related album
-row, verified against the current `profiles` table. Missing/null/invalid owners,
-missing owner columns, nonexistent profiles and conflicting ownership produce a
-clear skip in both preview and live mode. Ownership is rechecked just before
-queueing; there is no fallback to profile 1. A shared-library album with no
-explicit owner therefore needs its ownership resolved before it can qualify.
+Explicit positive `owner_profile_id` values remain authoritative. Their profiles
+must exist, be enabled (`disabled=0`) and be allowed to download (`can_download=1`).
+They are never replaced by an administrator or combined with another owner's songs.
+
+Legacy **NULL-owned shared-library albums** have one narrowly defined routing rule:
+
+- Every configured profile, including disabled profiles, must declare
+  `library_mode='shared'`, have no private `library_root`, and have identical
+  shared server library selections. Missing/ambiguous configuration fails closed.
+- There must be exactly **one active administrator** (`is_admin=1, disabled=0`),
+  and that administrator must be allowed to download. The ID is discovered from
+  configuration; it is not assumed to be 1. Disabled administrators are not active.
+- All current fragments of the same artist/edition group must still be NULL-owned
+  and match the scanned fragment set. Mixed ownership or added/changed fragments
+  block inference, including locked or empty rows outside the inventory scan.
+
+For example, enabled Admin (ID 1) and Kiwi (ID 2) profiles sharing the same library,
+with Admin as the only administrator and both permitted to download, route NULL-owned
+album completion to Admin. No album ownership is backfilled or otherwise changed.
+The preview shows **Download Profile** and **Ownership** so this decision is reviewable.
+
+The current album rows and profile configuration are read in a consistent read-only
+snapshot, then checked again immediately before wishlist enqueueing. A changed owner,
+new separate library, disabled profile, withdrawn download permission, or changed
+administrator route causes a skip. Dry Run only records its report; it never adds
+wishlist entries or changes music files or album/profile ownership. Missing owner
+columns, invalid non-NULL owners and unverifiable profiles still produce clear skips.
+
+Already queued requests follow the existing wishlist controls. Configuration changes
+after enqueueing are outside this enqueue-time check; review or cancel outstanding
+requests before changing profile libraries. This feature adds no database migration.
 
 Requests retain album provenance and the verified album owner's profile. They carry no
 playlist ID and never change playlist membership. Wishlist's persistent

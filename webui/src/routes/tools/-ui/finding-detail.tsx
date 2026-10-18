@@ -673,6 +673,14 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
 
     case 'standard_album_preview': {
       pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.completion_profile_id, 'Download Profile');
+      if (d.ownership_mode)
+        rows.push([
+          'Ownership',
+          d.ownership_mode === 'legacy_shared_admin'
+            ? 'Verified shared-library administrator'
+            : 'Explicit album owner',
+        ]);
       pushIf(rows, d.album, 'Album');
       pushIf(rows, d.release, 'Selected standard release');
       pushIf(rows, d.source, 'Release source');

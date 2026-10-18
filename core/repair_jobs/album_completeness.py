@@ -470,23 +470,75 @@ class AlbumCompletenessJob(RepairJob):
 
     @staticmethod
     def _standard_owner(db, album_ids, expected_owner):
-        """Verify every fragment's explicit owner against current database rows."""
-        if type(expected_owner) is not int or expected_owner <= 0:
-            raise ValueError('Album ownership is missing, null or invalid')
+        """Resolve explicit ownership or a provably unambiguous legacy shared route.
+
+        Read raw configuration, not profile/library getters that default to the
+        admin/shared library on errors. Never persist inferred album ownership.
+        """
+        from core.edition_grouping import edition_group_key
+
+        if not album_ids or (expected_owner is not None
+                             and (type(expected_owner) is not int or expected_owner <= 0)):
+            raise ValueError('Album ownership is missing or invalid')
         conn = db._get_connection()
         try:
+            conn.execute('BEGIN')  # one consistent, read-only ownership/config snapshot
             placeholders = ','.join('?' for _ in album_ids)
             rows = conn.execute(
-                f'SELECT id, owner_profile_id FROM albums WHERE id IN ({placeholders})', album_ids
+                f'SELECT id, owner_profile_id, artist_id, title FROM albums WHERE id IN ({placeholders})', album_ids
             ).fetchall()
             if (len(rows) != len(album_ids)
-                    or any(type(row[1]) is not int or row[1] != expected_owner for row in rows)):
+                    or any(row[1] != expected_owner or type(row[1]) is not type(expected_owner) for row in rows)):
                 raise ValueError('Album ownership changed or could not be verified for all fragments')
-            if not conn.execute('SELECT id FROM profiles WHERE id = ?', (expected_owner,)).fetchone():
-                raise ValueError('Album owner profile does not exist')
+            # Explicit ownership remains authoritative, even with separate libraries
+            # or multiple admins. The chosen profile must still be able to download.
+            if expected_owner is not None:
+                profile = conn.execute('SELECT disabled, can_download FROM profiles WHERE id = ?',
+                                       (expected_owner,)).fetchone()
+                if not profile:
+                    raise ValueError('Album owner profile does not exist')
+                if profile[0] != 0 or profile[1] != 1:
+                    raise ValueError('Album owner profile is disabled or not permitted to download')
+                return expected_owner
+
+            logical_key = (rows[0][2], edition_group_key(rows[0][3]))
+            if any((row[2], edition_group_key(row[3])) != logical_key for row in rows):
+                raise ValueError('Conflicting legacy album fragments')
+            # Include rows excluded from the scan (e.g. locked/empty fragments),
+            # and detect a newly introduced fragment before any enqueue.
+            siblings = conn.execute('SELECT id, title, owner_profile_id FROM albums WHERE artist_id = ?',
+                                    (logical_key[0],)).fetchall()
+            siblings = [r for r in siblings if edition_group_key(r[1]) == logical_key[1]]
+            if ({r[0] for r in siblings} != set(album_ids) or any(r[2] is not None for r in siblings)):
+                raise ValueError('Conflicting or changed legacy album fragments; ownership cannot be inferred')
+
+            columns = {c[1] for c in conn.execute('PRAGMA table_info(profiles)')}
+            required = {'id', 'is_admin', 'disabled', 'can_download', 'library_mode', 'library_root'}
+            if not required <= columns:
+                raise ValueError('Legacy shared ownership requires complete profile/library configuration')
+            # Distinct server library selections also constitute separate libraries.
+            selectors = sorted(columns & {'plex_library_id', 'jellyfin_library_id', 'navidrome_library_id'})
+            fields = ['id', 'is_admin', 'disabled', 'can_download', 'library_mode', 'library_root', *selectors]
+            profiles = conn.execute('SELECT ' + ','.join(fields) + ' FROM profiles ORDER BY id').fetchall()
+            if not profiles:
+                raise ValueError('No configured profiles for legacy shared-library routing')
+            for profile in profiles:
+                if (type(profile[0]) is not int or profile[0] <= 0 or profile[1] not in (0, 1)
+                        or profile[2] not in (0, 1)):
+                    raise ValueError('Profile administrator/enabled status cannot be verified')
+                if profile[4] != 'shared' or profile[5] not in (None, ''):
+                    raise ValueError('Legacy albums require every configured profile to use the same shared library')
+            library_keys = {tuple(str(v).strip() if v is not None else '' for v in profile[6:]) for profile in profiles}
+            if len(library_keys) != 1:
+                raise ValueError('Profiles have conflicting shared server library selections')
+            admins = [profile for profile in profiles if profile[1] == 1 and profile[2] == 0]
+            if len(admins) != 1:
+                raise ValueError('Legacy shared albums require exactly one active administrator')
+            if admins[0][3] != 1:
+                raise ValueError('Shared-library administrator is not permitted to download')
+            return admins[0][0]
         finally:
             conn.close()
-        return expected_owner
 
     # Worker job instances survive scheduled runs. Cache reports only, never a
     # pending download plan; recheck local metadata and ownership on every scan.
@@ -559,6 +611,9 @@ class AlbumCompletenessJob(RepairJob):
                         cache[cache_key] = (time.monotonic(), fingerprint, deepcopy(plan))
             else:
                 cache.pop(cache_key, None)
+            if owner is not None:
+                plan['completion_profile_id'] = owner
+                plan['ownership_mode'] = 'legacy_shared_admin' if row.get('owner_profile_id') is None else 'explicit'
             if owner is not None and not local:
                 plan.update(status='skipped', reason='Local tracks unavailable; refusing to guess ownership', proposed_downloads=[])
             if plan['status'] == 'ready':
@@ -574,7 +629,9 @@ class AlbumCompletenessJob(RepairJob):
                 try:
                     # Metadata requests can take time. Refuse to queue if any
                     # fragment was reassigned/deleted while resolving releases.
-                    self._standard_owner(context.db, related, owner)
+                    current_owner = self._standard_owner(context.db, related, row.get('owner_profile_id'))
+                    if current_owner != owner:
+                        raise ValueError('Completion profile changed during scan')
                     result.auto_fixed += enqueue_standard_plan(context.db, plan, profile_id=owner)
                 except Exception as exc:
                     plan.update(status='skipped', reason=f'Ownership verification / wishlist enqueue failed: {exc}', proposed_downloads=[])
