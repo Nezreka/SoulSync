@@ -16945,61 +16945,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     line-height: 1.2;
 }
 
-.genre-track-count {
-    display: inline-block;
-    background: rgba(1, 255, 149, 0.15);
-    color: #01FF95;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 8px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(1, 255, 149, 0.3);
-    position: relative;
-    z-index: 2;
-}
-
-/* Dynamic Genre Loading States */
-.genre-loading-placeholder,
-.genre-error-placeholder {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-    text-align: center;
-    color: #888;
-}
-
-.genre-loading-placeholder .loading-spinner {
-    width: 40px;
-    height: 40px;
-    border: 3px solid rgba(1, 255, 149, 0.2);
-    border-top: 3px solid #01FF95;
-    border-radius: var(--radius-circle);
-    animation: spin 1s linear infinite;
-    margin-bottom: 15px;
-}
-
-
-.refresh-genres-btn {
-    background: linear-gradient(135deg, #01FF95 0%, #00E085 100%);
-    color: #000;
-    border: none;
-    padding: 10px 20px;
-    border-radius: var(--radius-md);
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 14px;
-    margin-top: 15px;
-    transition: all 0.3s ease;
-}
-
-.refresh-genres-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(1, 255, 149, 0.3);
-}
-
 /* Genre Images */
 .beatport-genre-item .genre-image {
     width: 50px;
