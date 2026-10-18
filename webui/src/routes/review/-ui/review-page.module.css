@@ -2910,7 +2910,8 @@
   min-height: 44px;
 }
 .applyPreview summary:focus-visible {
-  outline: var(--focus-ring);
+  outline: 2px solid rgb(var(--accent-rgb));
+  box-shadow: var(--focus-ring);
   outline-offset: 2px;
 }
 .applyPreview ul {
