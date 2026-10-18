@@ -134,6 +134,33 @@ The pre-deployment snapshot contained 884 albums: 758 needing input, 124 ready, 
 
 The audit identified Isis's “Weight”: a release-ID rewrite remained automatic despite fingerprint decoding failure. That now requires review and excludes its whole nine-action album from the batch. The two other unsuccessful fingerprint lookups proposed only library album-display cleanup, so remain eligible. The resulting unchanged-snapshot selector has 123 ready albums and 558 actions. Supported version text remains automatic only with exact recording support, close duration and no competing explicit version; explicit approvals remain effective.
 
-A compact policy query reads only classification inputs for list/count endpoints. Its results match the full evidence selector across all 884 captured albums; execution still uses complete evidence. One local replay measured 0.496 seconds for full classification and 0.177 seconds for compact classification. This is an isolated query measurement, not a whole-page speed claim.
+A compact policy query reads only classification inputs for list/count endpoints. Its results match the full evidence selector across all 884 captured albums; execution still uses complete evidence. Five interleaved local replays after warming both paths measured median classification times of 0.339 seconds with full evidence and 0.164 seconds with compact inputs. This is an isolated query measurement, not a whole-page speed claim.
 
-The UI loads the album list independently of global counts, fetches the selected album without waiting for both, avoids refetching its detail solely because a mode changed, and avoids whole-queue recounts on each running-album poll. Detail reads load only that case's saved choices. Deployed measurements and final verification follow after rollout.
+The UI loads the album list independently of global counts, fetches the selected album without waiting for both, avoids refetching its detail solely because a mode changed, and avoids whole-queue recounts on each running-album poll. Detail reads load only that case's saved choices. Deployed read-only checks measured the following. The endpoint figures are medians of three requests through the same local tunnel; background provider activity was not controlled, so they are observations rather than a throughput guarantee.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Queue summary response | 0.917 s | 0.344 s |
+| Queue list response | 1.435 s | 0.478 s |
+| First selected-album request begins after navigation | 5.6 s | 2.3 s |
+
+Under concurrent browser loading and reconciliation, some requests still exceeded one second. The shared application bundle and large technical-evidence payloads remain costs; this pass avoids new caching or changing the evidence/execution contract.
+
+### Completed regression and deployed UI checks
+
+- 1,146 backend tests passed across reconciliation, repair jobs, queue/API, legacy retagging, organization, requests, canonical resolution and pin guards.
+- 670 Review/Tools UI tests passed. Frontend checks completed with zero errors and 551 warnings; production builds succeeded.
+- 27 representative album/tab/viewport combinations passed at 1800, 840 and 390 pixels, with no JavaScript errors or horizontal document overflow. These covered Oceanic, Queen's Platinum Collection and Magnolia. The intentional mobile inspector was closed before changing tabs.
+- All 558 eligible actions had present source files, matching recorded size/mtime and no occupied or duplicate rename destinations. All 34 pending saved approvals still matched their evidence during the scan. The live confirmation agreed on 123 albums, 558 actions and one explicitly approved replacement.
+- The global batch was inspected without applying it. Mutating integration tests used temporary libraries. Wishlist cancellation preserves intent, and cancelled requests remain visible as wanted missing tracks without inflating the waiting count.
+- The legacy automatic canonical resolver and API-based organization now check accepted queue fields as well as generic finding actions. Tag-based organization can retain the reviewed metadata.
+- During rollout preparation, real downloads encountered slskd ENOSPC errors and a stale completed-download mount. No storage changes or wishlist cancellations were made for this verification. Successful live acquisition could not be demonstrated; publication, cancellation and exact assignment were exercised in integration tests.
+
+### Full reconciliation and final reassessment
+
+- Run 841 completed all 13,827 files / 1,600 folders in 1,921.68 seconds, with zero errors, zero automatic fixes and zero new findings.
+- The ready batch retained exactly the same 558 action IDs across 123 albums, including one approved replacement. All 34 pending approvals still matched their evidence; a repeated filesystem audit found no changed sources or conflicting rename targets.
+- All 1,567 logical album plans remained present. Comparing assignments and proposed changes, excluding inventory bookkeeping and expiring preview URLs, found changes only in Bastille's *Bad Blood X* and *motionblur*: existing manual assignments were restored. Motionblur's five accepted assignments no longer produced unresolved findings. Final totals were 883 albums: 758 needing input, 123 ready and two file-decision albums.
+- This comparison exposed a read-model inconsistency: a verified manual assignment could still display as uncertain. A follow-up correction treats it as settled and allows harmless dependent metadata through readiness checks, while retaining independent title/version, numbering and audio-conflict decisions. All 674 affected backend regression tests passed.
+- The final correction is being verified through targeted deployed reanalysis of the affected albums. No live user plan has been applied.
+
