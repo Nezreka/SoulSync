@@ -707,6 +707,7 @@ def tick(db: Any = None) -> Dict[str, int]:
                 )
             _forget_fallbacks(asin)
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
+            _announce_import(row, imported_path)
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
             # waiting for the rest of itself, which is a normal state a torrent
@@ -725,6 +726,28 @@ def tick(db: Any = None) -> Dict[str, int]:
                 )
                 _try_next_release(database, asin)
     return summary
+
+
+def _announce_import(row: Dict[str, Any], imported_path: str) -> None:
+    """Tell the automation engine a book landed, as the music importers do.
+
+    ``import_completed`` is the trigger Settings offers for "an import
+    finished"; without this a finished audiobook never fired it. Published on
+    the shared app-event bus so the monitor still never imports the engine.
+    Never raises: a notification must not fail an import that already happened.
+    """
+    try:
+        from core.app_events import publish
+
+        book = _book_for(row)
+        authors = book.get("author_names") or []
+        publish("import_completed", {
+            "track_count": "1",
+            "album_name": str(book.get("title") or row.get("title") or ""),
+            "artist": str(authors[0] if authors else row.get("author") or ""),
+        })
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not announce audiobook import: %s", exc)
 
 
 def _fallback_limit() -> int:
