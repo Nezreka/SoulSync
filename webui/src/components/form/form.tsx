@@ -288,7 +288,7 @@ type BaseButtonProps = ComponentPropsWithoutRef<typeof BaseButton>;
 export type ButtonProps = Omit<BaseButtonProps, 'className'> & {
   className?: string;
   size?: 'sm' | 'md' | 'lg' | 'icon';
-  variant?: 'default' | 'primary' | 'secondary' | 'ghost';
+  variant?: 'default' | 'primary' | 'secondary' | 'ghost' | 'danger';
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -298,6 +298,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   return (
     <BaseButton
       ref={ref}
+      data-slot="control"
       className={clsx(styles.button, className)}
       data-variant={variant}
       data-size={size}

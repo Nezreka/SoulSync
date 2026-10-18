@@ -1236,6 +1236,9 @@ def release_catalog_details(meta: dict) -> dict:
     names = [str((row.get('label') or {}).get('name') or '') for row in labels if isinstance(row, dict) and isinstance(row.get('label'), dict)]
     numbers = [str(row.get('catalog-number') or row.get('catalog_number') or '') for row in labels if isinstance(row, dict)]
     return {
+        'label_catalogs': [{'label': str((row.get('label') or {}).get('name') or ''),
+                            'catalog_number': str(row.get('catalog-number') or row.get('catalog_number') or '')}
+                           for row in labels if isinstance(row, dict) and isinstance(row.get('label'), dict)],
         'label': ', '.join(dict.fromkeys(filter(None, names))) or (meta.get('label') if isinstance(meta.get('label'), str) else ''),
         'catalog_number': ', '.join(dict.fromkeys(filter(None, numbers))) or meta.get('catalog_number') or '',
         'barcode': meta.get('barcode') or '',

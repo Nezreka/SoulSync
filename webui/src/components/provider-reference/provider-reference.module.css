@@ -1,0 +1,22 @@
+.providerReference {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.providerReference code {
+  font: 12px var(--font-mono);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.providerReference a {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 13px;
+}
+.providerReference a:hover,
+.providerReference a:focus-visible {
+  color: var(--accent);
+}

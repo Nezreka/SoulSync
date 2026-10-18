@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
+
 import type { TagPreview } from '../-artist-detail.tags-rg';
 
 import {
@@ -150,35 +152,15 @@ export function TagDiffTable({
 }) {
   const rows = changedOnly ? diff.filter((d) => d.changed) : diff;
   return (
-    <table className="tag-preview-table">
-      <thead>
-        <tr>
-          <th>Field</th>
-          <th>{changedOnly ? 'Current File' : 'Current File Tag'}</th>
-          <th />
-          <th>{changedOnly ? 'New Value' : 'DB Value'}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((d) => (
-          <tr className={d.changed ? 'tag-diff-changed' : 'tag-diff-same'} key={d.field}>
-            <td className="tag-field-name">{d.field}</td>
-            <td className="tag-file-value">
-              {d.file_value || <span className="tag-empty">empty</span>}
-            </td>
-            <td className="tag-diff-indicator">
-              {d.changed ? (
-                <span className="tag-diff-arrow">→</span>
-              ) : (
-                <span className="tag-diff-check">✓</span>
-              )}
-            </td>
-            <td className="tag-db-value">
-              {d.db_value || <span className="tag-empty">empty</span>}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <MetadataComparison
+      currentLabel={changedOnly ? 'Current File' : 'Current File Tag'}
+      plannedLabel={changedOnly ? 'New Value' : 'DB Value'}
+      rows={rows.map((d) => ({
+        field: d.field,
+        current: d.file_value,
+        planned: d.db_value,
+        changed: d.changed,
+      }))}
+    />
   );
 }

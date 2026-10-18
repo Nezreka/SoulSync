@@ -1,15 +1,15 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  z-index: 10999;
+  z-index: var(--z-modal);
   background: rgba(5, 9, 16, 0.86);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(6px);
 }
 
 .viewport {
   position: fixed;
   inset: 0;
-  z-index: 11000;
+  z-index: calc(var(--z-modal) + 1);
   display: grid;
   place-items: center;
   padding: 18px;
@@ -21,9 +21,9 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border-radius: 28px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--white-a10);
-  background: linear-gradient(180deg, rgba(16, 22, 34, 0.98), rgba(12, 16, 25, 0.98));
+  background: var(--surface-overlay);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
 }
 

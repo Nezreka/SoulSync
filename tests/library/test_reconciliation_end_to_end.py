@@ -2450,3 +2450,15 @@ def test_failed_catalogue_reanalysis_preserves_plan_and_findings(tmp_path, monke
     assert result.stopped_early and result.metrics['catalogue_incomplete']
     assert state() == before
     assert result.findings_created == 0
+
+
+def test_release_catalog_details_preserves_label_catalog_associations():
+    from core.repair_jobs.library_reconciliation import release_catalog_details
+    result = release_catalog_details({'label-info': [
+        {'label': {'name': 'First label'}, 'catalog-number': 'A-1'},
+        {'label': {'name': 'Second label'}, 'catalog-number': 'B-2'},
+    ]})
+    assert result['label_catalogs'] == [
+        {'label': 'First label', 'catalog_number': 'A-1'},
+        {'label': 'Second label', 'catalog_number': 'B-2'},
+    ]

@@ -1,0 +1,72 @@
+.comparison {
+  min-width: 0;
+  container-type: inline-size;
+}
+.comparison table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.comparison th,
+.comparison td {
+  text-align: left;
+  vertical-align: top;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--line);
+}
+.comparison th {
+  color: var(--text-2);
+  font-weight: 600;
+}
+.comparison th:first-child {
+  width: 25%;
+}
+.comparison td {
+  color: var(--text-1);
+}
+.comparison td button {
+  margin-left: 8px;
+}
+.comparison tr[data-changed='true'] td:last-child {
+  background: rgba(var(--info-rgb), 0.06);
+}
+.comparison em {
+  color: var(--text-3);
+  font-style: normal;
+}
+.feedback:empty {
+  display: none;
+}
+.feedback {
+  color: var(--text-2);
+  font-size: 12px;
+}
+@container (max-width:520px) {
+  .comparison thead {
+    display: none;
+  }
+  .comparison tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding-block: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .comparison th:first-child {
+    width: auto;
+  }
+  .comparison th,
+  .comparison td {
+    display: block;
+    border: 0;
+    padding: 6px 8px;
+  }
+  .comparison td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    color: var(--text-2);
+    margin-bottom: 3px;
+  }
+}

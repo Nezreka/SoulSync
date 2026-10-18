@@ -1,8 +1,9 @@
+import { trackDuration } from '@/components/track/track-format';
+
 import type { AlbumAssignment, ReviewFinding } from '../-review.api';
 
 export function shortDuration(value: number | null | undefined): string {
-  if (!value || !Number.isFinite(value)) return '';
-  return `${Math.floor(value / 60000)}:${String(Math.floor((value % 60000) / 1000)).padStart(2, '0')}`;
+  return trackDuration(value, '');
 }
 
 export function assignmentKey(row: AlbumAssignment): string {

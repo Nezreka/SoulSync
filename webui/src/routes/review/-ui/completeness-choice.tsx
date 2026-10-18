@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { Button, Checkbox } from '@/components/form/form';
+
 import type { ReviewFinding } from '../-review.api';
 
 import styles from './review-page.module.css';
@@ -40,14 +42,11 @@ export function CompletenessChoice({
           const key = slotKey(slot);
           return (
             <label key={`${key}-${index}`}>
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={wanted.includes(key)}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                   setWanted((current) =>
-                    event.target.checked
-                      ? [...current, key]
-                      : current.filter((value) => value !== key),
+                    checked ? [...current, key] : current.filter((value) => value !== key),
                   )
                 }
               />
@@ -57,16 +56,16 @@ export function CompletenessChoice({
         })}
       </div>
       <div className={styles.decisionActions}>
-        <button type="button" disabled={busy} onClick={() => onChoose('complete')}>
+        <Button type="button" disabled={busy} onClick={() => onChoose('complete')}>
           I want the complete album
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           disabled={busy}
           onClick={() => onChoose(`partial:${JSON.stringify(wanted)}`)}
         >
           Keep as partial{wanted.length ? ` · ${wanted.length} wanted` : ''}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { trackDuration } from '@/components/track/track-format';
 /**
  * The Enhanced Management view's data layer, ported from toggleEnhancedView /
  * _libraryViewModeKey / renderEnhancedView / renderEnhancedStatsBar /
@@ -239,12 +240,7 @@ export function enhancedStats(data: EnhancedData): EnhancedStats {
 
 /** m:ss, or a dash for a track with no known duration. */
 export function formatDurationMs(ms: unknown): string {
-  const value = Number(ms);
-  if (!value) return '-';
-  const totalSeconds = Math.floor(value / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  return trackDuration(ms, '-');
 }
 
 /** "3 releases · 40 tracks" — singular for exactly one release. */

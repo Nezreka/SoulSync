@@ -24,6 +24,7 @@ it('plays the exact local file through the shared player without another audio e
     expect(window.playTrackList).toHaveBeenCalledWith(
       [{ file_path: '/music/song.flac', title: 'Song', artist: 'Artist', duration: 200 }],
       'Review Queue',
+      { audition: true },
     ),
   );
   expect(container.querySelector('audio')).toBeNull();

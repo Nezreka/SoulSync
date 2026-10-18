@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /**
  * The findings surface — library health, the grouped inbox, and the finding
  * list that lives inside whichever group is open.
@@ -29,7 +30,7 @@
  * duplicate), so the backend refuses an action that spans more than one type.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ReviewDependency } from '@/components/review-dependency/review-dependency';
 
 import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
@@ -1321,14 +1322,7 @@ export function FindingsSurface({
         onPickType={pickType}
       />
 
-      {conflictingReview && (
-        <div className="repair-bulk-bar">
-          This action conflicts with an accepted album decision.{' '}
-          <a href={`/review?case=${encodeURIComponent(conflictingReview)}`}>
-            Review the album plan →
-          </a>
-        </div>
-      )}
+      {conflictingReview && <ReviewDependency caseId={conflictingReview} />}
       {bulkRunBar}
 
       {cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (

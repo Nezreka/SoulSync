@@ -21,27 +21,27 @@
 }
 
 .notice[data-tone='info'] {
-  border-color: rgba(var(--accent-light-rgb), 0.24);
-  background: rgba(var(--accent-light-rgb), 0.08);
-  color: rgba(255, 232, 188, 0.94);
+  border-color: rgba(var(--info-rgb), 0.3);
+  background: rgba(var(--info-rgb), 0.08);
+  color: var(--text-1);
 }
 
 .notice[data-tone='success'] {
-  border-color: rgba(110, 220, 150, 0.26);
-  background: rgba(110, 220, 150, 0.08);
-  color: rgba(210, 255, 228, 0.94);
+  border-color: rgba(var(--success-rgb), 0.3);
+  background: rgba(var(--success-rgb), 0.08);
+  color: var(--text-1);
 }
 
 .notice[data-tone='warning'] {
-  border-color: rgba(255, 200, 100, 0.26);
-  background: rgba(255, 200, 100, 0.08);
-  color: rgba(255, 232, 188, 0.94);
+  border-color: rgba(var(--warning-rgb), 0.3);
+  background: rgba(var(--warning-rgb), 0.08);
+  color: var(--text-1);
 }
 
 .notice[data-tone='danger'] {
-  border-color: rgba(255, 120, 120, 0.26);
-  background: rgba(255, 120, 120, 0.08);
-  color: rgba(255, 214, 214, 0.94);
+  border-color: rgba(var(--danger-rgb), 0.3);
+  background: rgba(var(--danger-rgb), 0.08);
+  color: var(--text-1);
 }
 
 .badge {
@@ -63,25 +63,34 @@
 }
 
 .badge[data-tone='info'] {
-  color: rgb(var(--accent-light-rgb));
-  background: rgba(var(--accent-rgb), 0.12);
-  border-color: rgba(var(--accent-light-rgb), 0.12);
+  color: var(--info);
+  background: rgba(var(--info-rgb), 0.1);
+  border-color: rgba(var(--info-rgb), 0.3);
 }
 
 .badge[data-tone='success'] {
-  color: #4ade80;
-  background: rgba(74, 222, 128, 0.12);
-  border-color: rgba(74, 222, 128, 0.12);
+  color: var(--success);
+  background: rgba(var(--success-rgb), 0.1);
+  border-color: rgba(var(--success-rgb), 0.3);
 }
 
 .badge[data-tone='warning'] {
-  color: #fbbf24;
-  background: rgba(251, 191, 36, 0.12);
-  border-color: rgba(251, 191, 36, 0.12);
+  color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.1);
+  border-color: rgba(var(--warning-rgb), 0.3);
 }
 
 .badge[data-tone='danger'] {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.12);
-  border-color: rgba(248, 113, 113, 0.12);
+  color: var(--danger-light);
+  background: rgba(var(--danger-rgb), 0.1);
+  border-color: rgba(var(--danger-rgb), 0.3);
+}
+
+.badge {
+  gap: 5px;
+}
+.badge svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }

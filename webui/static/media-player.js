@@ -134,6 +134,7 @@ function _stripSourceIdPrefix(value) {
 function setTrackInfo(track) {
     currentTrack = track;
     window.__ssCurrentTrack = track;
+    window.dispatchEvent(new CustomEvent('soulsync:player-track', { detail: track }));
     if (typeof window.getCurrentTrack !== 'function') {
         window.getCurrentTrack = function () { return currentTrack; };
     }
@@ -2912,7 +2913,7 @@ async function playQueueItem(index, options = {}) {
         // Auto-skip to next track on failure instead of stopping the queue
         npLoadingQueueItem = false;
         const nextIdx = npQueueIndex + 1;
-        const skipping = nextIdx < npQueue.length;
+        const skipping = !options.audition && nextIdx < npQueue.length;
         if (skipping) {
             setTimeout(() => { if (isCurrent()) void playQueueItem(nextIdx, options); }, 500);
         }
@@ -3857,8 +3858,19 @@ async function playTrackList(tracks, contextName, options = {}) {
         showToast('This list has no usable track metadata', 'info');
         return { status: 'empty' };
     }
+    if (options.audition && (list.length !== 1 || !list[0].file_path)) return { status: 'empty' };
     window.cancelPendingPlayback();
     npCancelCrossfade();
+    if (options.audition) {
+        if (list.length !== 1 || !list[0].file_path) return { status: 'empty' };
+        // Reuse an existing exact file, otherwise insert immediately after the
+        // current track. Never clear the user's queue for a review audition.
+        const existing = npQueue.findIndex(t => t.file_path === list[0].file_path);
+        const index = existing >= 0 ? existing : Math.min(npQueue.length, Math.max(0, npQueueIndex + 1));
+        if (existing < 0) npQueue.splice(index, 0, ...npPrepareQueueTracks(list));
+        renderNpQueue();
+        return await playQueueItem(index, options);
+    }
     npRadioMode = false;
     clearQueue();
     if (audioPlayer && !audioPlayer.paused) audioPlayer.pause();

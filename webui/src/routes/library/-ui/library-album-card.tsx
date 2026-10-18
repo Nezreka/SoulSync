@@ -1,6 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
-
-import { thumb } from '@/platform/artwork-thumb';
+import { Artwork } from '@/components/artwork/artwork';
 
 import type { LibraryAlbum } from '../-library.types';
 
@@ -28,30 +26,12 @@ interface Props {
  * straight to the placeholder.
  */
 function AlbumImage({ album }: { album: LibraryAlbum }) {
-  const art = album.thumb_url?.trim();
-  const [broken, setBroken] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const imgRef = useRef<HTMLImageElement | null>(null);
-
-  useEffect(() => {
-    setLoaded(false);
-    // A cached image can be complete before onLoad is wired; read it off the
-    // element so a paged-back card does not sit invisible.
-    const el = imgRef.current;
-    if (el && el.complete && el.naturalWidth > 0) setLoaded(true);
-  }, [art]);
-
-  if (!art || broken) return <div className="library-artist-image-fallback">💿</div>;
-
   return (
-    <img
-      ref={imgRef}
-      src={thumb(art, 'grid')}
-      alt={album.title}
-      loading="lazy"
-      className={loaded ? 'is-loaded' : 'is-loading'}
-      onLoad={() => setLoaded(true)}
-      onError={() => setBroken(true)}
+    <Artwork
+      url={album.thumb_url?.trim()}
+      title={album.title}
+      variant="grid"
+      className="is-loaded"
     />
   );
 }

@@ -1,8 +1,13 @@
 import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 
+import { Button } from '@/components/form/form';
+import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
+import { Badge } from '@/components/primitives';
+import { RecordInspector } from '@/components/record-inspector/record-inspector';
+import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
+
 import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
-import { ArtistRecordModal } from '../../artist-detail/-ui/artist-db-record';
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
 import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
@@ -106,10 +111,13 @@ export function StatusChip({
   children: ReactNode;
 }) {
   return (
-    <span className={styles.statusChip} data-tone={tone}>
+    <Badge
+      className={styles.statusChip}
+      tone={tone === 'good' ? 'success' : tone === 'muted' ? 'neutral' : tone}
+    >
       <EvidenceIcon name={icon} />
       {children}
-    </span>
+    </Badge>
   );
 }
 
@@ -495,28 +503,6 @@ function candidateAssignments(candidate: Data): string {
   return `${label(candidate.total_slots)}::${pairs}::missing=${missing}::extra=${extra}`;
 }
 
-function ReleaseBadges({ release }: { release: Data }) {
-  const country = label(release.country);
-  const flag =
-    /^[A-Z]{2}$/.test(country) && country !== 'XE' && country !== 'XW'
-      ? String.fromCodePoint(...country.split('').map((letter) => letter.charCodeAt(0) + 127397))
-      : '🌐';
-  const badges = [
-    label(release.format),
-    country
-      ? `${flag} ${country === 'XW' ? 'Worldwide' : country === 'XE' ? 'Europe' : country}`
-      : '',
-    label(release.disambiguation),
-  ].filter(Boolean);
-  return (
-    <span className={styles.releaseBadges}>
-      {badges.map((value) => (
-        <span key={value}>{value}</span>
-      ))}
-    </span>
-  );
-}
-
 export function ReleaseComparison({
   candidates,
   selected,
@@ -600,6 +586,7 @@ export function ReleaseComparison({
                   <button
                     type="button"
                     data-selected={selected === index || undefined}
+                    aria-pressed={selected === index}
                     onClick={() => onSelect(index)}
                   >
                     <span className={styles.candidateRank}>{index + 1}</span>
@@ -613,20 +600,25 @@ export function ReleaseComparison({
                       <small>
                         {[candidate.source, candidate.date].map(label).filter(Boolean).join(' · ')}
                       </small>
-                      <ReleaseBadges release={candidate} />
-                      {isCurrent && <small>Current library release</small>}
+                      <ReleaseBadges
+                        format={label(candidate.format)}
+                        country={label(candidate.country)}
+                        disambiguation={label(candidate.disambiguation)}
+                      />
+                      {isCurrent && <small>Selected for this album plan</small>}
                     </span>
                     <CandidateFit candidate={candidate} />
                   </button>
                   {selected === index && onPin && (
-                    <button
+                    <Button
+                      variant="primary"
                       className={styles.candidateUse}
                       type="button"
                       disabled={busy}
                       onClick={() => onPin(index)}
                     >
                       Use this release
-                    </button>
+                    </Button>
                   )}
                 </div>
               );
@@ -639,12 +631,32 @@ export function ReleaseComparison({
           <div className={styles.releaseDetailHeader}>
             <div>
               <strong>{label(active.release_title) || `Candidate ${selected + 1}`}</strong>
-              <ReleaseBadges release={active} />
+              <ReleaseBadges
+                format={label(active.format)}
+                country={label(active.country)}
+                disambiguation={label(active.disambiguation)}
+              />
               <dl className={styles.factList}>
                 {[
                   ['Release date', active.date],
-                  ['Label', active.label],
-                  ['Catalog number', active.catalog_number],
+                  [
+                    'Label',
+                    Array.isArray(active.label_catalogs) && active.label_catalogs.length
+                      ? objects(active.label_catalogs)
+                          .map((row) =>
+                            [label(row.label), label(row.catalog_number)]
+                              .filter(Boolean)
+                              .join(' · '),
+                          )
+                          .join('; ')
+                      : active.label,
+                  ],
+                  [
+                    'Catalog number',
+                    Array.isArray(active.label_catalogs) && active.label_catalogs.length
+                      ? null
+                      : active.catalog_number,
+                  ],
                   ['Discs', active.disc_count],
                   ['Barcode', active.barcode],
                 ]
@@ -838,18 +850,14 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
         <div className={styles.sectionHeading}>
           <h5>Local evidence</h5>
           {finding.file_path && (
-            <button
-              type="button"
-              className="artist-db-record-btn"
-              onClick={() => setRecordOpen(true)}
-            >
+            <Button size="sm" variant="ghost" type="button" onClick={() => setRecordOpen(true)}>
               DB Record
-            </button>
+            </Button>
           )}
         </div>
         {recordOpen && (
-          <ArtistRecordModal
-            artistName={currentTitle || finding.file_path?.split('/').pop() || 'Track'}
+          <RecordInspector
+            name={currentTitle || finding.file_path?.split('/').pop() || 'Track'}
             recordKind="Track"
             endpoint={
               details.track_id != null
@@ -1071,11 +1079,15 @@ export function ReconciliationEvidence({
   onKeepCopy,
   busy = false,
   prominent = false,
+  controls,
+  audio: audioControl,
 }: {
   finding: ReviewFinding;
   onKeepCopy?: (trackId: string) => void;
   busy?: boolean;
   prominent?: boolean;
+  controls?: ReactNode;
+  audio?: ReactNode;
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
@@ -1146,20 +1158,17 @@ export function ReconciliationEvidence({
           <h4>
             <EvidenceIcon name="check" /> Proposed changes
           </h4>
-          <div className={styles.changeList}>
-            {shownChanges.map((change) => {
-              return (
-                <div key={`${change.field}-${change.old}-${change.next}`}>
-                  <strong>{proposedFieldLabel(change.field, change.locations)}</strong>
-                  <span className={styles.oldValue}>{change.old || '—'}</span>
-                  <EvidenceIcon name="arrow" />
-                  <span className={styles.newValue}>{change.next || '—'}</span>
-                </div>
-              );
-            })}
-          </div>
+          <MetadataComparison
+            rows={shownChanges.map((change) => ({
+              field: proposedFieldLabel(change.field, change.locations),
+              current: change.old,
+              planned: change.next,
+            }))}
+          />
         </section>
       )}
+      {controls}
+      {audioControl}
       <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
       {ambiguityReasons.length > 0 && (
         <section className={styles.problemCard} data-tone="warning">

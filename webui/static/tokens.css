@@ -14,6 +14,17 @@
 */
 
 :root {
+    /* Shared layout and opaque overlay surfaces. */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --surface-overlay: #18181d;
+    --surface-inset: #101014;
+    --focus-ring: 0 0 0 3px rgba(var(--accent-rgb), .24);
+
     /* ── Accent ─────────────────────────────────────────────────────────
        Defaults only. The inline <style id="soulsync-initial-appearance"> in
        index.html sets the user's accent before first paint, and init.js

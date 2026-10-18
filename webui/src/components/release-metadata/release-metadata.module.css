@@ -1,0 +1,11 @@
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block: 6px;
+}
+.badges span {
+  white-space: normal;
+  text-align: left;
+  font-weight: 500;
+}

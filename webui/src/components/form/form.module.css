@@ -573,3 +573,25 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+.button[data-variant='danger'] {
+  color: var(--danger-light);
+  background: rgba(var(--danger-rgb), 0.12);
+  border-color: rgba(var(--danger-rgb), 0.4);
+}
+.button[data-variant='danger']:hover:not(:disabled) {
+  background: rgba(var(--danger-rgb), 0.2);
+  border-color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .textInput,
+  .textArea,
+  .optionButton,
+  .optionCard {
+    transition: none;
+  }
+  .button:hover:not(:disabled) {
+    transform: none;
+  }
+}

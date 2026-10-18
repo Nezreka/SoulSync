@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AudioFormatBadge } from '@/components/audio-format-badge/audio-format-badge';
+import { Button } from '@/components/form/form';
 
 import { PlayIcon } from '../../artist-detail/-ui/lib-icons';
 import styles from './review-page.module.css';
@@ -42,11 +43,35 @@ export function ReviewAudio({
   const localFormat = localPath.split('.').pop()?.toUpperCase() || '';
   const searchQuery = [artist, comparisonTitle || localTitle].filter(Boolean).join(' ');
   const [playError, setPlayError] = useState('');
+  const [playingPath, setPlayingPath] = useState('');
+  const [pendingPath, setPendingPath] = useState('');
+  useEffect(() => {
+    const audio = document.getElementById('audio-player') as HTMLAudioElement | null;
+    const update = () => {
+      const value = window.getCurrentTrack?.();
+      const track = value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+      setPlayingPath(
+        audio && !audio.paused ? String(track?.filename || track?.file_path || '') : '',
+      );
+    };
+    update();
+    window.addEventListener('soulsync:player-track', update);
+    audio?.addEventListener('play', update);
+    audio?.addEventListener('pause', update);
+    audio?.addEventListener('ended', update);
+    return () => {
+      window.removeEventListener('soulsync:player-track', update);
+      audio?.removeEventListener('play', update);
+      audio?.removeEventListener('pause', update);
+      audio?.removeEventListener('ended', update);
+    };
+  }, []);
   // Only submit an exact local path. A missing slot must never trigger the
   // shared player's metadata search/download fallback.
   const playable = (path?: string) => Boolean(path && /\.[a-z0-9]{2,5}$/i.test(path));
   const choose = async (path: string, title: string, durationMs?: number) => {
     setPlayError('');
+    setPendingPath(path);
     try {
       if (!window.playTrackList) throw new Error('The library player is unavailable.');
       const result = await window.playTrackList(
@@ -59,12 +84,15 @@ export function ReviewAudio({
           },
         ],
         'Review Queue',
+        { audition: true },
       );
       if (result && !['played', 'superseded'].includes(result.status)) {
         throw new Error(result.error || 'This local audio could not be played.');
       }
     } catch (error) {
       setPlayError((error as Error).message);
+    } finally {
+      setPendingPath('');
     }
   };
   return (
@@ -74,17 +102,18 @@ export function ReviewAudio({
           {playable(localPath) && (
             <>
               {localFormat && <AudioFormatBadge format={localFormat} />}
-              <button
+              <Button
                 type="button"
+                disabled={Boolean(pendingPath)}
                 onClick={() => void choose(localPath, localTitle, localDurationMs)}
               >
-                <PlayIcon size={14} /> Play local file
+                <PlayIcon size={14} /> {pendingPath === localPath ? 'Starting…' : 'Play local file'}
                 {localDurationMs ? <small>{clock(localDurationMs / 1000)}</small> : null}
-              </button>
+              </Button>
             </>
           )}
           {playable(comparisonPath) && (
-            <button
+            <Button
               type="button"
               onClick={() =>
                 void choose(
@@ -95,7 +124,7 @@ export function ReviewAudio({
               }
             >
               <PlayIcon size={14} /> Play other local copy
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -136,6 +165,12 @@ export function ReviewAudio({
           Search YouTube ↗
         </a>
       </div>
+      {playingPath && [localPath, comparisonPath].includes(playingPath) && (
+        <small role="status">
+          Playing {playingPath === localPath ? 'this local file' : 'the other local copy'} in the
+          music player.
+        </small>
+      )}
       {playError && <small role="alert">{playError}</small>}
     </section>
   );

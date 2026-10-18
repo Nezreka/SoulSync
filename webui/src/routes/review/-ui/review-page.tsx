@@ -1,5 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { ActionMenu } from '@/components/action-menu/action-menu';
+import { useConfirmDialog } from '@/components/dialog/use-confirm-dialog';
+import { Button, Select, TextInput } from '@/components/form/form';
+import { PageHeader } from '@/components/page-header';
+import { Notice } from '@/components/primitives';
+
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
 import {
@@ -96,9 +102,11 @@ function caseStatusSummary(item: ReviewCaseSummary): string {
   const status =
     primary?.category === 'pending_fulfillment'
       ? 'Waiting for download'
-      : item.plan.status === 'ready'
-        ? 'Ready'
-        : 'Needs input';
+      : item.plan.status === 'waiting'
+        ? 'Waiting for download'
+        : item.plan.status === 'ready'
+          ? 'Ready'
+          : 'Needs input';
   const more = ordered.length > 1 ? ` · +${ordered.length - 1} more` : '';
   return `${status}${primary ? ` · ${primary.label}` : ''} · ${item.pending} action${item.pending === 1 ? '' : 's'}${more}`;
 }
@@ -279,6 +287,7 @@ function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChang
 }
 
 export function ReviewPage() {
+  const { confirm, dialog } = useConfirmDialog();
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialMode = initialParams.get('mode');
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
@@ -289,7 +298,9 @@ export function ReviewPage() {
   const [reviewCase, setReviewCase] = useState<ReviewCase | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const trackListScroll = useRef(0);
+  const inspectorRef = useRef<HTMLElement | null>(null);
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [trackFilter, setTrackFilter] = useState('');
   const [trackView, setTrackView] = useState<TrackView>('issues');
@@ -317,7 +328,12 @@ export function ReviewPage() {
   const [operationCase, setOperationCase] = useState<string | null>(
     window.sessionStorage.getItem('review-operation-case'),
   );
-  const [error, setError] = useState('');
+  const [error, setErrorValue] = useState('');
+  const [errorCase, setErrorCase] = useState<string | null>(null);
+  const setError = useCallback((value: string, scope?: string | null) => {
+    setErrorValue(value);
+    setErrorCase(value ? (scope === undefined ? selectedCaseRef.current || null : scope) : null);
+  }, []);
   const [notice, setNotice] = useState('');
   const [globalNotice, setGlobalNotice] = useState('');
   const [reloadBusy, setReloadBusy] = useState(false);
@@ -597,7 +613,6 @@ export function ReviewPage() {
     if (first) {
       setActiveId(first.finding_id ?? null);
       setActiveRowKey(assignmentKey(first));
-      setInspectorOpen(true);
     }
   }, [albumView, reviewCase, activeRowKey, activeId, assignments]);
 
@@ -690,7 +705,7 @@ export function ReviewPage() {
         return true;
       if (refreshError.current) {
         const previous = refreshError.current;
-        setError((current) => (current === previous ? '' : current));
+        setErrorValue((current) => (current === previous ? '' : current));
         refreshError.current = null;
       }
       if (
@@ -939,33 +954,43 @@ export function ReviewPage() {
       };
       if (!preview.action_count)
         throw new Error('No fully decided album plans are ready to apply.');
-      const shown = scopeCaseId ? preview.albums : preview.albums.slice(0, 8);
-      const message =
-        `Apply ${preview.action_count} planned actions across ${preview.albums.length} fully decided album${preview.albums.length === 1 ? '' : 's'}?\n${preview.file_actions ? `${preview.file_actions} file actions are included. Quarantined files remain recoverable.\n` : ''}\n` +
-        shown
-          .map(
-            (album) =>
-              `${album.album}\n${album.actions
-                .slice(0, scopeCaseId ? 50 : 5)
-                .map((action) => `• ${action.description}`)
-                .join(
-                  '\n',
-                )}${album.actions.length > (scopeCaseId ? 50 : 5) ? `\n… ${album.actions.length - (scopeCaseId ? 50 : 5)} more actions` : ''}`,
-          )
-          .join('\n\n') +
-        (preview.albums.length > shown.length
-          ? `\n\n… and ${preview.albums.length - shown.length} more fully decided albums. Review the ready batch to inspect every album.`
-          : '') +
-        (organize ? `\n\nThen organize into: ${organizationMoves.join(', ')}` : '') +
-        '\n\nAlbums with open decisions are excluded. The selected plans will be checked again before execution.';
-      const confirmed = window.showConfirmDialog
-        ? await window.showConfirmDialog({
-            title: 'Apply ready album plans',
-            message,
-            destructive: preview.file_actions > 0,
-            confirmText: 'Apply plans',
-          })
-        : window.confirm(message);
+      const message = (
+        <>
+          <p>
+            Apply {preview.action_count} planned actions across {preview.albums.length} fully
+            decided album{preview.albums.length === 1 ? '' : 's'}?
+          </p>
+          {preview.file_actions > 0 && (
+            <Notice tone="warning">
+              {preview.file_actions} file actions are included. Files moved to quarantine remain
+              recoverable.
+            </Notice>
+          )}
+          {preview.albums.map((album, index) => (
+            <details key={`${album.album}-${index}`} open={Boolean(scopeCaseId)}>
+              <summary>
+                {album.album} · {album.actions.length} actions
+              </summary>
+              <ul>
+                {album.actions.map((action, i) => (
+                  <li key={i}>{action.description}</li>
+                ))}
+              </ul>
+            </details>
+          ))}
+          {organize && <p>Then organize into: {organizationMoves.join(', ')}</p>}
+          <p>
+            Albums with open decisions are excluded. These plans will be checked again before
+            execution. If a plan changes, review a fresh preview before applying.
+          </p>
+        </>
+      );
+      const confirmed = await confirm({
+        title: 'Apply ready album plans',
+        message,
+        destructive: preview.file_actions > 0,
+        confirmText: 'Apply plans',
+      });
       if (!confirmed) return;
       setApplyBusy(true);
       const result = await fetch('/api/repair/review-queue/apply-ready', {
@@ -979,7 +1004,7 @@ export function ReviewPage() {
     } catch (cause) {
       setApplyBusy(false);
       setApplyProgress('');
-      setError((cause as Error).message);
+      setError((cause as Error).message, scopeCaseId || null);
     } finally {
       setBusy(false);
     }
@@ -987,13 +1012,11 @@ export function ReviewPage() {
 
   const requestAllMissing = async (missingCount: number) => {
     if (!reviewCase || !missingCount) return;
-    const confirmed = window.showConfirmDialog
-      ? await window.showConfirmDialog({
-          title: 'Request missing album tracks',
-          message: `Request ${missingCount === 1 ? 'the missing track' : `all ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
-          confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
-        })
-      : window.confirm(`Request ${missingCount} absent tracks?`);
+    const confirmed = await confirm({
+      title: 'Request missing album tracks',
+      message: `Request ${missingCount === 1 ? 'the missing track' : `all ${missingCount} missing tracks`} from the selected release? ${missingCount === 1 ? 'It will' : 'They will'} be added to the wishlist.`,
+      confirmText: `Request ${missingCount} track${missingCount === 1 ? '' : 's'}`,
+    });
     if (!confirmed) return;
     setApplyBusy(true);
     setError('');
@@ -1162,26 +1185,27 @@ export function ReviewPage() {
   const readyActionControls =
     reviewCase && plan.can_apply_ready ? (
       <div className={styles.inlineActions}>
-        <button
+        <Button
           type="button"
+          variant="primary"
           className={styles.primary}
           disabled={mutationBusy}
           onClick={() => void applyReady(reviewCase.case_id)}
         >
           Apply {plan.ready} ready change
           {plan.ready === 1 ? '' : 's'}
-        </button>
+        </Button>
         {plan.can_organize &&
           organizationMoves.length > 0 &&
           reviewMetadataCount === 0 &&
           reviewCase.album_id != null && (
-            <button
+            <Button
               type="button"
               disabled={mutationBusy}
               onClick={() => void applyReady(reviewCase.case_id, true)}
             >
               Apply ready edits, then organize folder
-            </button>
+            </Button>
           )}
       </div>
     ) : null;
@@ -1190,7 +1214,7 @@ export function ReviewPage() {
     readyChangeGroups.length > 0 ? (
       <div className={styles.readySummaryList} aria-label="Ready change summary">
         {readyChangeGroups.map((group) => (
-          <button
+          <Button
             key={group.key}
             type="button"
             onClick={() => {
@@ -1208,7 +1232,7 @@ export function ReviewPage() {
             <b>
               {group.count} track{group.count === 1 ? '' : 's'}
             </b>
-          </button>
+          </Button>
         ))}
       </div>
     ) : null;
@@ -1262,7 +1286,15 @@ export function ReviewPage() {
         selected={selected}
         numberingMode={reviewCase?.album_plan?.numbering_mode}
         onSelect={(findingId, rowKey) => {
+          trackListScroll.current = window.scrollY;
           selectAssignment(findingId, rowKey);
+          requestAnimationFrame(() => {
+            const inspector = inspectorRef.current;
+            if (inspector && getComputedStyle(inspector).position === 'static') {
+              inspector.focus();
+              inspector.scrollIntoView({ block: 'start' });
+            }
+          });
         }}
       />
     );
@@ -1270,95 +1302,97 @@ export function ReviewPage() {
 
   return (
     <main className={`page-shell review-queue-root ${styles.page}`}>
-      <header className={styles.header}>
-        <div>
-          <a href="/tools" className={styles.back}>
-            ← Library Maintenance
-          </a>
-          <h1>Review Queue</h1>
-          <p>Review album plans, apply supported changes, and resolve exceptions.</p>
-        </div>
-        <div className={styles.headerTools}>
-          <div className={styles.headerCount}>
-            <strong>
-              {queueTotals || queue
-                ? `${queueTotals?.all ?? queue?.total} album${(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}`
-                : 'Loading queue…'}
-            </strong>
-            <span>
-              {queueTotals?.ready ?? 0} ready album{queueTotals?.ready === 1 ? '' : 's'} ·{' '}
-              {queue?.ready_total || 0} ready change{queue?.ready_total === 1 ? '' : 's'}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setQueueMode('ready');
-              setPage(0);
-              setCaseId('');
-            }}
-          >
-            Review ready batch
-          </button>
-          <button
-            type="button"
-            className={styles.safeAction}
-            disabled={mutationBusy || !queue?.ready_total}
-            onClick={() => void applyReady()}
-          >
-            {applyBusy && !operationCase
-              ? applyProgress || 'Applying…'
-              : `Apply ready changes (${queue?.ready_total || 0})`}
-          </button>
-          <div className={styles.inlineActions} aria-label="Queue actions">
-            <button
+      {dialog}
+      <a href="/tools" className={styles.back}>
+        ← Library Maintenance
+      </a>
+      <PageHeader
+        title="Review Queue"
+        subtitle="Review album plans, apply supported changes, and resolve exceptions."
+        actions={
+          <div className={styles.headerTools}>
+            <div className={styles.headerCount}>
+              <strong>
+                {queueTotals || queue
+                  ? `${queueTotals?.all ?? queue?.total} album${(queueTotals?.all ?? queue?.total) === 1 ? '' : 's'}`
+                  : 'Loading queue…'}
+              </strong>
+              <span>
+                {queueTotals?.ready ?? 0} ready album{queueTotals?.ready === 1 ? '' : 's'} ·{' '}
+                {queue?.ready_total || 0} ready change{queue?.ready_total === 1 ? '' : 's'}
+              </span>
+            </div>
+            <Button
               type="button"
-              disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
-              onClick={(event) => {
-                void runScan();
+              onClick={() => {
+                setQueueMode('ready');
+                setPage(0);
+                setCaseId('');
               }}
             >
-              {scanBusy
-                ? 'Queuing…'
-                : scanStatus?.current_job?.job_id === 'library_reconciliation'
-                  ? 'Scanning…'
-                  : 'Scan library'}
-            </button>
-            <button
+              Review ready batch
+            </Button>
+            <Button
               type="button"
-              disabled={reloadBusy}
-              onClick={(event) => {
-                setReloadBusy(true);
-                setGlobalNotice('Reloading queue…');
-                void refresh()
-                  .then((ok) => {
-                    if (ok) setGlobalNotice('Queue updated.');
-                  })
-                  .finally(() => setReloadBusy(false));
-              }}
+              variant="primary"
+              className={styles.safeAction}
+              disabled={mutationBusy || !queue?.ready_total}
+              onClick={() => void applyReady()}
             >
-              {reloadBusy ? 'Reloading…' : 'Reload queue'}
-            </button>
+              {applyBusy && !operationCase
+                ? applyProgress || 'Applying…'
+                : `Apply ready changes (${queue?.ready_total || 0})`}
+            </Button>
+            <div className={styles.inlineActions} aria-label="Queue actions">
+              <Button
+                type="button"
+                disabled={scanBusy || scanStatus?.current_job?.job_id === 'library_reconciliation'}
+                onClick={() => {
+                  void runScan();
+                }}
+              >
+                {scanBusy
+                  ? 'Queuing…'
+                  : scanStatus?.current_job?.job_id === 'library_reconciliation'
+                    ? 'Scanning…'
+                    : 'Scan library'}
+              </Button>
+              <Button
+                type="button"
+                disabled={reloadBusy}
+                onClick={() => {
+                  setReloadBusy(true);
+                  setGlobalNotice('Reloading queue…');
+                  void refresh()
+                    .then((ok) => {
+                      if (ok) setGlobalNotice('Queue updated.');
+                    })
+                    .finally(() => setReloadBusy(false));
+                }}
+              >
+                {reloadBusy ? 'Reloading…' : 'Reload queue'}
+              </Button>
+            </div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
-      {error && (
-        <div className={styles.error} role="alert">
+      {error && (!errorCase || !reviewCase) && (
+        <Notice tone="danger" role="alert">
           {error}
-        </div>
+        </Notice>
       )}
       {globalNotice && (
-        <div className={styles.albumNotice} role="status">
+        <Notice tone="info" className={styles.albumNotice} role="status">
           <span>{globalNotice}</span>
-          <button
+          <Button
             type="button"
             aria-label="Dismiss queue notice"
             onClick={() => setGlobalNotice('')}
           >
             ×
-          </button>
-        </div>
+          </Button>
+        </Notice>
       )}
       {notice && !reviewCase && (
         <div className={styles.notice} role="status">
@@ -1366,11 +1400,11 @@ export function ReviewPage() {
         </div>
       )}
       {applyBusy && !operationCase && (
-        <div className={styles.applyBanner} role="status" aria-live="polite">
+        <Notice tone="info" className={styles.applyBanner} role="status" aria-live="polite">
           <span className={styles.loadingSpinner} aria-hidden="true" />
           <strong>{applyProgress || 'Applying album changes…'}</strong>
           <span>This continues on the server. You can leave this page and return.</span>
-        </div>
+        </Notice>
       )}
       {(scanStatus?.current_job?.job_id === 'library_reconciliation' || lastRun) && (
         <div
@@ -1406,7 +1440,7 @@ export function ReviewPage() {
         <aside className={styles.sidebar} aria-label="Reconciliation albums">
           <nav className={styles.queueModes} aria-label="Queue view">
             {queueModes.map((mode) => (
-              <button
+              <Button
                 key={mode.value}
                 type="button"
                 aria-current={queueMode === mode.value ? 'page' : undefined}
@@ -1418,11 +1452,11 @@ export function ReviewPage() {
               >
                 <span>{mode.label}</span>
                 <b>{queueTotals?.[mode.value] ?? '—'}</b>
-              </button>
+              </Button>
             ))}
           </nav>
           <label htmlFor="review-search">Find album or track</label>
-          <input
+          <TextInput
             id="review-search"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
@@ -1430,7 +1464,7 @@ export function ReviewPage() {
           />
           <label className={styles.categoryFilter}>
             Filter by type
-            <select
+            <Select
               value={category}
               onChange={(event) => {
                 setCategory(event.target.value);
@@ -1443,11 +1477,11 @@ export function ReviewPage() {
                   {label}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <div className={styles.caseList} ref={caseListRef}>
             {queue?.items.map((item) => (
-              <button
+              <Button
                 key={item.case_id}
                 type="button"
                 className={item.case_id === caseId ? styles.selectedCase : styles.caseButton}
@@ -1466,7 +1500,7 @@ export function ReviewPage() {
                     {item.error_count ? ` · ${item.error_count} failed` : ''}
                   </small>
                 </span>
-              </button>
+              </Button>
             ))}
             {queue && queue.total === 0 && (
               <div className={styles.queueEmpty}>
@@ -1477,7 +1511,7 @@ export function ReviewPage() {
                     : 'No albums match the current search and queue view.'}
                 </p>
                 {queueMode !== 'all' && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => {
                       setQueueMode('all');
@@ -1485,10 +1519,10 @@ export function ReviewPage() {
                     }}
                   >
                     Show all {category ? 'albums of this type' : 'albums'}
-                  </button>
+                  </Button>
                 )}
                 {query && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => {
                       setSearchInput('');
@@ -1496,13 +1530,13 @@ export function ReviewPage() {
                     }}
                   >
                     Clear search
-                  </button>
+                  </Button>
                 )}
               </div>
             )}
           </div>
           <div className={styles.pagination}>
-            <button
+            <Button
               type="button"
               disabled={page === 0}
               onClick={() => {
@@ -1511,12 +1545,12 @@ export function ReviewPage() {
               }}
             >
               Previous
-            </button>
+            </Button>
             <span className={styles.paginationCenter}>
               <span>
                 Page {page + 1} of {pageCount}
               </span>
-              <select
+              <Select
                 aria-label="Jump to page"
                 value={page}
                 onChange={(event) => {
@@ -1529,9 +1563,9 @@ export function ReviewPage() {
                     Page {index + 1}
                   </option>
                 ))}
-              </select>
+              </Select>
             </span>
-            <button
+            <Button
               type="button"
               disabled={!queue || (page + 1) * queue.limit >= queue.total}
               onClick={() => {
@@ -1540,7 +1574,7 @@ export function ReviewPage() {
               }}
             >
               Next
-            </button>
+            </Button>
           </div>
         </aside>
 
@@ -1572,98 +1606,153 @@ export function ReviewPage() {
                   </div>
                 </div>
                 <div className={styles.nav}>
-                  <button
+                  <Button
                     type="button"
                     disabled={mutationBusy}
                     onClick={() => void reanalyzeAlbum()}
                   >
                     Reanalyze album
-                  </button>
-                  <button
-                    type="button"
-                    disabled={mutationBusy}
-                    title="Fetch fresh catalogue evidence and reanalyze this album"
-                    onClick={() => void reanalyzeAlbum(true)}
-                  >
-                    Refresh catalogue evidence
-                  </button>
-                  <button
+                  </Button>
+                  <ActionMenu
+                    trigger={(props) => (
+                      <Button {...props} variant="ghost" aria-label="Album actions">
+                        •••
+                      </Button>
+                    )}
+                    items={[
+                      {
+                        key: 'catalogue',
+                        label: 'Refresh catalog evidence',
+                        disabled: mutationBusy,
+                        onSelect: () => void reanalyzeAlbum(true),
+                      },
+                    ]}
+                  />
+                  <Button
                     type="button"
                     disabled={caseIndex <= 0}
                     onClick={() => selectCase(queue!.items[caseIndex - 1].case_id)}
                   >
                     ← Previous album
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
                     disabled={!queue || caseIndex < 0 || caseIndex >= queue.items.length - 1}
                     onClick={() => selectCase(queue!.items[caseIndex + 1].case_id)}
                   >
                     Next album →
-                  </button>
+                  </Button>
                 </div>
               </div>
 
-              <nav className={styles.albumViews} aria-label="Album review views">
-                <button
+              {error && errorCase === reviewCase.case_id && (
+                <Notice tone="danger" role="alert">
+                  {error}
+                </Notice>
+              )}
+              <nav
+                className={styles.albumViews}
+                role="tablist"
+                aria-label="Album review views"
+                onKeyDown={(event) => {
+                  const views: AlbumView[] = ['plan', 'release', 'tracks'];
+                  const index = views.indexOf(albumView);
+                  const next =
+                    event.key === 'ArrowRight'
+                      ? views[(index + 1) % 3]
+                      : event.key === 'ArrowLeft'
+                        ? views[(index + 2) % 3]
+                        : event.key === 'Home'
+                          ? views[0]
+                          : event.key === 'End'
+                            ? views[2]
+                            : null;
+                  if (next) {
+                    event.preventDefault();
+                    setAlbumView(next);
+                    document.getElementById(`review-tab-${next}`)?.focus();
+                  }
+                }}
+              >
+                <Button
                   type="button"
+                  role="tab"
+                  id="review-tab-plan"
+                  aria-controls="review-tab-panel"
+                  aria-selected={albumView === 'plan'}
+                  tabIndex={albumView === 'plan' ? 0 : -1}
                   aria-current={albumView === 'plan' ? 'page' : undefined}
                   onClick={() => setAlbumView('plan')}
                 >
                   Plan
                   <span>{reviewDecisions.length || plan.ready}</span>
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  role="tab"
+                  id="review-tab-release"
+                  aria-controls="review-tab-panel"
+                  aria-selected={albumView === 'release'}
+                  tabIndex={albumView === 'release' ? 0 : -1}
                   aria-current={albumView === 'release' ? 'page' : undefined}
                   onClick={() => setAlbumView('release')}
                 >
                   Release
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  role="tab"
+                  id="review-tab-tracks"
+                  aria-controls="review-tab-panel"
+                  aria-selected={albumView === 'tracks'}
+                  tabIndex={albumView === 'tracks' ? 0 : -1}
                   aria-current={albumView === 'tracks' ? 'page' : undefined}
                   onClick={() => setAlbumView('tracks')}
                 >
                   Tracks
                   <span>{assignments.length}</span>
-                </button>
+                </Button>
               </nav>
 
               {applyBusy && operationCase === reviewCase.case_id && (
-                <div className={styles.applyBanner} role="status" aria-live="polite">
+                <Notice tone="info" className={styles.applyBanner} role="status" aria-live="polite">
                   <span className={styles.loadingSpinner} aria-hidden="true" />
                   <strong>{applyProgress || 'Applying this album plan…'}</strong>
                   <span>This continues on the server. You can leave this page and return.</span>
-                </div>
+                </Notice>
               )}
               {notice && !reanalyzing && reviewCase.refresh?.state !== 'running' && (
-                <div className={styles.albumNotice} role="status" aria-live="polite">
+                <Notice tone="info" className={styles.albumNotice} role="status" aria-live="polite">
                   <span>{notice}</span>
-                  <button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
+                  <Button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
                     ×
-                  </button>
-                </div>
+                  </Button>
+                </Notice>
               )}
               {!(applyBusy && operationCase === reviewCase.case_id) &&
                 (reanalyzing || reviewCase.refresh?.state === 'running') && (
-                  <div className={styles.refreshBanner} role="status">
+                  <Notice tone="info" className={styles.refreshBanner} role="status">
                     <span className={styles.loadingSpinner} aria-hidden="true" /> Reanalyzing this
                     album. The previous decisions remain visible while dependent track actions are
                     recalculated.
-                  </div>
+                  </Notice>
                 )}
 
               {albumView === 'tracks' && plan.can_apply_ready && (
-                <div className={styles.albumNotice} role="status">
+                <Notice tone="info" className={styles.albumNotice} role="status">
                   <span>All decisions are planned. This album is ready to apply.</span>
-                  <button type="button" onClick={() => setAlbumView('plan')}>
+                  <Button type="button" onClick={() => setAlbumView('plan')}>
                     Return to plan →
-                  </button>
-                </div>
+                  </Button>
+                </Notice>
               )}
               <div className={styles.tabWorkspace} data-view={albumView}>
-                <div className={styles.tabMain}>
+                <div
+                  className={styles.tabMain}
+                  id="review-tab-panel"
+                  role="tabpanel"
+                  aria-labelledby={`review-tab-${albumView}`}
+                >
                   {albumView === 'plan' &&
                     reviewCase.items.some((item) => item.details?.planned_choice) && (
                       <details className={styles.editPlan}>
@@ -1686,14 +1775,14 @@ export function ReviewPage() {
                               }),
                             ),
                           ].map((category) => (
-                            <button
+                            <Button
                               key={category}
                               type="button"
                               disabled={mutationBusy}
                               onClick={() => void actGroup({ category } as ReviewDecision, 'reset')}
                             >
                               Review {category.replaceAll('_', ' ')} again
-                            </button>
+                            </Button>
                           ))}
                         </div>
                       </details>
@@ -1730,7 +1819,7 @@ export function ReviewPage() {
                       <div className={styles.decisionGrid}>
                         {!releaseChoicePending && reviewCase.album_plan && (
                           <article data-state="complete">
-                            <button
+                            <Button
                               className={styles.decisionSelect}
                               type="button"
                               onClick={() => setAlbumView('release')}
@@ -1749,7 +1838,7 @@ export function ReviewPage() {
                                     : 'Compare editions →'}
                                 </small>
                               </span>
-                            </button>
+                            </Button>
                           </article>
                         )}
                         {!releaseChoicePending &&
@@ -1786,7 +1875,7 @@ export function ReviewPage() {
                                 }
                                 data-selected={selected || undefined}
                               >
-                                <button
+                                <Button
                                   type="button"
                                   className={styles.decisionSelect}
                                   onClick={() => openDecision(decision)}
@@ -1812,12 +1901,12 @@ export function ReviewPage() {
                                       {' →'}
                                     </b>
                                   )}
-                                </button>
+                                </Button>
                                 {['numbering', 'title_conventions', 'metadata'].includes(
                                   decision.category,
                                 ) && (
                                   <div className={styles.decisionActions}>
-                                    <button
+                                    <Button
                                       type="button"
                                       disabled={
                                         busy ||
@@ -1825,6 +1914,7 @@ export function ReviewPage() {
                                         releaseChoicePending ||
                                         reviewCase.refresh?.state === 'running'
                                       }
+                                      variant="primary"
                                       onClick={() => void actGroup(decision, 'fix')}
                                     >
                                       {busyDecision === decision.category
@@ -1840,8 +1930,8 @@ export function ReviewPage() {
                                             : decision.label === 'Confirm album artist'
                                               ? 'Use proposed album artist'
                                               : `Use ${decision.action_count} proposed changes`}
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                       type="button"
                                       disabled={
                                         busy ||
@@ -1856,7 +1946,7 @@ export function ReviewPage() {
                                         : decision.label === 'Confirm album artist'
                                           ? 'Keep current album artist'
                                           : 'Keep current values'}
-                                    </button>
+                                    </Button>
                                   </div>
                                 )}
                                 {busyDecision === decision.category && (
@@ -1881,7 +1971,7 @@ export function ReviewPage() {
                                       />
                                     ) : (
                                       <div className={styles.decisionActions}>
-                                        <button
+                                        <Button
                                           type="button"
                                           disabled={
                                             applyBusy ||
@@ -1896,7 +1986,7 @@ export function ReviewPage() {
                                           {decision.action_count === 1
                                             ? 'the missing track'
                                             : `all ${decision.action_count} missing tracks`}
-                                        </button>
+                                        </Button>
                                         <small>
                                           Each track is added to the wishlist for the selected
                                           release.
@@ -1919,13 +2009,13 @@ export function ReviewPage() {
                                     Compare the available editions before choosing this album's
                                     track list.
                                   </p>
-                                  <button
+                                  <Button
                                     type="button"
                                     className={styles.secondaryButton}
                                     onClick={() => setAlbumView('release')}
                                   >
                                     Compare releases →
-                                  </button>
+                                  </Button>
                                 </div>
                               )}
                             </Fragment>
@@ -1941,7 +2031,7 @@ export function ReviewPage() {
                             ].includes(step.category),
                           ) && (
                             <article data-state="complete">
-                              <button
+                              <Button
                                 className={styles.decisionSelect}
                                 type="button"
                                 onClick={() => setAlbumView('tracks')}
@@ -1954,7 +2044,7 @@ export function ReviewPage() {
                                   <strong>No assignment decisions remain</strong>
                                   <small>Inspect all local files and release tracks →</small>
                                 </span>
-                              </button>
+                              </Button>
                             </article>
                           )}
                         {albumView === 'plan' && pendingDecisions.length > 0 && (
@@ -2049,7 +2139,7 @@ export function ReviewPage() {
                           </div>
                         </div>
                         {readySummaryList}
-                        <button
+                        <Button
                           type="button"
                           className={styles.secondaryButton}
                           onClick={() => {
@@ -2058,7 +2148,7 @@ export function ReviewPage() {
                           }}
                         >
                           Inspect proposed track edits →
-                        </button>
+                        </Button>
 
                         {active &&
                           activeDecision?.risk === 'ready' &&
@@ -2075,7 +2165,7 @@ export function ReviewPage() {
                     )}
 
                   {albumView === 'tracks' && assignments.length > 0 && (
-                    <div className={styles.trackWorkspace}>
+                    <div className={styles.trackWorkspace} data-detail={inspectorOpen || undefined}>
                       <section
                         className={styles.trackMatrix}
                         aria-label="Complete album track assignment"
@@ -2166,24 +2256,24 @@ export function ReviewPage() {
                             role="group"
                             aria-label="Track arrangement"
                           >
-                            <button
+                            <Button
                               type="button"
                               aria-pressed={trackView === 'issues'}
                               onClick={() => setTrackView('issues')}
                             >
                               Group by action
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
                               aria-pressed={trackView === 'release'}
                               onClick={() => setTrackView('release')}
                             >
                               Release order
-                            </button>
+                            </Button>
                           </div>
                           <label>
                             Show tracks
-                            <select
+                            <Select
                               value={trackFilter}
                               onChange={(event) => setTrackFilter(event.target.value)}
                             >
@@ -2224,16 +2314,16 @@ export function ReviewPage() {
                                   Version conflicts ({filterCount('version_conflict')})
                                 </option>
                               )}
-                            </select>
+                            </Select>
                           </label>
                           {trackFilter && (
-                            <button
+                            <Button
                               type="button"
                               className={styles.secondaryButton}
                               onClick={() => setTrackFilter('')}
                             >
                               Clear filter
-                            </button>
+                            </Button>
                           )}
                         </div>
                         <div
@@ -2255,7 +2345,7 @@ export function ReviewPage() {
                             <>
                               {attentionAssignments.filter(matchingFilter).length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="warning">
-                                  <button
+                                  <Button
                                     type="button"
                                     aria-expanded={openGroups.includes('attention')}
                                     onClick={() => toggleGroup('attention')}
@@ -2263,7 +2353,7 @@ export function ReviewPage() {
                                     {openGroups.includes('attention') ? '▾' : '▸'}{' '}
                                     {attentionAssignments.filter(matchingFilter).length} tracks
                                     needing review
-                                  </button>
+                                  </Button>
                                   {openGroups.includes('attention') &&
                                     attentionAssignments
                                       .filter(matchingFilter)
@@ -2272,7 +2362,7 @@ export function ReviewPage() {
                               )}
                               {changeAssignments.filter(matchingFilter).length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="info">
-                                  <button
+                                  <Button
                                     type="button"
                                     aria-expanded={openGroups.includes('changes')}
                                     onClick={() => toggleGroup('changes')}
@@ -2280,7 +2370,7 @@ export function ReviewPage() {
                                     {openGroups.includes('changes') ? '▾' : '▸'} ↻{' '}
                                     {changeAssignments.filter(matchingFilter).length} proposed track
                                     changes
-                                  </button>
+                                  </Button>
                                   {openGroups.includes('changes') &&
                                     changeAssignments
                                       .filter(matchingFilter)
@@ -2289,7 +2379,7 @@ export function ReviewPage() {
                               )}
                               {missingAssignments.filter(matchingFilter).length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="danger">
-                                  <button
+                                  <Button
                                     type="button"
                                     aria-expanded={openGroups.includes('missing')}
                                     onClick={() => toggleGroup('missing')}
@@ -2297,7 +2387,7 @@ export function ReviewPage() {
                                     {openGroups.includes('missing') ? '▾' : '▸'}{' '}
                                     {missingAssignments.filter(matchingFilter).length} absent
                                     release tracks
-                                  </button>
+                                  </Button>
                                   {openGroups.includes('missing') && (
                                     <>
                                       {hasIntentDecision && (
@@ -2315,7 +2405,7 @@ export function ReviewPage() {
                               )}
                               {settledAssignments.filter(matchingFilter).length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="good">
-                                  <button
+                                  <Button
                                     type="button"
                                     aria-expanded={openGroups.includes('settled')}
                                     onClick={() => toggleGroup('settled')}
@@ -2323,7 +2413,7 @@ export function ReviewPage() {
                                     {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
                                     {settledAssignments.filter(matchingFilter).length} settled
                                     release slots
-                                  </button>
+                                  </Button>
                                   {openGroups.includes('settled') &&
                                     settledAssignments
                                       .filter(matchingFilter)
@@ -2334,26 +2424,31 @@ export function ReviewPage() {
                           )}
                         </div>
                       </section>
-                      {inspectorOpen && (
-                        <button
-                          type="button"
-                          className={styles.inspectorBackdrop}
-                          aria-label="Close track details"
-                          onClick={() => setInspectorOpen(false)}
-                        />
-                      )}
                       <aside
                         className={styles.trackInspector}
+                        ref={inspectorRef}
+                        tabIndex={-1}
                         aria-label="Selected track details"
                         data-open={inspectorOpen || undefined}
                       >
-                        <button
+                        <Button
                           type="button"
+                          variant="ghost"
                           className={styles.inspectorClose}
-                          onClick={() => setInspectorOpen(false)}
+                          onClick={() => {
+                            setInspectorOpen(false);
+                            requestAnimationFrame(() => {
+                              document
+                                .querySelector<HTMLElement>(
+                                  `[data-review-assignment][data-selected="true"]`,
+                                )
+                                ?.focus({ preventScroll: true });
+                              window.scrollTo({ top: trackListScroll.current });
+                            });
+                          }}
                         >
-                          Close details ×
-                        </button>
+                          ← Back to tracks
+                        </Button>
                         {activeRowKey &&
                         assignmentsByKey.get(activeRowKey)?.status === 'missing' ? (
                           <>
@@ -2362,9 +2457,9 @@ export function ReviewPage() {
                               album={reviewCase}
                             />
                             <div className={styles.actions}>
-                              <button type="button" onClick={() => setAlbumView('plan')}>
+                              <Button type="button" onClick={() => setAlbumView('plan')}>
                                 Review album completeness →
-                              </button>
+                              </Button>
                             </div>
                           </>
                         ) : activeRowKey && active ? (
@@ -2454,7 +2549,7 @@ export function ReviewPage() {
                           it.
                         </p>
                         <div>
-                          <input
+                          <TextInput
                             aria-label="MusicBrainz release MBID or URL"
                             value={releaseIdInput}
                             onChange={(event) => {
@@ -2463,24 +2558,24 @@ export function ReviewPage() {
                             }}
                             placeholder="Release MBID or URL"
                           />
-                          <button
+                          <Button
                             type="button"
                             className={styles.secondaryButton}
                             disabled={busy}
                             onClick={() => void inspectReleaseId()}
                           >
                             Load release
-                          </button>
+                          </Button>
                         </div>
                       </div>
                       {active?.finding_type === 'reconciliation_release' && (
-                        <button
+                        <Button
                           type="button"
                           disabled={busy}
                           onClick={() => void act(active, 'dismiss')}
                         >
                           Keep current release
-                        </button>
+                        </Button>
                       )}
                     </section>
                   )}
@@ -2578,17 +2673,17 @@ export function ReviewPage() {
                           </section>
                         )}
                         <div className={`${styles.actions} ${styles.planContextActions}`}>
-                          <button type="button" onClick={() => setAlbumView('tracks')}>
+                          <Button type="button" onClick={() => setAlbumView('tracks')}>
                             Review track assignments
-                          </button>
+                          </Button>
                           {reviewCase.album_plan.intent_scope && (
-                            <button
+                            <Button
                               type="button"
                               disabled={mutationBusy}
                               onClick={() => void reconsiderScope()}
                             >
                               Review album scope
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </section>
@@ -2606,7 +2701,7 @@ export function ReviewPage() {
                         </div>
                         <div className={styles.readySummaryList}>
                           {proposedChangeGroups.map((group) => (
-                            <button
+                            <Button
                               key={group.key}
                               type="button"
                               onClick={() => {
@@ -2624,7 +2719,7 @@ export function ReviewPage() {
                               <b>
                                 {group.count} track{group.count === 1 ? '' : 's'} →
                               </b>
-                            </button>
+                            </Button>
                           ))}
                         </div>
                       </section>

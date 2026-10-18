@@ -155,7 +155,7 @@ declare global {
     playTrackList?: (
       tracks: unknown[],
       contextName?: string,
-      options?: { isCurrent: () => boolean },
+      options?: { isCurrent?: () => boolean; audition?: boolean },
     ) =>
       | void
       | { status: string; error?: string }

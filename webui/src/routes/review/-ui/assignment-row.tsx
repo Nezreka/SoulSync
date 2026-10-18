@@ -38,6 +38,7 @@ export function AssignmentRow({
   return (
     <button
       type="button"
+      data-review-assignment="true"
       className={styles.matrixRow}
       data-status={
         row.status === 'settled' && ['extra', 'duplicate'].includes(row.evidence_status || '')

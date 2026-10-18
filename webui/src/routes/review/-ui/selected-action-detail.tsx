@@ -1,5 +1,7 @@
 import { useState } from 'react';
 
+import { Button, Select } from '@/components/form/form';
+
 import type { ReviewFinding } from '../-review.api';
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
@@ -84,20 +86,20 @@ export function SelectedActionDetail({
         </div>
       )}
       <nav className={styles.actions} aria-label="Decision navigation">
-        <button
+        <Button
           type="button"
           disabled={busy || previousId == null}
           onClick={() => onSelect(previousId ?? null)}
         >
           ← Previous decision
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           disabled={busy || nextId == null}
           onClick={() => onSelect(nextId ?? null)}
         >
           Next decision →
-        </button>
+        </Button>
       </nav>
       <h3>{findingHeading(finding)}</h3>
       <p className={styles.description}>
@@ -137,31 +139,6 @@ export function SelectedActionDetail({
           </span>
         </div>
       )}
-      {finding.file_path &&
-        ['reconciliation_metadata', 'reconciliation_unresolved', 'reconciliation_extra'].includes(
-          finding.finding_type,
-        ) && (
-          <ReviewAudio
-            localPath={finding.file_path}
-            localTitle={
-              textValue(details.current_title || record(details.current_tags).title) ||
-              finding.title
-            }
-            localDurationMs={localDurationMs}
-            comparisonPath={comparisonPath}
-            comparisonTitle={
-              textValue(details.expected_title || record(details.replacement_track).name) ||
-              'Release recording'
-            }
-            comparisonDurationMs={comparisonDurationMs || releaseDurationMs}
-            previewUrl={textValue(
-              details.expected_preview_url || record(details.replacement_track).preview_url,
-            )}
-            artist={textValue(details.expected_artist || record(details.current_tags).artist)}
-            previewSource={textValue(details.source)}
-            previewTrackId={textValue(record(details.replacement_track).source_track_id)}
-          />
-        )}
       {!compact && (
         <section
           className={styles.suggestion}
@@ -207,179 +184,227 @@ export function SelectedActionDetail({
           finding.finding_type === 'reconciliation_unresolved' || wrongAudio || versionConflict
         }
         onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
-      />
-      {finding.finding_type === 'reconciliation_intent' && (
-        <CompletenessChoice
-          key={finding.id}
-          finding={finding}
-          busy={busy}
-          onChoose={(choice) => onAct('fix', choice)}
-        />
-      )}
-      {finding.file_path && assignmentOptions.length > 0 && (
-        <div className={styles.assignmentCorrection}>
-          {proposedSlot && (
-            <button
-              type="button"
-              className={styles.primary}
-              disabled={busy}
-              onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
-            >
-              Use assignment in plan: {textValue(proposedSlot.title)}
-            </button>
-          )}
-          <label>
-            Assign this file to another release track
-            <select
-              value={assignmentSlot}
-              onChange={(event) => setAssignmentSlot(event.target.value)}
-            >
-              <option value="">Choose a release track…</option>
-              {assignmentOptions.map((slot, index) => (
-                <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
-                  {formatTrackPosition(
-                    textValue(slot.disc_number),
-                    textValue(slot.track_number),
-                    textValue(details.numbering_mode),
-                    textValue(slot.display_track_number),
-                  )}{' '}
-                  {textValue(slot.title)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            disabled={busy || !assignmentSlot}
-            onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
-          >
-            Save plan assignment
-          </button>
-          {details.saved_assignment === true && (
-            <button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
-              Reset plan assignment
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={busy || numberingPreview}
-            onClick={() => onAct('dismiss')}
-          >
-            Keep current values
-          </button>
-          <small>
-            This saves your plan choice and recalculates proposed edits. Files stay unchanged until
-            you apply them.
-          </small>
-        </div>
-      )}
-      {waitingForDownload && (
-        <p className={styles.waitingNotice} role="status">
-          {finding.details?.fulfillment_state === 'downloaded'
-            ? 'This track has downloaded. Reconciliation is checking its library assignment.'
-            : 'This track is on the wishlist. The album is waiting for it to download and join the library.'}
-        </p>
-      )}
-      {numberingPreview && (
-        <p className={styles.waitingNotice} role="status">
-          This numbering change is a preview. Choose the album numbering on Plan first.
-        </p>
-      )}
-      {!waitingForDownload && (
-        <div className={styles.actions}>
-          {finding.finding_type === 'reconciliation_intent' ? null : versionConflict && canApply ? (
-            <>
-              {replacement.source_track_id && (
-                <>
-                  <button
+        controls={
+          <>
+            {finding.finding_type === 'reconciliation_intent' && (
+              <CompletenessChoice
+                key={finding.id}
+                finding={finding}
+                busy={busy}
+                onChoose={(choice) => onAct('fix', choice)}
+              />
+            )}
+            {finding.file_path && assignmentOptions.length > 0 && (
+              <div className={styles.assignmentCorrection}>
+                {proposedSlot && (
+                  <Button
                     type="button"
-                    disabled={busy}
+                    variant="primary"
                     className={styles.primary}
-                    onClick={() => onAct('fix', 'request_missing')}
-                  >
-                    Plan to keep local and request release version
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
-                    Plan replacement with release version
-                  </button>
-                </>
-              )}
-            </>
-          ) : wrongAudio && canApply ? (
-            <>
-              {canReplaceWrongAudio && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className={styles.primary}
-                  onClick={() => onAct('fix', 'replace')}
-                >
-                  {busy ? 'Saving…' : 'Plan replacement with correct track'}
-                </button>
-              )}
-              <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-                Plan quarantine of wrong file
-              </button>
-            </>
-          ) : (
-            <>
-              {canApply &&
-                finding.finding_type !== 'reconciliation_release' &&
-                finding.finding_type !== 'reconciliation_duplicate' &&
-                finding.finding_type !== 'reconciliation_unresolved' &&
-                finding.finding_type !== 'reconciliation_extra' && (
-                  <button
-                    type="button"
                     disabled={busy}
-                    className={styles.primary}
-                    onClick={() => onAct('fix')}
+                    onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
                   >
-                    {finding.finding_type === 'reconciliation_metadata'
-                      ? busy
-                        ? 'Saving…'
-                        : 'Use proposed change'
-                      : busy
-                        ? 'Applying…'
-                        : suggested
-                          ? typeInfo?.verb || 'Apply repair'
-                          : finding.finding_type === 'reconciliation_extra'
-                            ? 'Plan quarantine'
-                            : 'Apply this change'}
-                  </button>
+                    Use assignment in plan: {textValue(proposedSlot.title)}
+                  </Button>
                 )}
-            </>
-          )}
-          {assignmentOptions.length === 0 && (
-            <button
-              type="button"
-              disabled={busy || numberingPreview}
-              onClick={() => onAct('dismiss')}
-            >
-              {versionConflict ? 'Keep local version' : 'Keep current values'}
-            </button>
-          )}
-        </div>
-      )}
+                <label>
+                  Assign this file to another release track
+                  <Select
+                    value={assignmentSlot}
+                    onChange={(event) => setAssignmentSlot(event.target.value)}
+                  >
+                    <option value="">Choose a release track…</option>
+                    {assignmentOptions.map((slot, index) => (
+                      <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
+                        {formatTrackPosition(
+                          textValue(slot.disc_number),
+                          textValue(slot.track_number),
+                          textValue(details.numbering_mode),
+                          textValue(slot.display_track_number),
+                        )}{' '}
+                        {textValue(slot.title)}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <Button
+                  type="button"
+                  disabled={busy || !assignmentSlot}
+                  onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
+                >
+                  Save plan assignment
+                </Button>
+                {details.saved_assignment === true && (
+                  <Button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
+                    Reset plan assignment
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  disabled={busy || numberingPreview}
+                  onClick={() => onAct('dismiss')}
+                >
+                  Keep current values
+                </Button>
+                <small>
+                  This saves your plan choice and recalculates proposed edits. Files stay unchanged
+                  until you apply them.
+                </small>
+              </div>
+            )}
+            {waitingForDownload && (
+              <p className={styles.waitingNotice} role="status">
+                {finding.details?.fulfillment_state === 'downloaded'
+                  ? 'This track has downloaded. Reconciliation is checking its library assignment.'
+                  : 'This track is on the wishlist. The album is waiting for it to download and join the library.'}
+              </p>
+            )}
+            {numberingPreview && (
+              <p className={styles.waitingNotice} role="status">
+                This numbering change is a preview. Choose the album numbering on Plan first.
+              </p>
+            )}
+            {!waitingForDownload && (
+              <div className={styles.actions}>
+                {finding.finding_type === 'reconciliation_intent' ? null : versionConflict &&
+                  canApply ? (
+                  <>
+                    {replacement.source_track_id && (
+                      <>
+                        <Button
+                          type="button"
+                          disabled={busy}
+                          variant="primary"
+                          className={styles.primary}
+                          onClick={() => onAct('fix', 'request_missing')}
+                        >
+                          Plan to keep local and request release version
+                        </Button>
+                        <Button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => onAct('fix', 'replace')}
+                        >
+                          Plan replacement with release version
+                        </Button>
+                      </>
+                    )}
+                  </>
+                ) : wrongAudio && canApply ? (
+                  <>
+                    {canReplaceWrongAudio && (
+                      <Button
+                        type="button"
+                        disabled={busy}
+                        variant="primary"
+                        className={styles.primary}
+                        onClick={() => onAct('fix', 'replace')}
+                      >
+                        {busy ? 'Saving…' : 'Plan replacement with correct track'}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onAct('fix', 'quarantine')}
+                    >
+                      Plan quarantine of wrong file
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {canApply &&
+                      finding.finding_type !== 'reconciliation_release' &&
+                      finding.finding_type !== 'reconciliation_duplicate' &&
+                      finding.finding_type !== 'reconciliation_unresolved' &&
+                      finding.finding_type !== 'reconciliation_extra' && (
+                        <Button
+                          type="button"
+                          disabled={busy}
+                          variant="primary"
+                          className={styles.primary}
+                          onClick={() => onAct('fix')}
+                        >
+                          {finding.finding_type === 'reconciliation_metadata'
+                            ? busy
+                              ? 'Saving…'
+                              : 'Use proposed change'
+                            : busy
+                              ? 'Applying…'
+                              : suggested
+                                ? typeInfo?.verb || 'Apply repair'
+                                : finding.finding_type === 'reconciliation_extra'
+                                  ? 'Plan quarantine'
+                                  : 'Apply this change'}
+                        </Button>
+                      )}
+                  </>
+                )}
+                {assignmentOptions.length === 0 && (
+                  <Button
+                    type="button"
+                    disabled={busy || numberingPreview}
+                    onClick={() => onAct('dismiss')}
+                  >
+                    {versionConflict ? 'Keep local version' : 'Keep current values'}
+                  </Button>
+                )}
+              </div>
+            )}
 
-      {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
-        finding.file_path &&
-        Boolean(details.track_id) &&
-        details.album_id != null &&
-        !wrongAudio &&
-        !versionConflict &&
-        !duplicateChoice &&
-        !(details.competing_copies as unknown[] | undefined)?.length && (
-          <details className={styles.extraAction}>
-            <summary>Move this file out of the album</summary>
-            <span>
-              If this copy does not belong here, move it to recoverable quarantine and remove its
-              library entry.
-            </span>
-            <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-              Plan move to quarantine
-            </button>
-          </details>
-        )}
+            {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
+              finding.file_path &&
+              Boolean(details.track_id) &&
+              details.album_id != null &&
+              !wrongAudio &&
+              !versionConflict &&
+              !duplicateChoice &&
+              !(details.competing_copies as unknown[] | undefined)?.length && (
+                <details className={styles.extraAction}>
+                  <summary>Move this file out of the album</summary>
+                  <span>
+                    If this copy does not belong here, move it to recoverable quarantine and remove
+                    its library entry.
+                  </span>
+                  <Button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
+                    Plan move to quarantine
+                  </Button>
+                </details>
+              )}
+          </>
+        }
+        audio={
+          <>
+            {finding.file_path &&
+              [
+                'reconciliation_metadata',
+                'reconciliation_unresolved',
+                'reconciliation_extra',
+              ].includes(finding.finding_type) && (
+                <ReviewAudio
+                  localPath={finding.file_path}
+                  localTitle={
+                    textValue(details.current_title || record(details.current_tags).title) ||
+                    finding.title
+                  }
+                  localDurationMs={localDurationMs}
+                  comparisonPath={comparisonPath}
+                  comparisonTitle={
+                    textValue(details.expected_title || record(details.replacement_track).name) ||
+                    'Release recording'
+                  }
+                  comparisonDurationMs={comparisonDurationMs || releaseDurationMs}
+                  previewUrl={textValue(
+                    details.expected_preview_url || record(details.replacement_track).preview_url,
+                  )}
+                  artist={textValue(details.expected_artist || record(details.current_tags).artist)}
+                  previewSource={textValue(details.source)}
+                  previewTrackId={textValue(record(details.replacement_track).source_track_id)}
+                />
+              )}
+          </>
+        }
+      />
     </section>
   );
 }

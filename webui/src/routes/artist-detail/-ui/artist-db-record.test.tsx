@@ -182,7 +182,7 @@ describe('the record modal', () => {
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(JSON.stringify(RECORD.record, null, 2)),
     );
-    expect(window.showToast).toHaveBeenCalledWith('Full record copied as JSON', 'success');
+    expect(await screen.findByText('Full record copied as JSON')).toBeTruthy();
   });
 
   it('copies a single row value', async () => {
@@ -193,7 +193,7 @@ describe('the record modal', () => {
 
     fireEvent.click(document.querySelectorAll('.arec-rowcopy')[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('Aphex Twin'));
-    expect(window.showToast).toHaveBeenCalledWith('Value copied', 'success');
+    expect(await screen.findByText('Value copied')).toBeTruthy();
   });
 
   it('reports the saved filename', async () => {

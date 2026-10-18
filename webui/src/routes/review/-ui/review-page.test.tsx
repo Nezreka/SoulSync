@@ -195,7 +195,7 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByText('Choose whether this folder represents the complete album');
-    fireEvent.click(screen.getByLabelText('First'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'First' }));
     fireEvent.click(screen.getByRole('button', { name: 'Keep as partial · 1 wanted' }));
     await waitFor(() =>
       expect(
@@ -323,7 +323,7 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Ashes of the Wake' });
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
     await screen.findByRole('heading', { name: 'Compare 2 release candidates' });
     const images = [...document.querySelectorAll('img')];
     expect(images.some((image) => image.src.includes('local-ashes'))).toBe(true);
@@ -481,7 +481,7 @@ describe('library reconciliation review queue', () => {
       screen.getByRole('button', { name: 'Plan release track numbers for 1 track' }),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Evidence' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
     expect(screen.getByText('digital-release')).toBeTruthy();
     expect(screen.getAllByText('One disc · match release positions').length).toBeGreaterThan(0);
@@ -770,7 +770,6 @@ describe('library reconciliation review queue', () => {
         );
       throw new Error(`Unexpected request: ${url}`);
     });
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true);
 
     render(<ReviewPage />);
 
@@ -779,7 +778,8 @@ describe('library reconciliation review queue', () => {
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
-    await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    await screen.findByRole('dialog', { name: 'Apply ready album plans' });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(
       fetchMock.mock.calls.filter(
         ([url, options]) =>
@@ -787,7 +787,11 @@ describe('library reconciliation review queue', () => {
       ),
     ).toHaveLength(0);
     expect(screen.queryByText(/Applying album changes/)).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Apply 1 ready change' })).not.toBeDisabled(),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply plans' }));
     await waitFor(() => expect(screen.getByText('1 album action completed.')).toBeTruthy(), {
       timeout: 3000,
     });
@@ -974,9 +978,10 @@ describe('library reconciliation review queue', () => {
       ).toBe(true),
     );
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Refresh catalogue evidence' })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Album actions' })).not.toBeDisabled(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalogue evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Album actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Refresh catalog evidence' }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(
@@ -1146,7 +1151,7 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Ashes of the Wake' });
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
     const button = await screen.findByRole('button', { name: 'Use this release' });
     fireEvent.click(button);
     await waitFor(() => expect(applied).toBe(true));
@@ -1245,7 +1250,7 @@ describe('library reconciliation review queue', () => {
     });
     render(<ReviewPage />);
     await screen.findByRole('heading', { name: 'Album' });
-    fireEvent.click(screen.getByRole('button', { name: 'Release' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
     expect(
       await screen.findByRole('heading', { name: 'Choose the edition for this album' }),
     ).toBeTruthy();
@@ -1254,7 +1259,7 @@ describe('library reconciliation review queue', () => {
     expect(images.some((image) => image.src.includes('first-release'))).toBe(true);
     expect(
       screen.getAllByText('12/12 assigned')[0].closest('[data-tone]')?.getAttribute('data-tone'),
-    ).toBe('good');
+    ).toBe('success');
     expect(screen.getByText('2 missing').closest('[data-tone]')?.getAttribute('data-tone')).toBe(
       'danger',
     );
