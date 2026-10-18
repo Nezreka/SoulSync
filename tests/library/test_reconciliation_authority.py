@@ -127,3 +127,14 @@ def test_locked_release_pin_blocks_a_conflicting_resolver_choice(tmp_path):
                     details={'source':'musicbrainz','album_id':'other'})['review_conflict']
     assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
                     details={'source':'musicbrainz','album_id':'selected'}) is None
+
+
+def test_accepted_release_id_governs_legacy_auto_resolver_without_explicit_pin(tmp_path):
+    db = Database(tmp_path / 'db')
+    with db._get_connection() as c:
+        raw = json.dumps({'changes':{'musicbrainz_release_id':{'old':'old','new':'selected'}}})
+        c.execute("UPDATE repair_findings SET details_json=?, status='resolved', user_action='retagged'", (raw,))
+    assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
+                    details={'source':'musicbrainz','album_id':'other'})['review_conflict']
+    assert conflict(db,'canonical_version',entity_type='album',entity_id='album',
+                    details={'source':'musicbrainz','album_id':'selected'}) is None

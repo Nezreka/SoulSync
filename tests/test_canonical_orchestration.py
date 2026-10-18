@@ -261,3 +261,25 @@ def test_default_fetcher_handles_failure(monkeypatch):
         lambda s, a: (_ for _ in ()).throw(RuntimeError("boom")), raising=False,
     )
     assert default_fetch_tracklist("spotify", "x") is None
+
+
+def test_auto_resolver_respects_an_accepted_queue_release(tmp_path):
+    from core.library.reconciliation_store import persist_album_plan
+    from core.repair_worker import RepairWorker
+    db = MusicDatabase(str(tmp_path / 'accepted.db'))
+    album_id = _seed(db, spotify='sp_std')
+    header = {'album_id':album_id, 'album_folder':'/album', 'source':'musicbrainz',
+              'release_id':'reviewed-release', 'evidence_signature':'snapshot'}
+    persist_album_plan(db,header,{})
+    worker = RepairWorker(database=db)
+    worker._create_finding(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+        severity='info', entity_type='track', entity_id='t0', file_path='/album/song.flac',
+        title='Release identity', description='Accepted', details={**header,
+        'changes':{'musicbrainz_release_id':{'old':'old','new':'reviewed-release'}}})
+    with db._get_connection() as conn:
+        conn.execute("UPDATE repair_findings SET status='resolved',user_action='retagged'")
+    result = resolve_and_store_canonical_for_album(db,album_id,
+        fetch_tracklist=lambda *_: STD, source_priority=['spotify'])
+    assert result['review_conflict']
+    assert result['review_case_key']
+    assert db.get_album_canonical(album_id) is None

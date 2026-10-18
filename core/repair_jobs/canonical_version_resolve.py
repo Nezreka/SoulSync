@@ -184,7 +184,7 @@ class CanonicalVersionResolveJob(RepairJob):
 
             result.scanned += 1
             if resolved:
-                if dry_run and context.create_finding:
+                if (dry_run or resolved.get('review_conflict')) and context.create_finding:
                     artist = resolved.get('artist_name') or ''
                     label = f"{artist} — {album_title}" if artist else (album_title or str(album_id))
                     inserted = context.create_finding(
@@ -202,7 +202,7 @@ class CanonicalVersionResolveJob(RepairJob):
                         result.findings_created += 1
                     else:
                         result.findings_skipped_dedup += 1
-                elif not dry_run:
+                elif not dry_run and not resolved.get('review_conflict'):
                     result.auto_fixed += 1
 
             if context.report_progress and (i + 1) % 25 == 0:

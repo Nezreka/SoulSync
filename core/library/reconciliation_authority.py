@@ -21,7 +21,7 @@ FIELDS = {
     'mbid_mismatch': {'musicbrainz_recording_id'},
     'album_mbid_mismatch': {'musicbrainz_release_id'},
     'track_number_mismatch': {'track_number', 'disc_number', 'filename'},
-    'canonical_version': {'release'}, 'incomplete_album': {'intent', 'files'},
+    'canonical_version': {'release', 'musicbrainz_release_id'}, 'incomplete_album': {'intent', 'files'},
     'album_tag_inconsistency': IDENTITY, 'library_retag': IDENTITY,
     'metadata_gap': IDENTITY, 'comma_artist_split': {'artist'},
     'unknown_artist': IDENTITY | {'files'}, 'suspect_album_tag': IDENTITY | {'files'},
@@ -47,6 +47,8 @@ def _proposed(kind, details):
     changes = details.get('changes')
     if isinstance(changes, dict):
         values.update({k: v.get('new') for k, v in changes.items() if isinstance(v, dict)})
+    if kind == 'canonical_version' and details.get('source') == 'musicbrainz':
+        values['musicbrainz_release_id'] = details.get('album_id')
     if kind == 'mbid_mismatch':
         values['musicbrainz_recording_id'] = ''
     if kind == 'album_mbid_mismatch':

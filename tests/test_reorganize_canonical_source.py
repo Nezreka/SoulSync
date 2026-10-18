@@ -142,6 +142,10 @@ def test_musicbrainz_release_id_is_used_by_priority_walk(monkeypatch):
         {
             "id": "recording-1",
             "name": "Test Track",
+            "recording_title": "Test Track",
+            "release_track_id": "track-1",
+            "medium_format": "",
+            "video": False,
             "disambiguation": "",
             "artists": [{"name": "Test Artist"}],
             "duration_ms": 180000,
@@ -155,5 +159,5 @@ def test_musicbrainz_release_id_is_used_by_priority_walk(monkeypatch):
     )
     client._client.get_release.assert_any_call(
         "mb-release-1",
-        includes=["recordings", "artist-credits", "release-groups"],
+        includes=["recordings", "artist-credits", "release-groups", "labels"],
     )
