@@ -29115,21 +29115,6 @@ div.artist-hero-badge {
     height: 80px;
 }
 
-.add-to-wishlist-modal-hero-icon {
-    width: 80px;
-    height: 80px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 36px;
-    border-radius: var(--radius-lg);
-    background: linear-gradient(135deg,
-            var(--white-a10) 0%,
-            var(--white-a05) 100%);
-    border: 1px solid var(--white-a10);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
 .add-to-wishlist-modal-hero-metadata {
     flex: 1;
     display: flex;
@@ -29530,13 +29515,6 @@ div.artist-hero-badge {
     .add-to-wishlist-modal-hero-image.artist {
         width: 60px;
         height: 60px;
-    }
-
-    .add-to-wishlist-modal-hero-icon {
-        width: 60px;
-        height: 60px;
-        font-size: 28px;
-        margin: 0 auto;
     }
 
     .add-to-wishlist-modal-hero-title {
