@@ -2752,13 +2752,13 @@
   gap: 8px;
   margin-block: 10px;
 }
-.recordingLink {
+.technicalCard .recordingLink {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
 }
-.recordingLink:hover,
-.recordingLink:focus-visible {
+.technicalCard .recordingLink:hover,
+.technicalCard .recordingLink:focus-visible {
   color: #cfc0ff;
 }
