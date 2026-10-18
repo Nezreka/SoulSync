@@ -8,6 +8,7 @@ import {
   removedSelectors,
   selectorClasses,
   selectorKey,
+  stripComments,
 } from '../../scripts/css-class-refs.mjs';
 
 /**
@@ -153,6 +154,69 @@ describe('css-class-refs: Python that emits class names', () => {
   });
 });
 
+describe('css-class-refs: comments', () => {
+  const liveIn = (cls: string, path: string, text: string) =>
+    isLive(cls, refsFromTexts([{ path, text }]));
+
+  it("a class or prefix named only in a JS comment is dead (helper.js's // 'dashboard-')", () => {
+    expect(liveIn('dashboard-action-x', 'static/helper.js', `// 'dashboard-'\nfoo();`)).toBe(false);
+    expect(liveIn('old-card', 'static/a.js', `/* el.className = 'old-card'; */ run();`)).toBe(
+      false,
+    );
+    expect(
+      liveIn('old-card', 'src/a.tsx', `return <div>{/* <i className="old-card" /> */}</div>;`),
+    ).toBe(false);
+    expect(liveIn('old-card', 'static/a.js', `el.className = 'old-card'; // kept`)).toBe(true);
+  });
+
+  it("'//' and '/*' inside strings, template literals, URLs and regexes are not comments", () => {
+    expect(
+      liveIn('cdn-x', 'static/a.js', `const u = 'https://x.io/'; el.className = 'cdn-x';`),
+    ).toBe(true);
+    expect(liveIn('live-a', 'static/a.js', `s = "a // b"; el.className = 'live-a';`)).toBe(true);
+    expect(liveIn('live-b', 'static/a.js', `s = \`/* \${'live-b'} */\`;`)).toBe(true);
+    expect(liveIn('live-c', 'static/a.js', `if (/\\/\\//.test(p)) el.className = 'live-c';`)).toBe(
+      true,
+    );
+    expect(liveIn('live-d', 'static/a.js', `x = p.split(/[/]/); el.className = 'live-d';`)).toBe(
+      true,
+    );
+    expect(liveIn('live-e', 'src/a.tsx', `<a>see https://x.io</a>; <b className="live-e" />`)).toBe(
+      true,
+    );
+  });
+
+  it('a slash after a value divides, so what follows is not mistaken for a regex', () => {
+    const js = `const w = a / 2; // 'gone-'\nel.className = 'kept';`;
+    expect(stripComments('a.js', js)).toBe(`const w = a / 2;  \nel.className = 'kept';`);
+  });
+
+  it("Python's # comments are dropped but '#' in strings stays", () => {
+    expect(liveIn('old-row', 'api/x.py', `# html = '<tr class="old-row">'\npass`)).toBe(false);
+    expect(liveIn('hash-row', 'api/x.py', `c = '#fff'; h = '<tr class="hash-row">'`)).toBe(true);
+    expect(liveIn('doc-row', 'api/x.py', `"""\n# not a comment: doc-row\n"""`)).toBe(true);
+  });
+
+  it('HTML comments are dropped, and JS comments inside <script>', () => {
+    expect(liveIn('old-pane', 'index.html', `<!-- <div class="old-pane"></div> -->`)).toBe(false);
+    expect(liveIn('old-pane', 'index.html', `<script>// x.className = 'old-pane'\n</script>`)).toBe(
+      false,
+    );
+    expect(liveIn('new-pane', 'index.html', `<!-- note --><div class="new-pane"></div>`)).toBe(
+      true,
+    );
+  });
+
+  it('comments become blanks that keep every newline, so line counts stay', () => {
+    const js = `a();\n/* one\ntwo */\nb(); // c\n`;
+    expect(stripComments('a.js', js).split('\n')).toHaveLength(js.split('\n').length);
+  });
+
+  it('sources without a known path are scanned as written', () => {
+    expect(live('kept-card', `// 'kept-card'`)).toBe(true);
+  });
+});
+
 describe('css-class-refs: selectors', () => {
   it('classes inside :not() and :is() are not required', () => {
     expect(selectorClasses('button:not(.a):not(.b) .c')).toEqual(['c']);
@@ -218,11 +282,20 @@ describe('css-class-refs: selectors', () => {
 }`,
       },
     ];
-    expect(removedSelectors(minified, reflowed, refs)).toEqual({ gone: [], live: [] });
-    expect(removedSelectors(reflowed, minified, refs)).toEqual({ gone: [], live: [] });
+    expect(removedSelectors(minified, reflowed, refs)).toEqual({
+      gone: [],
+      live: [],
+    });
+    expect(removedSelectors(reflowed, minified, refs)).toEqual({
+      gone: [],
+      live: [],
+    });
     // A real change of context still counts.
     const narrower = [
-      { name: 'a.css', text: '@media (max-width: 899px) { .used > .used { flex: 1 } }' },
+      {
+        name: 'a.css',
+        text: '@media (max-width: 899px) { .used > .used { flex: 1 } }',
+      },
     ];
     expect(removedSelectors(minified, narrower, refs).live).toContain(
       '@media (max-width: 900px) | .used > .used',
