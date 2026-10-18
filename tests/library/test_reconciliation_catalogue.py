@@ -296,3 +296,18 @@ def test_partial_scan_metrics_survive_exception_and_reset_context(db):
     assert context.reconciliation_metrics['counts']['albums_started'] == 1
     assert context.reconciliation_metrics['seconds']['total_wall'] >= 0
     assert catalogue.current.get() is None
+
+
+@pytest.mark.parametrize('media', [
+    [{'track-count': 0, 'format': 'Vinyl'}],
+    [{'track-count': 1, 'tracks': [{'title': 'Song'}]},
+     {'track-count': 0, 'format': 'DVD-Video'}],
+])
+def test_explicit_zero_track_media_are_valid_catalogue_evidence(db, media):
+    calls = []
+    payload = {'id': 'release', 'media': media}
+    for _ in range(2):
+        session = catalogue.CatalogueSession(db)
+        assert session.request('http://mirror', '/release/release', {}, fetcher(calls, payload)).json() == payload
+        assert not session.failed
+    assert len(calls) == 1

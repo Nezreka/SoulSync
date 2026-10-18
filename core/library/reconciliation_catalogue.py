@@ -108,10 +108,12 @@ def _valid(path, payload):
             return False
         if parts[0] == 'release':
             # All release requests include recordings. An omitted tracklist is
-            # an incomplete response, not evidence of an empty release.
+            # an incomplete response unless the provider explicitly declares
+            # zero tracks (e.g. an unindexed bonus DVD).
             media = payload.get('media')
             return isinstance(media, list) and all(
-                isinstance(medium, dict) and isinstance(medium.get('tracks'), list)
+                isinstance(medium, dict) and (isinstance(medium.get('tracks'), list) or
+                    ('tracks' not in medium and medium.get('track-count') == 0))
                 for medium in media)
         return True
     plural = {'release': 'releases', 'release-group': 'release-groups',
