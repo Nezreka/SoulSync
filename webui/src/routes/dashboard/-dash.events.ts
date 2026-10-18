@@ -13,7 +13,7 @@
  * providers, bare for the rest) — React deliberately does not inherit it.
  */
 
-import { useEffect } from 'react';
+import { useShellEvent } from '@/platform/shell/use-shell-event';
 
 import type { ActivityItem, ServiceStatusPayload, SystemStats } from './-dash.api';
 import type { ProviderStatusPayload } from './-dash.types';
@@ -79,17 +79,6 @@ export interface SyncProgressFrame {
   } | null;
   result?: Record<string, unknown> | null;
   error?: string;
-}
-
-function useShellEvent<T>(name: string, onFrame: (frame: T) => void): void {
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<T>).detail;
-      if (detail) onFrame(detail);
-    };
-    window.addEventListener(name, handler);
-    return () => window.removeEventListener(name, handler);
-  }, [name, onFrame]);
 }
 
 export function useEnrichStatusEvent(onFrame: (frame: EnrichStatusFrame) => void): void {
