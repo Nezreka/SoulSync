@@ -24712,11 +24712,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 32px;
 }
 
-.artists-search-state.fade-out {
-    opacity: 0;
-    transform: translateY(-20px);
-}
-
 .artists-search-container {
     max-width: 600px;
     width: 100%;
