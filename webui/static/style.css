@@ -3270,12 +3270,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Dashboard Page Styling */
-.dashboard-content {
-    display: flex;
-    gap: 40px;
-    height: calc(100vh - 150px);
-}
-
 .activity-section {
     flex: 1;
     background: var(--white-a02);
@@ -3329,15 +3323,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         0 0 20px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a15);
     border-color: rgba(var(--accent-rgb), 0.25);
-}
-
-.stat-value {
-    font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 32px;
-    font-weight: 700;
-    color: rgb(var(--accent-light-rgb));
-    line-height: 1;
-    margin-bottom: 8px;
 }
 
 .stat-label {
