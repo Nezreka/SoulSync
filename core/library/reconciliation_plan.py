@@ -516,6 +516,9 @@ def reconcile_folder(files: list[dict], slots: list[dict],
     assigned = assign_max_weight([[weight for weight, _ in row] for row in weighted])
     assigned_by_slot = {slot_index: file_index for file_index, slot_index in assigned}
     assigned_by_file = {file_index: slot_index for file_index, slot_index in assigned}
+    largest_slot_number = max((int(item.get('track_number') or 0)
+                               for item in slots), default=0)
+    has_multiple_discs = len({item.get('disc_number') or 1 for item in slots}) > 1
     pairs = []
     for file_index, slot_index in assigned:
         weight, reasons = weighted[file_index][slot_index]
@@ -650,11 +653,14 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         # album even when AcoustID links the fingerprint to this song too.
         # Versioned top recordings make that provenance conflict actionable.
         local_number = int(tags.get('track_number') or 0)
-        largest_slot_number = max((int(item.get('track_number') or 0)
-                                   for item in slots), default=0)
+        # A continuous album position is valid even when the selected edition
+        # restarts its track numbers on each disc. Compare the assigned slot,
+        # not just the largest per-disc position, before inferring provenance.
+        continuous_position_agrees = has_multiple_discs and local_number == slot_index + 1
         outlying_version = (
             local_number > largest_slot_number + 1
             and local_number != int(slot.get('track_number') or 0)
+            and not continuous_position_agrees
             and any(_version_markers(str(recording.get('title') or ''))
                     - slot_version_markers(slot)
                     for recording in top_recordings)

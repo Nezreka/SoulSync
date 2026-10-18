@@ -129,6 +129,24 @@ def test_out_of_range_position_and_live_fingerprint_block_renumbering():
                for reason in result['pairs'][0]['ambiguity_reasons'])
 
 
+def test_continuous_multidisc_position_does_not_make_noisy_versions_out_of_range():
+    file = _file('Girl', '/album/30 - Girl.flac', 151440,
+                 {'mbid': 'girl', 'title': 'Girl', 'artist': 'The Beatles', 'score': 1})
+    file['tags'].update(track_number=30, disc_number=2, artist='The Beatles', mbid='girl')
+    file['acoustid']['recordings'].append(
+        {'mbid': 'alternate', 'title': 'Girl (take 2)', 'artist': 'The Beatles', 'score': 1})
+    slots = [{'title': f'Other song {i}', 'disc_number': 1 if i <= 19 else 2,
+              'track_number': i if i <= 19 else i - 19, 'duration_ms': 200000}
+             for i in range(1, 31)]
+    slots[-1].update(title='Girl', artist='The Beatles', recording_mbid='girl', duration_ms=151440)
+
+    pair = reconcile_folder([file], slots)['pairs'][0]
+
+    assert pair['slot_index'] == 29
+    assert pair['confidence'] == 'clear'
+    assert not pair['ambiguity_reasons']
+
+
 def test_repeated_exchange_titles_do_not_swap_numbered_files_on_fuzzy_audio():
     files = [
         _file('Exchange', '/album/05 - Exchange.flac', 253258,

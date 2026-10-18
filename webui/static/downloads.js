@@ -5068,7 +5068,9 @@ function _musicRepairActiveHTML() {
         // without a display name.
         const jobName = t.display_name || t.name || t.job_name || t.id || 'Library maintenance';
         // _taskCardHTML escapes the title itself, so no _escToast here.
-        return _taskCardHTML(jobName, pct, line, cls, _notifActionHTML('Open Tools', 'tools'));
+        return _taskCardHTML(jobName, pct, line, cls, t.id === 'review_apply'
+            ? _notifActionHTML('Open Review Queue', 'review')
+            : _notifActionHTML('Open Tools', 'tools'));
     }).join('');
 }
 

@@ -163,6 +163,20 @@ def repair_review_queue_apply(case_id, finding_id):
         return jsonify({'error': 'Could not apply review decision'}), 500
 
 
+@bp.route('/api/repair/review-queue/<path:case_id>/findings/<int:finding_id>/reopen', methods=['POST'])
+def repair_review_queue_reopen(case_id, finding_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    try:
+        result = worker.reopen_review_assignment(case_id, finding_id)
+        return jsonify(result), 200 if result.get('success') else 409 if result.get('stale') else 400
+    except Exception as exc:
+        logger.error('Error reopening review decision: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not reopen review decision'}), 500
+
+
+
 @bp.route('/api/repair/review-queue/<path:case_id>/release', methods=['POST'])
 def repair_review_queue_pin_release(case_id):
     worker = _repair_worker()
@@ -209,6 +223,51 @@ def repair_review_queue_apply_decision(case_id, category):
     except Exception as exc:
         logger.error('Error applying grouped review decision: %s', exc, exc_info=True)
         return jsonify({'error': 'Could not apply grouped review decision'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/reset-scope', methods=['POST'])
+def repair_review_reset_scope(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    try:
+        result = worker.reset_review_scope(case_id)
+        return jsonify(result), 200 if result.get('success') else 409
+    except Exception as exc:
+        logger.error('Error reopening album scope: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not reopen album scope'}), 500
+
+
+@bp.route('/api/repair/review-queue/<path:case_id>/save-plan', methods=['POST'])
+def repair_review_save_plan(case_id):
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    data = request.get_json(silent=True) or {}
+    try:
+        result = worker.save_review_plan(case_id, str(data.get('signature') or ''))
+        return jsonify(result), 200 if result.get('success') else 409
+    except Exception as exc:
+        logger.error('Error saving review plan: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not save review plan'}), 500
+
+
+
+@bp.route('/api/repair/review-queue/saved-plans', methods=['GET', 'POST'])
+def repair_review_saved_plans():
+    worker = _repair_worker()
+    if worker is None:
+        return jsonify({'error': 'Repair worker unavailable'}), 503
+    try:
+        if request.method == 'GET':
+            return jsonify({'plans': worker.saved_review_plans()})
+        data = request.get_json(silent=True) or {}
+        result = worker.start_saved_review_plans(data.get('plans'))
+        return jsonify(result), 200 if result.get('started') else 409
+    except Exception as exc:
+        logger.error('Error handling saved review plans: %s', exc, exc_info=True)
+        return jsonify({'error': 'Could not load or apply saved review plans'}), 500
+
 
 
 @bp.route('/api/repair/review-queue/apply-ready', methods=['POST'])

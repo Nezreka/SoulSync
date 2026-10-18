@@ -1171,6 +1171,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'current_track_number': tags.get('track_number'),
             'current_disc_number': tags.get('disc_number') or 1,
             'slot_artist': slot.get('artist') or '',
+            'source_track_id': slot.get('source_track_id'),
             'slot_track_number': slot.get('track_number'),
             'slot_disc_number': slot.get('disc_number') or 1,
             'display_track_number': display_slot.get('track_number'),
@@ -1215,6 +1216,8 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'current_track_number': tags.get('track_number'),
             'current_disc_number': tags.get('disc_number') or 1,
             'file_duration_ms': tags.get('duration_ms') or 0,
+            'current_tags': tags,
+            'acoustid': file.get('acoustid') or {},
             'audio_title': audio.get('title') or '',
             'audio_artist': audio.get('artist') or '',
             'audio_score': audio.get('score'),
@@ -1293,7 +1296,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             assignment['fulfillment_state'] = 'wishlisted'
     if intent_scope == 'partial':
         for assignment in assignments:
-            if (assignment.get('status') == 'missing' and
+            if (assignment.get('status') == 'missing' and not assignment.get('fulfillment_state') and
                     _wanted_slot_key({'source_track_id': assignment.get('source_track_id'),
                                       'disc_number': assignment.get('slot_disc_number'),
                                       'track_number': assignment.get('slot_track_number'),
@@ -1336,7 +1339,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                  else 'confirmed')
     candidate_rows = candidates or [scored]
     try:
-        return persist_album_plan(db, common, {
+        case_id = persist_album_plan(db, common, {
             'source': source, 'release_id': release_id, 'state': state,
             'intent_scope': intent_scope,
             'numbering_mode': numbering_mode,
@@ -1348,6 +1351,9 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                             (candidate_metadata or {}).get((row[3], row[4])) or {},
                             numbering_mode) for row in candidate_rows[:6]],
         })
+        from core.library.reconciliation_fulfillment import settle_assignments
+        settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id)
+        return case_id
     except Exception as exc:
         # The snapshot is a review read model. A transient persistence problem
         # must not discard the findings that remain the actionable source of
@@ -1802,6 +1808,9 @@ class LibraryReconciliationJob(RepairJob):
         """Read exact requested tracks once for the current scan."""
         conn = context.db._get_connection()
         try:
+            from core.library.reconciliation_fulfillment import backfill_requests, outstanding
+            backfill_requests(conn)
+            durable = outstanding(conn)
             rows = conn.execute('''
                 SELECT profile_id, spotify_track_id, spotify_data
                 FROM wishlist_tracks
@@ -1812,6 +1821,11 @@ class LibraryReconciliationJob(RepairJob):
         finally:
             conn.close()
         by_profile: dict[int, set[tuple[str, str]]] = defaultdict(set)
+        self._published_by_profile = defaultdict(set)
+        for profile_id, track_id, release_id, state in durable:
+            by_profile[int(profile_id or 1)].add((track_id, release_id))
+            if state == 'published':
+                self._published_by_profile[int(profile_id or 1)].add((track_id, release_id))
         for profile_id, stored_id, raw in rows:
             try:
                 payload = json.loads(raw or '{}')
@@ -2797,45 +2811,42 @@ class LibraryReconciliationJob(RepairJob):
                     not plan['extra_files'] and
                     all(pair['confidence'] != 'ambiguous' for pair in plan['pairs'])
                 )
-                if missing and album_id is not None and assignment_settled:
-                    if (not intent_scope and len(files) == 1 and
-                            files[0].get('playlists')):
-                        # A lone album track that is actively referenced by a
-                        # playlist is positive partial-acquisition evidence.
-                        # Treat absent release slots as intentionally unowned;
-                        # do not persist a guess or request the other tracks.
-                        intent_scope = 'partial'
-                    if not intent_scope:
+                if missing and album_id is not None:
+                    if not intent_scope and assignment_settled:
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_intent',
                             severity='info', entity_type='album', entity_id=str(album_id),
                             file_path=None, title=f'Is {common["album_title"]} meant to be complete?',
                             description=f'{len(missing)} release track(s) are not in this folder.',
-                            details={**common, 'missing_tracks': missing}):
+                            details={**common, 'missing_tracks': missing,
+                                     'suggested_scope': 'partial' if len(files) == 1 and files[0].get('playlists') else 'complete'}):
                             result.findings_created += 1
-                    elif intent_scope in ('complete', 'partial'):
-                        for slot in missing:
-                            if (intent_scope == 'partial' and
-                                    _wanted_slot_key(slot) not in wanted_slots):
-                                continue
-                            key = missing_slot_key(album_id, source, release_id, slot)
-                            fulfillment_state = (
-                                'wishlisted' if
-                                (str(slot.get('source_track_id') or ''),
-                                 str(exact_release_id)) in wishlisted_slots else '')
-                            if emit(
-                                job_id=self.job_id, finding_type='reconciliation_missing',
-                                severity='info', entity_type='album_slot', entity_id=key,
-                                file_path=None, title=f'Missing: {slot["title"]}',
-                                description='This track is absent from the intended complete release.',
-                                details={**common, 'fulfillment_state': fulfillment_state,
-                                         'missing_tracks': [{
-                                    'name': slot['title'], 'track_number': slot['track_number'],
-                                    'disc_number': slot['disc_number'],
-                                    'source_track_id': slot['source_track_id'],
-                                    'source': source, 'duration_ms': slot['duration_ms'],
-                                }] }):
-                                result.findings_created += 1
+                    for slot in missing:
+                        key = missing_slot_key(album_id, source, release_id, slot)
+                        fulfillment_state = (
+                            'wishlisted' if
+                            (str(slot.get('source_track_id') or ''),
+                             str(exact_release_id)) in wishlisted_slots else '')
+                        wanted = intent_scope == 'complete' or (intent_scope == 'partial' and _wanted_slot_key(slot) in wanted_slots)
+                        if not wanted and not fulfillment_state:
+                            continue
+                        if not assignment_settled and not fulfillment_state:
+                            continue
+                        if (str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_published_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
+                            fulfillment_state = 'downloaded'
+                        if emit(
+                            job_id=self.job_id, finding_type='reconciliation_missing',
+                            severity='info', entity_type='album_slot', entity_id=key,
+                            file_path=None, title=f'Missing: {slot["title"]}',
+                            description='This track is absent from the intended complete release.',
+                            details={**common, 'fulfillment_state': fulfillment_state,
+                                     'missing_tracks': [{
+                                'name': slot['title'], 'track_number': slot['track_number'],
+                                'disc_number': slot['disc_number'],
+                                'source_track_id': slot['source_track_id'],
+                                'source': source, 'duration_ms': slot['duration_ms'],
+                            }] }):
+                            result.findings_created += 1
                 case_id = _persist_selected_plan(
                     context.db, common, files, scored[0], inventory=album_inventory, candidates=scored,
                     candidate_metadata={

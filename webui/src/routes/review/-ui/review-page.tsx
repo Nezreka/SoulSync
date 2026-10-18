@@ -3,7 +3,12 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
 import {
+  resetAlbumScope,
+  saveAlbumPlan,
+  fetchSavedAlbumPlans,
+  applySavedAlbumPlans,
   applyReviewDecision,
+  reopenReviewAssignment,
   applyReviewDecisionGroup,
   fetchLastReconciliationRun,
   fetchReviewCase,
@@ -291,7 +296,7 @@ export function ReviewPage() {
   const [albumView, setAlbumView] = useState<AlbumView>('plan');
   const [trackFilter, setTrackFilter] = useState('');
   const [trackView, setTrackView] = useState<TrackView>('issues');
-  const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const [openGroups, setOpenGroups] = useState<string[]>(['attention', 'changes']);
   const [previewCandidate, setPreviewCandidate] = useState(0);
   const [releaseIdInput, setReleaseIdInput] = useState('');
   const [manualRelease, setManualRelease] = useState<Record<string, unknown> | null>(null);
@@ -312,6 +317,9 @@ export function ReviewPage() {
   const [scanBusy, setScanBusy] = useState(false);
   const [applyBusy, setApplyBusy] = useState(false);
   const [applyProgress, setApplyProgress] = useState('');
+  const [operationCase, setOperationCase] = useState<string | null>(
+    window.sessionStorage.getItem('review-operation-case'),
+  );
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [globalNotice, setGlobalNotice] = useState('');
@@ -453,7 +461,7 @@ export function ReviewPage() {
         setActiveRowKey(null);
         setManualRelease(null);
         setPreviewCandidate(0);
-        setOpenGroups([]);
+        setOpenGroups(['attention', 'changes']);
       })
       .catch((cause: unknown) => {
         if (live) setError((cause as Error).message);
@@ -601,7 +609,7 @@ export function ReviewPage() {
     setAlbumView('plan');
     setTrackFilter('');
     setTrackView('issues');
-    setOpenGroups([]);
+    setOpenGroups(['attention', 'changes']);
     setPreviewCandidate(0);
     setCaseId(next);
   };
@@ -627,7 +635,7 @@ export function ReviewPage() {
       setActiveRowKey(
         assignmentsByFinding.get(first) ? assignmentKey(assignmentsByFinding.get(first)!) : null,
       );
-      setOpenGroups(['changes', 'missing', 'settled']);
+      setOpenGroups(['attention', 'changes', 'missing', 'settled']);
     }
     window.setTimeout(
       () => document.getElementById('selected-review-action')?.scrollIntoView({ block: 'nearest' }),
@@ -663,6 +671,7 @@ export function ReviewPage() {
       }
       if (
         updated.status === 'completed' &&
+        !updated.album_plan?.assignments.some((row) => row.fulfillment_state) &&
         updated.refresh?.state !== 'running' &&
         updated.refresh?.state !== 'error'
       ) {
@@ -709,7 +718,10 @@ export function ReviewPage() {
   }, [caseId, reviewCase?.refresh?.state]);
 
   const operationRef = useRef<string | null>(window.sessionStorage.getItem('review-operation'));
-  const rememberOperation = (id?: string) => {
+  const rememberOperation = (id?: string, albumCase?: string) => {
+    setOperationCase(albumCase || null);
+    if (albumCase) window.sessionStorage.setItem('review-operation-case', albumCase);
+    else window.sessionStorage.removeItem('review-operation-case');
     operationRef.current = id || 'current';
     window.sessionStorage.setItem('review-operation', operationRef.current);
     setApplyBusy(true);
@@ -731,6 +743,10 @@ export function ReviewPage() {
           window.sessionStorage.setItem('review-operation', operationRef.current);
         }
         if (!operationRef.current) return;
+        if (status.review_scope)
+          setOperationCase(
+            status.review_scope === 'album' ? status.review_case_ids?.[0] || null : null,
+          );
         if (!status.operation_id && operationRef.current !== 'current') {
           setError(
             'The server no longer has this operation report. Review the refreshed album before retrying.',
@@ -760,12 +776,15 @@ export function ReviewPage() {
             `${status.fixed || 0} completed; ${status.failed || 0} failed. ${status.error || status.errors?.[0]?.error || 'The operation stopped before completing.'}`,
           );
         } else {
-          setNotice(
-            `${status.fixed || 0} album action${status.fixed === 1 ? '' : 's'} completed.${status.organize_queued ? ' Folder organization was queued.' : ''}${status.reconciliation_queued ? ' Updating the album plan…' : ''}`,
-          );
+          const message = `${status.fixed || 0} album action${status.fixed === 1 ? '' : 's'} completed.${status.organize_queued ? ' Folder organization was queued.' : ''}${status.reconciliation_queued ? ' Updating the album plan…' : ''}`;
+          const targetCase =
+            status.review_scope === 'album' ? status.review_case_ids?.[0] : operationCase;
+          if (status.review_scope === 'global' || !targetCase) setGlobalNotice(message);
+          else if (selectedCaseRef.current === targetCase) setNotice(message);
         }
         operationRef.current = null;
         window.sessionStorage.removeItem('review-operation');
+        window.sessionStorage.removeItem('review-operation-case');
         setApplyBusy(false);
         setApplyProgress('');
         await refreshRef.current();
@@ -784,7 +803,7 @@ export function ReviewPage() {
       live = false;
       window.clearInterval(timer);
     };
-  }, [applyBusy]);
+  }, [applyBusy, operationCase]);
 
   const runScan = async () => {
     setScanBusy(true);
@@ -858,7 +877,7 @@ export function ReviewPage() {
           ? await startAlbumMetadataChanges(scopeCaseId)
           : await startReadyChanges(scopeCaseId, organize);
       if (!started.started) throw new Error(started.error || 'Could not start album changes');
-      rememberOperation(started.operation_id);
+      rememberOperation(started.operation_id, scopeCaseId);
     } catch (cause) {
       setApplyBusy(false);
       setApplyProgress('');
@@ -882,7 +901,7 @@ export function ReviewPage() {
     try {
       const started = await startMissingTrackRequests(reviewCase.case_id);
       if (!started.started) throw new Error(started.error || 'Could not request missing tracks');
-      rememberOperation(started.operation_id);
+      rememberOperation(started.operation_id, reviewCase.case_id);
     } catch (cause) {
       setApplyBusy(false);
       setApplyProgress('');
@@ -1021,16 +1040,7 @@ export function ReviewPage() {
     }
   };
 
-  const actGroup = async (decision: ReviewDecision, action: 'fix' | 'dismiss') => {
-    const verb = action === 'fix' ? 'apply' : 'keep the current values for';
-    const confirmed = window.showConfirmDialog
-      ? await window.showConfirmDialog({
-          title: decision.label,
-          message: `This will ${verb} ${decision.action_count} proposed action${decision.action_count === 1 ? '' : 's'}.`,
-          confirmText: action === 'fix' ? 'Apply actions' : 'Keep current values',
-        })
-      : window.confirm(`${verb} ${decision.action_count} proposed actions?`);
-    if (!confirmed) return;
+  const actGroup = async (decision: ReviewDecision, action: 'fix' | 'dismiss' | 'reset') => {
     setBusy(true);
     setBusyDecision(decision.category);
     setError('');
@@ -1045,9 +1055,7 @@ export function ReviewPage() {
           `${result.applied == null ? 'The operation outcome could not be confirmed.' : `${result.applied} of ${result.total || decision.action_count} changes completed.`} ${result.error || 'Review the current operation status before retrying.'}`,
         );
       } else {
-        setNotice(
-          `${result.applied == null ? 'Decision handled' : `${result.applied} action${result.applied === 1 ? '' : 's'} handled`}.${result.refresh_queued ? ' Updating this album plan…' : ''}`,
-        );
+        setNotice('Album plan saved. Apply it when you are ready.');
       }
       if (!(await refresh()) && result.success) {
         setError(
@@ -1059,6 +1067,64 @@ export function ReviewPage() {
     } finally {
       setBusy(false);
       setBusyDecision('');
+    }
+  };
+
+  const reconsiderScope = async () => {
+    if (!reviewCase) return;
+    setBusy(true);
+    setNotice('');
+    setError('');
+    try {
+      await resetAlbumScope(reviewCase.case_id);
+      await refresh();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveForLater = async () => {
+    if (!reviewCase?.plan_signature) return;
+    setBusy(true);
+    setError('');
+    try {
+      await saveAlbumPlan(reviewCase.case_id, reviewCase.plan_signature);
+      setNotice('Plan saved for bulk apply. No file changes have been applied.');
+      await refresh();
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applySavedPlans = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const { plans } = await fetchSavedAlbumPlans();
+      if (!plans.length) {
+        setGlobalNotice('No saved plans are ready. Save a resolved album plan first.');
+        return;
+      }
+      const message = `Apply ${plans.reduce((sum, item) => sum + item.ready, 0)} saved actions across ${plans.length} albums?`;
+      const confirmed = window.showConfirmDialog
+        ? await window.showConfirmDialog({
+            title: 'Apply saved album plans',
+            message,
+            confirmText: 'Apply saved plans',
+          })
+        : window.confirm(message);
+      if (!confirmed) return;
+      const result = await applySavedAlbumPlans(plans);
+      if (!result.started) throw new Error(result.error || 'The saved batch could not be started');
+      rememberOperation(result.operation_id);
+    } catch (cause) {
+      setError((cause as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1074,6 +1140,15 @@ export function ReviewPage() {
           Apply {plan.ready} ready change
           {plan.ready === 1 ? '' : 's'}
         </button>
+        {reviewCase.plan_signature && reviewDecisions.length === 0 && (
+          <button
+            type="button"
+            disabled={mutationBusy || reviewCase.saved_for_later}
+            onClick={() => void saveForLater()}
+          >
+            {reviewCase.saved_for_later ? 'Saved for bulk apply' : 'Save plan for bulk apply'}
+          </button>
+        )}
         {plan.can_organize && reviewMetadataCount === 0 && reviewCase.album_id != null && (
           <button
             type="button"
@@ -1205,9 +1280,12 @@ export function ReviewPage() {
             disabled={applyBusy || !queue?.ready_total}
             onClick={() => void applyReady()}
           >
-            {applyBusy
+            {applyBusy && !operationCase
               ? applyProgress || 'Applying…'
               : `Apply ready changes (${queue?.ready_total || 0})`}
+          </button>
+          <button type="button" disabled={mutationBusy} onClick={() => void applySavedPlans()}>
+            Apply saved plans
           </button>
           <details className={styles.moreMenu}>
             <summary aria-label="More queue actions">More</summary>
@@ -1269,7 +1347,7 @@ export function ReviewPage() {
           {notice}
         </div>
       )}
-      {applyBusy && (
+      {applyBusy && !operationCase && (
         <div className={styles.applyBanner} role="status" aria-live="polite">
           <span className={styles.loadingSpinner} aria-hidden="true" />
           <strong>{applyProgress || 'Applying album changes…'}</strong>
@@ -1524,6 +1602,13 @@ export function ReviewPage() {
                 </button>
               </nav>
 
+              {applyBusy && operationCase === reviewCase.case_id && (
+                <div className={styles.applyBanner} role="status" aria-live="polite">
+                  <span className={styles.loadingSpinner} aria-hidden="true" />
+                  <strong>{applyProgress || 'Applying this album plan…'}</strong>
+                  <span>This continues on the server. You can leave this page and return.</span>
+                </div>
+              )}
               {notice && !reanalyzing && reviewCase.refresh?.state !== 'running' && (
                 <div className={styles.albumNotice} role="status" aria-live="polite">
                   <span>{notice}</span>
@@ -1532,49 +1617,49 @@ export function ReviewPage() {
                   </button>
                 </div>
               )}
-              {(reanalyzing || reviewCase.refresh?.state === 'running') && (
-                <div className={styles.refreshBanner} role="status">
-                  <span className={styles.loadingSpinner} aria-hidden="true" /> Reanalyzing this
-                  album. The previous decisions remain visible while dependent track actions are
-                  recalculated.
-                </div>
-              )}
+              {!(applyBusy && operationCase === reviewCase.case_id) &&
+                (reanalyzing || reviewCase.refresh?.state === 'running') && (
+                  <div className={styles.refreshBanner} role="status">
+                    <span className={styles.loadingSpinner} aria-hidden="true" /> Reanalyzing this
+                    album. The previous decisions remain visible while dependent track actions are
+                    recalculated.
+                  </div>
+                )}
 
               <div className={styles.tabWorkspace} data-view={albumView}>
                 <div className={styles.tabMain}>
                   {albumView === 'plan' &&
-                    reviewCase.items.filter(
-                      (item) => item.finding_type === 'reconciliation_metadata',
-                    ).length > 0 &&
-                    reviewMetadataCount > 0 &&
-                    !reviewDecisions.some((decision) =>
-                      ['release_conflicts', 'album_completeness', 'numbering'].includes(
-                        decision.category,
-                      ),
-                    ) && (
-                      <div className={styles.albumApplyAll}>
+                    reviewCase.items.some((item) => item.details?.planned_choice) && (
+                      <section className={styles.albumApplyAll} aria-label="Saved plan choices">
                         <div>
-                          <strong>Apply all proposed metadata edits</strong>
+                          <strong>Choices saved in this album plan</strong>
                           <p>
-                            Includes proposed metadata and filename edits that you approve here.
-                            Folder organization is separate.
+                            No file changes have been applied. You can change these choices before
+                            applying.
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          className={styles.primary}
-                          disabled={applyBusy || busy || reviewCase.refresh?.state === 'running'}
-                          onClick={() => void applyReady(reviewCase.case_id, false, true)}
-                        >
-                          Apply all{' '}
-                          {
-                            reviewCase.items.filter(
-                              (item) => item.finding_type === 'reconciliation_metadata',
-                            ).length
-                          }{' '}
-                          album edits
-                        </button>
-                      </div>
+                        <div className={styles.inlineActions}>
+                          {[
+                            ...new Set(
+                              reviewCase.items.flatMap((item) => {
+                                const choice = item.details?.planned_choice as
+                                  | { category?: string }
+                                  | undefined;
+                                return choice?.category ? [choice.category] : [];
+                              }),
+                            ),
+                          ].map((category) => (
+                            <button
+                              key={category}
+                              type="button"
+                              disabled={mutationBusy}
+                              onClick={() => void actGroup({ category } as ReviewDecision, 'reset')}
+                            >
+                              Review {category.replaceAll('_', ' ')} again
+                            </button>
+                          ))}
+                        </div>
+                      </section>
                     )}
 
                   {albumView === 'plan' && plan.ready > 0 && (
@@ -1704,18 +1789,18 @@ export function ReviewPage() {
                                       onClick={() => void actGroup(decision, 'fix')}
                                     >
                                       {busyDecision === decision.category
-                                        ? `Applying ${decision.action_count} changes…`
+                                        ? `Saving ${decision.action_count} choices…`
                                         : decision.category === 'numbering'
                                           ? !releaseHasMultipleDiscs
-                                            ? `Apply release track numbers to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                            ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
                                             : reviewCase.album_plan?.numbering_mode === 'digital'
-                                              ? `Apply continuous numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
-                                              : `Apply release numbering to ${decision.action_count} track${decision.action_count === 1 ? '' : 's'} now`
+                                              ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                              : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
                                           : decision.category === 'title_conventions'
-                                            ? 'Apply title conventions'
+                                            ? 'Use proposed title conventions'
                                             : decision.label === 'Confirm album artist'
                                               ? 'Use proposed album artist'
-                                              : `Apply all ${decision.action_count} proposed changes`}
+                                              : `Use ${decision.action_count} proposed changes`}
                                     </button>
                                     <button
                                       type="button"
@@ -1738,8 +1823,7 @@ export function ReviewPage() {
                                 {busyDecision === decision.category && (
                                   <p className={styles.decisionProgress} role="status">
                                     <span className={styles.loadingSpinner} aria-hidden="true" />
-                                    Applying the selected changes now; the album will be reanalyzed
-                                    next.
+                                    Saving your choices in the album plan…
                                   </p>
                                 )}
                                 {decision.category === 'album_completeness' &&
@@ -1840,7 +1924,7 @@ export function ReviewPage() {
                             aria-label="Missing tracks being acquired"
                           >
                             <StatusChip tone="info" icon="info">
-                              {wishlistedCount} on wishlist
+                              {wishlistedCount} requested
                             </StatusChip>
                             <div>
                               <strong>Waiting for missing tracks</strong>
@@ -1848,9 +1932,15 @@ export function ReviewPage() {
                                 {wishlistedCount === 1
                                   ? 'The missing track is'
                                   : 'These missing tracks are'}{' '}
-                                already requested. The album will be checked again after the files
-                                arrive.
+                                already requested. Published downloads are checked automatically;
+                                the album stays here until those files are assigned.
                               </p>
+                              <a
+                                className={styles.secondaryButton}
+                                href={`/wishlist?q=${encodeURIComponent(reviewCase?.album || '')}`}
+                              >
+                                View album in Wishlist →
+                              </a>
                             </div>
                           </section>
                         )}
@@ -2124,16 +2214,38 @@ export function ReviewPage() {
                               .map(renderAssignmentRow)
                           ) : (
                             <>
-                              {attentionAssignments.filter(matchingFilter).map(renderAssignmentRow)}
+                              {attentionAssignments.filter(matchingFilter).length > 0 && (
+                                <div className={styles.assignmentGroup} data-tone="warning">
+                                  <button
+                                    type="button"
+                                    aria-expanded={openGroups.includes('attention')}
+                                    onClick={() => toggleGroup('attention')}
+                                  >
+                                    {openGroups.includes('attention') ? '▾' : '▸'}{' '}
+                                    {attentionAssignments.filter(matchingFilter).length} tracks
+                                    needing review
+                                  </button>
+                                  {openGroups.includes('attention') &&
+                                    attentionAssignments
+                                      .filter(matchingFilter)
+                                      .map(renderAssignmentRow)}
+                                </div>
+                              )}
                               {changeAssignments.filter(matchingFilter).length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="info">
-                                  <div className={styles.assignmentGroupTitle}>
-                                    ↻ {changeAssignments.filter(matchingFilter).length} proposed
-                                    track changes
-                                  </div>
-                                  {changeAssignments
-                                    .filter(matchingFilter)
-                                    .map(renderAssignmentRow)}
+                                  <button
+                                    type="button"
+                                    aria-expanded={openGroups.includes('changes')}
+                                    onClick={() => toggleGroup('changes')}
+                                  >
+                                    {openGroups.includes('changes') ? '▾' : '▸'} ↻{' '}
+                                    {changeAssignments.filter(matchingFilter).length} proposed track
+                                    changes
+                                  </button>
+                                  {openGroups.includes('changes') &&
+                                    changeAssignments
+                                      .filter(matchingFilter)
+                                      .map(renderAssignmentRow)}
                                 </div>
                               )}
                               {missingAssignments.filter(matchingFilter).length > 0 && (
@@ -2218,6 +2330,28 @@ export function ReviewPage() {
                           <AssignmentEvidence
                             row={assignmentsByKey.get(activeRowKey)!}
                             album={reviewCase}
+                            busy={mutationBusy}
+                            onReviewAgain={(findingId) => {
+                              const requestedCase = caseId;
+                              setBusy(true);
+                              setError('');
+                              void reopenReviewAssignment(requestedCase, findingId)
+                                .then(async (result) => {
+                                  if (!result.success)
+                                    throw new Error(result.error || 'Could not reopen decision');
+                                  if (selectedCaseRef.current !== requestedCase) return;
+                                  setNotice(result.message || 'Decision reopened.');
+                                  await refresh();
+                                })
+                                .catch((error: unknown) =>
+                                  setError(
+                                    error instanceof Error
+                                      ? error.message
+                                      : 'Could not reopen decision',
+                                  ),
+                                )
+                                .finally(() => setBusy(false));
+                            }}
                           />
                         ) : (
                           <p>Select a track to inspect its evidence and decisions.</p>
@@ -2347,6 +2481,15 @@ export function ReviewPage() {
                                   : reviewCase.album_plan.counts.missing
                                     ? 'Resolve track assignments first'
                                     : 'Full release coverage')}
+                              {reviewCase.album_plan.intent_scope && (
+                                <button
+                                  type="button"
+                                  disabled={mutationBusy}
+                                  onClick={() => void reconsiderScope()}
+                                >
+                                  Review album scope
+                                </button>
+                              )}
                             </dd>
                           </div>
                           {wishlistedCount > 0 && (

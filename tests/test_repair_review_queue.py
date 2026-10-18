@@ -246,7 +246,7 @@ class _Database:
                 id INTEGER PRIMARY KEY, job_id TEXT, finding_type TEXT,
                 severity TEXT, status TEXT, entity_type TEXT, entity_id TEXT,
                 file_path TEXT, title TEXT, description TEXT, details_json TEXT,
-                user_action TEXT, created_at TEXT, updated_at TEXT,
+                user_action TEXT, created_at TEXT, updated_at TEXT, resolved_at TEXT,
                 last_error TEXT, review_case_key TEXT
             )
         ''')
@@ -558,6 +558,8 @@ def test_case_includes_persisted_successful_assignments_around_the_open_action()
 def test_persisted_plan_marks_previous_actions_settled_without_hiding_current_action():
     db = _Database()
     details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Album'}
+    db.add(2, '/music/Album/01.flac', details, status='dismissed',
+           job_id='library_reconciliation', kind='reconciliation_metadata')
     db.add(1, '/music/Album/02.flac', {
         **details, 'changes': {'title': {'new': 'Current'}}, 'confidence': 'clear',
     }, job_id='library_reconciliation', kind='reconciliation_metadata')
@@ -919,7 +921,7 @@ def test_review_http_api_returns_exact_case_and_rejects_stale_apply(monkeypatch)
     assert calls == [{'case_id': case_id, 'organize': True}]
 
 
-def test_grouped_title_convention_decision_applies_every_current_action():
+def test_grouped_title_convention_decision_stages_without_applying():
     db = _Database()
     for finding_id in (1, 2):
         db.add(finding_id, f'/music/Album/{finding_id:02}.flac', {
@@ -935,11 +937,41 @@ def test_grouped_title_convention_decision_applies_every_current_action():
     worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {
         'started': True, 'operation_id': 'durable-operation', 'total': 2}
     result = worker.apply_review_decision_group(case_id, 'title_conventions', action='fix')
-    assert result == {'success': True, 'started': True, 'total': 2,
-                      'operation_id': 'durable-operation'}
-    assert calls == [{'finding_ids': [1, 2], 'allow_review_ids': True,
-                      'review_approved': True,
-                      'review_case_folders': [(case_id, '/music/Album')]}]
+    assert result['success'] and result['saved'] == 2
+    assert not calls
+    case = get_case(db, case_id)
+    assert all(item['status'] == 'pending' for item in case['items'])
+    assert all(item['details']['plan_approved'] for item in case['items'])
+
+
+def test_numbering_draft_keeps_independent_metadata_and_invalidates_on_change():
+    db = _Database()
+    db.add(1, '/music/Album/09.flac', {
+        'album_id': 10, 'album_title': 'Album', 'confidence': 'clear',
+        'changes': {'track_number': {'old': 9, 'new': 3},
+                    'musicbrainz_recording_id': {'old': '', 'new': 'recording'}},
+        'db_data': {'track_number': 3, 'musicbrainz_recording_id': 'recording'},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.Lock()
+    assert worker.apply_review_decision_group(key, 'numbering', action='dismiss')['success']
+    item = get_case(db, key)['items'][0]
+    assert item['details']['db_data'] == {'musicbrainz_recording_id': 'recording'}
+    assert item['review_tier'] == 'ready'
+    assert safe_finding_ids(db)[0] == [1]
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 1
+    conn = db._get_connection()
+    raw = json.loads(conn.execute('SELECT details_json FROM repair_findings WHERE id=1').fetchone()[0])
+    assert raw['db_data']['track_number'] == 3  # untouched scan evidence
+    raw['changes']['track_number']['new'] = 4
+    conn.execute('UPDATE repair_findings SET details_json=? WHERE id=1', (json.dumps(raw),))
+    conn.commit()
+    conn.close()
+    assert get_case(db, key)['items'][0]['review_tier'] == 'manual'
+    assert safe_finding_ids(db)[0] == []
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
 
 
 def test_accepted_reconciliation_exception_reopens_when_audio_evidence_changes(tmp_path):
@@ -1147,3 +1179,109 @@ def test_metadata_inspector_can_change_and_reset_plan_assignment_without_writing
         with db._get_connection() as conn:
             assert conn.execute('SELECT COUNT(*) FROM reconcile_track_assignment').fetchone()[0] == expected
             assert conn.execute('SELECT status FROM repair_findings WHERE id=?', (item['id'],)).fetchone()[0] == 'pending'
+
+
+def test_obsolete_extra_keeps_evidence_and_coverage_without_claiming_user_review():
+    db = _Database()
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Album'}
+    db.add(1, '/music/Album/01.flac', {**details, 'changes': {'title': {'new': 'One'}},
+           'confidence': 'clear'}, job_id='library_reconciliation', kind='reconciliation_metadata')
+    audio = {'status': 'ok', 'recordings': [{'title': 'Different song', 'score': 1}]}
+    db.add(2, '/music/Album/02.flac', {**details, 'acoustid': audio,
+           'current_tags': {'title': 'Expected song'}}, status='resolved',
+           job_id='library_reconciliation', kind='reconciliation_extra')
+    db.conn.execute("UPDATE repair_findings SET user_action='obsolete' WHERE id=2")
+    case_id = persist_album_plan(db, {**details, 'evidence_signature': 'evidence'}, {
+        'source': 'musicbrainz', 'release_id': 'release-id',
+        'assignments': [{'status': 'extra', 'file_path': '/music/Album/02.flac',
+                         'audio_conflict': 'different_recording'}],
+    })
+    case = get_case(db, case_id, job_id='library_reconciliation')
+    extra = case['album_plan']['assignments'][0]
+    assert extra['status'] == 'extra'
+    assert extra['review_state'] == 'obsolete'
+    assert extra['acoustid'] == audio
+    assert case['album_plan']['counts']['extra'] == 1
+    assert case['album_plan']['counts']['settled'] == 0
+
+    db.conn.execute("UPDATE repair_findings SET status='dismissed', user_action=NULL WHERE id=2")
+    case = get_case(db, case_id, job_id='library_reconciliation')
+    assert case['album_plan']['assignments'][0]['review_state'] == 'reviewed'
+    assert case['album_plan']['counts']['extra'] == 1
+    assert case['album_plan']['counts']['settled'] == 1
+
+
+def test_reopen_assignment_is_case_scoped_and_clears_only_its_saved_choice(tmp_path):
+    db = _Database()
+    file = tmp_path / 'track.flac'
+    file.write_bytes(b'unchanged audio')
+    details = {'album_id': 10, 'profile_id': 1, 'album_title': 'Album',
+               'album_folder': str(tmp_path), 'source': 'musicbrainz', 'release_id': 'edition'}
+    db.add(1, str(file), details, status='dismissed',
+           job_id='library_reconciliation', kind='reconciliation_unresolved')
+    db.conn.execute('''CREATE TABLE reconcile_track_assignment
+        (album_id TEXT, source TEXT, release_id TEXT, file_path TEXT, slot_key TEXT)''')
+    db.conn.executemany('INSERT INTO reconcile_track_assignment VALUES (?, ?, ?, ?, ?)', [
+        ('10', 'musicbrainz', 'edition', str(file), 'one'),
+        ('10', 'musicbrainz', 'edition', '/different.flac', 'two'),
+    ])
+    case_id = db.conn.execute('SELECT review_case_key FROM repair_findings WHERE id=1').fetchone()[0]
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.RLock()
+    refreshed = []
+    worker._schedule_album_refresh = lambda *args: refreshed.append(args) or True
+
+    assert worker.reopen_review_assignment('another-case', 1)['stale']
+    assert not refreshed
+    result = worker.reopen_review_assignment(case_id, 1)
+    assert result['success'] and result['refresh_queued']
+    assert db.conn.execute('SELECT status FROM repair_findings WHERE id=1').fetchone()[0] == 'pending'
+    assert db.conn.execute('SELECT file_path FROM reconcile_track_assignment').fetchall() == [('/different.flac',)]
+    assert file.read_bytes() == b'unchanged audio'
+
+
+def test_saved_bulk_plan_is_bound_to_current_choices_and_evidence():
+    db = _Database()
+    db.add(1, '/music/Album/09.flac', {
+        'album_id': 10, 'album_title': 'Album', 'confidence': 'clear',
+        'changes': {'track_number': {'old': 9, 'new': 3}},
+        'db_data': {'track_number': 3},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.Lock()
+    calls = []
+    worker.start_bulk_fix = lambda **kwargs: calls.append(kwargs) or {'started': True}
+    before = get_case(db, key)
+    assert not worker.save_review_plan(key, before['plan_signature'])['success']
+    assert worker.apply_review_decision_group(key, 'numbering', action='fix')['success']
+    case = get_case(db, key)
+    assert worker.save_review_plan(key, case['plan_signature'])['success']
+    assert not calls
+    saved = worker.saved_review_plans()
+    assert len(saved) == 1
+    assert worker.start_saved_review_plans(saved)['started']
+    assert calls[0]['finding_ids'] == [1]
+    assert worker.apply_review_decision_group(key, 'numbering', action='reset')['success']
+    assert worker.saved_review_plans() == []
+    assert not worker.start_saved_review_plans(saved)['started']
+    assert len(calls) == 1
+    assert get_case(db, key)['items'][0]['status'] == 'pending'
+
+
+def test_retired_reconciliation_finding_is_not_treated_as_user_acceptance(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    finding = dict(job_id='library_reconciliation', finding_type='reconciliation_extra',
+                   severity='warning', entity_type='track', entity_id='track',
+                   file_path='/music/album/01.flac', title='Wrong audio', description='Wrong recording',
+                   details={'album_id': 1, 'album_folder': '/music/album',
+                            'fingerprint_key': 'same-audio', 'audio_conflict': 'different_recording'})
+    assert worker._create_finding(**finding)
+    case = worker.get_review_cases()['items'][0]['case_id']
+    first = worker.get_review_case(case)['items'][0]['id']
+    worker.resolve_finding(first, action='obsolete')
+    assert worker._create_finding(**finding)
+    assert worker.get_review_case(case)['items'][0]['id'] != first

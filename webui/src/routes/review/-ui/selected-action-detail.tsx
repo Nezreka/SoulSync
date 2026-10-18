@@ -47,7 +47,7 @@ export function SelectedActionDetail({
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
   const wrongAudio = finding.details?.audio_conflict === 'different_recording';
   const versionConflict = finding.details?.version_conflict === true;
-  const waitingForDownload = ['wishlisted', 'downloading'].includes(
+  const waitingForDownload = ['wishlisted', 'downloading', 'downloaded'].includes(
     textValue(finding.details?.fulfillment_state),
   );
   const replacement = record(finding.details?.replacement_track);
@@ -266,8 +266,9 @@ export function SelectedActionDetail({
       )}
       {waitingForDownload && (
         <p className={styles.waitingNotice} role="status">
-          This track is on the wishlist. The album is waiting for it to download and join the
-          library.
+          {finding.details?.fulfillment_state === 'downloaded'
+            ? 'This track has downloaded. Reconciliation is checking its library assignment.'
+            : 'This track is on the wishlist. The album is waiting for it to download and join the library.'}
         </p>
       )}
       {numberingPreview && (
@@ -324,13 +325,17 @@ export function SelectedActionDetail({
                     className={styles.primary}
                     onClick={() => onAct('fix')}
                   >
-                    {busy
-                      ? 'Applying…'
-                      : suggested
-                        ? typeInfo?.verb || 'Apply repair'
-                        : finding.finding_type === 'reconciliation_extra'
-                          ? 'Quarantine file'
-                          : 'Apply this change'}
+                    {finding.finding_type === 'reconciliation_metadata'
+                      ? busy
+                        ? 'Saving…'
+                        : 'Use proposed change'
+                      : busy
+                        ? 'Applying…'
+                        : suggested
+                          ? typeInfo?.verb || 'Apply repair'
+                          : finding.finding_type === 'reconciliation_extra'
+                            ? 'Quarantine file'
+                            : 'Apply this change'}
                   </button>
                 )}
             </>

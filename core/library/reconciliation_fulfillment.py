@@ -1,0 +1,114 @@
+"""Durable acquisition state: a removed wishlist row is not proof of an assigned file."""
+from __future__ import annotations
+
+import json
+import os
+
+from core.repair_review_identity import review_case_key
+
+
+def ensure_schema(conn):
+    conn.execute('''CREATE TABLE IF NOT EXISTS reconcile_fulfillment (
+        case_id TEXT NOT NULL, profile_id INTEGER NOT NULL, album_id TEXT NOT NULL,
+        album_folder TEXT NOT NULL, source TEXT NOT NULL, release_id TEXT NOT NULL,
+        source_track_id TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'requested',
+        published_path TEXT NOT NULL DEFAULT '', refresh_needed INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(case_id, source, release_id, source_track_id)
+    )''')
+
+
+def record_request(db, details, slot):
+    conn = db._get_connection()
+    try:
+        ensure_schema(conn)
+        conn.execute('''INSERT INTO reconcile_fulfillment
+            (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET
+                state='requested', published_path='', refresh_needed=0, updated_at=CURRENT_TIMESTAMP
+                WHERE reconcile_fulfillment.state='fulfilled' ''', (
+                review_case_key(details, None), int(details.get('profile_id') or 1),
+                str(details['album_id']), details.get('album_folder') or '',
+                details.get('source') or '', details.get('exact_release_id') or details.get('release_id') or '',
+                str(slot.get('source_track_id') or '')))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def published_wishlist_track(db, stored_id, profiles, path):
+    """Capture exact wishlist identity before removal, after publication succeeded."""
+    if not path or not os.path.isfile(path):
+        return
+    conn = db._get_connection()
+    try:
+        ensure_schema(conn)
+        rows = conn.execute('SELECT profile_id, spotify_data FROM wishlist_tracks WHERE spotify_track_id=?',
+                            (stored_id,)).fetchall()
+        for profile, raw in rows:
+            if profiles is not None and profile not in profiles:
+                continue
+            payload = json.loads(raw or '{}')
+            track_id = str(payload.get('id') or str(stored_id).split('::')[0])
+            release_id = str((payload.get('album') or {}).get('id') or '')
+            source = str(payload.get('provider') or '')
+            if not track_id or not release_id or not source:
+                continue
+            conn.execute('''UPDATE reconcile_fulfillment SET state='published',
+                published_path=?, refresh_needed=1, updated_at=CURRENT_TIMESTAMP
+                WHERE profile_id=? AND release_id=? AND source_track_id=? AND source=?
+                  AND state != 'fulfilled' ''', (str(path), profile, release_id, track_id, source))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def outstanding(conn):
+    ensure_schema(conn)
+    return conn.execute('''SELECT profile_id, source_track_id, release_id, state
+        FROM reconcile_fulfillment WHERE state != 'fulfilled' ''').fetchall()
+
+
+def settle_assignments(db, case_id, assignments, release_id):
+    """A published file stays pending until reconciliation assigns its exact slot."""
+    ids = {str(row.get('source_track_id')) for row in assignments
+           if row.get('status') in ('confirmed', 'change', 'settled') and row.get('file_path')
+           and row.get('source_track_id')}
+    if not ids:
+        return
+    conn = db._get_connection()
+    try:
+        ensure_schema(conn)
+        for track_id in ids:
+            conn.execute('''UPDATE reconcile_fulfillment SET state='fulfilled', refresh_needed=0,
+                updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=?''',
+                (case_id, str(release_id), track_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def backfill_requests(conn):
+    """Retain requests made before the durable acquisition state was introduced."""
+    ensure_schema(conn)
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='repair_findings'").fetchone():
+        return
+    rows = conn.execute("""SELECT review_case_key, details_json FROM repair_findings
+        WHERE finding_type='reconciliation_missing' AND
+          (user_action='wishlisted' OR (status='pending' AND
+           json_extract(details_json, '$.fulfillment_state')='wishlisted'))""").fetchall()
+    for key, raw in rows:
+        details = json.loads(raw or '{}')
+        if details.get('album_id') is None:
+            continue
+        for slot in details.get('missing_tracks') or []:
+            if not slot.get('source_track_id'):
+                continue
+            conn.execute('''INSERT INTO reconcile_fulfillment
+                (case_id, profile_id, album_id, album_folder, source, release_id, source_track_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING''', (
+                    key, int(details.get('profile_id') or 1), str(details['album_id']),
+                    details.get('album_folder') or '', details.get('source') or '',
+                    details.get('exact_release_id') or details.get('release_id') or '',
+                    str(slot['source_track_id'])))
+    conn.commit()

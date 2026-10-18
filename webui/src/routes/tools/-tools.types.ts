@@ -151,6 +151,8 @@ export interface RepairFindingCounts {
 }
 
 export interface BulkFixStatus {
+  review_scope?: 'album' | 'global';
+  review_case_ids?: string[];
   operation_id?: string;
   phase?: string;
   review_approved?: boolean;

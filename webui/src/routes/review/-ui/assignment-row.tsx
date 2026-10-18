@@ -39,7 +39,11 @@ export function AssignmentRow({
     <button
       type="button"
       className={styles.matrixRow}
-      data-status={row.status}
+      data-status={
+        row.status === 'settled' && ['extra', 'duplicate'].includes(row.evidence_status || '')
+          ? row.evidence_status
+          : row.status
+      }
       data-selected={selected || undefined}
       aria-pressed={selected}
       onClick={() => onSelect(row.finding_id ?? null, assignmentKey(row))}
@@ -71,7 +75,11 @@ export function AssignmentRow({
       </span>
       <span className={styles.rowStatus}>
         <i>{statusLabel(row.status, row)}</i>
+        {row.status === 'settled' && row.audio_conflict && <small>Previously reviewed</small>}
         {row.fulfillment_state === 'wishlisted' && <small>Waiting for download</small>}
+        {row.fulfillment_state === 'downloaded' && (
+          <small>Downloaded · checking library assignment</small>
+        )}
         {row.numbering_preview && <small>Choose numbering first</small>}
       </span>
     </button>

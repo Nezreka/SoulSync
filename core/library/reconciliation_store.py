@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS reconcile_album_plans (
 def ensure_schema(conn) -> None:
     # Keep this safe inside the database bootstrap transaction. executescript
     # commits implicitly in sqlite3, which would split unrelated migrations.
+    from core.library.reconciliation_choices import ensure_schema as ensure_choices
+    ensure_choices(conn)
     conn.execute(CREATE_TABLE)
     conn.execute('''CREATE INDEX IF NOT EXISTS idx_reconcile_plans_state
                     ON reconcile_album_plans(state, updated_at)''')

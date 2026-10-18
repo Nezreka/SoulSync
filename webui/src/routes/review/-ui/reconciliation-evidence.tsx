@@ -3,7 +3,7 @@ import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
 import { musicBrainzBrowserUrl } from './musicbrainz-links';
-import { ProviderReference, ProviderReleaseId } from './provider-release-id';
+import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
@@ -42,7 +42,14 @@ function MusicBrainzId({ value, kind }: { value: unknown; kind: 'release' | 'rec
   const id = label(value);
   if (!id) return null;
   return (
-    <ProviderReference id={id} href={musicBrainzBrowserUrl(kind, id)} provider="MusicBrainz" />
+    <a
+      className={styles.recordingLink}
+      href={musicBrainzBrowserUrl(kind, id)}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <code>{id}</code>
+    </a>
   );
 }
 
@@ -667,35 +674,47 @@ export function ReleaseComparison({
                         : label(pair.file)}
                       {pair.file_duration_ms ? ` · ${formatDuration(pair.file_duration_ms)}` : ''}
                     </small>
-                    {!pair.missing && label(pair.confidence) !== 'clear' && (
-                      <small className={styles.reason}>
-                        {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
-                          ? label(pair.ambiguity_reasons[0])
-                          : 'The assignment has a competing match; inspect the evidence.'}
-                      </small>
-                    )}
+                    {!pair.missing &&
+                      pair.review_state !== 'reviewed' &&
+                      label(pair.confidence) !== 'clear' && (
+                        <small className={styles.reason}>
+                          {Array.isArray(pair.ambiguity_reasons) && pair.ambiguity_reasons.length
+                            ? label(pair.ambiguity_reasons[0])
+                            : 'The assignment has a competing match; inspect the evidence.'}
+                        </small>
+                      )}
                   </span>
                   <StatusChip
                     tone={
-                      pair.missing
-                        ? 'danger'
-                        : label(pair.confidence) === 'clear'
-                          ? 'good'
-                          : 'warning'
+                      pair.review_state === 'reviewed'
+                        ? 'info'
+                        : pair.missing
+                          ? 'danger'
+                          : label(pair.confidence) === 'clear'
+                            ? 'good'
+                            : 'warning'
                     }
-                    icon={label(pair.confidence) === 'clear' ? 'check' : 'warning'}
+                    icon={
+                      pair.review_state === 'reviewed' || label(pair.confidence) === 'clear'
+                        ? 'check'
+                        : 'warning'
+                    }
                   >
-                    {pair.missing
-                      ? 'Missing'
-                      : label(pair.confidence) === 'clear'
-                        ? 'Strong match'
-                        : 'Needs review'}
+                    {pair.review_state === 'reviewed'
+                      ? 'Previously reviewed'
+                      : pair.missing
+                        ? 'Missing'
+                        : label(pair.confidence) === 'clear'
+                          ? 'Strong match'
+                          : 'Needs review'}
                   </StatusChip>
-                  {!pair.missing && label(pair.confidence) !== 'clear' && (
-                    <button type="button" onClick={() => setInspectedPair(index)}>
-                      Inspect match
-                    </button>
-                  )}
+                  {!pair.missing &&
+                    pair.review_state !== 'reviewed' &&
+                    label(pair.confidence) !== 'clear' && (
+                      <button type="button" onClick={() => setInspectedPair(index)}>
+                        Inspect match
+                      </button>
+                    )}
                 </div>
               ))}
             </div>
@@ -831,10 +850,10 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
               <dd>{currentDisambiguation}</dd>
             </div>
           )}
-          {Boolean(tags.artist) && (
+          {Boolean(tags.track_artist || tags.artist) && (
             <div>
-              <dt>Artist</dt>
-              <dd>{label(tags.artist)}</dd>
+              <dt>Track artist</dt>
+              <dd>{label(tags.track_artist || tags.artist)}</dd>
             </div>
           )}
           {Boolean(tags.album) && (
@@ -922,7 +941,17 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
   );
 }
 
-export function AssignmentEvidence({ row, album }: { row: AlbumAssignment; album: ReviewCase }) {
+export function AssignmentEvidence({
+  row,
+  album,
+  onReviewAgain,
+  busy,
+}: {
+  row: AlbumAssignment;
+  album: ReviewCase;
+  onReviewAgain?: (findingId: number) => void;
+  busy?: boolean;
+}) {
   const details: Data = {
     current_tags: row.current_tags || { title: row.current_title },
     current_title: row.current_title,
@@ -939,13 +968,31 @@ export function AssignmentEvidence({ row, album }: { row: AlbumAssignment; album
   return (
     <section className={styles.findingDetail}>
       <h3>{row.current_title || row.slot_title || 'Track assignment'}</h3>
+      {row.historical_finding_id != null && onReviewAgain && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onReviewAgain(row.historical_finding_id!)}
+        >
+          Review again
+        </button>
+      )}
       <p>
         {row.status === 'confirmed'
           ? 'Confirmed match · no metadata edit is pending.'
           : row.status === 'not_owned'
             ? 'This track is intentionally not collected.'
-            : 'No pending action for this assignment.'}
+            : row.review_state === 'reviewed' || row.status === 'settled'
+              ? 'You previously reviewed this assignment.'
+              : row.preview_reason || 'This assignment needs review.'}
       </p>
+      {row.audio_conflict === 'different_recording' && (
+        <p className={styles.error}>
+          This file’s tags suggest it belongs on this album, but its fingerprint identifies
+          {` ${row.audio_title || 'a different recording'}`}. Review the audio before choosing how
+          to handle it.
+        </p>
+      )}
       <ReviewAudio
         localPath={row.file_path || ''}
         localTitle={row.current_title || ''}

@@ -29,6 +29,12 @@ export function findingHeading(finding: ReviewFinding): string {
 }
 
 export function statusLabel(status: string, row?: AlbumAssignment) {
+  if (row?.fulfillment_state === 'downloaded') return 'Checking download';
+  if (row?.planned_choice?.action === 'dismiss')
+    return row.planned_choice.category === 'numbering'
+      ? 'Keep numbering planned'
+      : 'Keep values planned';
+  if (row?.planned_choice?.action === 'fix') return 'Change planned';
   if (row?.fulfillment_state === 'downloading') return 'Downloading';
   if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';

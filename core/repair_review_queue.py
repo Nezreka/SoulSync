@@ -13,6 +13,7 @@ import os
 from typing import Any
 
 from core.library.reconciliation_store import load_album_plan
+from core.library import reconciliation_choices as choices
 from core.text.fold import fold_title
 from core.repair_review_policy import (
     _DETAILS, _GLOBAL_BLOCKER_TYPES, _TRACK_ARTIST_CHANGE_KEYS,
@@ -22,6 +23,41 @@ from core.repair_review_policy import (
 
 
 _SEVERITY = "CASE severity WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END"
+
+
+def _assignment_history(conn, case_id: str) -> dict[str, dict]:
+    """Keep retirement, user review, and matching evidence separate."""
+    history = {}
+    for finding_id, path, status, action, raw in conn.execute('''
+            SELECT id, file_path, status, user_action, details_json
+            FROM repair_findings WHERE review_case_key = ?
+              AND job_id = 'library_reconciliation'
+              AND status IN ('resolved', 'dismissed') AND file_path IS NOT NULL
+            ORDER BY updated_at DESC, id DESC''', (case_id,)):
+        if path in history:
+            continue
+        try:
+            details = json.loads(raw or '{}')
+        except (TypeError, ValueError):
+            details = {}
+        history[path] = {'id': finding_id, 'status': status, 'action': action,
+                         'details': details if isinstance(details, dict) else {}}
+    return history
+
+
+def _history_matches_assignment(history: dict, assignment: dict, plan: dict) -> bool:
+    details = history['details']
+    for field in ('source', 'release_id'):
+        if details.get(field) and details[field] != plan.get(field):
+            return False
+    if (details.get('expected_title') and assignment.get('slot_title') and
+            details['expected_title'] != assignment['slot_title']):
+        return False
+    fingerprint = (assignment.get('acoustid') or {}).get('fingerprint_key')
+    return not (fingerprint and details.get('fingerprint_key') and
+                fingerprint != details['fingerprint_key'])
+
+
 def _album_art_by_id(conn, album_ids: set[str]) -> dict[str, str]:
     """Read local covers by album identity, never by a possibly shared title."""
     if not album_ids:
@@ -209,9 +245,9 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if uniform:
                 decision_label, summary = uniform
             else:
-                summary = (f'{len(rows)} metadata action'
-                           f'{"s" if len(rows) != 1 else ""} '
-                           f'{"need review" if risk != "ready" else "are ready"}.')
+                ready_count = tiers.count('ready')
+                review_count = len(rows) - ready_count
+                summary = f'{ready_count} ready; {review_count} need review.'
         elif category == 'audio_conflicts':
             wrong_audio = [
                 row for row in rows
@@ -306,6 +342,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
     page = max(0, int(page))
     limit = min(100, max(1, int(limit)))
     conn = db._get_connection()
+    choices.ensure_schema(conn)
     try:
         where, params = queue_filter(status=status, job_id=job_id, q=q,
                                      category=category, risk=risk)
@@ -347,13 +384,14 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
             case_ids = [item['case_id'] for item in items]
             placeholders = ','.join('?' for _ in case_ids)
             detail_rows = conn.execute(f"""
-                SELECT review_case_key, finding_type, last_error, details_json
+                SELECT review_case_key, finding_type, last_error, details_json, id
                 FROM repair_findings
                 WHERE status = ? AND review_case_key IN ({placeholders})
                   AND (? = '' OR job_id = ?)
             """, [status, *case_ids, job_id, job_id]).fetchall()
             grouped: dict[str, list[dict[str, Any]]] = {}
-            for case_key, finding_type, last_error, raw_details in detail_rows:
+            saved_choices = choices.load_choices(conn)
+            for case_key, finding_type, last_error, raw_details, finding_id in detail_rows:
                 try:
                     details = json.loads(raw_details) if raw_details else {}
                     if not isinstance(details, dict):
@@ -361,7 +399,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 except (TypeError, ValueError):
                     details = {}
                 grouped.setdefault(case_key, []).append({
-                    'finding_type': finding_type, 'details': details,
+                    'finding_type': finding_type, 'details': choices.project(details, saved_choices.get(finding_id), case_id=case_key),
                     'last_error': last_error,
                 })
             for item in items:
@@ -389,6 +427,7 @@ def matching_case_ids(db, case_ids, **filters) -> set[str]:
         return set()
     where, params = queue_filter(**filters)
     conn = db._get_connection()
+    choices.ensure_schema(conn)
     try:
         placeholders = ','.join('?' for _ in case_ids)
         return {row[0] for row in conn.execute(
@@ -406,6 +445,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
     ready-action total. Use the exact same predicates as the paginated reader.
     """
     conn = db._get_connection()
+    choices.ensure_schema(conn)
     try:
         conn.execute('BEGIN')
         projections = []
@@ -434,6 +474,7 @@ def queue_summary(db, *, status: str = 'pending', q: str = '',
 def get_case(db, case_id: str, *, status: str = 'pending',
              job_id: str = '') -> dict[str, Any] | None:
     conn = db._get_connection()
+    choices.ensure_schema(conn)
     try:
         rows = conn.execute(f"""
             SELECT id, job_id, finding_type, severity, status, entity_type,
@@ -447,6 +488,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         if not rows:
             return None
         items = []
+        saved_choices = choices.load_choices(conn)
         for row in rows:
             try:
                 details = json.loads(row[10]) if row[10] else {}
@@ -458,7 +500,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 'id': row[0], 'job_id': row[1], 'finding_type': row[2],
                 'severity': row[3], 'status': row[4], 'entity_type': row[5],
                 'entity_id': row[6], 'file_path': row[7], 'title': row[8],
-                'description': row[9], 'details': details, 'user_action': row[11],
+                'description': row[9], 'details': choices.project(details, saved_choices.get(row[0]), case_id=case_id), 'user_action': row[11],
                 'created_at': row[12], 'updated_at': row[13], 'last_error': row[14],
                 'evidence_token': evidence_token(row),
             })
@@ -473,6 +515,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         album_art = _album_art_by_id(conn, {str(album_id)}).get(str(album_id)) if album_id is not None else None
         album_plan = load_album_plan(conn, case_id)
         if album_plan:
+            history_by_path = _assignment_history(conn, case_id)
             numbering_choice_pending = any(
                 decision.get('category') == 'numbering' and
                 decision.get('risk') != 'ready'
@@ -533,6 +576,15 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 match['counterpart_file'] = extra.get('file')
                 match['counterpart_file_path'] = extra.get('file_path')
             for assignment in assignments:
+                history = history_by_path.get(assignment.get('file_path'))
+                if history and _history_matches_assignment(history, assignment, album_plan):
+                    assignment['historical_finding_id'] = history['id']
+                    assignment['review_state'] = (
+                        'obsolete' if history['action'] == 'obsolete' else 'reviewed')
+                    # Older snapshots omitted the full evidence for extras.
+                    for field in ('acoustid', 'current_tags'):
+                        if not assignment.get(field) and history['details'].get(field):
+                            assignment[field] = history['details'][field]
                 if (numbering_choice_pending and
                         {'track_number', 'disc_number', 'library_track_number',
                          'library_disc_number'}.intersection(
@@ -559,13 +611,17 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     # even though there is no finding per missing slot.
                     finding = intent_finding
                 if finding:
+                    assignment['review_state'] = 'pending'
+                    if finding.get('finding_type') == 'reconciliation_metadata':
+                        assignment['changes'] = (finding.get('details') or {}).get('changes') or {}
+                        assignment['planned_choice'] = (finding.get('details') or {}).get('planned_choice')
                     fulfillment = (finding.get('details') or {}).get('fulfillment_state')
                     if fulfillment:
                         assignment['fulfillment_state'] = fulfillment
                     assignment['finding_id'] = finding['id']
                     assignment['review_tier'] = finding.get('review_tier')
                     assignment['action_state'] = (
-                        'waiting' if assignment.get('fulfillment_state') == 'wishlisted'
+                        'waiting' if assignment.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')
                         else finding.get('review_tier'))
                 elif has_release_decision or has_album_unresolved:
                     # These rows preview the selected candidate. They are not
@@ -585,13 +641,14 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                         else 'Missing from the selected release')
                 elif assignment.get('status') in {
                         'change', 'uncertain', 'extra', 'duplicate'}:
-                    # The persisted plan is complete evidence and can outlive
-                    # a dismissed/applied finding. Do not present a resolved
-                    # hypothesis as a pending action.
-                    assignment['evidence_status'] = assignment.get('status')
-                    assignment['status'] = 'settled'
-                    assignment['changes'] = {}
-                    assignment['action_state'] = 'resolved'
+                    if assignment.get('review_state') == 'reviewed':
+                        assignment['evidence_status'] = assignment.get('status')
+                        assignment['status'] = 'settled'
+                        assignment['changes'] = {}
+                        assignment['action_state'] = 'resolved'
+                    else:
+                        assignment['action_state'] = 'preview'
+                        assignment['preview_reason'] = 'Reanalyze this album to refresh this decision'
             counts = {
                 'confirmed': 0, 'changed': 0, 'uncertain': 0, 'missing': 0,
                 'not_owned': 0, 'extra': 0, 'settled': 0,
@@ -606,9 +663,22 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 key = count_keys.get(str(assignment.get('status') or ''))
                 if key:
                     counts[key] += 1
+                if assignment.get('status') == 'settled' and assignment.get('evidence_status') in ('extra', 'duplicate'):
+                    counts['extra'] += 1
             album_plan['counts'] = counts
+            reviewed_paths = {row.get('file_path') for row in assignments
+                              if row.get('review_state') == 'reviewed'}
+            for candidate in album_plan.get('candidates') or []:
+                if (candidate.get('source'), candidate.get('release_id')) != (
+                        album_plan.get('source'), album_plan.get('release_id')):
+                    continue
+                for pair in candidate.get('pairs') or []:
+                    if pair.get('file_path') in reviewed_paths:
+                        pair['review_state'] = 'reviewed'
         return {
             'case_id': case_id,
+            'plan_signature': choices.plan_signature(items),
+            'saved_for_later': bool(conn.execute('SELECT 1 FROM reconcile_saved_plans WHERE case_id=? AND signature=?', (case_id, choices.plan_signature(items))).fetchone()),
             'album': label.get('album_title') or label.get('album') or label.get('album_name'),
             'artist': label.get('artist_name') or label.get('artist') or
                       label.get('expected_artist'),
@@ -630,52 +700,26 @@ def get_case(db, case_id: str, *, status: str = 'pending',
 
 
 def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
-    """Return currently ready reconciliation IDs and their album cases."""
+    """Select the same effective draft proposals that the album view displays."""
     conn = db._get_connection()
+    choices.ensure_schema(conn)
     try:
-        params: list[Any] = []
-        case_filter = ''
-        if case_id:
-            case_filter = 'AND review_case_key = ?'
-            params.append(case_id)
-        rows = conn.execute(f"""
-            SELECT id, review_case_key, finding_type, last_error,
-                   json_extract({_DETAILS}, '$.confidence'),
-                   json_type({_DETAILS}, '$.changes.track_number'),
-                   json_type({_DETAILS}, '$.changes.disc_number'),
-                   json_type({_DETAILS}, '$.changes.library_track_number'),
-                   json_type({_DETAILS}, '$.changes.library_disc_number'),
-                   json_extract({_DETAILS}, '$.title_difference_kind'),
-                   json_extract({_DETAILS}, '$.changes')
-            FROM repair_findings
-            WHERE job_id = 'library_reconciliation' AND status = 'pending'
-              {case_filter}
-            ORDER BY review_case_key, id
-        """, params).fetchall()
+        saved = choices.load_choices(conn)
+        rows = conn.execute("""SELECT id, review_case_key, finding_type,
+                    last_error, details_json FROM repair_findings
+                WHERE job_id = 'library_reconciliation' AND status = 'pending'
+                  AND (? = '' OR review_case_key = ?)
+                ORDER BY review_case_key, id""", (case_id, case_id)).fetchall()
     finally:
         conn.close()
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for (finding_id, key, finding_type, last_error, confidence,
-         track_number, disc_number, library_track_number, library_disc_number,
-         title_kind, raw_changes) in rows:
-        position_values = (
-            ('track_number', track_number), ('disc_number', disc_number),
-            ('library_track_number', library_track_number),
-            ('library_disc_number', library_disc_number),
-        )
-        details = {
-            'confidence': confidence,
-            'title_difference_kind': title_kind,
-            'changes': {**(json.loads(raw_changes) if raw_changes else {}),
-                        **{name: True for name, value in position_values
-                           if value is not None}},
-        }
+    grouped = {}
+    for finding_id, key, kind, error, raw in rows:
+        details = choices.project(json.loads(raw or '{}'), saved.get(finding_id), case_id=key)
         grouped.setdefault(key, []).append({
-            'id': finding_id, 'finding_type': finding_type,
-            'details': details, 'last_error': last_error,
+            'id': finding_id, 'finding_type': kind, 'details': details,
+            'last_error': error,
         })
-    ready: list[int] = []
-    cases: list[str] = []
+    ready, cases = [], []
     for key, items in grouped.items():
         classify_case(items)
         ids = [item['id'] for item in items if item['review_tier'] == 'ready']

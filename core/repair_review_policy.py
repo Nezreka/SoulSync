@@ -57,7 +57,7 @@ def finding_category(item: dict[str, Any]) -> str:
     if finding_type == 'reconciliation_release':
         return 'release_conflicts'
     if (finding_type == 'reconciliation_missing' and
-            details.get('fulfillment_state') == 'wishlisted'):
+            details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
         return 'pending_fulfillment'
     if finding_type in ('reconciliation_intent', 'reconciliation_missing'):
         return 'album_completeness'
@@ -89,8 +89,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if item.get('last_error'):
         return 'manual', 'The previous apply attempt failed'
     if (finding_type == 'reconciliation_missing' and
-            details.get('fulfillment_state') == 'wishlisted'):
-        return 'blocked', 'The missing track is already on the wishlist'
+            details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
+        return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'The missing track is already on the wishlist')
     if finding_type in _DESTRUCTIVE_TYPES:
         if details.get('audio_conflict') == 'different_recording':
             return ('destructive',
@@ -106,6 +106,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         }.get(finding_type, 'This finding requires a decision')
     if global_blocked:
         return 'blocked', 'The selected release must be resolved first'
+    if details.get('plan_approved') or details.get('plan_keep'):
+        return 'ready', 'Saved in the album plan; no file changes applied yet'
     if (details.get('title_difference_kind') in ('material', 'version') and
             _TITLE_CHANGE_KEYS.intersection(changes)):
         return 'manual', 'The title may identify a different song or recording version'
@@ -131,15 +133,22 @@ def _metadata_review_sql(details: str, error: str, *, artist_credit: bool = True
     predicate. Keep that count contract explicit rather than silently changing
     it during a performance refactor; apply authorization uses finding tiers.
     """
+    alias = error.rsplit('.', 1)[0] + '.' if '.' in error else 'repair_findings.'
+    saved = ("SELECT 1 FROM reconcile_review_choices choice WHERE "
+             f"choice.finding_id = {alias}id AND choice.case_id = {alias}review_case_key "
+             f"AND choice.evidence_json = {alias}details_json")
+    approved = f"EXISTS ({saved} AND choice.choice = 'fix')"
+    kept = f"EXISTS ({saved} AND choice.choice = 'dismiss' AND choice.category != 'numbering')"
+    kept_numbers = f"EXISTS ({saved} AND choice.choice = 'dismiss' AND choice.category = 'numbering')"
     predicates = [
-        _position_change_sql(details),
+        f'({_position_change_sql(details)} AND NOT {kept_numbers})',
         f"COALESCE({error}, '') != ''",
         f"COALESCE(json_extract({details}, '$.confidence'), 'clear') NOT IN ('','clear')",
         f"COALESCE(json_extract({details}, '$.title_difference_kind'), '') IN ('material','version')",
     ]
     if artist_credit:
         predicates.append(_artist_replacement_sql(details))
-    return '(' + ' OR '.join(predicates) + ')'
+    return f"(COALESCE({error}, '') != '' OR (NOT ({approved} OR {kept}) AND (" + ' OR '.join(predicates) + ')))'
 
 
 def _related_finding_sql(alias: str) -> str:
@@ -233,6 +242,8 @@ def queue_filter(*, status: str, job_id: str = "", q: str = "", category: str = 
     return where, params
 
 def count_ready_findings(conn, *, status: str, job_id: str = "") -> int:
+    from core.library.reconciliation_choices import ensure_schema
+    ensure_schema(conn)
     ready_total = 0
     if not job_id or job_id == 'library_reconciliation':
         ready_params: list[Any] = [status]

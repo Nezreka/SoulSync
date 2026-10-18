@@ -38,6 +38,9 @@ export interface AlbumAssignment {
     | 'duplicate'
     | 'settled';
   evidence_status?: string;
+  review_state?: 'pending' | 'reviewed' | 'obsolete';
+  historical_finding_id?: number;
+  planned_choice?: { category: string; action: 'fix' | 'dismiss' };
   action_state?:
     | 'ready'
     | 'manual'
@@ -46,7 +49,7 @@ export interface AlbumAssignment {
     | 'preview'
     | 'resolved'
     | 'waiting';
-  fulfillment_state?: 'wishlisted' | 'downloading';
+  fulfillment_state?: 'wishlisted' | 'downloading' | 'downloaded';
   numbering_preview?: boolean;
   preview_reason?: string;
   relationship?: 'version_conflict';
@@ -174,6 +177,8 @@ export interface ReviewFinding extends RepairFinding {
 
 export interface ReviewCase {
   case_id: string;
+  plan_signature?: string;
+  saved_for_later?: boolean;
   album: string | null;
   artist: string | null;
   album_thumb_url?: string | null;
@@ -250,7 +255,7 @@ export async function fetchReviewQueueModeTotals(
 export async function applyReviewDecisionGroup(
   caseId: string,
   category: string,
-  action: 'fix' | 'dismiss',
+  action: 'fix' | 'dismiss' | 'reset',
 ): Promise<{
   success: boolean;
   started?: boolean;
@@ -268,8 +273,7 @@ export async function applyReviewDecisionGroup(
       body: JSON.stringify({ action }),
     },
   );
-  // Grouped edits return a durable operation ID; database-only dismissals
-  // return completion counts. A missing acknowledgement proves neither success nor failure.
+  // Grouped decisions only save draft choices; they do not write files. A missing acknowledgement proves neither success nor failure.
   if (typeof response.text !== 'function') return response.json();
   const raw = await response.text();
   if (!raw.trim()) {
@@ -371,6 +375,22 @@ export async function applyReviewDecision(
   return response.json();
 }
 
+export async function reopenReviewAssignment(
+  caseId: string,
+  findingId: number,
+): Promise<{
+  success: boolean;
+  message?: string;
+  error?: string;
+}> {
+  return readJson(
+    await fetch(
+      `/api/repair/review-queue/${encodeURIComponent(caseId)}/findings/${findingId}/reopen`,
+      { method: 'POST' },
+    ),
+  );
+}
+
 export async function startReadyChanges(
   caseId?: string,
   organize = false,
@@ -420,4 +440,43 @@ export async function reanalyzeReviewCase(caseId: string): Promise<void> {
 
 export async function fetchReviewApplyStatus(operationId?: string): Promise<BulkFixStatus> {
   return fetchBulkFixStatus(readJson<BulkFixStatus>, operationId);
+}
+
+export async function saveAlbumPlan(caseId: string, signature: string) {
+  return readJson<{ success: boolean; message?: string }>(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/save-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signature }),
+    }),
+  );
+}
+
+export interface SavedAlbumPlan {
+  case_id: string;
+  album: string;
+  signature: string;
+  ready: number;
+}
+
+export async function fetchSavedAlbumPlans() {
+  return readJson<{ plans: SavedAlbumPlan[] }>(await fetch('/api/repair/review-queue/saved-plans'));
+}
+
+export async function applySavedAlbumPlans(plans: SavedAlbumPlan[]) {
+  return readJson<{ started: boolean; operation_id?: string; error?: string }>(
+    await fetch('/api/repair/review-queue/saved-plans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plans }),
+    }),
+  );
+}
+
+export async function resetAlbumScope(caseId: string) {
+  return readJson<{ success: boolean }>(
+    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/reset-scope`, {
+      method: 'POST',
+    }),
+  );
 }

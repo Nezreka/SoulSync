@@ -657,7 +657,7 @@ def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monke
     assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
 
 
-def test_lone_playlist_track_is_treated_as_partial_album_intent(tmp_path, monkeypatch):
+def test_lone_playlist_track_requires_explicit_album_intent(tmp_path, monkeypatch):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -696,22 +696,22 @@ def test_lone_playlist_track_is_treated_as_partial_album_intent(tmp_path, monkey
 
     result = LibraryReconciliationJob().scan(context)
 
-    assert result.findings_created == 0
-    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
+    assert result.findings_created == 1
+    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 1
     with db._get_connection() as conn:
         saved = conn.execute(
             'SELECT intent_scope, state, confirmed_count, missing_count, plan_json '
             'FROM reconcile_album_plans'
         ).fetchone()
-    assert saved['intent_scope'] == 'partial'
-    assert saved['state'] == 'confirmed'
+    assert saved['intent_scope'] == ''
+    assert saved['state'] == 'review'
     assert saved['confirmed_count'] == 1
-    assert saved['missing_count'] == 0
+    assert saved['missing_count'] == 1
     document = json.loads(saved['plan_json'])
-    assert document['counts']['not_owned'] == 1
+    assert document['counts']['missing'] == 1
     assert document['assignments'][0]['playlists'] == ['Imported playlist']
     assert {row['status'] for row in document['assignments']} == {
-        'confirmed', 'not_owned'}
+        'confirmed', 'missing'}
 
 
 def test_musicbrainz_release_group_missing_request_uses_exact_edition(tmp_path, monkeypatch):
@@ -1902,9 +1902,12 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     assert finding['details']['changes']['library_recording_disambiguation']['new'] == \
         'alternate studio recording'
     assert finding['details']['changes']['filename']['new'] == '02 - Hourglass.flac'
+    staged = worker.apply_review_decision(case_id, finding['id'],
+        evidence_token=finding['evidence_token'], action='fix')
+    assert staged['success']
+    assert path.exists() and FLAC(str(path))['title'][0] == 'Laid to Rest'
     assert db.set_album_canonical(10, 'musicbrainz', 'different-release', 0.9, locked=True)
-    stale = worker.apply_review_decision(case_id, finding['id'],
-                                         evidence_token=finding['evidence_token'], action='fix')
+    stale = worker.fix_finding(finding['id'], review_approved=True)
     assert stale['success'] is False and 'rescan' in stale['error']
     assert FLAC(str(path))['title'][0] == 'Laid to Rest'
     assert db.set_album_canonical(10, 'musicbrainz', 'ashes-mb-release', 0.9, locked=True)
@@ -1913,8 +1916,7 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
         conn.execute("UPDATE tracks SET recording_disambiguation = 'changed after scan' "
                      "WHERE id = 1")
         conn.commit()
-    stale_identity = worker.apply_review_decision(
-        case_id, finding['id'], evidence_token=finding['evidence_token'], action='fix')
+    stale_identity = worker.fix_finding(finding['id'], review_approved=True)
     assert stale_identity['success'] is False and 'rescan' in stale_identity['error']
     with db._get_connection() as conn:
         conn.execute('UPDATE tracks SET recording_disambiguation = NULL WHERE id = 1')
@@ -1922,14 +1924,12 @@ def test_audio_backed_retag_writes_real_flac_and_track_row(tmp_path, monkeypatch
     finding = worker.get_review_case(case_id)['items'][0]
     target_path = root / '02 - Hourglass.flac'
     target_path.write_bytes(b'collision')
-    collision = worker.apply_review_decision(case_id, finding['id'],
-                                             evidence_token=finding['evidence_token'], action='fix')
+    collision = worker.fix_finding(finding['id'], review_approved=True)
     assert collision['success'] is False and 'already exists' in collision['error']
     assert FLAC(str(path))['title'][0] == 'Laid to Rest'
     target_path.unlink()
     finding = worker.get_review_case(case_id)['items'][0]
-    applied = worker.apply_review_decision(case_id, finding['id'],
-                                           evidence_token=finding['evidence_token'], action='fix')
+    applied = worker.fix_finding(finding['id'], review_approved=True)
     assert applied['success'], applied
     assert FLAC(str(target_path))['musicbrainz_albumid'][0] == 'ashes-mb-release'
     assert not path.exists()
@@ -2014,6 +2014,8 @@ def test_exact_release_title_repairs_rated_r_album_and_file_tags(tmp_path, monke
     applied = worker.apply_review_decision(case_id, finding['id'],
                                            evidence_token=finding['evidence_token'], action='fix')
     assert applied['success'], applied
+    assert FLAC(str(path))['album'][0] == 'R'
+    assert worker.fix_finding(finding['id'], review_approved=True)['success']
     assert FLAC(str(path))['album'][0] == 'Rated R'
     with db._get_connection() as conn:
         title = conn.execute('SELECT title FROM albums WHERE id = 10').fetchone()[0]
@@ -2197,6 +2199,8 @@ def test_filename_and_library_row_repair_when_file_tags_are_already_correct(tmp_
     result = worker.apply_review_decision(case_id, finding['id'],
                                           evidence_token=finding['evidence_token'], action='fix')
     assert result['success'], result
+    assert path.exists()
+    assert worker.fix_finding(finding['id'], review_approved=True)['success']
     target = root / '02 - Hourglass.flac'
     assert target.exists() and not path.exists()
     assert FLAC(str(target))['title'][0] == 'Hourglass'

@@ -2522,7 +2522,8 @@
   color: #b9c1d4;
   user-select: all;
 }
-.providerReference a {
+.providerReference a,
+.listeningLinks a {
   display: inline-flex;
   align-items: center;
   padding: 6px 9px;
@@ -2532,7 +2533,8 @@
   text-decoration: none;
   white-space: nowrap;
 }
-.providerReference a:hover {
+.providerReference a:hover,
+.listeningLinks a:hover {
   background: #302b46;
   border-color: #ab92ed;
 }
@@ -2741,4 +2743,21 @@
     grid-column: 2;
     justify-self: start;
   }
+}
+
+.listeningLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 10px;
+}
+.recordingLink {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.recordingLink:hover,
+.recordingLink:focus-visible {
+  color: #cfc0ff;
 }

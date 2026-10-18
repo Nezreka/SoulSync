@@ -80,9 +80,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
   const pendingDecisions = decisions.filter(
     (decision) => decision.category === 'pending_fulfillment',
   );
-  const wishlistedCount = assignments.filter(
-    (row) => row.fulfillment_state === 'wishlisted',
-  ).length;
+  const wishlistedCount = assignments.filter((row) => Boolean(row.fulfillment_state)).length;
   const releaseChoicePending = reviewDecisions.some(
     (decision) => decision.category === 'release_conflicts',
   );

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 
+import { AudioFormatBadge } from '@/components/audio-format-badge/audio-format-badge';
 import { AddToPlaylistButton, openAddToPlaylist } from '@/features/playlists/add-to-playlist';
 import { getShellBridge } from '@/platform/shell/bridge';
 
@@ -468,19 +469,7 @@ function TrackRow({
 
       <td className="col-duration">{formatDurationMs(track.duration)}</td>
 
-      <td className="col-format">
-        {missing ? (
-          '-'
-        ) : (
-          <span
-            className={`enhanced-format-badge ${
-              format === 'FLAC' ? 'flac' : format === 'MP3' ? 'mp3' : 'other'
-            }`}
-          >
-            {format}
-          </span>
-        )}
-      </td>
+      <td className="col-format">{missing ? '-' : <AudioFormatBadge format={format} />}</td>
 
       <td className="col-bitrate">
         <span

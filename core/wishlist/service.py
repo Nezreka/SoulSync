@@ -379,6 +379,13 @@ class WishlistService:
                 alongside the removal so "why did this track vanish?" is a query
                 rather than a log-correlation exercise (#1289).
         """
+        if success and audit and audit.get('final_path'):
+            try:
+                from core.library.reconciliation_fulfillment import published_wishlist_track
+                published_wishlist_track(self.database, spotify_track_id, profile_ids,
+                                         audit['final_path'])
+            except Exception:
+                logger.exception('Could not update reconciliation download state')
         return self.database.update_wishlist_retry(
             spotify_track_id, success, error_message, profile_id=profile_id,
             profile_ids=profile_ids, audit=audit)

@@ -478,7 +478,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getByText('2 tracks need no decision')).toBeTruthy();
     expect(screen.queryByText('1 affected action')).toBeNull();
     expect(
-      screen.getByRole('button', { name: 'Apply release track numbers to 1 track now' }),
+      screen.getByRole('button', { name: 'Plan release track numbers for 1 track' }),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Evidence' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Tracks/ }));

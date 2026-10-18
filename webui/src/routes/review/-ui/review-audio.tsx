@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { AudioFormatBadge } from '@/components/audio-format-badge/audio-format-badge';
+
+import { PlayIcon } from '../../artist-detail/-ui/lib-icons';
 import styles from './review-page.module.css';
 
 function clock(seconds: number): string {
@@ -30,6 +33,7 @@ export function ReviewAudio({
   previewTrackId?: string;
   artist?: string;
 }) {
+  const localFormat = localPath.split('.').pop()?.toUpperCase() || '';
   const searchQuery = [artist, comparisonTitle || localTitle].filter(Boolean).join(' ');
   const audioRef = useRef<HTMLAudioElement>(null);
   const shouldPlayRef = useRef(false);
@@ -93,21 +97,26 @@ export function ReviewAudio({
   return (
     <section className={styles.reviewAudio} aria-label="Compare audio">
       <div className={styles.reviewAudioChoices}>
+        {localFormat && <AudioFormatBadge format={localFormat} />}
         <button
           type="button"
+          aria-pressed={selected === 'local' && playing}
           data-active={selected === 'local' || undefined}
           onClick={() => void choose('local')}
         >
-          {selected === 'local' && playing ? 'Pause' : '▶ Listen'} · Local file
+          {!(selected === 'local' && playing) && <PlayIcon size={14} />}
+          {selected === 'local' && playing ? 'Pause' : 'Listen'} · Local file
           {localDurationMs ? <small>{clock(localDurationMs / 1000)}</small> : null}
         </button>
         {comparisonSource && (
           <button
             type="button"
+            aria-pressed={selected === 'comparison' && playing}
             data-active={selected === 'comparison' || undefined}
             onClick={() => void choose('comparison')}
           >
-            {selected === 'comparison' && playing ? 'Pause' : '▶ Listen'} · Other local copy
+            {!(selected === 'comparison' && playing) && <PlayIcon size={14} />}
+            {selected === 'comparison' && playing ? 'Pause' : 'Listen'} · Other local copy
             {comparisonDurationMs ? <small>{clock(comparisonDurationMs / 1000)}</small> : null}
           </button>
         )}
@@ -117,11 +126,12 @@ export function ReviewAudio({
             data-active={selected === 'preview' || undefined}
             onClick={() => void choose('preview')}
           >
-            {selected === 'preview' && playing ? 'Pause' : '▶ Listen'} · Release preview
+            {!(selected === 'preview' && playing) && <PlayIcon size={14} />}
+            {selected === 'preview' && playing ? 'Pause' : 'Listen'} · Release preview
           </button>
         )}
       </div>
-      <div className={styles.inlineActions} aria-label="Find this recording online">
+      <div className={styles.listeningLinks} aria-label="Find this recording online">
         {previewSource === 'deezer' && /^\d+$/.test(previewTrackId || '') && (
           <a
             href={`https://www.deezer.com/track/${previewTrackId}`}

@@ -29,6 +29,7 @@ from core.metadata_service import (
 from core.library.path_resolver import resolve_library_file_path
 from core.library.reconciliation_inventory import refresh_scope_for_finding
 from core.repair_review_identity import missing_slot_key, review_case_key
+from core.library import reconciliation_choices as review_choices
 from core import repair_review_queue
 from core.repair_jobs import get_all_jobs
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
@@ -985,6 +986,7 @@ class RepairWorker:
 
         while not self._stop_event.is_set():
             try:
+                self._refresh_published_review_albums()
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
                 with self._force_run_lock:
@@ -1013,6 +1015,23 @@ class RepairWorker:
                     break
 
         logger.info("Repair worker thread finished")
+
+    def _refresh_published_review_albums(self):
+        """Coalesce published downloads into one discovery refresh per album."""
+        from core.library.reconciliation_fulfillment import ensure_schema
+        conn = self.db._get_connection()
+        try:
+            ensure_schema(conn)
+            rows = conn.execute("""SELECT case_id, album_folder, MAX(updated_at)
+                FROM reconcile_fulfillment WHERE refresh_needed=1
+                GROUP BY case_id, album_folder""").fetchall()
+            for key, folder, stamp in rows:
+                if self._schedule_album_refresh(key, folder, scope='discovery'):
+                    conn.execute("""UPDATE reconcile_fulfillment SET refresh_needed=0
+                        WHERE case_id=? AND updated_at<=?""", (key, stamp))
+            conn.commit()
+        finally:
+            conn.close()
 
     def _job_context(self, **overrides) -> JobContext:
         """Share dependencies while callers retain their lifecycle policies."""
@@ -1352,7 +1371,7 @@ class RepairWorker:
             # superseded finding leaves its resolved/dismissed ancestor
             # behind), so the refresh path always lands on the live row.
             cursor.execute("""
-                SELECT id, status, resolved_at, details_json FROM repair_findings
+                SELECT id, status, resolved_at, details_json, user_action FROM repair_findings
                 WHERE job_id = ? AND finding_type = ?
                   AND status IN ('pending', 'resolved', 'dismissed')
                   AND ((entity_type = ? AND entity_id = ?) OR (file_path = ? AND file_path IS NOT NULL))
@@ -1388,8 +1407,8 @@ class RepairWorker:
                         signals = ('fingerprint_key', 'source', 'release_id',
                                    'evidence_signature', 'fulfillment_state', 'changes',
                                    'expected_title', 'recording_mbid', 'expected_duration_ms')
-                        changed_reconciliation_evidence = any(
-                            prior.get(key) != (details or {}).get(key) for key in signals)
+                        changed_reconciliation_evidence = (existing[4] == 'obsolete' or any(
+                            prior.get(key) != (details or {}).get(key) for key in signals))
                     if existing_status == 'dismissed' and not changed_reconciliation_evidence:
                         return False
                     if (existing_status == 'resolved' and
@@ -1828,6 +1847,10 @@ class RepairWorker:
             if not evidence_token or evidence_token != item['evidence_token']:
                 return {'success': False, 'stale': True,
                         'error': 'The evidence changed since this card was opened. Review it again.'}
+            if (item.get('finding_type') == 'reconciliation_metadata' and
+                    action in ('fix', 'dismiss') and not fix_action):
+                return self._stage_review_decision_group(case_id, 'metadata', action=action,
+                                                        selected_ids={finding_id})
             if action == 'dismiss':
                 ok = self.dismiss_finding(finding_id)
                 queued = (self._schedule_review_refresh(case_id, case.get('folder') or '', case)
@@ -1928,41 +1951,167 @@ class RepairWorker:
             return {'success': True, 'message': 'Release pinned; updating this album plan',
                     'refresh_queued': queued}
 
+    def reopen_review_assignment(self, case_id: str, finding_id: int) -> dict:
+        """Reconsider a recorded decision; never undo an applied file write."""
+        with self._review_apply_lock:
+            conn = self.db._get_connection()
+            try:
+                row = conn.execute('''SELECT file_path, details_json, status
+                    FROM repair_findings WHERE id = ? AND review_case_key = ?
+                      AND job_id = 'library_reconciliation' ''',
+                    (finding_id, case_id)).fetchone()
+                if not row or row[2] not in ('resolved', 'dismissed'):
+                    return {'success': False, 'stale': True,
+                            'error': 'This decision is no longer available to reopen'}
+                details = json.loads(row[1] or '{}')
+                folder = details.get('album_folder') or os.path.dirname(row[0] or '')
+                if not self.reopen_finding(finding_id):
+                    return {'success': False, 'error': 'Could not reopen this decision'}
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
+                    conn.execute('''DELETE FROM reconcile_track_assignment
+                        WHERE album_id = ? AND source = ? AND release_id = ? AND file_path = ?''',
+                        (str(details.get('album_id')), details.get('source'),
+                         details.get('release_id'), row[0]))
+                    conn.commit()
+            finally:
+                conn.close()
+            queued = self._schedule_album_refresh(case_id, folder)
+            return {'success': True, 'refresh_queued': queued,
+                    'message': 'Decision reopened. Updating the album plan; applied file changes are retained.'}
+
     def apply_review_decision_group(self, case_id: str, category: str, *,
                                     action: str) -> dict:
-        """Apply one album-level convention decision to its current actions."""
+        """Save one album-level convention without applying file changes."""
+        with self._review_apply_lock:
+            return self._stage_review_decision_group(case_id, category, action=action)
+
+    def _stage_review_decision_group(self, case_id, category, *, action, selected_ids=None):
         allowed = {'numbering', 'title_conventions', 'metadata'}
-        if category not in allowed or action not in ('fix', 'dismiss'):
+        if category not in allowed or action not in ('fix', 'dismiss', 'reset'):
             return {'success': False, 'error': 'Unsupported grouped decision'}
         case = self.get_review_case(case_id, job_id='library_reconciliation')
         if not case:
             return {'success': False, 'stale': True, 'error': 'Review case changed'}
-        findings = [item for item in case['items'] if item.get('category') == category]
+        if action == 'reset':
+            conn = self.db._get_connection()
+            try:
+                review_choices.ensure_schema(conn)
+                conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND category=?',
+                             (case_id, category))
+                conn.commit()
+            finally:
+                conn.close()
+            return {'success': True, 'message': 'Saved choice cleared. Review the proposal again.'}
+        findings = [item for item in case['items']
+                    if (item['id'] in selected_ids if selected_ids is not None else item.get('category') == category)]
         if not findings:
             return {'success': False, 'stale': True, 'error': 'Decision is no longer current'}
-        if action == 'fix':
-            result = self.start_bulk_fix(
-                finding_ids=[item['id'] for item in findings],
-                allow_review_ids=True, review_approved=True,
-                review_case_folders=[(case_id, case.get('folder') or '')],
-            )
-            return {**result, 'success': bool(result.get('started'))}
-        applied = 0
-        scope = 'album'
-        for item in findings:
-            result = self.apply_review_decision(
-                case_id, item['id'], evidence_token=item['evidence_token'],
-                action=action, schedule_refresh=False)
-            if not result.get('success'):
-                queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case, scope=scope) if applied else False
-                return {**result, 'applied': applied, 'total': len(findings),
-                        'refresh_queued': queued}
-            applied += 1
-            if action == 'fix' and refresh_scope_for_finding(item) == 'discovery':
-                scope = 'discovery'
-        queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case, scope=scope) if applied else False
-        return {'success': True, 'applied': applied, 'total': len(findings),
-                'refresh_queued': queued}
+        # Transactional staging only: retain findings until explicit application.
+        conn = self.db._get_connection()
+        try:
+            review_choices.ensure_schema(conn)
+            conn.execute('BEGIN IMMEDIATE')
+            for item in findings:
+                row = conn.execute("""SELECT id, job_id, finding_type, severity, status,
+                    entity_type, entity_id, file_path, title, description, details_json,
+                    user_action, created_at, updated_at, last_error FROM repair_findings
+                    WHERE id = ? AND review_case_key = ? AND status = 'pending'""",
+                    (item['id'], case_id)).fetchone()
+                if not row or repair_review_queue.evidence_token(row) != item['evidence_token']:
+                    conn.rollback()
+                    return {'success': False, 'stale': True, 'error': 'The album plan changed'}
+                # Re-read the immutable scan proposal, not a projected prior choice.
+                conn.execute("""INSERT INTO reconcile_review_choices
+                    (finding_id, case_id, evidence_json, category, choice)
+                    VALUES (?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
+                    case_id=excluded.case_id, evidence_json=excluded.evidence_json,
+                    category=excluded.category, choice=excluded.choice,
+                    updated_at=CURRENT_TIMESTAMP""",
+                    (item['id'], case_id, row[10], category, action))
+            conn.commit()
+        finally:
+            conn.close()
+        return {'success': True, 'saved': len(findings), 'total': len(findings),
+                'message': 'Album plan saved. File changes will run only when you apply it.'}
+
+    def reset_review_scope(self, case_id):
+        """Reopen completeness as a plan choice without cancelling acquisitions."""
+        with self._review_apply_lock:
+            case = self.get_review_case(case_id, job_id='library_reconciliation')
+            plan = (case or {}).get('album_plan') or {}
+            if not case or case.get('album_id') is None or not plan:
+                return {'success': False, 'error': 'Reanalyze this album before changing scope'}
+            conn = self.db._get_connection()
+            try:
+                for table in ('reconcile_album_intent', 'reconcile_wanted_slots'):
+                    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                        conn.execute(f'DELETE FROM {table} WHERE album_id=? AND source=? AND release_id=?',
+                            (str(case['album_id']), plan.get('source'), plan.get('release_id')))
+                # An old accepted intent must not suppress this explicit reconsideration.
+                conn.execute("""UPDATE repair_findings SET status='pending', user_action=NULL,
+                    resolved_at=NULL WHERE id=(SELECT MAX(id) FROM repair_findings
+                    WHERE review_case_key=? AND finding_type='reconciliation_intent'
+                    AND status IN ('resolved','dismissed'))""", (case_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            queued = self._schedule_review_refresh(case_id, case.get('folder') or '', case)
+            return {'success': True, 'refresh_queued': queued,
+                    'message': 'Album scope reopened. Existing wishlist requests are retained.'}
+
+    def save_review_plan(self, case_id, signature):
+        """Approve the current, resolved plan for a later bulk operation."""
+        with self._review_apply_lock:
+            case = self.get_review_case(case_id, job_id='library_reconciliation')
+            if not case or not signature or case.get('plan_signature') != signature or (case.get('refresh') or {}).get('state') == 'running':
+                return {'success': False, 'stale': True, 'error': 'The plan changed; review it again'}
+            if any(item.get('review_tier') != 'ready' and item.get('category') != 'pending_fulfillment'
+                   for item in case['items']):
+                return {'success': False, 'error': 'Resolve the remaining choices before saving for bulk apply'}
+            if not case['plan']['ready']:
+                return {'success': False, 'error': 'No changes remain to apply'}
+            conn = self.db._get_connection()
+            try:
+                review_choices.ensure_schema(conn)
+                conn.execute("""INSERT INTO reconcile_saved_plans(case_id, signature)
+                    VALUES (?, ?) ON CONFLICT(case_id) DO UPDATE SET signature=excluded.signature,
+                    updated_at=CURRENT_TIMESTAMP""", (case_id, signature))
+                conn.commit()
+            finally:
+                conn.close()
+            return {'success': True, 'message': 'Plan saved for bulk apply. No file changes applied.'}
+
+    def saved_review_plans(self):
+        conn = self.db._get_connection()
+        try:
+            review_choices.ensure_schema(conn)
+            keys = [row[0] for row in conn.execute('SELECT case_id FROM reconcile_saved_plans')]
+        finally:
+            conn.close()
+        cases = []
+        for key in keys:
+            case = self.get_review_case(key, job_id='library_reconciliation')
+            if case and case.get('saved_for_later') and (case.get('refresh') or {}).get('state') != 'running':
+                cases.append({'case_id': key, 'album': case.get('album'),
+                              'signature': case['plan_signature'], 'ready': case['plan']['ready']})
+        return cases
+
+    def start_saved_review_plans(self, plans):
+        with self._review_apply_lock:
+            current = {row['case_id']: row for row in self.saved_review_plans()}
+            if not isinstance(plans, list) or not plans:
+                return {'started': False, 'error': 'No saved plans selected'}
+            ids, folders = [], []
+            for plan in plans:
+                key = plan.get('case_id') if isinstance(plan, dict) else None
+                if key not in current or current[key]['signature'] != plan.get('signature'):
+                    return {'started': False, 'stale': True, 'error': 'A saved plan changed; review the current proposals'}
+                case = self.get_review_case(key, job_id='library_reconciliation')
+                ids.extend(item['id'] for item in case['items'] if item['review_tier'] == 'ready')
+                folders.append((key, case.get('folder') or ''))
+            return self.start_bulk_fix(finding_ids=list(dict.fromkeys(ids)),
+                                      allow_review_ids=True, review_approved=True,
+                                      review_case_folders=folders)
 
     def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
         """Apply the planner-approved reconciliation subset in the background."""
@@ -1982,7 +2131,7 @@ class RepairWorker:
         return self.start_bulk_fix(
             finding_ids=ids, allow_review_ids=True, review_approved=True,
             organize_album_ids=organize_album_ids,
-            review_case_folders=refresh_cases,
+            review_case_folders=refresh_cases, review_scope='album' if case_id else 'global',
         )
 
     def start_review_album_metadata(self, case_id: str) -> dict:
@@ -1992,7 +2141,7 @@ class RepairWorker:
             return {'started': False, 'error': 'This album plan changed; refresh it first'}
         decisions = (case.get('plan') or {}).get('decisions') or []
         blocked = {'release_conflicts', 'album_completeness', 'numbering'}
-        if any(row.get('category') in blocked for row in decisions):
+        if any(row.get('category') in blocked and row.get('risk') != 'ready' for row in decisions):
             return {'started': False,
                     'error': 'Choose the release, album scope, and numbering before applying metadata'}
         ids = [row['id'] for row in case.get('items') or []
@@ -2001,7 +2150,7 @@ class RepairWorker:
             return {'started': False, 'error': 'No proposed metadata edits remain'}
         return self.start_bulk_fix(
             finding_ids=ids, allow_review_ids=True, review_approved=True,
-            review_case_folders=[(case_id, case.get('folder') or '')],
+            review_case_folders=[(case_id, case.get('folder') or '')], review_scope='album',
         )
 
     def start_review_missing_tracks(self, case_id: str) -> dict:
@@ -2015,11 +2164,12 @@ class RepairWorker:
                     'error': 'Choose the release and complete-album scope first'}
         ids = [item['id'] for item in case.get('items') or []
                if (item.get('finding_type') == 'reconciliation_missing' and
-                   (item.get('details') or {}).get('fulfillment_state') != 'wishlisted')]
+                   (item.get('details') or {}).get('fulfillment_state') not in ('wishlisted', 'downloading', 'downloaded'))]
         if not ids:
             return {'started': False, 'error': 'No missing release tracks remain'}
         return self.start_bulk_fix(
             finding_ids=ids, allow_review_ids=True, review_approved=True,
+            review_scope='album', review_case_id=case_id,
         )
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
@@ -2507,6 +2657,8 @@ class RepairWorker:
                 return {'success': False,
                         'error': 'Open this finding in the Review Queue before applying it'}
             details = json.loads(details_json) if details_json else {}
+            if finding_type == 'reconciliation_metadata':
+                details = review_choices.project(details, review_choices.load_choices(conn, fid).get(fid))
             conn.close()
             conn = None
 
@@ -2515,7 +2667,10 @@ class RepairWorker:
                 details['_fix_action'] = fix_action
 
             # Dispatch fix by finding type
-            result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
+            if finding_type == 'reconciliation_metadata' and details.get('plan_keep'):
+                result = {'success': True, 'action': 'kept_current_values'}
+            else:
+                result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
 
             if result.get('success'):
                 if finding_type == 'reconciliation_missing' and result.get('action') == 'wishlisted':
@@ -4303,7 +4458,9 @@ class RepairWorker:
                 return 'The file changed after the scan; rescan before applying'
             expected = details.get('fingerprint_key')
             if expected:
+                started = time.perf_counter()
                 result = self.acoustid_client.fingerprint_audio_file(file_path)
+                self._record_review_timing('fingerprinting', time.perf_counter() - started)
                 if result.get('status') != 'ok':
                     return result.get('error') or 'Could not verify the audio again'
                 actual = hashlib.sha256(
@@ -4571,7 +4728,7 @@ class RepairWorker:
                                            score=score, locked=True):
             return {'success': False, 'error': 'Could not pin that album release'}
         return {'success': True, 'action': 'reconciliation_release',
-                'message': 'Release pinned. Run reconciliation again to refresh file decisions.'}
+                'message': 'Release choice saved.'}
 
     def _fix_reconciliation_assignment(self, entity_type, entity_id, file_path, details):
         choice = details.get('_fix_action') or ''
@@ -4651,7 +4808,7 @@ class RepairWorker:
         finally:
             conn.close()
         return {'success': True, 'action': 'reconciliation_assignment',
-                'message': 'Track assignment saved. Run reconciliation to update the album plan.'}
+                'message': 'Track assignment saved in the album plan.'}
 
     def _fix_reconciliation_missing(self, entity_type, entity_id, file_path, details):
         album_id = details.get('album_id')
@@ -4730,6 +4887,8 @@ class RepairWorker:
                          'reason': 'library_reconciliation'},
             user_initiated=True)
         if outcome.get('applied'):
+            from core.library.reconciliation_fulfillment import record_request
+            record_request(self.db, details, slot)
             return {'success': True, 'action': 'wishlisted',
                     'message': f'{name} requested from the selected release'}
         return {'success': False, 'error': outcome.get('reason') or
@@ -7247,7 +7406,8 @@ class RepairWorker:
                        allow_review_ids: bool = False,
                        review_approved: bool = False,
                        organize_album_ids: List[str] = None,
-                       review_case_folders: List[Tuple[str, str]] = None) -> dict:
+                       review_case_folders: List[Tuple[str, str]] = None,
+                       review_scope: str = 'global', review_case_id: str = '') -> dict:
         """Start a background bulk-fix run. Only one runs at a time.
 
         ``fix_action`` may only reach ONE finding type per run. The string is
@@ -7296,6 +7456,9 @@ class RepairWorker:
                     placeholders = ','.join('?' for _ in ids)
                     reviewed_details = dict(conn.execute(
                         f'SELECT id, details_json FROM repair_findings WHERE id IN ({placeholders})', ids))
+                    saved_choices = review_choices.load_choices(conn)
+                    reviewed_details = {fid: json.dumps(review_choices.project(json.loads(raw or '{}'), saved_choices.get(fid)))
+                                        for fid, raw in reviewed_details.items()}
                 finally:
                     conn.close()
             self._bulk_fix_stop_event.clear()
@@ -7307,7 +7470,9 @@ class RepairWorker:
                 'running': True,
                 'operation_id': uuid.uuid4().hex,
                 'phase': 'metadata',
-                'review_case_ids': [key for key, _ in review_case_folders or []],
+                'review_case_ids': [key for key, _ in review_case_folders or []] or ([review_case_id] if review_case_id else []),
+                'review_scope': review_scope,
+                'timings_seconds': {'waiting_for_scan': 0.0, 'fingerprinting': 0.0, 'applying': 0.0},
                 'total': len(ids),
                 'done': 0,
                 'fixed': 0,
@@ -7326,6 +7491,11 @@ class RepairWorker:
                 # ("312 cover art, 40 lyrics") instead of one opaque number.
                 'per_type': {},
             }
+            if review_approved and getattr(self, '_on_job_start', None):
+                try:
+                    self._on_job_start('review_apply', 'Applying album plan' if review_scope == 'album' else 'Applying saved library changes')
+                except Exception:
+                    logger.exception('Could not publish review operation start')
             self._save_bulk_fix_report()
             self._bulk_fix_thread = threading.Thread(
                 target=self._run_bulk_fix,
@@ -7372,6 +7542,7 @@ class RepairWorker:
         try:
             if scan_lock:
                 state['phase'] = 'waiting_for_scan'
+                wait_started = time.perf_counter()
                 self._save_bulk_fix_report()
                 while not self._bulk_fix_stop_event.is_set() and not self.should_stop:
                     if scan_lock.acquire(timeout=0.25):
@@ -7380,6 +7551,7 @@ class RepairWorker:
                 if not acquired:
                     state['stopped'] = True
                     return
+                self._record_review_timing('waiting_for_scan', time.perf_counter() - wait_started)
                 state['phase'] = 'metadata'
             for fid in ids:
                 if self._bulk_fix_stop_event.is_set() or self.should_stop:
@@ -7387,14 +7559,16 @@ class RepairWorker:
                     logger.info("Background bulk fix stopped at %d/%d",
                                 state['done'], state['total'])
                     break
+                apply_started = time.perf_counter()
                 try:
                     if reviewed_details is not None:
                         conn = self.db._get_connection()
                         try:
                             current = conn.execute('SELECT details_json FROM repair_findings WHERE id = ?', (fid,)).fetchone()
+                            effective = review_choices.project(json.loads(current[0] or '{}'), review_choices.load_choices(conn, fid).get(fid)) if current else None
                         finally:
                             conn.close()
-                        if not current or json.loads(current[0] or '{}') != json.loads(reviewed_details.get(fid) or '{}'):
+                        if effective != json.loads(reviewed_details.get(fid) or '{}'):
                             raise ValueError('The proposed action changed during reconciliation; review the updated plan before applying.')
                     if review_approved:
                         result = self.fix_finding(
@@ -7405,6 +7579,7 @@ class RepairWorker:
                         result = self.fix_finding(fid, fix_action=fix_action)
                 except Exception as e:  # fix_finding shouldn't raise, but never kill the run
                     result = {'success': False, 'error': str(e)}
+                self._record_review_timing('applying', time.perf_counter() - apply_started)
                 state['done'] += 1
                 slug = types.get(fid)
                 if slug:
@@ -7498,11 +7673,35 @@ class RepairWorker:
             self._save_bulk_fix_report({**state, 'running': False})
             self._bulk_fix_thread = None
             state['running'] = False
+            if review_approved and getattr(self, '_on_job_finish', None):
+                try:
+                    self._on_job_finish('review_apply',
+                        'error' if state['failed'] or state.get('stopped') else 'finished',
+                        JobResult(scanned=state['done'], auto_fixed=state['fixed'], errors=state['failed']))
+                except Exception:
+                    logger.exception('Could not publish review operation completion')
             logger.info("Background bulk fix finished: %d fixed, %d failed of %d",
                         state['fixed'], state['failed'], state['total'])
 
+    def _record_review_timing(self, phase, seconds):
+        state = getattr(self, '_bulk_fix_state', {})
+        if state.get('running') and state.get('review_approved'):
+            timings = state.get('timings_seconds') or {}
+            timings[phase] = round(timings.get(phase, 0.0) + seconds, 4)
+            state['timings_seconds'] = timings
+
     def _save_bulk_fix_report(self, state=None):
         from core.repair_operation_reports import save_report
+        report = state if state is not None else self._bulk_fix_state
+        if report.get('review_approved') and getattr(self, '_on_job_progress', None):
+            try:
+                self._on_job_progress('review_apply', scanned=report.get('done', 0),
+                    total=report.get('total', 0), phase=report.get('phase'),
+                    current_item=str(report.get('phase') or '').replace('_', ' '),
+                    operation_id=report.get('operation_id'), review_scope=report.get('review_scope'),
+                    review_case_ids=report.get('review_case_ids'))
+            except Exception:
+                logger.exception('Could not publish review operation progress')
         try:
             save_report(self.db, state if state is not None else self._bulk_fix_state)
         except Exception:
