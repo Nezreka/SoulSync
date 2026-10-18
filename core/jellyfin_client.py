@@ -121,10 +121,28 @@ class JellyfinTrack(MediaTrack):
             artist_ids=[artist.get('Id', '') for artist in jellyfin_data.get('ArtistItems', [])],
         )
 
-from core.media_server.contract import MediaServerClient
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
 
 
-class JellyfinClient(MediaServerClient):
+class JellyfinClient(MediaServerBase):
+    CAPABILITIES = frozenset({
+        Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER, Capability.LIBRARY_STATS,
+        Capability.PLAYLISTS, Capability.PLAYLIST_IMAGE, Capability.PLAY_HISTORY,
+        Capability.CURATION_SIGNALS, Capability.METADATA_WRITE, Capability.PER_USER_VIEWS,
+    })
+
+    def scan_hints(self):
+        # Bulk inserts from the Jellyfin cache lock the database with more
+        # workers; the worker capped itself at 3 for Jellyfin.
+        return {'max_workers_cap': 3,
+                'preparing_message': 'Preparing Jellyfin cache for fast processing...'}
+
+    def user_view(self, identity):
+        """``as_user`` under the shared hook name (see MediaServerBase)."""
+        user_id = (identity or {}).get('user_id')
+        return self.as_user(user_id, (identity or {}).get('library_id')) if user_id else None
+
     # Sent alongside X-Emby-Token on every request.
     #
     # X-Emby-Token is the Emby-compatibility header Jellyfin has accepted
