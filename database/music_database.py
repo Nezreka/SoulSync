@@ -8985,6 +8985,8 @@ class MusicDatabase:
                 "ON repair_findings (job_id, status, review_case_key)")
             from core.library.reconciliation_catalogue import ensure_schema as ensure_catalogue_schema
             ensure_catalogue_schema(cursor.connection)
+            from core.library.reconciliation_match_cache import ensure_schema as ensure_match_schema
+            ensure_match_schema(cursor.connection)
             from core.library.reconciliation_store import ensure_schema
             ensure_schema(cursor.connection)
         except Exception as e:

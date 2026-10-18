@@ -518,7 +518,8 @@ def test_load_rows_does_not_join_distinct_libraries_by_relative_path(tmp_path):
     assert str(scan_path) not in tracks
 
 
-def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
+@pytest.mark.parametrize("matching_mode", ["off", "shadow", "reuse"])
+def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch, matching_mode):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -557,6 +558,7 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
                          acoustid_client=client, create_finding=worker._create_finding)
     scan = LibraryReconciliationJob()
+    monkeypatch.setattr(scan, 'default_settings', {**scan.default_settings, 'matching_cache_mode': matching_mode})
     first = scan.scan(context)
     assert first.scanned == 1
     assert first.findings_created == 1
@@ -582,6 +584,11 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
     assert result['success'], result
     second = scan.scan(context)
     assert second.scanned == 1
+    if matching_mode == 'reuse':
+        assert second.metrics['matching']['counts']['reused'] > 0
+    elif matching_mode == 'shadow':
+        assert second.metrics['matching']['counts']['shadow_compared'] > 0
+        assert not second.metrics['matching']['counts'].get('shadow_mismatches')
     assert client.fingerprints == client.lookups == 1  # persistent cache
     missing = next(item for item in worker.get_review_case(case_id)['items']
                    if item['finding_type'] == 'reconciliation_missing')

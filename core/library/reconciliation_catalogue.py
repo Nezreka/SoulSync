@@ -299,6 +299,8 @@ def catalogue_scan(fn):
         force = kwargs.pop('refresh_catalogue', False)
         settings = self._get_settings(context)
         session = CatalogueSession(context.db, force=force, enabled=settings.get('catalogue_cache_enabled', True))
+        from core.library.reconciliation_match_cache import MatchingCache
+        session.matching = MatchingCache(context.db, settings.get('matching_cache_mode', 'off'))
         token = current.set(session)
         start = time.perf_counter()
         result = None
@@ -311,6 +313,7 @@ def catalogue_scan(fn):
         finally:
             session.seconds['total_wall'] = time.perf_counter() - start
             metrics = session.finish()
+            metrics['matching'] = session.matching.finish()
             metrics['seconds']['total_wall'] = round(time.perf_counter() - start, 4)
             context.reconciliation_metrics = metrics
             current.reset(token)

@@ -35,6 +35,7 @@ from core.library.reconciliation_plan import (
     _recording_supports_slot,
 )
 from core.library.reconciliation_catalogue import catalogue_scan, current as catalogue_current, deferred, timed, stage
+from core.library.reconciliation_match_cache import cached_match
 from core.library.reconciliation_store import persist_album_plan, retire_unseen_plans
 from core.library.retag_planner import plan_track, _artist_credit_includes
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
@@ -608,8 +609,7 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
         slots = release_cache[key]
         if not slots:
             continue
-        with stage('candidate_matching'):
-            plan = reconcile_folder(files, slots)
+        plan = cached_match(files, slots, source=source, release_id=release_id, compute=reconcile_folder)
         clear = sum(pair['confidence'] == 'clear' for pair in plan['pairs'])
         matched = len(plan['pairs'])
         scored.append(ScoredCandidate(clear, matched, -len(plan['extra_files']),
@@ -1594,6 +1594,7 @@ class LibraryReconciliationJob(RepairJob):
     default_settings = {
         'min_acoustid_score': 0.80,
         'catalogue_cache_enabled': True,
+        'matching_cache_mode': 'shadow',
         # Prefer a one-medium/digital edition when it fits the same audio and
         # preserves continuous library numbering. Set to "release" to prefer
         # the linked physical edition and its per-disc positions.
@@ -1602,6 +1603,7 @@ class LibraryReconciliationJob(RepairJob):
         'album_title_policy': 'preserve',
     }
     setting_options = {
+        'matching_cache_mode': ['off', 'shadow', 'reuse'],
         'numbering_mode': ['digital', 'release'],
         'source_preference': ['active_preferred', 'best_fit'],
         'album_title_policy': ['preserve', 'exact_release'],
@@ -2403,7 +2405,8 @@ class LibraryReconciliationJob(RepairJob):
                             forced_pairs[file_index] = slot_index
                     if forced_pairs:
                         try:
-                            plan = reconcile_folder(files, slots, forced_pairs=forced_pairs)
+                            plan = cached_match(files, slots, source=source, release_id=release_id,
+                                                forced_pairs=forced_pairs, compute=reconcile_folder)
                         except ValueError as exc:
                             logger.warning('Ignoring conflicting manual assignments for %s: %s',
                                            folder, exc)
