@@ -22821,15 +22821,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .wl-linked-search-close:hover { color: #fff; }
 
 /* Keep existing search styles */
-.watchlist-linked-search {
-    margin-top: 12px;
-}
-
-.watchlist-linked-search-input-row {
-    display: flex;
-    gap: 8px;
-}
-
 .watchlist-linked-search-input {
     flex: 1;
     padding: 10px 14px;
@@ -22860,15 +22851,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .watchlist-linked-search-btn:hover {
     background: rgba(var(--accent-rgb), 0.3);
-}
-
-.watchlist-linked-search-results {
-    margin-top: 8px;
-    max-height: 260px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
 }
 
 .watchlist-linked-search-result {
