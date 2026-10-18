@@ -334,7 +334,10 @@ def _coerce_tag_int(value: Any, default: int) -> int:
             result = int(float(value))  # type: ignore[arg-type]
         except (TypeError, ValueError, OverflowError):
             return default
-    if result is None or result <= 0:
+    # Zero/negative are not real positions or durations, and anything past
+    # 2**62 is poison, not data — it would overflow the SQLite INTEGER
+    # columns this context eventually lands in.
+    if result is None or result <= 0 or result > 2**62:
         return default
     return result
 
@@ -352,7 +355,9 @@ def _build_single_import_fallback_context(
 ) -> Dict[str, Any]:
     artist_name = requested_artist or 'Unknown Artist'
     title = requested_title or 'Unknown Track'
-    album_name = str(album or '').strip()
+    # A non-string album (list/dict from raw request JSON) is not an album
+    # name; stringifying it would file the track under "['x']".
+    album_name = album.strip() if isinstance(album, str) else ''
     track_no = _coerce_tag_int(track_number, 1)
     disc_no = _coerce_tag_int(disc_number, 1)
     duration = _coerce_tag_int(duration_ms, 0)
@@ -451,8 +456,10 @@ def get_single_track_import_context(
     which returns the first (unrelated) search result (#1772).
     """
     source_priority = _get_source_chain_for_lookup(source_override=source_override, allow_fallback=True)
-    title = (title or '').strip()
-    artist = (artist or '').strip()
+    # Raw request JSON can carry non-string title/artist; treat those as
+    # absent instead of raising AttributeError on .strip().
+    title = title.strip() if isinstance(title, str) else ''
+    artist = artist.strip() if isinstance(artist, str) else ''
 
     if from_own_tags and not override_id:
         return _build_single_import_fallback_context(

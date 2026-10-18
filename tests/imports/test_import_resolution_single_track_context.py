@@ -340,6 +340,68 @@ def test_get_single_track_import_context_from_own_tags_yields_to_override(monkey
     assert result["context"]["track_info"]["id"] == "override-track-1"
 
 
+def test_failed_lookup_fallback_ignores_supplied_tag_fields(monkeypatch):
+    """The ordinary failed-lookup fallback keeps its HISTORICAL shape even
+    when the caller supplied tag fields: those fields only shape the
+    explicit from_own_tags context. Pinning this is what stops the fields
+    leaking back into every no-match import (round-1 finding)."""
+    deezer_client = FakeClient()
+    spotify_client = FakeClient()
+    itunes_client = FakeClient()
+
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: {"deezer": deezer_client, "spotify": spotify_client, "itunes": itunes_client}.get(source),
+    )
+
+    result = resolution.get_single_track_import_context(
+        "Missing Song",
+        "Missing Artist",
+        album="Tag Album",
+        track_number=9,
+        disc_number=2,
+        duration_ms=999_000,
+    )
+
+    context = result["context"]
+    assert context["album"]["name"] == ""
+    assert context["album"]["artists"] == []
+    assert context["track_info"]["album"] == ""
+    assert context["track_info"]["track_number"] == 1
+    assert context["track_info"]["disc_number"] == 1
+    assert context["track_info"]["duration_ms"] == 0
+    assert context["original_search_result"]["clean_album"] == ""
+    assert "_manual_metadata" not in context
+
+
+def test_get_single_track_import_context_from_own_tags_tolerates_nonstring_fields(monkeypatch):
+    """Raw request JSON can carry anything: a numeric title, a list album.
+    Those are treated as absent, never stringified into the library and
+    never an AttributeError out of the resolver."""
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "deezer")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "spotify", "itunes"])
+    monkeypatch.setattr(metadata_registry, "get_client_for_source", lambda source, **kwargs: None)
+
+    result = resolution.get_single_track_import_context(
+        123,
+        456,
+        from_own_tags=True,
+        album=["not", "a", "name"],
+        track_number=10**100,
+        duration_ms=10**100,
+    )
+
+    context = result["context"]
+    assert context["track_info"]["name"] == "Unknown Track"
+    assert context["artist"]["name"] == "Unknown Artist"
+    assert context["album"]["name"] == ""
+    assert context["track_info"]["track_number"] == 1
+    assert context["track_info"]["duration_ms"] == 0
+
+
 def test_get_single_track_import_context_returns_fallback_payload_when_no_source_matches(monkeypatch):
     deezer_client = FakeClient()
     spotify_client = FakeClient()
