@@ -1,10 +1,8 @@
 // ── Mirrored Playlists ────────────────────────────────────────────────
 
 let mirroredPlaylistsLoaded = false;
-// Auto-Sync state + functions moved to webui/static/auto-sync.js; declared
-// as globals there so the older mirrored-playlist render path below can
-// still reach `mirroredPipelinePollers`, `runMirroredPlaylistPipeline`,
-// `editMirroredSourceRef`, `getMirroredSourceRef`, and `pollMirroredPipelineStatus`.
+// auto-sync.js retains classic card and edit adapters. AutoSyncHost publishes
+// the run/resume globals, delegating to the native pipeline controller.
 
 /**
  * Fire-and-forget helper: send parsed playlist data to be mirrored on the backend.
@@ -193,8 +191,9 @@ function renderMirroredCard(p, container) {
         );
     }
 
-    if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
-        pollMirroredPipelineStatus(p.id, p.name);
+    if (pipelineState && pipelineState.status === 'running') {
+        // The native controller owns the poller registry and deduplicates resumes.
+        window.pollMirroredPipelineStatus?.(p.id, p.name);
     }
 }
 

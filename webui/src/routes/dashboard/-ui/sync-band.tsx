@@ -6,8 +6,8 @@
  * explained twice.
  *
  * Inherits BOTH predecessors' behavior:
- * - schedule side: the board's state builder via the window seam
- *   (buildAutoSyncScheduleState), Manage/empty-CTA opening the real board
+ * - schedule side: the shared native board state builder,
+ *   Manage/empty-CTA opening the real board
  *   modal, Run Now via the board's pipeline run path, a refresh loop only
  *   while a pipeline is in flight, minute countdown tick (render-only);
  * - history side: loadDashboardSyncHistory's 30s cycle with the app-locked
@@ -31,6 +31,11 @@ import { autoSyncCardRows } from '../-dash.autosync';
 import { useDashboardStatsEvent, useSyncProgressEvent } from '../-dash.events';
 import { syncCardView } from '../-dash.library';
 import { syncBandRows } from '../-dash.syncband';
+import {
+  buildAutoSyncScheduleState,
+  type AutomationRow,
+  type MirroredRow,
+} from '../../sync/-sync.autosync';
 
 type SeamPhase = 'loading' | 'ready' | 'error';
 type LiveSync = {
@@ -92,9 +97,11 @@ function useSyncBand() {
       const automations = (await automationsRes.json()) as unknown[];
       const history = (await historyRes.json()) as Record<string, unknown>;
       if (!Array.isArray(playlists) || !Array.isArray(automations)) throw new Error('bad shape');
-      const build = window.buildAutoSyncScheduleState;
-      if (typeof build !== 'function') throw new Error('board seam missing');
-      const state = build(playlists, automations, history) as unknown as AutoSyncSeamState;
+      const state = buildAutoSyncScheduleState(
+        playlists as MirroredRow[],
+        automations as AutomationRow[],
+        history,
+      ) as unknown as AutoSyncSeamState;
       if (!mountedRef.current) return;
       setSeam(state);
       setNowMs(Date.now());
