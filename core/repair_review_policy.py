@@ -1,6 +1,6 @@
 """Review decision policy shared by queue readers and action selection.
 
-Finding readiness, whole-album queue buckets, and the legacy global ready count
+Finding readiness, whole-album queue buckets, and the global ready count
 are separate projections. Keep their contracts explicit; a ready finding may
 belong to an album that still needs input.
 """
@@ -91,7 +91,13 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
     if (finding_type == 'reconciliation_missing' and
             details.get('fulfillment_state') in ('wishlisted', 'downloading', 'downloaded')):
         return 'blocked', ('Downloaded; waiting for a verified library assignment' if details.get('fulfillment_state') == 'downloaded' else 'The missing track is already on the wishlist')
+    if finding_type == 'reconciliation_unresolved' and details.get('plan_approved'):
+        return ('blocked', 'Choose the intended release first') if global_blocked else ('ready', 'File action saved in the album plan')
     if finding_type in _DESTRUCTIVE_TYPES:
+        if details.get('plan_approved') or details.get('plan_keep'):
+            if global_blocked:
+                return 'blocked', 'Choose the intended release first'
+            return 'ready', 'File decision saved; it will run only when this album plan is applied'
         if details.get('audio_conflict') == 'different_recording':
             return ('destructive',
                     'The fingerprint identifies different audio than the expected release track')
@@ -127,12 +133,7 @@ def _position_change_sql(details: str) -> str:
 
 
 def _metadata_review_sql(details: str, error: str, *, artist_credit: bool = True) -> str:
-    """SQL queue projection; preserve its conservative handling of title kinds.
-
-    The historical global ready count excludes artist replacement from its
-    predicate. Keep that count contract explicit rather than silently changing
-    it during a performance refactor; apply authorization uses finding tiers.
-    """
+    """SQL projection of the same approval requirements shown in the album plan."""
     alias = error.rsplit('.', 1)[0] + '.' if '.' in error else 'repair_findings.'
     saved = ("SELECT 1 FROM reconcile_review_choices choice WHERE "
              f"choice.finding_id = {alias}id AND choice.case_id = {alias}review_case_key "
@@ -257,7 +258,7 @@ def count_ready_findings(conn, *, status: str, job_id: str = "") -> int:
               AND f.finding_type = 'reconciliation_metadata'
               AND NOT {_metadata_review_sql(
                   "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END",
-                  'f.last_error', artist_credit=False)}
+                  'f.last_error')}
               AND NOT EXISTS (
                   SELECT 1 FROM repair_findings blocker
                   WHERE blocker.status = f.status

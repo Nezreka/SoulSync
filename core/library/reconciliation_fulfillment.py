@@ -65,11 +65,11 @@ def published_wishlist_track(db, stored_id, profiles, path):
 
 def outstanding(conn):
     ensure_schema(conn)
-    return conn.execute('''SELECT profile_id, source_track_id, release_id, state
+    return conn.execute('''SELECT profile_id, source_track_id, release_id, state, source
         FROM reconcile_fulfillment WHERE state != 'fulfilled' ''').fetchall()
 
 
-def settle_assignments(db, case_id, assignments, release_id):
+def settle_assignments(db, case_id, assignments, release_id, source):
     """A published file stays pending until reconciliation assigns its exact slot."""
     ids = {str(row.get('source_track_id')) for row in assignments
            if row.get('status') in ('confirmed', 'change', 'settled') and row.get('file_path')
@@ -81,8 +81,8 @@ def settle_assignments(db, case_id, assignments, release_id):
         ensure_schema(conn)
         for track_id in ids:
             conn.execute('''UPDATE reconcile_fulfillment SET state='fulfilled', refresh_needed=0,
-                updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=?''',
-                (case_id, str(release_id), track_id))
+                updated_at=CURRENT_TIMESTAMP WHERE case_id=? AND release_id=? AND source_track_id=? AND source=?''',
+                (case_id, str(release_id), track_id, source))
         conn.commit()
     finally:
         conn.close()

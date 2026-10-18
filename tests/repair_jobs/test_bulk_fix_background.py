@@ -251,3 +251,29 @@ def test_review_apply_waits_for_scan_and_rejects_changed_proposal(tmp_path):
     status = _wait_done(worker)
     assert status['fixed'] == 0 and status['failed'] == 1
     assert 'changed during reconciliation' in status['errors'][0]['error']
+
+
+def test_saved_file_decision_runs_only_in_explicit_album_batch(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    worker = _worker(db, tmp_path)
+    worker._create_finding(job_id='library_reconciliation',
+        finding_type='reconciliation_extra', severity='warning', entity_type='file',
+        entity_id='extra', file_path=str(tmp_path / 'extra.flac'), title='Extra',
+        description='Choose a file action', details={'album_folder': str(tmp_path),
+            'album_id': 'album', 'album_title': 'Album'})
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = worker.get_review_case(case_id)['items'][0]
+    calls = []
+    worker._execute_fix = lambda kind, entity, key, path, details: calls.append(
+        (kind, details.get('_fix_action'))) or {'success': True, 'action': 'quarantined'}
+    worker._schedule_album_refresh = lambda *args, **kwargs: True
+    assert worker.apply_review_decision(case_id, item['id'],
+        evidence_token=item['evidence_token'], action='fix', fix_action='quarantine')['success']
+    assert not calls
+    assert not worker.start_review_safe()['started']
+    assert not worker.start_bulk_fix(job_id='library_reconciliation')['started']
+    assert worker.start_review_safe(case_id=case_id)['started']
+    result = _wait_done(worker)
+    assert result['fixed'] == 1 and result['failed'] == 0
+    assert calls == [('reconciliation_extra', 'quarantine')]
+    assert result['review_scope'] == 'album'

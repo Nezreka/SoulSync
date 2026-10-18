@@ -611,8 +611,10 @@ describe('library reconciliation review queue', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /Confirm 1 uncertain track assignment/ }));
 
-    expect(screen.getByRole('button', { name: 'Replace with correct track' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Quarantine wrong file' })).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Plan replacement with correct track' }),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Plan quarantine of wrong file' })).toBeTruthy();
     expect(
       screen.getByText(
         'Requests the exact track from the selected release, then moves this file to recoverable quarantine.',
@@ -1036,7 +1038,7 @@ describe('library reconciliation review queue', () => {
     await screen.findByRole('heading', { name: 'Duplicate local copies' });
     expect(screen.getByText('Choose the copy to keep')).toBeTruthy();
     expect(screen.getByText('Playlist: Release Radar')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Keep this copy' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Plan to keep this copy' })).toHaveLength(2);
     expect(screen.getByText('2 linked recording IDs')).toBeTruthy();
   });
 

@@ -40,7 +40,7 @@ export interface AlbumAssignment {
   evidence_status?: string;
   review_state?: 'pending' | 'reviewed' | 'obsolete';
   historical_finding_id?: number;
-  planned_choice?: { category: string; action: 'fix' | 'dismiss' };
+  planned_choice?: { category: string; action: 'fix' | 'dismiss'; fix_action?: string };
   action_state?:
     | 'ready'
     | 'manual'
@@ -453,6 +453,7 @@ export async function saveAlbumPlan(caseId: string, signature: string) {
 }
 
 export interface SavedAlbumPlan {
+  file_actions?: number;
   case_id: string;
   album: string;
   signature: string;

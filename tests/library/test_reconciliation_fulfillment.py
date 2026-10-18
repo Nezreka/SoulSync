@@ -48,12 +48,33 @@ def test_published_request_survives_wishlist_removal_until_correct_assignment(tm
     worker._refresh_published_review_albums()
     assert len(calls) == 1 and calls[0][1] == {'scope': 'discovery'}
     key = review_case_key(details, None)
-    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'uncertain', 'file_path': str(audio)}], 'release')
+    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'uncertain', 'file_path': str(audio)}], 'release', 'musicbrainz')
     with db._get_connection() as conn:
         assert len(outstanding(conn)) == 2
-    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'confirmed', 'file_path': str(audio)}], 'other-release')
+    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'confirmed', 'file_path': str(audio)}], 'other-release', 'musicbrainz')
     with db._get_connection() as conn:
         assert len(outstanding(conn)) == 2
-    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'confirmed', 'file_path': str(audio)}], 'release')
+    settle_assignments(db, key, [{'source_track_id': 'slot', 'status': 'confirmed', 'file_path': str(audio)}], 'release', 'musicbrainz')
     with db._get_connection() as conn:
         assert [(row[0], row[3]) for row in outstanding(conn)] == [(2, 'requested')]
+
+
+def test_request_identity_includes_provider_when_numeric_ids_overlap(tmp_path):
+    from core.repair_jobs.base import JobContext
+    from core.repair_jobs.library_reconciliation import LibraryReconciliationJob
+
+    db = Database(tmp_path / 'providers.db')
+    details = {'album_id': 2, 'profile_id': 1, 'album_folder': str(tmp_path),
+               'source': 'deezer', 'release_id': '123'}
+    record_request(db, details, {'source_track_id': '456'})
+    job = LibraryReconciliationJob()
+    context = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=None)
+    assert job._wishlisted_slots(context)[1] == {('deezer', '456', '123')}
+    key = review_case_key(details, None)
+    assignment = [{'source_track_id': '456', 'status': 'confirmed', 'file_path': '/audio.flac'}]
+    settle_assignments(db, key, assignment, '123', 'itunes')
+    with db._get_connection() as conn:
+        assert len(outstanding(conn)) == 1
+    settle_assignments(db, key, assignment, '123', 'deezer')
+    with db._get_connection() as conn:
+        assert outstanding(conn) == []

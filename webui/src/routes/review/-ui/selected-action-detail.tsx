@@ -288,10 +288,10 @@ export function SelectedActionDetail({
                     className={styles.primary}
                     onClick={() => onAct('fix', 'request_missing')}
                   >
-                    Keep local and request release version
+                    Plan to keep local and request release version
                   </button>
                   <button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
-                    Replace local with release version
+                    Plan replacement with release version
                   </button>
                 </>
               )}
@@ -305,11 +305,11 @@ export function SelectedActionDetail({
                   className={styles.primary}
                   onClick={() => onAct('fix', 'replace')}
                 >
-                  {busy ? 'Applying…' : 'Replace with correct track'}
+                  {busy ? 'Saving…' : 'Plan replacement with correct track'}
                 </button>
               )}
               <button type="button" disabled={busy} onClick={() => onAct('fix', 'quarantine')}>
-                Quarantine wrong file
+                Plan quarantine of wrong file
               </button>
             </>
           ) : (
@@ -334,7 +334,7 @@ export function SelectedActionDetail({
                         : suggested
                           ? typeInfo?.verb || 'Apply repair'
                           : finding.finding_type === 'reconciliation_extra'
-                            ? 'Quarantine file'
+                            ? 'Plan quarantine'
                             : 'Apply this change'}
                   </button>
                 )}

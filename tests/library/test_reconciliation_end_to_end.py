@@ -573,7 +573,8 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch):
         narrow = scan.scan(context, target_folder=str(folder))
     assert narrow.scanned == 1
     assert walked == []  # Saved membership avoids even the artist/library walk.
-    assert worker.get_review_case(case_id)['items'][0]['finding_type'] == 'reconciliation_intent'
+    item = worker.get_review_case(case_id)['items'][0]
+    assert item['finding_type'] == 'reconciliation_intent'
 
     result = worker.apply_review_decision(case_id, item['id'],
                                           evidence_token=item['evidence_token'],
@@ -1592,12 +1593,13 @@ def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_pa
     assert path.exists()  # scanning never edits a file
     extra = next(finding for finding in findings if finding['finding_type'] == 'reconciliation_extra')
     assert worker.fix_finding(extra['id'], fix_action='quarantine')['success'] is False
+    staged = worker.apply_review_decision(case_id, extra['id'],
+        evidence_token=extra['evidence_token'], action='fix', fix_action='quarantine')
+    assert staged['success'] and path.exists()
     with db._get_connection() as conn:
         conn.execute("UPDATE tracks SET file_path = '/music/another.flac' WHERE id = 1")
         conn.commit()
-    changed = worker.apply_review_decision(case_id, extra['id'],
-                                           evidence_token=extra['evidence_token'],
-                                           action='fix', fix_action='quarantine')
+    changed = worker.fix_finding(extra['id'], review_approved=True)
     assert changed['success'] is False and 'another file' in changed['error']
     assert path.exists()
     with db._get_connection() as conn:
@@ -1605,17 +1607,13 @@ def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_pa
         conn.commit()
     extra = next(finding for finding in worker.get_review_case(case_id)['items']
                  if finding['finding_type'] == 'reconciliation_extra')
-    blocked = worker.apply_review_decision(case_id, extra['id'],
-                                           evidence_token=extra['evidence_token'],
-                                           action='fix', fix_action='quarantine')
+    blocked = worker.fix_finding(extra['id'], review_approved=True)
     assert blocked['success'] is False and 'playlist' in blocked['error']
     assert path.exists()
     monkeypatch.setattr('core.repair_worker._server_playlist_membership', lambda: {})
     extra = next(finding for finding in worker.get_review_case(case_id)['items']
                  if finding['finding_type'] == 'reconciliation_extra')
-    result = worker.apply_review_decision(case_id, extra['id'],
-                                          evidence_token=extra['evidence_token'],
-                                          action='fix', fix_action='quarantine')
+    result = worker.fix_finding(extra['id'], review_approved=True)
     assert result['success'], result
     assert not path.exists()
     assert (root / '.deleted' / path.name).exists()
@@ -1670,6 +1668,10 @@ def test_wrong_audio_can_request_exact_replacement_before_quarantine(tmp_path, m
         case_id, extra['id'], evidence_token=extra['evidence_token'],
         action='fix', fix_action='replace')
 
+    assert result['success'] and path.exists()
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
+    result = worker.fix_finding(extra['id'], review_approved=True)
     assert result['success'], result
     assert not path.exists()
     assert (root / '.deleted' / path.name).exists()
@@ -1857,6 +1859,9 @@ def test_competing_audio_copies_become_one_keeper_decision(tmp_path, monkeypatch
         action='fix', fix_action='1')
 
     assert outcome['success'] is True
+    assert first.exists() and second.exists() and third.exists()
+    outcome = worker.fix_finding(findings[0]['id'], review_approved=True)
+    assert outcome['success'], outcome
     assert first.exists()
     assert not second.exists()
     assert not third.exists()

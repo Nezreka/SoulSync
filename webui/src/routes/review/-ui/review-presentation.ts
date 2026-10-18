@@ -33,8 +33,16 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.planned_choice?.action === 'dismiss')
     return row.planned_choice.category === 'numbering'
       ? 'Keep numbering planned'
-      : 'Keep values planned';
-  if (row?.planned_choice?.action === 'fix') return 'Change planned';
+      : ['extra_files', 'audio_conflicts', 'duplicates'].includes(row.planned_choice.category)
+        ? 'Keep files planned'
+        : 'Keep values planned';
+  if (row?.planned_choice?.action === 'fix') {
+    if (row.planned_choice.fix_action === 'replace') return 'Replacement planned';
+    if (row.planned_choice.fix_action === 'quarantine') return 'Quarantine planned';
+    if (row.planned_choice.fix_action === 'request_missing') return 'Request planned';
+    if (row.planned_choice.category === 'duplicates') return 'Copy choice planned';
+    return 'Change planned';
+  }
   if (row?.fulfillment_state === 'downloading') return 'Downloading';
   if (row?.fulfillment_state === 'wishlisted') return 'Wishlisted';
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';

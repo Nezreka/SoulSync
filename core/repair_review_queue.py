@@ -322,7 +322,7 @@ def classify_case(items: list[dict[str, Any]]) -> dict[str, Any]:
                    counts['blocked'] else 'ready'),
         'blocker_reasons': reasons,
         'can_apply_ready': counts['ready'] > 0,
-        'can_organize': bool(items and not counts['manual'] and
+        'can_organize': bool(items and all(item.get('finding_type') == 'reconciliation_metadata' for item in items) and not counts['manual'] and
                              not counts['destructive'] and not counts['blocked']),
         'decision_count': len(decisions),
         'categories': sorted({row['category'] for row in decisions}),
@@ -399,7 +399,7 @@ def list_cases(db, *, status: str = 'pending', page: int = 0,
                 except (TypeError, ValueError):
                     details = {}
                 grouped.setdefault(case_key, []).append({
-                    'finding_type': finding_type, 'details': choices.project(details, saved_choices.get(finding_id), case_id=case_key),
+                    'finding_type': finding_type, 'details': choices.project(details, saved_choices.get(finding_id), case_id=case_key, raw_json=raw_details),
                     'last_error': last_error,
                 })
             for item in items:
@@ -500,7 +500,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 'id': row[0], 'job_id': row[1], 'finding_type': row[2],
                 'severity': row[3], 'status': row[4], 'entity_type': row[5],
                 'entity_id': row[6], 'file_path': row[7], 'title': row[8],
-                'description': row[9], 'details': choices.project(details, saved_choices.get(row[0]), case_id=case_id), 'user_action': row[11],
+                'description': row[9], 'details': choices.project(details, saved_choices.get(row[0]), case_id=case_id, raw_json=row[10]), 'user_action': row[11],
                 'created_at': row[12], 'updated_at': row[13], 'last_error': row[14],
                 'evidence_token': evidence_token(row),
             })
@@ -612,9 +612,9 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                     finding = intent_finding
                 if finding:
                     assignment['review_state'] = 'pending'
+                    assignment['planned_choice'] = (finding.get('details') or {}).get('planned_choice')
                     if finding.get('finding_type') == 'reconciliation_metadata':
                         assignment['changes'] = (finding.get('details') or {}).get('changes') or {}
-                        assignment['planned_choice'] = (finding.get('details') or {}).get('planned_choice')
                     fulfillment = (finding.get('details') or {}).get('fulfillment_state')
                     if fulfillment:
                         assignment['fulfillment_state'] = fulfillment
@@ -699,7 +699,7 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         conn.close()
 
 
-def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
+def safe_finding_ids(db, *, case_id: str = '', include_planned_files: bool = False) -> tuple[list[int], list[str]]:
     """Select the same effective draft proposals that the album view displays."""
     conn = db._get_connection()
     choices.ensure_schema(conn)
@@ -714,7 +714,7 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
         conn.close()
     grouped = {}
     for finding_id, key, kind, error, raw in rows:
-        details = choices.project(json.loads(raw or '{}'), saved.get(finding_id), case_id=key)
+        details = choices.project(json.loads(raw or '{}'), saved.get(finding_id), case_id=key, raw_json=raw)
         grouped.setdefault(key, []).append({
             'id': finding_id, 'finding_type': kind, 'details': details,
             'last_error': error,
@@ -722,7 +722,8 @@ def safe_finding_ids(db, *, case_id: str = '') -> tuple[list[int], list[str]]:
     ready, cases = [], []
     for key, items in grouped.items():
         classify_case(items)
-        ids = [item['id'] for item in items if item['review_tier'] == 'ready']
+        ids = [item['id'] for item in items if item['review_tier'] == 'ready' and
+               (item['finding_type'] == 'reconciliation_metadata' or (include_planned_files and case_id))]
         if ids:
             ready.extend(ids)
             cases.append(key)

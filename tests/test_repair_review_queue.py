@@ -49,6 +49,7 @@ def test_metadata_filter_keeps_credit_replacement_in_needs_input():
     assert list_cases(db, job_id='library_reconciliation', category='metadata',
                       risk='ready')['total'] == 0
     assert safe_finding_ids(db)[0] == []
+    assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 0
 
 
 def test_queue_modes_partition_albums_with_mixed_decisions():
@@ -1285,3 +1286,47 @@ def test_retired_reconciliation_finding_is_not_treated_as_user_acceptance(tmp_pa
     worker.resolve_finding(first, action='obsolete')
     assert worker._create_finding(**finding)
     assert worker.get_review_case(case)['items'][0]['id'] != first
+
+
+def test_saved_approval_readiness_agrees_after_evidence_is_reserialized():
+    db = _Database()
+    details = {'album_id': 10, 'confidence': 'clear',
+               'changes': {'track_number': {'old': 9, 'new': 3}}}
+    db.add(1, '/music/Album/09.flac', details,
+           job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.Lock()
+    worker.apply_review_decision_group(key, 'numbering', action='fix')
+    assert get_case(db, key)['plan']['ready'] == 1
+    db.conn.execute('UPDATE repair_findings SET details_json=? WHERE id=1', (json.dumps(details, indent=2),))
+    db.conn.commit()
+    assert get_case(db, key)['plan']['ready'] == 0
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
+    assert safe_finding_ids(db)[0] == []
+
+
+def test_saved_file_choice_requires_explicit_album_apply_and_revalidates_evidence():
+    db = _Database()
+    db.add(1, '/music/Album/extra.flac', {'album_id': 10, 'album_title': 'Album'},
+           job_id='library_reconciliation', kind='reconciliation_extra')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    worker._review_apply_lock = threading.Lock()
+    item = get_case(db, key)['items'][0]
+    assert worker.apply_review_decision(key, 1, evidence_token=item['evidence_token'],
+                                      action='fix', fix_action='quarantine')['success']
+    case = get_case(db, key)
+    assert case['plan']['ready'] == 1
+    assert safe_finding_ids(db)[0] == []
+    assert safe_finding_ids(db, include_planned_files=True)[0] == []
+    assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == [1]
+    assert worker.save_review_plan(key, case['plan_signature'])['success']
+    saved = worker.saved_review_plans()
+    assert saved[0]['file_actions'] == 1
+    db.conn.execute("UPDATE repair_findings SET details_json=json_set(details_json,'$.evidence_signature','changed') WHERE id=1")
+    db.conn.commit()
+    assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == []
+    assert worker.saved_review_plans() == []

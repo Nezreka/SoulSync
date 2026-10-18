@@ -1851,6 +1851,23 @@ class RepairWorker:
                     action in ('fix', 'dismiss') and not fix_action):
                 return self._stage_review_decision_group(case_id, 'metadata', action=action,
                                                         selected_ids={finding_id})
+            if ((item.get('finding_type') in ('reconciliation_extra', 'reconciliation_duplicate') or
+                     (item.get('finding_type') == 'reconciliation_unresolved' and fix_action in ('quarantine', 'replace', 'request_missing')))
+                    and action in ('fix', 'dismiss') and not (fix_action or '').startswith('assign:')):
+                details = item.get('details') or {}
+                if action == 'fix':
+                    if item['finding_type'] == 'reconciliation_duplicate':
+                        allowed_actions = {str(row.get('track_id')) for row in details.get('duplicate_copies') or [] if row.get('track_id')}
+                    else:
+                        allowed_actions = {'quarantine'}
+                        if details.get('replacement_track'):
+                            allowed_actions.add('request_missing')
+                            if details.get('audio_conflict') == 'different_recording' or details.get('version_conflict'):
+                                allowed_actions.add('replace')
+                    if not fix_action or fix_action not in allowed_actions:
+                        return {'success': False, 'error': 'Choose a current file action before saving the plan'}
+                return self._stage_review_decision_group(case_id, item['category'], action=action,
+                    selected_ids={finding_id}, fix_action=fix_action or '')
             if action == 'dismiss':
                 ok = self.dismiss_finding(finding_id)
                 queued = (self._schedule_review_refresh(case_id, case.get('folder') or '', case)
@@ -1985,8 +2002,10 @@ class RepairWorker:
         with self._review_apply_lock:
             return self._stage_review_decision_group(case_id, category, action=action)
 
-    def _stage_review_decision_group(self, case_id, category, *, action, selected_ids=None):
+    def _stage_review_decision_group(self, case_id, category, *, action, selected_ids=None, fix_action=''):
         allowed = {'numbering', 'title_conventions', 'metadata'}
+        if selected_ids is not None or action == 'reset':
+            allowed |= {'audio_conflicts', 'extra_files', 'duplicates', 'title_issues'}
         if category not in allowed or action not in ('fix', 'dismiss', 'reset'):
             return {'success': False, 'error': 'Unsupported grouped decision'}
         case = self.get_review_case(case_id, job_id='library_reconciliation')
@@ -2022,12 +2041,12 @@ class RepairWorker:
                     return {'success': False, 'stale': True, 'error': 'The album plan changed'}
                 # Re-read the immutable scan proposal, not a projected prior choice.
                 conn.execute("""INSERT INTO reconcile_review_choices
-                    (finding_id, case_id, evidence_json, category, choice)
-                    VALUES (?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
+                    (finding_id, case_id, evidence_json, category, choice, fix_action)
+                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
                     case_id=excluded.case_id, evidence_json=excluded.evidence_json,
-                    category=excluded.category, choice=excluded.choice,
+                    category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
                     updated_at=CURRENT_TIMESTAMP""",
-                    (item['id'], case_id, row[10], category, action))
+                    (item['id'], case_id, row[10], category, action, fix_action))
             conn.commit()
         finally:
             conn.close()
@@ -2093,7 +2112,8 @@ class RepairWorker:
             case = self.get_review_case(key, job_id='library_reconciliation')
             if case and case.get('saved_for_later') and (case.get('refresh') or {}).get('state') != 'running':
                 cases.append({'case_id': key, 'album': case.get('album'),
-                              'signature': case['plan_signature'], 'ready': case['plan']['ready']})
+                              'signature': case['plan_signature'], 'ready': case['plan']['ready'],
+                              'file_actions': sum(item['finding_type'] != 'reconciliation_metadata' and item['review_tier'] == 'ready' and not item['details'].get('plan_keep') for item in case['items'])})
         return cases
 
     def start_saved_review_plans(self, plans):
@@ -2115,7 +2135,7 @@ class RepairWorker:
 
     def start_review_safe(self, *, case_id: str = '', organize: bool = False) -> dict:
         """Apply the planner-approved reconciliation subset in the background."""
-        ids, cases = repair_review_queue.safe_finding_ids(self.db, case_id=case_id)
+        ids, cases = repair_review_queue.safe_finding_ids(self.db, case_id=case_id, include_planned_files=bool(case_id))
         if not ids:
             return {'started': False, 'error': 'No ready reconciliation changes match'}
         refresh_cases = [(key, (self.get_review_case(key) or {}).get('folder') or '')
@@ -2657,17 +2677,20 @@ class RepairWorker:
                 return {'success': False,
                         'error': 'Open this finding in the Review Queue before applying it'}
             details = json.loads(details_json) if details_json else {}
-            if finding_type == 'reconciliation_metadata':
-                details = review_choices.project(details, review_choices.load_choices(conn, fid).get(fid))
+            if finding_type in ('reconciliation_metadata', 'reconciliation_extra', 'reconciliation_duplicate', 'reconciliation_unresolved'):
+                details = review_choices.project(details, review_choices.load_choices(conn, fid).get(fid), raw_json=details_json)
             conn.close()
             conn = None
 
+            # File choices are bound to the approved proposal, including the selected keeper.
+            if not fix_action and details.get('plan_approved'):
+                fix_action = (details.get('planned_choice') or {}).get('fix_action') or None
             # Pass fix_action through to handler via details
             if fix_action:
                 details['_fix_action'] = fix_action
 
             # Dispatch fix by finding type
-            if finding_type == 'reconciliation_metadata' and details.get('plan_keep'):
+            if details.get('plan_keep'):
                 result = {'success': True, 'action': 'kept_current_values'}
             else:
                 result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
@@ -4973,6 +4996,8 @@ class RepairWorker:
             if not outcome.get('applied'):
                 return {'success': False, 'error': outcome.get('reason') or
                         f'Replacement request was not accepted ({outcome.get("status")})'}
+            from core.library.reconciliation_fulfillment import record_request
+            record_request(self.db, details, slot)
             if action == 'request_missing':
                 return {'success': True, 'action': 'version_requested',
                         'message': f'{replacement_name} requested; the local version was kept'}
@@ -7322,7 +7347,8 @@ class RepairWorker:
                 # Only the review planner may opt exact, already-classified IDs
                 # back into a bulk run. An unscoped job/type sweep must never
                 # cross this boundary.
-                fixable.update({'reconciliation_metadata', 'reconciliation_missing'})
+                fixable.update({'reconciliation_metadata', 'reconciliation_missing',
+                                'reconciliation_extra', 'reconciliation_duplicate', 'reconciliation_unresolved'})
             if safe_only:
                 fixable -= DESTRUCTIVE_FINDING_TYPES
             if finding_type:
@@ -7457,7 +7483,7 @@ class RepairWorker:
                     reviewed_details = dict(conn.execute(
                         f'SELECT id, details_json FROM repair_findings WHERE id IN ({placeholders})', ids))
                     saved_choices = review_choices.load_choices(conn)
-                    reviewed_details = {fid: json.dumps(review_choices.project(json.loads(raw or '{}'), saved_choices.get(fid)))
+                    reviewed_details = {fid: json.dumps(review_choices.project(json.loads(raw or '{}'), saved_choices.get(fid), raw_json=raw))
                                         for fid, raw in reviewed_details.items()}
                 finally:
                     conn.close()
@@ -7565,7 +7591,7 @@ class RepairWorker:
                         conn = self.db._get_connection()
                         try:
                             current = conn.execute('SELECT details_json FROM repair_findings WHERE id = ?', (fid,)).fetchone()
-                            effective = review_choices.project(json.loads(current[0] or '{}'), review_choices.load_choices(conn, fid).get(fid)) if current else None
+                            effective = review_choices.project(json.loads(current[0] or '{}'), review_choices.load_choices(conn, fid).get(fid), raw_json=current[0]) if current else None
                         finally:
                             conn.close()
                         if effective != json.loads(reviewed_details.get(fid) or '{}'):

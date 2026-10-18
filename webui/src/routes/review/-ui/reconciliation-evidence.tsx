@@ -402,7 +402,7 @@ function DuplicateCopies({
               </div>
               {onKeepCopy && trackId && (
                 <button type="button" disabled={busy} onClick={() => onKeepCopy(trackId)}>
-                  Keep this copy
+                  Plan to keep this copy
                 </button>
               )}
             </article>

@@ -836,6 +836,14 @@ export function ReviewPage() {
   };
 
   const applyReady = async (scopeCaseId?: string, organize = false, allMetadata = false) => {
+    const fileActions = scopeCaseId
+      ? (reviewCase?.items || []).filter(
+          (item) =>
+            item.review_tier === 'ready' &&
+            item.finding_type !== 'reconciliation_metadata' &&
+            !item.details?.plan_keep,
+        ).length
+      : 0;
     const count = allMetadata
       ? reviewCase?.items.filter((item) => item.finding_type === 'reconciliation_metadata')
           .length || 0
@@ -849,11 +857,17 @@ export function ReviewPage() {
             : organize
               ? 'Apply and organize album'
               : 'Apply ready changes',
-          message: allMetadata
-            ? `Apply all ${count} proposed metadata edits for this album? The album will be reanalyzed afterward.`
-            : organize
-              ? `Apply ${count} ready metadata edits, then organize this album folder? Reanalysis may find additional proposed edits afterward.`
-              : 'Apply every metadata change in the queue that passed its album safety checks?',
+          destructive: fileActions > 0,
+          message:
+            fileActions > 0
+              ? `Apply ${plan.ready} planned actions, including ${fileActions} file decisions? This may quarantine files, remove duplicate copies, or request replacements according to your saved choices.`
+              : allMetadata
+                ? `Apply all ${count} proposed metadata edits for this album? The album will be reanalyzed afterward.`
+                : organize
+                  ? `Apply ${count} ready metadata edits, then organize this album folder? Reanalysis may find additional proposed edits afterward.`
+                  : scopeCaseId
+                    ? `Apply ${count} ready actions in this album plan?`
+                    : 'Apply every metadata change in the queue that passed its album safety checks?',
           confirmText: allMetadata
             ? 'Apply album edits'
             : organize
@@ -861,11 +875,13 @@ export function ReviewPage() {
               : 'Apply ready changes',
         })
       : window.confirm(
-          allMetadata
-            ? `Apply all ${count} proposed metadata edits?`
-            : scopeCaseId
-              ? `Apply ${count} ready metadata changes?`
-              : 'Apply all ready changes?',
+          fileActions > 0
+            ? `Apply ${plan.ready} planned actions including ${fileActions} file decisions?`
+            : allMetadata
+              ? `Apply all ${count} proposed metadata edits?`
+              : scopeCaseId
+                ? `Apply ${count} ready metadata changes?`
+                : 'Apply all ready changes?',
         );
     if (!confirmed) return;
     setApplyBusy(true);
@@ -929,15 +945,15 @@ export function ReviewPage() {
             title: fixAction === 'replace' ? 'Replace wrong audio' : 'Apply repair',
             message:
               fixAction === 'replace'
-                ? 'Request the exact track from the selected release and move this file to recoverable quarantine?'
-                : `Apply this action to ${finding.title}? Review the evidence and file path first.`,
-            confirmText: fixAction === 'replace' ? 'Replace audio' : 'Apply',
+                ? 'Add replacement of this track and recoverable quarantine of this file to the album plan?'
+                : `Save this file decision for ${finding.title} in the album plan? Files stay unchanged until you apply the plan.`,
+            confirmText: 'Save file decision',
             destructive: true,
           })
         : window.confirm(
             fixAction === 'replace'
-              ? 'Request the exact track and move the wrong file to recoverable quarantine?'
-              : `Apply this action to ${finding.title}?`,
+              ? 'Plan replacement of this track and recoverable quarantine of this file?'
+              : `Save this file decision for ${finding.title} in the album plan?`,
           );
       if (!confirmed) return;
     }
@@ -1109,10 +1125,12 @@ export function ReviewPage() {
         setGlobalNotice('No saved plans are ready. Save a resolved album plan first.');
         return;
       }
-      const message = `Apply ${plans.reduce((sum, item) => sum + item.ready, 0)} saved actions across ${plans.length} albums?`;
+      const fileActions = plans.reduce((sum, item) => sum + (item.file_actions || 0), 0);
+      const message = `Apply ${plans.reduce((sum, item) => sum + item.ready, 0)} saved actions across ${plans.length} albums?${fileActions ? ` This includes ${fileActions} saved file decisions (quarantine, replacement, or duplicate removal).` : ''}`;
       const confirmed = window.showConfirmDialog
         ? await window.showConfirmDialog({
             title: 'Apply saved album plans',
+            destructive: fileActions > 0,
             message,
             confirmText: 'Apply saved plans',
           })
@@ -1665,10 +1683,10 @@ export function ReviewPage() {
                   {albumView === 'plan' && plan.ready > 0 && (
                     <section className={styles.albumApplyAll} aria-label="Apply album changes">
                       <div>
-                        <strong>{plan.ready} ready metadata edits</strong>
+                        <strong>{plan.ready} ready album actions</strong>
                         <p>
-                          Metadata and filenames only. Folder organization is an explicit additional
-                          action.
+                          Applies the saved choices and supported edits shown in this plan. Folder
+                          organization is separate.
                         </p>
                       </div>
                       {readyActionControls}
@@ -2481,15 +2499,6 @@ export function ReviewPage() {
                                   : reviewCase.album_plan.counts.missing
                                     ? 'Resolve track assignments first'
                                     : 'Full release coverage')}
-                              {reviewCase.album_plan.intent_scope && (
-                                <button
-                                  type="button"
-                                  disabled={mutationBusy}
-                                  onClick={() => void reconsiderScope()}
-                                >
-                                  Review album scope
-                                </button>
-                              )}
                             </dd>
                           </div>
                           {wishlistedCount > 0 && (
@@ -2544,6 +2553,15 @@ export function ReviewPage() {
                           <button type="button" onClick={() => setAlbumView('tracks')}>
                             Review track assignments
                           </button>
+                          {reviewCase.album_plan.intent_scope && (
+                            <button
+                              type="button"
+                              disabled={mutationBusy}
+                              onClick={() => void reconsiderScope()}
+                            >
+                              Review album scope
+                            </button>
+                          )}
                         </div>
                       </section>
                     )}

@@ -1284,13 +1284,13 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            numbering_mode: str = '',
                            inventory: dict | None = None,
                            wanted_slots: set[str] | None = None,
-                           wishlisted_slots: set[tuple[str, str]] | None = None) -> str:
+                           wishlisted_slots: set[tuple[str, str, str]] | None = None) -> str:
     clear, matched, _extras, source, release_id, slots, plan = scored
     assignments, categories = _album_plan_assignments(files, slots, plan,
                                                        numbering_mode)
     for assignment in assignments:
         if (assignment.get('status') == 'missing' and
-                (str(assignment.get('source_track_id') or ''),
+                (source, str(assignment.get('source_track_id') or ''),
                  str(common.get('exact_release_id') or release_id)) in
                 (wishlisted_slots or set())):
             assignment['fulfillment_state'] = 'wishlisted'
@@ -1352,7 +1352,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                             numbering_mode) for row in candidate_rows[:6]],
         })
         from core.library.reconciliation_fulfillment import settle_assignments
-        settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id)
+        settle_assignments(db, case_id, assignments, common.get('exact_release_id') or release_id, source)
         return case_id
     except Exception as exc:
         # The snapshot is a review read model. A transient persistence problem
@@ -1804,7 +1804,7 @@ class LibraryReconciliationJob(RepairJob):
         finally:
             conn.close()
 
-    def _wishlisted_slots(self, context: JobContext) -> dict[int, set[tuple[str, str]]]:
+    def _wishlisted_slots(self, context: JobContext) -> dict[int, set[tuple[str, str, str]]]:
         """Read exact requested tracks once for the current scan."""
         conn = context.db._get_connection()
         try:
@@ -1820,19 +1820,20 @@ class LibraryReconciliationJob(RepairJob):
             return {}
         finally:
             conn.close()
-        by_profile: dict[int, set[tuple[str, str]]] = defaultdict(set)
+        by_profile: dict[int, set[tuple[str, str, str]]] = defaultdict(set)
         self._published_by_profile = defaultdict(set)
-        for profile_id, track_id, release_id, state in durable:
-            by_profile[int(profile_id or 1)].add((track_id, release_id))
+        for profile_id, track_id, release_id, state, source in durable:
+            by_profile[int(profile_id or 1)].add((source, track_id, release_id))
             if state == 'published':
-                self._published_by_profile[int(profile_id or 1)].add((track_id, release_id))
+                self._published_by_profile[int(profile_id or 1)].add((source, track_id, release_id))
         for profile_id, stored_id, raw in rows:
             try:
                 payload = json.loads(raw or '{}')
+                source = str(payload.get('provider') or 'spotify')
                 track_id = str(payload.get('id') or str(stored_id).split('::')[0])
                 release_id = str((payload.get('album') or {}).get('id') or '')
                 if track_id and release_id:
-                    by_profile[int(profile_id or 1)].add((track_id, release_id))
+                    by_profile[int(profile_id or 1)].add((source, track_id, release_id))
             except (TypeError, ValueError, AttributeError):
                 continue
         return by_profile
@@ -2825,14 +2826,14 @@ class LibraryReconciliationJob(RepairJob):
                         key = missing_slot_key(album_id, source, release_id, slot)
                         fulfillment_state = (
                             'wishlisted' if
-                            (str(slot.get('source_track_id') or ''),
+                            (source, str(slot.get('source_track_id') or ''),
                              str(exact_release_id)) in wishlisted_slots else '')
                         wanted = intent_scope == 'complete' or (intent_scope == 'partial' and _wanted_slot_key(slot) in wanted_slots)
                         if not wanted and not fulfillment_state:
                             continue
                         if not assignment_settled and not fulfillment_state:
                             continue
-                        if (str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_published_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
+                        if (source, str(slot.get('source_track_id') or ''), str(exact_release_id)) in getattr(self, '_published_by_profile', {}).get(int(common.get('profile_id') or 1), set()):
                             fulfillment_state = 'downloaded'
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_missing',
