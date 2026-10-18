@@ -58,7 +58,7 @@ const NO_HANDLERS = {
 
 function renderList(
   groups: QuarantineGroup[],
-  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void,
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number | null) => void,
 ) {
   return render(
     <AdlQuarantineList

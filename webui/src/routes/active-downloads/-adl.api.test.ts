@@ -120,6 +120,28 @@ describe('the reads never throw', () => {
     const result = await fetchQuarantine();
     expect('error' in result).toBe(true);
   });
+
+  it('fetchQuarantine sends page params and returns the server total', async () => {
+    const seen = capture('get', '/api/quarantine/list', {
+      success: true,
+      entries: [{ id: 'q1' }],
+      total: 42,
+    });
+    const result = await fetchQuarantine({ limit: 100, offset: 200 });
+    expect(seen[0].url.searchParams.get('limit')).toBe('100');
+    expect(seen[0].url.searchParams.get('offset')).toBe('200');
+    expect(result).toEqual({ entries: [{ id: 'q1' }], total: 42 });
+  });
+
+  it('fetchQuarantine falls back to the page length when total is omitted', async () => {
+    server.use(
+      http.get('/api/quarantine/list', () =>
+        HttpResponse.json({ success: true, entries: [{ id: 'q1' }, { id: 'q2' }] }),
+      ),
+    );
+    const result = await fetchQuarantine();
+    expect(result).toEqual({ entries: [{ id: 'q1' }, { id: 'q2' }], total: 2 });
+  });
 });
 
 describe('the verification config gate', () => {

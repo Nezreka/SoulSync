@@ -286,7 +286,14 @@ export function AdlQuarantineRow({
   handlers: ReviewActionHandlers;
   altSlot?: React.ReactNode;
   /** set on the lead row of a group: how many files tried to be this track. */
-  attempts?: { count: number; open: boolean; groupKey: string; onToggle: () => void };
+  attempts?: {
+    count: number;
+    open: boolean;
+    groupKey: string;
+    onToggle: () => void;
+    /** True when the list is paged, so the count is a floor, not a total. */
+    partial?: boolean;
+  };
 }) {
   const [triggerLabel, triggerClass] = quarantineTrigger(entry.trigger);
   const title = entry.expected_track || entry.original_filename || entry.filename || 'Unknown file';
@@ -334,15 +341,22 @@ export function AdlQuarantineRow({
               data-group-key={attempts.groupKey}
               data-alt-count={attempts.count - 1}
               aria-expanded={attempts.open}
-              title={`${attempts.count} downloads tried to be this track. ${
-                attempts.open ? 'Hide' : 'Show'
-              } the other ${attempts.count === 2 ? 'one' : attempts.count - 1}`}
+              title={
+                attempts.partial
+                  ? `At least ${attempts.count} downloads tried to be this track (the list is paged). ${
+                      attempts.open ? 'Hide' : 'Show'
+                    } the other ${attempts.count === 2 ? 'one' : attempts.count - 1} loaded`
+                  : `${attempts.count} downloads tried to be this track. ${
+                      attempts.open ? 'Hide' : 'Show'
+                    } the other ${attempts.count === 2 ? 'one' : attempts.count - 1}`
+              }
               onClick={(event) => {
                 event.stopPropagation();
                 attempts.onToggle();
               }}
             >
-              {attempts.count} attempts <span aria-hidden="true">{attempts.open ? '▴' : '▾'}</span>
+              {attempts.partial ? `${attempts.count}+ attempts` : `${attempts.count} attempts`}{' '}
+              <span aria-hidden="true">{attempts.open ? '▴' : '▾'}</span>
             </button>
           ) : null}
         </div>
@@ -409,6 +423,7 @@ export function AdlQuarantineRow({
  */
 export function AdlQuarantineList({
   groups,
+  partial,
   openDetails,
   openGroups,
   onToggleDetails,
@@ -417,13 +432,15 @@ export function AdlQuarantineList({
   onDeleteGroup,
 }: {
   groups: QuarantineGroup[];
+  /** True when more pages are not loaded yet, so group counts are page-local. */
+  partial?: boolean;
   openDetails: ReadonlySet<string>;
   openGroups: ReadonlySet<string>;
   onToggleDetails: (id: string) => void;
   onToggleGroup: (key: string) => void;
   handlersFor: (entry: AdlQuarantineEntry) => ReviewActionHandlers;
   /** Delete a whole group of candidates at once; absent = per-row deletes only. */
-  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number) => void;
+  onDeleteGroup?: (entry: AdlQuarantineEntry, count: number | null) => void;
 }) {
   return (
     <>
@@ -456,6 +473,7 @@ export function AdlQuarantineList({
                 open: isOpen,
                 groupKey,
                 onToggle: () => onToggleGroup(groupKey),
+                partial: Boolean(partial),
               }}
               altSlot={
                 // The row's own Delete only takes the one candidate it sits
@@ -465,27 +483,37 @@ export function AdlQuarantineList({
                     type="button"
                     className="verif-quar-alt-btn verif-quar-alt-del"
                     data-group-key={groupKey}
-                    title={`Permanently delete all ${group.members.length} quarantined candidates for this track`}
-                    onClick={() => onDeleteGroup(first, group.members.length)}
+                    title={
+                      partial
+                        ? 'Permanently delete every quarantined candidate for this track (the server resolves the full group, including entries not loaded yet)'
+                        : `Permanently delete all ${group.members.length} quarantined candidates for this track`
+                    }
+                    onClick={() => onDeleteGroup(first, partial ? null : group.members.length)}
                   >
-                    Delete all {group.members.length}
+                    {partial
+                      ? 'Delete all candidates for this track'
+                      : `Delete all ${group.members.length}`}
                   </button>
                 ) : null
               }
             />
             <div className={`verif-quar-alt-members${isOpen ? ' vqg-open' : ''}`}>
               <div className="verif-quar-alt-heading">
-                Other {rest.length === 1 ? 'attempt' : `${rest.length} attempts`} at this track
+                {partial
+                  ? `Other ${rest.length} attempt${rest.length === 1 ? '' : 's'} loaded`
+                  : `Other ${rest.length === 1 ? 'attempt' : `${rest.length} attempts`} at this track`}
               </div>
-              {rest.map((entry) => (
-                <AdlQuarantineRow
-                  key={entry.id}
-                  entry={entry}
-                  open={openDetails.has(entry.id)}
-                  onToggle={() => onToggleDetails(entry.id)}
-                  handlers={handlersFor(entry)}
-                />
-              ))}
+              {isOpen
+                ? rest.map((entry) => (
+                    <AdlQuarantineRow
+                      key={entry.id}
+                      entry={entry}
+                      open={openDetails.has(entry.id)}
+                      onToggle={() => onToggleDetails(entry.id)}
+                      handlers={handlersFor(entry)}
+                    />
+                  ))
+                : null}
             </div>
           </div>
         );
