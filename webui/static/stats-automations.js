@@ -2132,7 +2132,7 @@ const _autoIcons = {
     database_update_completed: '\uD83D\uDDC4\uFE0F', download_failed: '\u274C',
     download_quarantined: '\u26A0\uFE0F', wishlist_item_added: '\u2795',
     watchlist_artist_added: '\uD83D\uDC64', watchlist_artist_removed: '\uD83D\uDC64',
-    import_completed: '\uD83D\uDCE5', import_needs_attention: '\uD83D\uDCE5', mirrored_playlist_created: '\uD83D\uDCC2',
+    import_completed: '\uD83D\uDCE5', import_needs_attention: '\uD83D\uDCE5', audiobook_grab_started: '\u2B07\uFE0F', audiobook_download_failed: '\u274C', audiobook_import_needs_attention: '\u26A0\uFE0F', audiobook_wishlist_item_added: '\u2795', audiobook_wishlist_processing_completed: '\u2705', audiobook_new_release: '\uD83D\uDD14', audiobook_watchlist_scan_completed: '\u2705', audiobook_author_followed: '\uD83D\uDC64', audiobook_author_unfollowed: '\uD83D\uDC64', audiobook_library_scan_completed: '\uD83C\uDFA7', mirrored_playlist_created: '\uD83D\uDCC2',
     quality_scan_completed: '\uD83D\uDCCA', duplicate_scan_completed: '\uD83D\uDDC2\uFE0F', library_scan_completed: '\uD83D\uDCE1',
     start_database_update: '\uD83D\uDDC4\uFE0F', start_database_update_hourly: '\uD83D\uDDC4\uFE0F', run_duplicate_cleaner: '\uD83D\uDDC2\uFE0F',
     clear_quarantine: '\uD83D\uDDD1\uFE0F', library_cleanup: '\uD83D\uDDD1\uFE0F', cleanup_wishlist: '\uD83E\uDDF9',

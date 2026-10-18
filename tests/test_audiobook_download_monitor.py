@@ -251,7 +251,7 @@ def test_a_completed_download_announces_the_import(db):
     })]
 
 
-def test_a_failed_download_announces_no_import(db):
+def test_a_failed_download_announces_no_completed_import(db):
     _wishlisted(db)
     db.record_download("d1", "B1", "The Final Empire", "torrent", client_id="hash-1")
     events = []
@@ -262,7 +262,7 @@ def test_a_failed_download_announces_no_import(db):
          patch("core.app_events.publish", side_effect=lambda t, d=None: events.append((t, d))):
         tick(db=db)
 
-    assert events == []
+    assert "import_completed" not in [event for event, _ in events]
 
 
 def test_a_failed_download_marks_the_wishlist_row(db):
