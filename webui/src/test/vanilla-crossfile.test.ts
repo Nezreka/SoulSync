@@ -213,6 +213,16 @@ describe('calls that cross out of the files the sync port deletes', () => {
     ).toEqual([]);
   });
 
+  it.each(['sync-listenbrainz.js', 'sync-lastfm.js', 'sync-soulsync-discovery.js'])(
+    'keeps retired %s out of the page and source tree',
+    (file) => {
+      expect(readdirSync(resolve(process.cwd(), 'static'))).not.toContain(file);
+      const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+      expect(html).not.toContain(`filename='${file}'`);
+      expect(html).not.toContain(`filename="${file}"`);
+    },
+  );
+
   it('core.js page-leave no longer calls the deleted Beatport sliders', () => {
     // beatport-ui.js defined them and is gone. a call left in core.js would
     // throw ReferenceError the first time the beatport content tears down.
