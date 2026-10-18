@@ -21098,85 +21098,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ff3b30;
 }
 
-/* Live activity classes (replaces inline styles) */
-.watchlist-live-activity {
-    display: flex;
-    gap: 18px;
-    margin-top: 15px;
-    padding: 16px 20px;
-    background: var(--white-a03);
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(var(--accent-rgb), 0.15);
-    backdrop-filter: blur(8px);
-    justify-content: center;
-    align-items: flex-start;
-}
-
-.watchlist-live-activity-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}
-
-.watchlist-live-activity-artist-img {
-    width: 80px;
-    height: 80px;
-    border-radius: var(--radius-circle);
-    border: 2px solid rgb(var(--accent-rgb));
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.25);
-    object-fit: cover;
-    background: #1a1a1a;
-}
-
-.watchlist-live-activity-album-img {
-    width: 80px;
-    height: 80px;
-    border-radius: var(--radius-md);
-    border: 2px solid #ffc107;
-    box-shadow: 0 0 16px rgba(255, 193, 7, 0.2);
-    object-fit: cover;
-    background: #1a1a1a;
-}
-
-.watchlist-live-activity-label {
-    font-size: 11px;
-    font-weight: bold;
-    color: #fff;
-    text-align: center;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.watchlist-live-activity-feed {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 250px;
-    max-width: 300px;
-}
-
-.watchlist-live-activity-feed-label {
-    font-size: 10px;
-    color: #b3b3b3;
-    text-transform: uppercase;
-}
-
-.watchlist-live-activity-feed-label-orange {
-    font-size: 10px;
-    color: #ff9800;
-    text-transform: uppercase;
-}
-
-.watchlist-live-activity-track {
-    font-size: 11px;
-    font-weight: bold;
-    color: rgb(var(--accent-light-rgb));
-    margin-bottom: 8px;
-}
-
 .watchlist-live-addition-item {
     display: flex;
     gap: 6px;
@@ -64091,11 +64012,6 @@ body.max-performance #page-particles-canvas {
     background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
     opacity: 0;
     transition: opacity 0.3s;
-}
-
-.watchlist-page-scan-status:has(.watchlist-live-activity[style*="flex"])::before {
-    opacity: 1;
-    animation: scanPulse 2s ease-in-out infinite;
 }
 
 @keyframes scanPulse {
