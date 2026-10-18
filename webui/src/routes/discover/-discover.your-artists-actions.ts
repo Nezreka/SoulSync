@@ -30,8 +30,6 @@
  *      renders an empty grid. Your Albums' search does reset (1342).
  */
 
-import { disconnectedHint } from './-discover.your-albums-actions';
-
 // ── The artist info modal (5356) ────────────────────────────────────────────
 
 /** `setTimeout(() => controller.abort(), 8000)` (5413). */
@@ -339,14 +337,7 @@ export function initialArtistSourcesState(enabled: string[]): Record<string, boo
  * The vanilla returns silently here (5673, 5680). This returns the same hint
  * the Your Albums modal shows, from the shared table.
  */
-export function toggleArtistSource(
-  state: Record<string, boolean>,
-  id: string,
-  connected: string[],
-): { state: Record<string, boolean>; hint: string | null } {
-  if (!connected.includes(id)) return { state, hint: disconnectedHint(id) };
-  return { state: { ...state, [id]: !state[id] }, hint: null };
-}
+export { toggleSource as toggleArtistSource } from './-discover.your-albums-actions';
 
 /** The settings key differs from the albums one by a single word (5698). */
 export function artistSourcesSavePayload(enabled: string[]): {
