@@ -521,7 +521,12 @@ describe('SpotifyTab', () => {
     );
   });
 
-  it('opening a card fetches its tracks and shows the details modal', async () => {
+  it('opens details, closes through React on download, and can reopen them', async () => {
+    const openDownloadMissingModal = vi.fn(() => {
+      const modal = document.querySelector<HTMLElement>('#playlist-details-modal');
+      if (modal) modal.style.display = 'none';
+    });
+    vi.stubGlobal('openDownloadMissingModal', openDownloadMissingModal);
     responder = (url) =>
       url === '/api/spotify/playlists' ? [SPOTIFY_ROW] : { name: 'Road Trip', tracks: [] };
     render(<SpotifyTab registerRows={() => {}} />);
@@ -529,6 +534,13 @@ describe('SpotifyTab', () => {
     fireEvent.click(document.querySelector('#action-btn-p1') as Element);
     await waitFor(() => expect(document.querySelector('#playlist-details-modal')).not.toBeNull());
     expect(calls.some((c) => c.url === '/api/spotify/playlist/p1')).toBe(true);
+
+    fireEvent.click(screen.getByText('📥 Download Missing Tracks'));
+    expect(openDownloadMissingModal).toHaveBeenCalledWith('p1');
+    expect(document.querySelector('#playlist-details-modal')).toBeNull();
+
+    fireEvent.click(document.querySelector('#action-btn-p1') as Element);
+    await waitFor(() => expect(document.querySelector('#playlist-details-modal')).toBeVisible());
   });
 });
 

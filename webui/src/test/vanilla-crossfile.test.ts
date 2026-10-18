@@ -44,7 +44,6 @@ const EXPECTED_EDGES = [
   'editMirroredCustomName <- stats-automations.js [auto-sync.js]',
   'editMirroredSourceRef <- stats-automations.js [auto-sync.js]',
   'exportPlaylistAsM3U <- downloads.js,shared-helpers.js [sync-spotify.js]',
-  'formatDuration <- downloads.js,shared-helpers.js,stats-automations.js,wishlist-tools.js [sync-services.js]',
   'generateDiscoveryActionButton <- wishlist-tools.js [sync-services.js]',
   'generateDownloadModalHeroSection <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'getActionButtonText <- downloads.js [sync-spotify.js]',
