@@ -13745,15 +13745,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35), 0 0 0 1px rgba(var(--accent-rgb), 0.2) !important;
 }
 
-.sync-tab-divider {
-    width: 1px;
-    height: 20px;
-    background: var(--white-a08);
-    flex-shrink: 0;
-    margin: 0 2px;
-    align-self: center;
-}
-
 .sync-tab-button:hover:not(.active) {
     background: var(--white-a10);
     color: #ffffff;
@@ -60401,7 +60392,6 @@ tr.tag-diff-same {
     .server-search-result-details { gap: 3px; }
 
     .sync-tab-server { flex: 0 0 auto !important; }
-    .sync-tab-divider { display: none; }
 }
 
 /* ==================================================================================
@@ -69513,14 +69503,6 @@ body.max-performance .dash-card::after {
     border-color: rgba(0, 0, 0, 0.45);
 }
 
-/* Divider between Server Playlists and the rest — slim it down so
- * it doesn't dominate the compacted row. */
-.sync-tab-divider {
-    height: 24px;
-    margin: 0 4px;
-    background: var(--white-a08);
-}
-
 /* Responsive — collapse chip size on smaller widths to fit the row. */
 @media (max-width: 1099px) {
     .sync-tab-button {
@@ -69547,7 +69529,6 @@ body.max-performance .dash-card::after {
         height: 12px;
         border-width: 1px;
     }
-    .sync-tab-divider { display: none; }
 }
 
 
