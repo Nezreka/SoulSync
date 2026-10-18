@@ -49,10 +49,26 @@ import {
   repairJobBadge,
   repairJobCardClass,
   repairJobDot,
+  repairSettingText,
   scoreBar,
   timeAgo,
   linkedJobId,
 } from './-tools.core';
+
+describe('repairSettingText', () => {
+  it.each([
+    [null, ''],
+    [undefined, ''],
+    ['plain text', 'plain text'],
+    [0, '0'],
+    [false, 'false'],
+    [{ limit: 5 }, '{"limit":5}'],
+    [[1, 2], '[1,2]'],
+    [Symbol('unsupported'), ''],
+  ])('formats %s without changing the stored value', (value, expected) => {
+    expect(repairSettingText(value)).toBe(expected);
+  });
+});
 
 describe('prettifyRepairSettingKey', () => {
   it('spells out the ffmpeg cost for deep_audio_verify instead of Title Casing it', () => {

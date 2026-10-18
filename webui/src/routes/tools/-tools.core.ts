@@ -102,6 +102,15 @@ const SETTING_FULL_KEY_LABELS: Record<string, string> = {
   deep_audio_verify: 'Deep Audio Verify (ffmpeg decode — CPU heavy)',
 };
 
+/** Preserve structured setting values as JSON instead of "[object Object]". */
+export function repairSettingText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
 const SETTING_ACRONYMS: Record<string, string> = {
   eps: 'EPs',
   id: 'ID',
