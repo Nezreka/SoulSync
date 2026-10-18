@@ -2441,6 +2441,7 @@ class AutoImportWorker:
                 })
                 self._automation_engine.emit('batch_complete', {
                     'playlist_name': f'Import: {album_name}',
+                    'artist': artist_name,
                     'total_tracks': str(len(match_result.get('matches', []))),
                     'completed_tracks': str(processed),
                     'failed_tracks': str(len(errors)),

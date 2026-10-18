@@ -339,6 +339,7 @@ def test_batch_completion_emits_batch_complete_when_all_done():
         'max_concurrent': 2, 'permanently_failed_tracks': [],
         'cancelled_tracks': set(),
         'playlist_name': 'PL',
+        'artist_context': {'name': 'Bobby & Max'},
     }
     auto = _FakeAutoEngine()
     monitor = _FakeMonitor()
@@ -346,7 +347,7 @@ def test_batch_completion_emits_batch_complete_when_all_done():
     # Final task completes
     lc.on_download_completed('b1', 't2', True, deps)
     assert download_batches['b1']['phase'] == 'complete'
-    assert ('batch_complete', {'playlist_name': 'PL', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
+    assert ('batch_complete', {'playlist_name': 'PL', 'artist': 'Bobby & Max', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
     assert 'b1' in monitor.stopped
 
 

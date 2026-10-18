@@ -819,8 +819,10 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         _scan_owed = more_pending
         try:
             if deps.automation_engine:
+                _batch_artist = batch.get('artist_context')
                 deps.automation_engine.emit('batch_complete', {
                     'playlist_name': playlist_name,
+                    'artist': (_batch_artist.get('name') or '') if isinstance(_batch_artist, dict) else '',
                     'total_tracks': str(len(queue)),
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
