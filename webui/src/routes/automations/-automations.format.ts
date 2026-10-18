@@ -284,6 +284,7 @@ const ACTION_LABELS: Record<string, string> = {
   notify_only: 'Notify Only',
   start_database_update: 'Update Database',
   start_database_update_hourly: 'Update Database (Hourly)',
+  sync_downloaded_playlists: 'Sync Downloaded Playlists',
   run_duplicate_cleaner: 'Run Duplicate Cleaner',
   clear_quarantine: 'Clear Quarantine',
   library_cleanup: 'Clear Quarantine + Empty Recycle Bin',

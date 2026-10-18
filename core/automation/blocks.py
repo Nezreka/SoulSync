@@ -313,6 +313,9 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"}
      ]},
+    {"type": "sync_downloaded_playlists", "label": "Sync Downloaded Playlists", "icon": "sync",
+     "description": "Automatically sync playlists whose downloaded batches just finished and were updated in the database",
+     "available": True},
     {"type": "discover_playlist", "label": "Identify Playlist Tracks", "icon": "search", "description": "Find official Spotify/iTunes metadata for mirrored playlist tracks", "available": True,
      "config_fields": [
          {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},

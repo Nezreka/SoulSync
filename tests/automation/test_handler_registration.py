@@ -41,6 +41,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'scan_library',
     'refresh_mirrored',
     'sync_playlist',
+    'sync_downloaded_playlists',
     'discover_playlist',
     'playlist_pipeline',
     'personalized_pipeline',

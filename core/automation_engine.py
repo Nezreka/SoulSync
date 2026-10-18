@@ -149,6 +149,12 @@ SYSTEM_AUTOMATIONS = [
         'trigger_config': {},
         'action_type': 'start_database_update',
     },
+    {
+        'name': 'Auto-Sync Playlists After Database Update',
+        'trigger_type': 'database_update_completed',
+        'trigger_config': {},
+        'action_type': 'sync_downloaded_playlists',
+    },
     # Safety net, and the music twin of 'Auto-Update Video Database (Hourly)'.
     # The chain above only fires after SoulSync ITSELF downloads something, so
     # music added to the library any other way — dropped in by hand, ripped,

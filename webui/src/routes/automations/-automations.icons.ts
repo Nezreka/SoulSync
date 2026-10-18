@@ -53,6 +53,7 @@ export const AUTOMATION_ICONS: Record<string, string> = {
   library_scan_completed: '📡',
   start_database_update: '🗄️',
   start_database_update_hourly: '🗄️',
+  sync_downloaded_playlists: '🔄',
   run_duplicate_cleaner: '🗂️',
   clear_quarantine: '🗑️',
   library_cleanup: '🗑️',

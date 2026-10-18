@@ -869,6 +869,13 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                 'duration_ms': ti.get('duration_ms', 0),
             })
 
+    if successful_downloads > 0:
+        try:
+            from core.sync.post_download_sync import register_completed_playlist_batch
+            register_completed_playlist_batch(batch, tasks_snapshot=tasks_snapshot, database=MusicDatabase())
+        except Exception as reg_err:
+            logger.debug("register_completed_playlist_batch failed: %s", reg_err)
+
     if is_music_batch(batch_id, batch):
         # Mark that wishlist processing is starting (prevents premature cleanup)
         batch['wishlist_processing_started'] = True

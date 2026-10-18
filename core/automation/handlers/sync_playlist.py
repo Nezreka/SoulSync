@@ -191,7 +191,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         tracks_added = int(event_data.get('added') or 0)
     except (TypeError, ValueError):
         tracks_added = 0
-    force_sync = tracks_added > 0 or skipped_count > 0
+    force_sync = bool(config.get('force_sync')) or tracks_added > 0 or skipped_count > 0
 
     try:
         sync_statuses = deps.load_sync_status_file()

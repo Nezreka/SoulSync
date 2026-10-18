@@ -20,6 +20,7 @@ from core.automation.handlers.scan_watchlist_podcasts import auto_scan_watchlist
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
+from core.automation.handlers.sync_downloaded_playlists import auto_sync_downloaded_playlists
 from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
@@ -54,6 +55,7 @@ __all__ = [
     'auto_scan_library',
     'auto_refresh_mirrored',
     'auto_sync_playlist',
+    'auto_sync_downloaded_playlists',
     'auto_discover_playlist',
     'auto_playlist_pipeline',
     'auto_personalized_pipeline',
