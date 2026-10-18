@@ -671,6 +671,30 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
     }
 
+    case 'standard_album_preview': {
+      pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.album, 'Album');
+      pushIf(rows, d.release, 'Selected standard release');
+      pushIf(rows, d.source, 'Release source');
+      pushIf(rows, d.album_id, 'Release ID');
+      pushIf(rows, d.expected_track_count, 'Expected tracks');
+      pushIf(rows, d.status, 'Status');
+      pushIf(rows, d.reason, 'Reason');
+      rows.push(['Mode', d.dry_run === false ? 'Wishlist completion' : 'Dry run']);
+      for (const [key, label] of [
+        ['existing_tracks', 'Existing matching tracks'],
+        ['missing_tracks', 'Missing tracks'],
+        ['proposed_downloads', 'Proposed downloads'],
+      ]) {
+        const tracks = list<{ name?: string; title?: string }>(d[key]);
+        rows.push([
+          label,
+          tracks.map((track) => track.name || track.title || 'Unknown').join(', ') || 'None',
+        ]);
+      }
+      return <DetailGrid rows={rows} />;
+    }
+
     case 'incomplete_album': {
       pushIf(rows, d.artist, 'Artist');
       pushIf(rows, d.album_title, 'Album');

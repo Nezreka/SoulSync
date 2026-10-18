@@ -15567,7 +15567,8 @@ class MusicDatabase:
                     cursor, quality_profile_id
                 )
 
-                if not allow_duplicates:
+                standard_completion = bool(spotify_track_data.get('standard_completion_per_track'))
+                if not allow_duplicates or standard_completion:
                     cursor.execute("""
                         SELECT id, spotify_track_id, spotify_data, source_type
                         FROM wishlist_tracks
@@ -15580,6 +15581,13 @@ class MusicDatabase:
                     for existing in existing_tracks:
                         try:
                             existing_data = json.loads(existing['spotify_data'])
+                            if standard_completion and allow_duplicates:
+                                from core.edition_grouping import edition_group_key
+                                existing_album = existing_data.get('album') or {}
+                                requested_album = spotify_track_data.get('album') or {}
+                                if (not existing_album.get('name') or
+                                        edition_group_key(existing_album['name']) != edition_group_key(requested_album.get('name', ''))):
+                                    continue
                             existing_name = existing_data.get('name', '')
                             existing_artists = existing_data.get('artists', [])
                             if existing_artists:
@@ -15669,6 +15677,11 @@ class MusicDatabase:
                             "WHERE spotify_track_id=? AND profile_id=?",
                             (insert_track_id, profile_id),
                         ).fetchone()
+
+                if existing is not None and spotify_track_data.get('standard_completion_per_track'):
+                    # Completion is additive intent: never overwrite an existing
+                    # playlist request's provenance, metadata or quality choice.
+                    return self._wishlist_outcome("skipped", insert_track_id, reason="duplicate")
 
                 if existing is not None:
                     updates = ["spotify_data = ?"]

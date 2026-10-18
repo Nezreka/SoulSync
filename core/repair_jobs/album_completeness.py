@@ -1,5 +1,6 @@
 """Album Completeness Checker Job — finds albums missing tracks."""
 
+import json
 import re
 import unicodedata
 from collections import defaultdict
@@ -34,6 +35,10 @@ class AlbumCompletenessJob(RepairJob):
         'absent.\n\n'
         'Useful for catching partial downloads or albums where some tracks failed to download. '
         'You can use the Download Missing feature from the album page to fill gaps.\n\n'
+        'Standard Only enables safe standard-edition completion through the wishlist. '
+        'Dry Run defaults on and reports plans without queuing downloads. In Standard Only '
+        'mode set Min Owned Tracks to 1 to include playlist imports. The legacy mode '
+        'uses canonical editions and its Fill Album action may move/retag files.\n\n'
         'Settings:\n'
         '- Min Tracks For Check: Only check albums with at least this many expected tracks '
         '(skips singles and EPs)\n'
@@ -52,6 +57,8 @@ class AlbumCompletenessJob(RepairJob):
         'min_completion_pct': 0,
         # one or two playlist grabs are not an album the user is collecting (#1572)
         'min_owned_tracks': 3,
+        'standard_only': False,
+        'dry_run': True,
     }
     auto_fix = False
 
@@ -116,6 +123,8 @@ class AlbumCompletenessJob(RepairJob):
                 ('al.thumb_url', 'album_thumb_url'),
                 ('ar.thumb_url', 'artist_thumb_url'),
             ]
+            if 'owner_profile_id' in columns:
+                select_cols.append(('al.owner_profile_id', 'owner_profile_id'))
             if has_api_track_count:
                 select_cols.append(('al.api_track_count', 'api_track_count'))
             if has_itunes:
@@ -167,6 +176,9 @@ class AlbumCompletenessJob(RepairJob):
                     "AND al.canonical_album_id IS NOT NULL AND al.canonical_album_id != '')"
                 )
             where_clause = ' OR '.join(where_parts)
+            if settings.get('standard_only', False):
+                # Name discovery also covers playlist imports not enriched with IDs yet.
+                where_clause = 'EXISTS (SELECT 1 FROM tracks owned WHERE owned.album_id = al.id)'
             # hand-tagged: the user typed this release, the service tracklist
             # is the studio album and would call it incomplete
             if 'metadata_locked' in columns:
@@ -207,6 +219,9 @@ class AlbumCompletenessJob(RepairJob):
         finally:
             if conn:
                 conn.close()
+
+        if settings.get('standard_only', False):
+            return self._scan_standard(context, albums, settings, primary_source)
 
         # Rows that share a source ID with a canonical album are candidates for
         # the same release. A sibling joins the logical album only when at least
@@ -448,6 +463,74 @@ class AlbumCompletenessJob(RepairJob):
             result.scanned,
             result.findings_created,
         )
+        return result
+
+    def _scan_standard(self, context, albums, settings, source):
+        """Download-only mode: preview first, never invoke the file-moving fill action."""
+        from core.edition_grouping import edition_group_key
+        from core.metadata.standard_completion import plan_standard_album, enqueue_standard_plan
+
+        result = JobResult()
+        seen = set()
+        dry_run = settings.get('dry_run', True) is not False
+        for row in albums:
+            if context.check_stop() or context.wait_if_paused():
+                break
+            key = (str(row['artist_id']), edition_group_key(row['album_title']), row.get('owner_profile_id'))
+            if key in seen:
+                continue
+            seen.add(key)
+            result.scanned += 1
+            # Read all same-artist edition rows, including bonus tracks; matching
+            # counts only songs in the selected standard reference tracklist.
+            related = [a['album_id'] for a in albums
+                       if str(a['artist_id']) == key[0]
+                       and edition_group_key(a['album_title']) == key[1]
+                       and a.get('owner_profile_id') == key[2]]
+            local = self._load_local_tracks(context, related)
+            cfg = context.config_manager
+            explicit = cfg.get('watchlist.prefer_explicit_edition', True) if cfg else True
+            plan = plan_standard_album(row, local, source, prefer_explicit=explicit)
+            if not local:
+                plan.update(status='skipped', reason='Local tracks unavailable; refusing to guess ownership', proposed_downloads=[])
+            if plan['status'] == 'ready':
+                owned = len(plan['existing_tracks'])
+                expected = plan['expected_track_count']
+                if (expected < int(settings.get('min_tracks_for_check', 3))
+                        or owned < int(settings.get('min_owned_tracks', 3))
+                        or owned / expected * 100 < float(settings.get('min_completion_pct', 0))):
+                    plan.update(status='skipped', reason='Below configured completion thresholds', proposed_downloads=[])
+            if plan['status'] == 'skipped':
+                result.skipped += 1
+            elif not dry_run:
+                # Preserve per-profile routing. Do not guess when an owner lookup fails.
+                try:
+                    conn = context.db._get_connection()
+                    try:
+                        columns = {c[1] for c in conn.execute('PRAGMA table_info(albums)')}
+                        owner = conn.execute('SELECT owner_profile_id FROM albums WHERE id = ?',
+                                             (row['album_id'],)).fetchone() if 'owner_profile_id' in columns else None
+                    finally:
+                        conn.close()
+                    result.auto_fixed += enqueue_standard_plan(context.db, plan, profile_id=(owner[0] if owner and owner[0] else 1))
+                except Exception as exc:
+                    plan.update(status='skipped', reason=f'Wishlist enqueue failed: {type(exc).__name__}')
+                    result.errors += 1
+            message = json.dumps(plan, ensure_ascii=False)
+            logger.info('Standard album %s: %s', 'preview' if dry_run else 'completion', message)
+            if context.report_progress:
+                context.report_progress(log_line=message, log_type='info', scanned=result.scanned)
+            # Findings are reviewable reports only. They must never dispatch to
+            # _fix_incomplete_album, which can move/retag existing files.
+            if context.create_finding:
+                inserted = context.create_finding(
+                    job_id=self.job_id, finding_type='standard_album_preview', severity='info',
+                    entity_type='album', entity_id=str(row['album_id']), file_path=None,
+                    title=f"Standard album: {row['album_title']} ({plan['status']})",
+                    description=plan['reason'] or f"{len(plan['missing_tracks'])} missing standard tracks",
+                    details=dict(plan, dry_run=dry_run))
+                if inserted:
+                    result.findings_created += 1
         return result
 
     def _prepare_work_items(self, context, albums):
@@ -1470,6 +1553,14 @@ class AlbumCompletenessJob(RepairJob):
                 row[1]
                 for row in cursor.fetchall()
             }
+
+            if self._get_settings(context).get('standard_only', False):
+                lock_filter = ' AND COALESCE(metadata_locked, 0) = 0' if 'metadata_locked' in columns else ''
+                cursor.execute(
+                    'SELECT COUNT(*) FROM albums WHERE EXISTS '
+                    '(SELECT 1 FROM tracks WHERE tracks.album_id = albums.id)' + lock_filter
+                )
+                return cursor.fetchone()[0]
 
             where_parts = [
                 "(spotify_album_id IS NOT NULL "

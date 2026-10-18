@@ -2038,6 +2038,30 @@ describe('the detail renderer', () => {
     expect(gridPairs(detail)).toEqual([['Count', '4']]);
   });
 
+  it('standard album preview shows the selected release, ownership and proposed downloads', async () => {
+    const detail = await openDetail({
+      finding_type: 'standard_album_preview',
+      details: {
+        artist: 'Band',
+        album: 'LP Deluxe',
+        release: 'LP',
+        source: 'deezer',
+        album_id: 'std-1',
+        expected_track_count: 3,
+        status: 'ready',
+        dry_run: true,
+        existing_tracks: [{ name: 'Owned' }],
+        missing_tracks: [{ name: 'Missing' }],
+        proposed_downloads: [{ name: 'Missing' }],
+      },
+    });
+    expect(gridPairs(detail)).toContainEqual(['Selected standard release', 'LP']);
+    expect(gridPairs(detail)).toContainEqual(['Release ID', 'std-1']);
+    expect(gridPairs(detail)).toContainEqual(['Existing matching tracks', 'Owned']);
+    expect(gridPairs(detail)).toContainEqual(['Proposed downloads', 'Missing']);
+    expect(gridPairs(detail)).toContainEqual(['Mode', 'Dry run']);
+  });
+
   it('incomplete_album draws the completion bar and lists the missing tracks', async () => {
     const detail = await openDetail({
       finding_type: 'incomplete_album',
