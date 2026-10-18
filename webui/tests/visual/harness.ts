@@ -51,6 +51,7 @@ export function renderIndex() {
     'initial_worker_orbs_enabled | tojson': 'false',
     'initial_reduce_effects | tojson': 'false',
     'initial_max_performance | tojson': 'false',
+    'profile_gate_rules | tojson': 'null',
     soulsync_base_version: '0.0.0',
   };
   const flags: Record<string, boolean> = {
