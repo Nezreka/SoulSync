@@ -451,3 +451,114 @@ pacing and retry timers. Cache hits do not write SQLite access counters per hit.
 Initial verification: 995 backend tests, 670 Review/Tools tests, 110 focused
 follow-up tests, frontend check with zero errors (551 existing warnings), and
 production build passed. Deployed cold/warm measurements follow after rollout.
+
+### Deployment measurements and validation (2026-10-18)
+
+The comparison used the same 13,835 files across 1,602 folders, the configured
+MusicBrainz mirror, and no concurrent repair job. Music automation was restored
+after each deployment. These are live measurements rather than a frozen-server
+benchmark. No user album plan was applied to produce them.
+
+The previous full scan (842) took 1,562.56 seconds. The new cold scan (843) took
+1,136.49 seconds, a 27.3% reduction. It made 8,800 upstream requests and reused
+6,667 responses within the scan. Its inclusive catalogue time was 782.12 seconds,
+including 679.08 seconds of network time and 8.43 seconds of rate-limit waiting.
+Candidate matching took 255.42 seconds. Nested timers must not be added to their
+inclusive parent timers.
+
+The cold cache finished with 8,799 entries / 133,058,550 payload bytes (126.9 MiB).
+One response exceeded the 2 MiB per-entry limit and was deliberately not stored;
+it remains usable during analysis. Run-local raw response strings occupied
+129.7 MiB, and the application worker's observed memory high-water mark was
+about 1,013 MiB. The latter includes the application's existing caches and
+parsed candidate data; it is not the cache module's isolated memory cost, and
+no comparable pre-change memory measurement was captured.
+
+An intermediate warm scan (844) exposed an overly strict completeness check:
+MusicBrainz omits `tracks` for media explicitly declaring `track-count: 0`,
+including unindexed vinyl editions and bonus DVDs. The scan retained prior
+plans and marked itself incomplete. The validator now accepts that explicit
+zero while rejecting unexplained omissions. Regression tests cover both shapes.
+This incomplete run is not used as the final successful benchmark.
+
+Three sequential targeted reanalyses per album, measured from API request to
+completed refresh (including up to 300 ms polling granularity):
+
+| Album | Previous median | Warm median | Warm maximum |
+| --- | ---: | ---: | ---: |
+| Bastille | 3.287 s | 1.652 s | 2.691 s |
+| motionblur | 1.514 s | 1.121 s | 1.125 s |
+| Oceanic | 1.079 s | 0.734 s | 0.748 s |
+| Queen | 18.668 s | 14.828 s | 15.029 s |
+| Magnolia | 2.110 s | 0.780 s | 0.797 s |
+
+All 15 warm targeted runs made zero upstream catalogue requests. These samples
+are too small to make a population p95 claim. Queen's last sample spent 12.23
+seconds matching candidates and 0.46 seconds in catalogue access; it remains
+above the proposed ordinary-album latency target. An explicit Oceanic catalogue
+refresh fetched its three dependencies, reported `force_refresh: true`, and
+left the shared cache's entry count and payload size unchanged.
+
+Queue API medians during the cold scan were 329 ms (summary), 753 ms (list), and
+1,077 ms (global apply preview). After scanning they were 229, 479, and 668 ms,
+respectively (five requests each, inside the pod to exclude tunnel artifacts).
+No matched pre-change API benchmark was captured, so these measurements do not
+establish a percentage regression bound. A local alternating 12-track matching
+replay measured 1.511 seconds without the timer versus 1.509 with it: no measurable
+stage-timer overhead within sampling noise, with identical matching results.
+
+Validation passed: 1,026 tests in the wider backend suites, 181 final focused
+backend tests after the real-catalogue correction, 670 UI tests, frontend check
+with zero errors (existing warnings remain), production frontend build, and 39
+deployed album/tab/viewport checks without JavaScript errors or horizontal
+overflow. Local Kubernetes port-forward resets required browser retries; direct
+pod checks and restart counts confirmed the app remained healthy.
+
+### Final successful warm scan and scope decision
+
+After deploying the validator correction, run **845** completed in **400.30
+seconds (6m 40s)**, with zero errors, zero new findings, and
+`catalogue_incomplete: false`. This is **74.4% less wall time than run 842** and
+**64.8% less than the cold run**. Its 15,467 catalogue accesses consisted of:
+
+- 8,799 persistent hits;
+- 6,667 run-local hits;
+- one upstream release request for the deliberately uncached oversized response.
+
+Thus all eligible unexpired keys hit the persistent cache after a deployment,
+and upstream requests fell from 8,800 to one (99.99%). Storage remained 8,799
+entries / 126.9 MiB. Inclusive catalogue time fell to 43.74 seconds, of which
+1.18 seconds was network time. Candidate matching took 245.47 seconds (61.3% of
+wall time), finding persistence 11.24 seconds, and plan persistence 12.75 seconds.
+Plan publication/preparation timers are inclusive of assignment preparation and
+persistence; their values are not additional independent costs.
+
+Cold-to-final comparison found **no changes** in normalized plans, any of the
+14,714 reconciliation findings, or any of the 59 saved choices. Normalization
+excludes inventory bookkeeping, candidate presentation, and expiring preview
+URLs; selected assignments and proposal values remain compared. All 34 pending
+approvals still match their evidence. The global-ready batch remains exactly
+123 albums / 558 actions, including the same one approved file action. All 558
+action paths passed the read-only source/destination audit with no conflicts or
+duplicate destinations.
+
+Relative to the pre-cold baseline, the only changes were external library-index
+progress: Heartbreak Hysteria gained a library album identity while preserving
+its seven confirmed assignments, and Folsom Prison Blues gained a confirmed
+one-track plan, retiring its earlier unresolved finding. This accounts for the
+queue moving from 884 to 883 albums; ready membership did not change. Final album
+modes reconcile: 758 needing input + 123 ready + 2 file decisions = 883.
+
+**Milestones 1–3 are complete; milestone 4 is not implemented.** Measurements now
+support prioritizing reuse of unchanged candidate-matching results. Matching is
+the dominant warm-scan cost and explains Queen's remaining delay. Eliminating
+all measured matching time would leave roughly 155 seconds of this run, an
+upper-bound estimate rather than a promise: current inventory, decisions,
+approval validity, fulfillment, and plan projection must still be processed.
+A versioned input signature and the invalidation rules in milestone 4 remain
+necessary before implementing that optimization.
+
+Final deployed code: `7d2a4691c81b`, healthy 1/1. Music and video automation are
+both enabled as before. Only the SoulSync test Kustomization remains suspended
+under the established feature-review workflow. The subsequent documentation
+commit does not require another application rollout.
