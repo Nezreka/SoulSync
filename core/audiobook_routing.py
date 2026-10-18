@@ -245,6 +245,53 @@ def move_existing(name: str, apply: bool = False) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Ownership: what the audiobook library holds
+# ---------------------------------------------------------------------------
+
+def routed_library_match(title: Any, artist: Any, database: Any = None,
+                         books: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    """The audiobook-library entry for a routed artist's album, or None.
+
+    A routed album's files sit in the audiobook folder, outside the media
+    server's library, so the discography can never find them in ``albums``. The
+    audiobook library index (filled by the folder scan) is what actually holds
+    them, whoever put them there: the same view Audiobookshelf has.
+
+    Matched on the artist (the book's author) and the title. "Folge 93: ..."
+    from a streaming card and "Folge 93: ..." from the tags are the same text,
+    but an episode number on both sides must agree, so "Folge 9" never stands in
+    for "Folge 90".
+    """
+    if not is_routed_artist(artist, database):
+        return None
+    key = route_key(artist)
+    wanted = route_key(title)
+    if not key or not wanted:
+        return None
+    if books is None:
+        try:
+            from core.audiobook_database import get_audiobook_db
+            books = get_audiobook_db().get_library()
+        except Exception as exc:  # noqa: BLE001 - a lookup failure must never break a page
+            logger.debug("audiobook library lookup failed: %s", exc)
+            return None
+    wanted_number = _EPISODE_NUMBER.match(str(title or ""))
+    for book in books:
+        if route_key(book.get("author")) != key:
+            continue
+        if route_key(book.get("title")) == wanted:
+            return book
+        have_number = _EPISODE_NUMBER.match(str(book.get("title") or ""))
+        if wanted_number and have_number and wanted_number.group(1) == have_number.group(1):
+            # Same episode, titled slightly differently (punctuation, a subtitle).
+            a = route_key(re.sub(_EPISODE_NUMBER, "", str(title or "")))
+            b = route_key(re.sub(_EPISODE_NUMBER, "", str(book.get("title") or "")))
+            if a and b and (a in b or b in a):
+                return book
+    return None
+
+
+# ---------------------------------------------------------------------------
 # metadata.opf for routed albums
 # ---------------------------------------------------------------------------
 
