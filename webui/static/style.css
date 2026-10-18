@@ -6589,15 +6589,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 
-.gsearch-icon {
-    color: var(--white-a30);
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-    transition: color 0.2s;
-}
-.gsearch-bar.active .gsearch-icon { color: var(--accent); }
-
 .gsearch-input {
     flex: 1;
     background: none;
@@ -6692,27 +6683,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .gsearch-results-body::-webkit-scrollbar { width: 4px; }
 .gsearch-results-body::-webkit-scrollbar-thumb { background: var(--white-a08); border-radius: 2px; }
-
-/* Source tabs */
-.gsearch-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 8px 18px 4px;
-    flex-shrink: 0;
-}
-.gsearch-tab {
-    padding: 5px 12px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--white-a06);
-    background: var(--white-a03);
-    color: var(--white-a45);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-.gsearch-tab.active { background: rgba(var(--accent-rgb), 0.12); color: rgb(var(--accent-light-rgb)); border-color: rgba(var(--accent-rgb), 0.2); }
-.gsearch-tab:hover:not(.active) { background: var(--white-a06); }
 
 /* Source icon row in the global widget. The popover itself is already a
    glass panel, so this row is just a transparent flex strip — no double
@@ -6969,16 +6939,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-align: center; padding: 24px; font-size: 12px; color: var(--white-a20);
 }
 
-.gsearch-section-loading,
-.enh-section-loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 8px;
-    font-size: 11px;
-    color: var(--white-a30);
-}
-
 /* Track list (not grid) */
 .gsearch-track-list { display: flex; flex-direction: column; }
 
@@ -7043,7 +7003,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
     .gsearch-shortcut { display: none; }
     .gsearch-item-art { width: 36px; height: 36px; }
-    .gsearch-tabs { flex-wrap: wrap; }
 }
 
 /* ── Wing It Button ── */
@@ -7127,22 +7086,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .wing-it-dropdown-hint {
     font-size: 10px;
     color: var(--white-a25);
-}
-
-.wing-it-btn-sm {
-    background: transparent;
-    border: 1px solid var(--white-a08);
-    color: var(--white-a50);
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    padding: 4px 10px;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.wing-it-btn-sm:hover {
-    background: var(--white-a08);
-    color: var(--white-a80);
 }
 
 /* Desktop-Only Optimizations */
