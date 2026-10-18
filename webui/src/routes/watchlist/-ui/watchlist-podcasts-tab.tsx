@@ -4,11 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WatchlistPodcast } from '../-watchlist.types';
 
-import {
-  removeWatchlistPodcast,
-  scanWatchlistPodcasts,
-  watchlistPodcastsQueryOptions,
-} from '../-watchlist.api';
+import { removeWatchlistPodcast, watchlistPodcastsQueryOptions } from '../-watchlist.api';
 import { formatRelativeScanTime } from '../-watchlist.helpers';
 import { PodcastSettingsModal } from './podcast-settings-modal';
 import styles from './watchlist-page.module.css';
@@ -55,24 +51,6 @@ export function WatchlistPodcastsTab({ profileId, searchFilter = '' }: Watchlist
         pod.description?.toLowerCase().includes(q),
     );
   }, [podcasts, searchFilter]);
-
-  const scanMutation = useMutation({
-    mutationFn: () => scanWatchlistPodcasts(),
-    onSuccess: (data) => {
-      void queryClient.invalidateQueries({
-        queryKey: watchlistPodcastsQueryOptions(profileId).queryKey,
-      });
-      const queued = data.episodes_queued || 0;
-      const pruned = data.episodes_pruned || 0;
-      let msg = 'Podcast scan complete';
-      if (queued > 0) msg += ` • ${queued} new ${queued === 1 ? 'episode' : 'episodes'} queued`;
-      if (pruned > 0) msg += ` • ${pruned} pruned`;
-      window.showToast?.(msg, 'success');
-    },
-    onError: (err: Error) => {
-      window.showToast?.(err.message || 'Could not scan podcasts', 'error');
-    },
-  });
 
   const removeMutation = useMutation({
     mutationFn: ({ feedUrl, itunesId }: { feedUrl: string; itunesId?: number | null }) =>
