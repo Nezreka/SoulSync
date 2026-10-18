@@ -141,6 +141,26 @@ class JellyfinClient(MediaServerBase):
                 # process-wide singleton; the scan clears them
                 'caches_listings': True}
 
+    def image_url(self, thumb):
+        """Jellyfin image references are /Items/<id>/Images/... paths (or a
+        localhost URL holding one); they load with the base URL and the
+        API key as X-Emby-Token."""
+        if not thumb:
+            return None
+        from urllib.parse import urlparse
+        jf_config = config_manager.get_jellyfin_config()
+        base_url = (jf_config.get('base_url') or '').rstrip('/')
+        if not base_url:
+            return None
+        path = thumb if thumb.startswith(('/Items/', '/api/')) else urlparse(thumb).path
+        if not path.startswith(('/Items/', '/api/')):
+            return None
+        token = jf_config.get('api_key') or ''
+        if not token:
+            return f"{base_url}{path}"
+        separator = '&' if '?' in path else '?'
+        return f"{base_url}{path}{separator}X-Emby-Token={token}"
+
     def user_view(self, identity):
         """``as_user`` under the shared hook name (see MediaServerBase)."""
         user_id = (identity or {}).get('user_id')
