@@ -105,7 +105,10 @@ def tvdb_season(db: Any, client: Any, tvdb_id: int, season: int,
         logger.debug("tvdb season fetch failed for %s S%s", tvdb_id, season, exc_info=True)
         return list(cached[0]) if cached else []
     try:
-        db.tvdb_season_store(tvdb_id, season, eps)
+        try:
+            db.tvdb_season_store(tvdb_id, season, eps, fetched_at=now)
+        except TypeError:
+            db.tvdb_season_store(tvdb_id, season, eps)
     except Exception:   # noqa: BLE001
         logger.debug("tvdb season cache write failed", exc_info=True)
     return eps

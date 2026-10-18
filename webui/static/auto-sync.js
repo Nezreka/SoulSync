@@ -4,12 +4,13 @@
 // needs this card-state adapter until its remaining consumers are migrated.
 
 function getMirroredSourceRef(p) {
-    if (p && p.source_ref) return String(p.source_ref);
-    const desc = (p && p.description) ? String(p.description).trim() : '';
+    if (!p) return '';
+    if (p.source_ref) return String(p.source_ref);
+    const desc = p.description ? String(p.description).trim() : '';
     if ((p.source === 'spotify_public' || p.source === 'youtube') && /^https?:\/\//i.test(desc)) {
         return desc;
     }
-    return (p && p.source_playlist_id) ? String(p.source_playlist_id) : '';
+    return p.source_playlist_id ? String(p.source_playlist_id) : '';
 }
 
 async function editMirroredCustomName(playlistId, originalName, currentCustom) {
