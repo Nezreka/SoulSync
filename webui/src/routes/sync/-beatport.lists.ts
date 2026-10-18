@@ -154,7 +154,7 @@ export const beatportRefs = {
 const LIVE_REF =
   /^(?:(?:top|hype)-(?:10|100)|genre:[a-z0-9][a-z0-9-]*:\d+:(?:top|hype)-(?:10|100)|chart:[a-z0-9][a-z0-9-]*:\d+)$/;
 
-export function isLiveBeatportRef(ref: string | null | undefined): boolean {
+export function isLiveBeatportRef(ref: string | number | null | undefined): boolean {
   return LIVE_REF.test(String(ref ?? '').toLowerCase());
 }
 
