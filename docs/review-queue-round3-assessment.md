@@ -639,3 +639,103 @@ inventory membership; only directory-observation bookkeeping and expiring
 preview URLs are excluded. The initial cache held 10,053 results / 25.9 MiB;
 31 requests bypassed caching because their audio evidence was not a successful
 or confirmed-no-match outcome. Corrected deployment measurements follow below.
+
+### Corrected cold and full shadow validation
+
+Corrected cold run **847** completed in **403.73 seconds**, with zero errors,
+zero new findings, and complete catalogue evidence. Cache reads fell from
+31.54 seconds to **0.61 seconds**, and serialization/writes from 44.20 to
+**10.76 seconds**. Signature creation took 4.26 seconds. The approximately
+15.6 seconds spent in these new cache stages is more informative than attributing
+the entire wall-time difference to caching: audio lookups fell from 268 in run
+846 to zero, and the earlier 400.30-second baseline still spent 11.22 seconds
+on audio lookups. Every one of the 10,053 eligible results was freshly computed
+and persisted under the corrected policy identity.
+
+Warm shadow run **848** completed in **380.94 seconds**. It read and independently
+recomputed all **10,053** persisted results, with **zero mismatches, cache errors,
+or signature errors**. All 31 ineligible requests were calculated afresh. Both
+automatic and validated manual matching use this path. Matching itself took
+237.43 seconds; signature/read/serialization stages totaled 7.19 seconds.
+
+Both runs retained the exact baseline plans, findings, choices, queue totals,
+and complete ready preview. The release gate explicitly required successful
+shadow comparisons, complete catalogue evidence, and unchanged outputs before
+deploying reuse. The final default-reuse backend run passed **1,118 tests**.
+
+The cache budget is a payload budget, not the size of the shared SQLite file.
+Eviction runs every 64 writes and at completion/maintenance, so a running batch
+can temporarily exceed the target by up to 63 entries. The two policy generations
+from this validation occupy 20,106 entries / 51.8 MiB; the active generation is
+10,053 entries / 25.9 MiB. Older generations remain eligible for LRU eviction
+and idle expiry. Run-local matching payloads occupy 25.9 MiB, below the 32 MiB
+limit; these figures exclude Python object overhead and other application caches.
+
+### Final reuse benchmark and parity audit
+
+After deployment/restart, run **849** completed in **133.62 seconds (2m 14s)**,
+with zero errors/new findings and complete catalogue evidence. This is **66.6%
+less wall time (about 3× faster)** than the previous 400.30-second baseline,
+and 64.9% less than the immediately preceding full shadow calculation run.
+These are live measurements with the same 13,835 files / 1,602 folders, not an
+isolated hardware benchmark; audio lookup expiry and normal timing variation
+are recorded above rather than attributed to matching reuse.
+
+All **10,053 eligible requests hit persistent storage after restart**. The 31
+ineligible requests were computed normally. Matching computation fell from
+237.43 seconds in shadow mode to **0.58 seconds**; key generation and cache
+reads took 3.65 and 1.43 seconds. The stored-cost estimate reports 248.95 seconds
+avoided, separately from these measured timings. No cached approval or readiness
+state was used. The largest remaining measured stages were catalogue handling
+(33.53 seconds), finding persistence (10.72), plan persistence (11.76), and
+inventory (10.52); nested preparation/publication timers are not additive.
+
+Three sequential targeted reanalyses per album, using the same endpoint and
+300 ms completion polling as the earlier benchmark:
+
+| Album | Previous median | Reuse median | Reuse maximum |
+| --- | ---: | ---: | ---: |
+| Bastille | 1.652 s | 0.760 s | 1.059 s |
+| motionblur | 1.121 s | 0.701 s | 1.031 s |
+| Oceanic | 0.734 s | 0.698 s | 1.023 s |
+| Queen | 14.828 s | 1.486 s | 1.700 s |
+| Magnolia | 0.780 s | 0.720 s | 0.746 s |
+
+All 15 completed without errors or upstream catalogue requests. Oceanic's four
+matching requests per analysis deliberately bypassed reuse because its evidence
+was ineligible; its small timing change is not a matching-cache speedup. The
+other sampled albums reused their eligible results. These samples establish
+observed medians/maxima, not population p95 guarantees.
+
+Five idle requests per queue endpoint gave medians of 219.93 ms (summary),
+479.16 ms (list), and 747.94 ms (global ready preview). Earlier idle measurements
+were 229, 479, and 668 ms. This does not establish an idle UI/API speedup; the
+measured benefit is much shorter analysis, especially expensive albums.
+
+The full reuse scan and all subsequent targeted reanalyses preserved:
+
+- all 1,569 stored plans, including candidate presentation, assignments,
+  explanations, proposed edits, and inventory membership;
+- all 14,714 reconciliation findings and 59 saved decisions;
+- the exact global-ready preview and its signature: 123 albums / 558 actions,
+  including the same approved file action;
+- all 34 pending approvals, each still bound to its current evidence;
+- queue totals: 758 needing input + 123 ready + 2 file decisions = 883 albums.
+
+The read-only audit of all 558 ready-action paths found no missing/changed source
+files, occupied conflicting destinations, or duplicate targets. Benchmarks did
+not apply album plans. Normalization excluded only directory-observation
+bookkeeping and expiring preview URLs; comparisons did not omit candidate lists
+or inventory membership.
+
+The observed worker memory high-water mark was approximately 972 MiB, with
+736 MiB resident at the audit. These include the rest of the app and are not an
+isolated cache-memory comparison. Matching payload storage remained 51.8 MiB
+across two policy generations, with 25.9 MiB active/run-local payloads; the
+largest individual matching result was 16,615 bytes.
+
+Final deployed code: **`11596193ae4a`**, with reuse enabled by default and
+`off`/`shadow` retained for diagnostics. Music/video automation is restored to
+enabled. SoulSync remains under the established feature-review deployment with
+only its Flux Kustomization suspended. The final documentation commit requires
+no additional application rollout. **Milestone 4 is complete.**
