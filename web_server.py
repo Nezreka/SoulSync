@@ -3240,6 +3240,7 @@ from core.connection_test import (
 
 
 from core.connection_detect import run_detection
+from core.media_server import specs as _media_specs
 
 # --- Web UI Routes ---
 
@@ -4316,7 +4317,7 @@ def handle_settings():
                         reset_own_library_fallback_notifications()
                     except Exception as _inv_err:
                         logger.debug("scope cache invalidation failed: %s", _inv_err)
-                    if new_server not in ('plex', 'jellyfin'):
+                    if new_server not in _media_specs.names_where(supports_own_libraries=True):
                         try:
                             own_profs = get_database().get_own_library_profiles()
                             if own_profs:
@@ -4761,7 +4762,7 @@ def test_connection_endpoint():
         if service == 'spotify':
             invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful test")
-        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
+        elif _media_specs.is_known(service):
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -4997,7 +4998,7 @@ def test_dashboard_connection_endpoint():
         if service == 'spotify':
             invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful dashboard test")
-        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
+        elif _media_specs.is_known(service):
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -23437,6 +23438,11 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      listenbrainz_import_workers_getter=lambda: listenbrainz_import_workers,
                      lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
+
+# Media server descriptors for the UI (settings page, wizard, quick-switch).
+from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
+_configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
+app.register_blueprint(_create_media_servers_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three
 # self-contained clusters lifted to their own api/ modules.
