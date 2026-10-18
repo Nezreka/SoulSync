@@ -1594,7 +1594,7 @@ class LibraryReconciliationJob(RepairJob):
     default_settings = {
         'min_acoustid_score': 0.80,
         'catalogue_cache_enabled': True,
-        'matching_cache_mode': 'shadow',
+        'matching_cache_mode': 'reuse',
         # Prefer a one-medium/digital edition when it fits the same audio and
         # preserves continuous library numbering. Set to "release" to prefer
         # the linked physical edition and its per-disc positions.
