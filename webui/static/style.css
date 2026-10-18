@@ -88084,3 +88084,21 @@ body.src-modal-open { overflow: hidden; }
 @media (hover: none) {
     .mm-row-play { display: none; }
 }
+
+
+/* Shared dialogs use the same floating-chrome suppression as the existing
+   full-screen modals. Keep their footer actions reachable on narrow screens;
+   hiding the mini player controls does not interrupt audio playback. */
+body:has([data-shared-modal]) :is(
+    #gsearch-bar,
+    #gsearch-aura,
+    #notif-bell-btn,
+    #helper-float-btn,
+    #activity-float-btn,
+    .helper-first-launch-tip,
+    .media-player,
+    .hamburger-btn
+) {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}

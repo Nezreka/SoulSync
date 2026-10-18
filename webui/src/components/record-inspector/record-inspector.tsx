@@ -87,6 +87,7 @@ export function RecordInspector({
         <div
           ref={modal.ref}
           className="arec-card"
+          data-shared-modal=""
           aria-modal="true"
           role="dialog"
           aria-label={`${recordKind} database record`}

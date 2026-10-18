@@ -23,7 +23,11 @@ export function DialogFrame({
       <Dialog.Portal>
         <Dialog.Backdrop className={styles.backdrop} />
         <Dialog.Viewport className={styles.viewport}>
-          <Dialog.Popup initialFocus={initialFocus} className={clsx(styles.popup, className)}>
+          <Dialog.Popup
+            data-shared-modal=""
+            initialFocus={initialFocus}
+            className={clsx(styles.popup, className)}
+          >
             {children}
           </Dialog.Popup>
         </Dialog.Viewport>

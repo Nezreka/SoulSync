@@ -73,6 +73,7 @@ Verification so far: 1,984 frontend tests passed (116 files); 160 backend tests 
 - Matched pending playback behavior for both local copies.
 - Corrected cancelled-request evidence wording.
 - Kept failures of global operations at queue scope even while an album is selected.
+- Extended existing modal suppression of floating player/help/activity controls to shared dialogs and the record inspector, keeping mobile footer actions unobstructed.
 
 ### Verification boundaries
 
