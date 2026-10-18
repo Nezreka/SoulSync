@@ -156,7 +156,7 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'manual', 'The title may identify a different song or recording version'
     if needs_numbering_review(details):
         return 'manual', 'The release uses a different disc or track numbering scheme'
-    if details.get('confidence') not in (None, '', 'clear'):
+    if details.get('confidence') not in (None, '', 'clear', 'manual'):
         return 'manual', 'The file-to-track assignment is not clear'
     if _replaces_artist_credit(changes):
         return 'manual', 'Confirm the artist credit before replacing an existing credit'

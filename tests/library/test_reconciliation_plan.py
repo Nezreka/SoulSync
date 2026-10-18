@@ -725,3 +725,20 @@ def test_exact_session_title_and_fingerprint_can_supply_live_comment():
         else:
             other['tags']['title'] = 'Laura Palmer (Other Sessions)'
         assert not versions_compatible(other, slot), mutation
+
+
+def test_verified_manual_assignment_is_settled_in_track_matrix(monkeypatch):
+    from core.repair_jobs import library_reconciliation as job
+    files = [_file('Song', '/album/01 - Song.flac', 200000)]
+    files[0]['tags'].update(track_number=1, disc_number=1)
+    slots = [{'title': 'Song', 'track_number': 1, 'disc_number': 1,
+              'duration_ms': 200000}]
+    plan = reconcile_folder(files, slots, forced_pairs={0: 0})
+    rows, categories = job._album_plan_assignments(files, slots, plan)
+    assert rows[0]['confidence'] == 'manual'
+    assert rows[0]['status'] == 'confirmed'
+    assert 'audio_conflicts' not in categories
+    monkeypatch.setattr(job, '_audio_conflicts_with_slot', lambda *args: True)
+    rows, categories = job._album_plan_assignments(files, slots, plan)
+    assert rows[0]['status'] == 'uncertain'
+    assert 'audio_conflicts' in categories

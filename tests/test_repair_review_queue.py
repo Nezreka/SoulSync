@@ -1502,3 +1502,14 @@ def test_accepted_unchanged_review_does_not_expire_after_legacy_grace(tmp_path):
         c.execute("UPDATE repair_findings SET status='resolved', user_action='retagged', resolved_at='2000-01-01 00:00:00'")
     assert not worker._create_finding(**finding)
     assert worker._create_finding(**{**finding, 'details': {**finding['details'],'fingerprint_key':'new audio'}})
+
+
+def test_verified_manual_assignment_allows_harmless_metadata_but_not_new_title_decisions():
+    finding = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'manual', 'acoustid': {'status': 'ok'},
+        'changes': {'filename': {'old': 'song.flac', 'new': '01 - Song.flac'}},
+    }}
+    assert classify_case([finding])['ready'] == 1
+    finding['details']['title_difference_kind'] = 'material'
+    finding['details']['changes']['title'] = {'old': 'Song', 'new': 'Other song'}
+    assert classify_case([finding])['manual'] == 1

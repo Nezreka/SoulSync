@@ -1157,7 +1157,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
                 changes[field] = {'old': current, 'new': proposed}
                 categories.add('numbering')
         different_recording = _audio_conflicts_with_slot(file, slot)
-        if pair['confidence'] != 'clear' or different_recording:
+        if pair['confidence'] not in ('clear', 'manual') or different_recording:
             status = 'uncertain'
             categories.add('audio_conflicts')
         else:
@@ -2396,7 +2396,7 @@ class LibraryReconciliationJob(RepairJob):
                         logger.warning('Ignoring conflicting manual assignments for %s: %s',
                                        folder, exc)
                     else:
-                        scored[0] = ScoredCandidate(sum(pair['confidence'] == 'clear' for pair in plan['pairs']),
+                        scored[0] = ScoredCandidate(sum(pair['confidence'] in ('clear', 'manual') for pair in plan['pairs']),
                                      len(plan['pairs']), -len(plan['extra_files']),
                                      source, release_id, slots, plan)
                 release_meta = _release_metadata(
