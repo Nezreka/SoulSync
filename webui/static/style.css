@@ -27134,13 +27134,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: wait;
 }
 
-.library-watchlist-all-btn.all-added {
-    background: rgba(var(--accent-rgb), 0.2);
-    border-color: rgba(var(--accent-rgb), 0.5);
-    color: #fff;
-    pointer-events: none;
-}
-
 .library-watchlist-all-btn .watchlist-all-icon {
     font-size: 14px;
 }
