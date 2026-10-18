@@ -6,7 +6,7 @@ Scope: screenshot findings 1–23. The Operations redesign (24) is deferred.
 
 Numbering and metadata choices are drafts. Quarantine, replacement and duplicate-keeper choices are also saved in the album plan. Choosing them does not edit audio files. The user can revise a choice, apply the album, or save a resolved plan for a later explicit batch. Saved approvals are bound to the current evidence and selected file action; changed evidence invalidates them. An applied “keep numbering” decision survives unrelated metadata repairs while the release, fingerprint and exact numbering proposal remain the same. Reopening it clears that choice.
 
-The global ready-metadata action excludes physical file decisions. Applying a saved plan with physical decisions has a separate confirmation. Existing file identity, release, fingerprint and playlist guards still run when applying it.
+The current global ready action includes fully decided album plans, including explicitly approved physical file decisions. One unresolved required decision excludes the entire album. Confirmation describes metadata edits, file decisions and acquisition requests; the exact confirmed snapshot is revalidated before execution. Existing file identity, release, fingerprint and playlist guards still run when applying it.
 
 Release pins, completeness intent and assignments update the plan and trigger reanalysis. Explicit wishlist requests still start acquisition. Reopening a historical decision is reconsideration, not reversal of an already completed file edit.
 
@@ -93,3 +93,47 @@ File-changing workflows are exercised against temporary test libraries, not by a
 - The second deployment's runtime logs contained MusicBrainz release-group 404 lookups, but no other errors, tracebacks or reconciliation persistence failures.
 - The live wishlist and transfer list were empty. Publication-to-refresh behavior was verified through integration tests rather than a fabricated live download. No pending user album repair plan was bulk-applied for validation.
 - The audit of other Operations findings is documented above. Their independent actions still exist; replacing or reorganizing Operations remains deferred under item 24.
+
+
+## PR readiness follow-up (2026-10-18)
+
+This follow-up completes compatibility and correctness within the existing feature. It does not replace the Operations page or retire its specialized jobs. Earlier deployment measurements above describe their historical builds, not the current global batch contract.
+
+### Ownership and ordering
+
+- The selected release, completeness intent, manual assignment and numbering convention govern dependent edits. Queue choices reuse the existing canonical pin, intent, assignment and finding/choice journals.
+- Legacy maintenance checks these decisions before mutations. Conflicting changes remain unapplied and return an exact album-review link. Independent fields such as BPM, genre and ReplayGain remain with their existing tools.
+- Active album plans protect file membership from legacy duplicate cleanup, replacement and organization. Queued organization checks again at execution. Maintenance mutation units share a process lock; scans and UI reads do not hold it. This is protection within SoulSync's single maintenance process, not a distributed lock against external file editors.
+- Accepted field values remain authoritative after application. Reopening clears the decision; a changed proposal cannot reuse approval for older evidence. Unchanged queue resolutions do not expire under the generic seven-day recurrence rule.
+- Verified unique relocation preserves manual assignments and saved choices. Changed audio, changed size, ambiguous copies or an old path that still exists do not qualify as a verified relocation. Exact acquisition targets follow case redirects within the same profile and release.
+
+### Ready, acquisition and recovery contracts
+
+- Ready is an album classification. All required decisions must be resolved before any of that album's actions enter the global batch. A previously suspect action becomes eligible after explicit approval; harmless supported metadata can become eligible automatically.
+- Download requests already waiting for fulfillment are not unanswered decisions. Their presence does not authorize unrelated unresolved changes. Published files remain pending until reconciliation verifies their exact release-slot assignment.
+- Cancellation records acquisition state without changing complete/partial intent or wanted slots. Requesting again remains an explicit action. Profile, provider and release identities are preserved.
+- If one action fails, remaining dependent actions in that album stop. Other approved albums can continue. Restarted operations report interruption and require revalidation/retry; they do not automatically replay file actions. Reopening a decision does not undo a prior file write.
+- File edits and quarantine tests use disposable libraries. Live validation does not apply the user's waiting plans.
+
+### Why ordering matters in the observed cases
+
+| Observed case | What independent tools can get wrong | What the queue establishes first |
+| --- | --- | --- |
+| Queen, “Who Wants to Live Forever” | Correcting the number/title would make the wrong recording look more convincing; the fingerprint actually supported “Teo Torriatte (HD mix)”. | Resolve audio identity and replacement before metadata or filenames. |
+| *Rated R* and *Songs for the Deaf* | Retagging to one source can conceal split/combined tracks or a mixture of editions. | Select the fitting edition, then calculate assignment, missing tracks and dependent edits. |
+| Joep Beving, *Trilogy* | Per-track repair can repeatedly restore disc-relative numbers against an intentional continuous sequence. | Choose one numbering convention for all 46 tracks and preserve it. |
+| Chelsea Wolfe, *The Dark* | Independent duplicate cleanup can choose a single copy without considering the album slot or playlist use. | Compare the competing copies, select the keeper, then apply the approved plan. |
+| Gidge, *New Light* | Pinning an edition or observing playlist membership can be mistaken for a deliberate partial-album choice. | Ask separately whether the selected nine-track edition is intended to be complete. |
+| Compilation repeats | Matching fingerprints alone can make two legitimate release slots look like disposable duplicates. | Establish one-to-one release assignments before deciding which copies are surplus. |
+
+These are documented failure modes and observations, not a claim that every historical file change can be attributed to a particular legacy job run.
+
+### Readiness and performance audit
+
+The pre-deployment snapshot contained 884 albums: 758 needing input, 124 ready, two needing file decisions and none solely waiting. The ready selector contained 567 actions: 566 metadata actions and one explicitly approved replacement; 34 actions had explicit approval and 533 were automatic. The automatic entries had clear assignments and no recorded audio/version conflict.
+
+The audit identified Isis's “Weight”: a release-ID rewrite remained automatic despite fingerprint decoding failure. That now requires review and excludes its whole nine-action album from the batch. The two other unsuccessful fingerprint lookups proposed only library album-display cleanup, so remain eligible. The resulting unchanged-snapshot selector has 123 ready albums and 558 actions. Supported version text remains automatic only with exact recording support, close duration and no competing explicit version; explicit approvals remain effective.
+
+A compact policy query reads only classification inputs for list/count endpoints. Its results match the full evidence selector across all 884 captured albums; execution still uses complete evidence. One local replay measured 0.496 seconds for full classification and 0.177 seconds for compact classification. This is an isolated query measurement, not a whole-page speed claim.
+
+The UI loads the album list independently of global counts, fetches the selected album without waiting for both, avoids refetching its detail solely because a mode changed, and avoids whole-queue recounts on each running-album poll. Detail reads load only that case's saved choices. Deployed measurements and final verification follow after rollout.

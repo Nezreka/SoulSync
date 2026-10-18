@@ -1487,3 +1487,18 @@ def test_saved_choice_survives_only_a_verified_relocation(tmp_path):
     changed = {**relocated, 'fingerprint_key': 'different audio'}
     worker._create_finding(**finding, file_path='/new/song.flac', details=changed)
     assert not get_case(db,key)['items'][0]['details'].get('plan_approved')
+
+
+def test_accepted_unchanged_review_does_not_expire_after_legacy_grace(tmp_path):
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    worker = RepairWorker(database=db)
+    finding = dict(job_id='library_reconciliation', finding_type='reconciliation_metadata',
+                   severity='info', entity_type='track', entity_id='track', file_path='/song.flac',
+                   title='Title update', description='Supported',
+                   details={'album_id':'album','album_folder':'/album','fingerprint_key':'audio',
+                            'changes':{'title':{'old':'Old','new':'New'}}})
+    assert worker._create_finding(**finding)
+    with db._get_connection() as c:
+        c.execute("UPDATE repair_findings SET status='resolved', user_action='retagged', resolved_at='2000-01-01 00:00:00'")
+    assert not worker._create_finding(**finding)
+    assert worker._create_finding(**{**finding, 'details': {**finding['details'],'fingerprint_key':'new audio'}})

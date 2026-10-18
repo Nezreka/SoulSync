@@ -1433,7 +1433,7 @@ class RepairWorker:
                         return False
                     if (existing_status == 'resolved' and
                             not changed_reconciliation_evidence and
-                            self._within_recurrence_grace(resolved_at)):
+                            (job_id == 'library_reconciliation' or self._within_recurrence_grace(resolved_at))):
                         return False
 
             cursor.execute("""
