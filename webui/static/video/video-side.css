@@ -7790,8 +7790,6 @@ body[data-side="video"] #gsearch-aura {
     background: var(--white-a12); color: #fff; transform: translateY(-1px);
     border-color: var(--white-a20);
 }
-    background: var(--white-a12); color: #fff;
-}
 @media (max-width: 600px) {
     .vsr-fresh-cards-grid {
         grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
