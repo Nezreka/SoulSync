@@ -38,8 +38,13 @@ interface OrbChrome {
   buttonClass: string;
   buttonId: string;
   buttonTitle: string;
-  /** img logo, or the JioSaavn emoji span. */
-  logo: { src: string; alt: string; className: string } | { emoji: string; className: string };
+  /** img logo, or the JioSaavn emoji span. `ownLook`: the logo keeps its own
+   *  rules (monochrome, emoji, rounded square) instead of the shared
+   *  enrich-worker-logo look, so it doesn't get that class. */
+  logo: ({ src: string; alt: string } | { emoji: string }) & {
+    className: string;
+    ownLook?: true;
+  };
   spinnerClass: string;
   tooltipClass: string;
   tooltipId: string;
@@ -123,7 +128,7 @@ const ORBS: OrbChrome[] = [
     buttonClass: 'jiosaavn-button',
     buttonId: 'jiosaavn-button',
     buttonTitle: 'JioSaavn Library Enrichment',
-    logo: { emoji: '🎵', className: 'jiosaavn-logo' },
+    logo: { emoji: '🎵', className: 'jiosaavn-logo', ownLook: true },
     spinnerClass: 'jiosaavn-spinner',
     tooltipClass: 'jiosaavn-tooltip',
     tooltipId: 'jiosaavn-tooltip',
@@ -291,7 +296,12 @@ const ORBS: OrbChrome[] = [
     buttonClass: 'discogs-button',
     buttonId: 'discogs-button',
     buttonTitle: 'Discogs Library Enrichment',
-    logo: { src: '/static/img/brands/discogs.svg', alt: 'Discogs', className: 'discogs-logo' },
+    logo: {
+      src: '/static/img/brands/discogs.svg',
+      alt: 'Discogs',
+      className: 'discogs-logo',
+      ownLook: true,
+    },
     spinnerClass: 'discogs-spinner',
     tooltipClass: 'discogs-tooltip',
     tooltipId: 'discogs-tooltip',
@@ -312,7 +322,12 @@ const ORBS: OrbChrome[] = [
     buttonId: 'amazon-enrich-button',
     buttonTitle: 'Amazon Music Library Enrichment',
     // Amazon's logo is NOT under img/brands — /static/amazon.svg, verbatim.
-    logo: { src: '/static/amazon.svg', alt: 'Amazon Music', className: 'amazon-enrich-logo' },
+    logo: {
+      src: '/static/amazon.svg',
+      alt: 'Amazon Music',
+      className: 'amazon-enrich-logo',
+      ownLook: true,
+    },
     spinnerClass: 'amazon-enrich-spinner',
     tooltipClass: 'amazon-enrich-tooltip',
     tooltipId: 'amazon-enrich-tooltip',
@@ -336,6 +351,7 @@ const ORBS: OrbChrome[] = [
       src: '/static/img/brands/musicmap.png',
       alt: 'Similar Artists',
       className: 'similar-artists-enrich-logo',
+      ownLook: true,
     },
     spinnerClass: 'similar-artists-enrich-spinner',
     tooltipClass: 'similar-artists-enrich-tooltip',
@@ -358,7 +374,12 @@ const ORBS: OrbChrome[] = [
     buttonId: 'hydrabase-button',
     buttonTitle: 'Hydrabase P2P Mirror',
     // Class hydrabase-worker-logo, and NOT under img/brands — verbatim.
-    logo: { src: '/static/hydrabase.png', alt: 'Hydrabase', className: 'hydrabase-worker-logo' },
+    logo: {
+      src: '/static/hydrabase.png',
+      alt: 'Hydrabase',
+      className: 'hydrabase-worker-logo',
+      ownLook: true,
+    },
     spinnerClass: 'hydrabase-spinner',
     tooltipClass: 'hydrabase-tooltip',
     tooltipId: 'hydrabase-tooltip',
@@ -427,12 +448,18 @@ function Orb({
   hidden?: boolean;
   onClick?: () => void;
 }) {
+  // The shared enrich-worker* classes carry the look every orb has in common
+  // (style.css); the per-worker classes next to them carry each worker's
+  // colours and are the worker-orbs.js / test hooks.
   const buttonClass = pill.stateClass
-    ? `${chrome.buttonClass} ${pill.stateClass}`
-    : chrome.buttonClass;
+    ? `enrich-worker-btn ${chrome.buttonClass} ${pill.stateClass}`
+    : `enrich-worker-btn ${chrome.buttonClass}`;
+  const logoClass = chrome.logo.ownLook
+    ? chrome.logo.className
+    : `enrich-worker-logo ${chrome.logo.className}`;
   return (
     <div
-      className={chrome.containerClass}
+      className={`enrich-worker ${chrome.containerClass}`}
       id={chrome.containerId}
       style={hidden ? HIDDEN : undefined}
     >
@@ -443,13 +470,13 @@ function Orb({
         onClick={onClick}
       >
         {'src' in chrome.logo ? (
-          <img src={chrome.logo.src} alt={chrome.logo.alt} className={chrome.logo.className} />
+          <img src={chrome.logo.src} alt={chrome.logo.alt} className={logoClass} />
         ) : (
-          <span className={chrome.logo.className} aria-hidden="true">
+          <span className={logoClass} aria-hidden="true">
             {chrome.logo.emoji}
           </span>
         )}
-        <div className={chrome.spinnerClass}></div>
+        <div className={`enrich-worker-spinner ${chrome.spinnerClass}`}></div>
         {badge ? (
           <span
             className="repair-badge"
@@ -460,10 +487,12 @@ function Orb({
           </span>
         ) : null}
       </button>
-      <div className={chrome.tooltipClass} id={chrome.tooltipId}>
-        <div className={chrome.contentClass}>
-          <div className={chrome.headerClass}>{chrome.headerText}</div>
-          <div className={chrome.bodyClass} id={chrome.bodyId}>
+      <div className={`enrich-worker-tooltip ${chrome.tooltipClass}`} id={chrome.tooltipId}>
+        <div className={`enrich-worker-tooltip-content ${chrome.contentClass}`}>
+          <div className={`enrich-worker-tooltip-header ${chrome.headerClass}`}>
+            {chrome.headerText}
+          </div>
+          <div className={`enrich-worker-tooltip-body ${chrome.bodyClass}`} id={chrome.bodyId}>
             <div className="tooltip-status">
               Status:{' '}
               <span

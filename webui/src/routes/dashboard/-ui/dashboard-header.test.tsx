@@ -57,10 +57,16 @@ function ownText(el: Element): string {
  *  deliberately not among them — React binds listeners instead. */
 const ATTRS = ['src', 'alt', 'title', 'aria-hidden'] as const;
 
+/** The port adds the shared enrich-worker* classes (the look every orb has in
+ *  common, style.css) to the recorded per-worker ones; the rest of the class
+ *  list must still be the vanilla's. */
+const portedClasses = (el: Element) =>
+  Array.from(el.classList).filter((c) => !c.startsWith('enrich-worker'));
+
 function compareTrees(vanilla: Element, ported: Element, path: string) {
   expect(`${path} tag:${ported.tagName}`).toBe(`${path} tag:${vanilla.tagName}`);
   expect(`${path} id:${ported.id}`).toBe(`${path} id:${vanilla.id}`);
-  expect(`${path} class:${Array.from(ported.classList).join('.')}`).toBe(
+  expect(`${path} class:${portedClasses(ported).join('.')}`).toBe(
     `${path} class:${Array.from(vanilla.classList).join('.')}`,
   );
   for (const attr of ATTRS) {
@@ -134,6 +140,40 @@ describe('the artefact differential', () => {
 
     compareTrees(vanilla, ported, 'header-actions');
   });
+
+  it('gives every orb the shared enrich-worker classes style.css draws it with', async () => {
+    const view = await mountHeader();
+    const orbs = view.container.querySelectorAll('.orb-stage > .header-actions > div');
+    expect(orbs).toHaveLength(17);
+    for (const orb of orbs) {
+      const name = orb.className;
+      expect(name).toMatch(/^enrich-worker \S+-button-container$/);
+      for (const part of [
+        ':scope > button.enrich-worker-btn',
+        ':scope > button > .enrich-worker-spinner',
+        ':scope > .enrich-worker-tooltip > .enrich-worker-tooltip-content',
+        '.enrich-worker-tooltip-content > .enrich-worker-tooltip-header',
+        '.enrich-worker-tooltip-content > .enrich-worker-tooltip-body',
+      ])
+        expect(orb.querySelector(part), `${name}: ${part}`).not.toBeNull();
+    }
+  });
+
+  it('leaves the shared logo look off the five logos that have their own', async () => {
+    const view = await mountHeader();
+    const own = Array.from(
+      view.container.querySelectorAll('.enrich-worker-btn > :first-child:not(.enrich-worker-logo)'),
+      (logo) => logo.className,
+    );
+    expect(own).toEqual([
+      'jiosaavn-logo',
+      'discogs-logo',
+      'amazon-enrich-logo',
+      'similar-artists-enrich-logo',
+      'hydrabase-worker-logo',
+    ]);
+    expect(view.container.querySelectorAll('.orb-stage .enrich-worker-logo')).toHaveLength(12);
+  });
 });
 
 describe('the orb stage', () => {
@@ -193,7 +233,7 @@ describe('state rendering', () => {
       );
     });
     const button = view.container.querySelector('#musicbrainz-button')!;
-    expect(button.className).toBe('musicbrainz-button active');
+    expect(button.className).toBe('enrich-worker-btn musicbrainz-button active');
     expect(view.container.querySelector('#mb-tooltip-status')!.textContent).toBe('Running');
     expect(view.container.querySelector('#mb-tooltip-current')!.textContent).toBe('Artist: "BYLT"');
     expect(view.container.querySelector('#mb-tooltip-progress')!.textContent).toBe(
