@@ -66605,43 +66605,11 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
    inventing pills. */
 /* The stats STRIP — six numbers in one slim full-width card, subtitles
    demoted to tooltips. Replaces the box-of-boxes System Stats card. */
-.dash-card--tiles {
-    grid-column: 1 / -1;
-    padding: 14px 24px;
-}
 .stats-strip {
     display: flex;
     flex-wrap: wrap;
     gap: 10px 36px;
     justify-content: space-between;
-}
-.stat-tile {
-    min-width: 0;
-}
-.stat-tile .stat-card-value {
-    font-size: 22px;
-    font-weight: 800;
-    line-height: 1.1;
-    margin: 0;
-}
-.stat-tile .stat-card-title {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--white-a45);
-    margin: 2px 0 0;
-}
-
-/* The Library STRIP — same language as the stats band above it. The tall
-   card left four numbers floating beside the taller Services card;
-   centering them (the first fix) just moved the void around. */
-.dash-card--strip {
-    grid-column: 1 / -1;
-    padding: 14px 24px;
-}
-.dash-card--strip .dash-card__body {
-    flex: none;
 }
 
 /* ── The Alerts band (data-card="alerts") — the exception surface. Not
@@ -66746,18 +66714,6 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: rgba(var(--accent-rgb), 0.9);
     transform: scale(1.08);
 }
-.listen-hero-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.14);
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-}
 .listen-hero-text {
     flex: 1;
     min-width: 0;
@@ -66816,12 +66772,6 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .listen-tile-title {
     font-size: 13.5px;
     font-weight: 700;
-}
-.listen-tile-sub {
-    font-size: 11.5px;
-    color: var(--white-a50);
-    line-height: 1.45;
-    padding-right: 28px;
 }
 .listen-tile-arrow {
     position: absolute;
@@ -67271,11 +67221,6 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: var(--white-a70);
     white-space: nowrap;
 }
-.syncband-chip--dl {
-    color: rgba(74, 222, 128, 0.9);
-    border-color: rgba(74, 222, 128, 0.22);
-    background: rgba(74, 222, 128, 0.08);
-}
 .syncband-chip--fail {
     color: rgba(248, 113, 113, 0.9);
     border-color: rgba(248, 113, 113, 0.22);
@@ -67463,9 +67408,6 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     .dash-band-tab {
         font-size: 16px;
     }
-    .dash-card--tiles {
-        padding: 12px 16px;
-    }
     /* Phone: space-between flex wrapped the six tiles into ragged rows —
        a fixed 3x2 grid (2x3 on the smallest screens, below) reads clean. */
     .stats-strip {
@@ -67473,18 +67415,9 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px 10px;
     }
-    .stat-tile .stat-card-value {
-        font-size: 18px;
-    }
     .dash-rail .dash-rail-card {
         width: 126px;
     }
-}
-
-.dash-merged-divider {
-    height: 1px;
-    background: var(--white-a07);
-    margin: 16px 0;
 }
 
 .dash-band-tabs {
@@ -67742,16 +67675,6 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     /* No infinite scale-pulse — same reason as ::before (#935). */
 }
 
-@keyframes dashBlobHaloPulse {
-    0%, 100% { opacity: 0.7;  transform: translate(-50%, -50%) scale(0.96); }
-    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.08); }
-}
-
-@keyframes dashBlobCorePulse {
-    0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.92); }
-    50%      { opacity: 1.0;  transform: translate(-50%, -50%) scale(1.10); }
-}
-
 @media (prefers-reduced-motion: reduce) {
     .dash-card::before,
     .dash-card::after { animation: none; }
@@ -67809,7 +67732,6 @@ body.max-performance .dash-card::after {
 }
 
 /* Span modifiers */
-.dash-card--wide { grid-column: span 2; }
 .dash-card--full { grid-column: 1 / -1; }
 
 /* Card head */
@@ -67838,24 +67760,6 @@ body.max-performance .dash-card::after {
     margin: 4px 0 0;
     line-height: 1.4;
 }
-.dash-card__head-btn {
-    background: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    color: var(--white-a70);
-    font-size: 12px;
-    font-weight: 600;
-    padding: 7px 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-    font-family: inherit;
-}
-.dash-card__head-btn:hover {
-    background: var(--white-a08);
-    border-color: var(--white-a16);
-    color: #fff;
-}
 
 /* Card body */
 .dash-card__body {
@@ -67863,50 +67767,6 @@ body.max-performance .dash-card::after {
     z-index: 1;
     flex: 1;
     min-width: 0;
-}
-
-/* CTA card variant (Tools) — entire card is clickable */
-.dash-card--cta {
-    cursor: pointer;
-}
-.dash-card--cta:hover .dash-card__cta-arrow {
-    transform: translateX(4px);
-    color: rgb(var(--accent-rgb));
-}
-.dash-card--cta:hover .dash-card__cta-icon {
-    background: rgba(var(--accent-rgb), 0.22);
-    transform: scale(1.06) rotate(-2deg);
-    box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.35);
-}
-.dash-card__body--cta {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding-top: 4px;
-}
-.dash-card__cta-icon {
-    width: 40px;
-    height: 40px;
-    border-radius: 10px;
-    background: rgba(var(--accent-rgb), 0.14);
-    border: 1px solid rgba(var(--accent-rgb), 0.26);
-    color: rgb(var(--accent-rgb));
-    transition: background 0.24s ease, transform 0.24s ease, box-shadow 0.24s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-.dash-card__cta-label {
-    flex: 1;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--white-a85);
-}
-.dash-card__cta-arrow {
-    color: var(--white-a40);
-    transition: transform 0.2s ease, color 0.2s ease;
-    flex-shrink: 0;
 }
 
 /* Body overrides for embedded sub-grids — make them compact for bento */
@@ -68945,9 +68805,6 @@ body.max-performance .dash-card::after {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 16px;
     }
-    .dash-card--wide {
-        grid-column: span 2;
-    }
     .dash-card--full {
         grid-column: 1 / -1;
     }
@@ -69055,9 +68912,6 @@ body.max-performance .dash-card::after {
     .dash-autom-rows {
         max-height: 320px;
     }
-    .dash-card--strip {
-        padding: 12px 16px;
-    }
     /* One column can't fit header + stats side by side — stack them. */
     .dash-card[data-card="library"] .library-status-header {
         min-width: 0;
@@ -69121,9 +68975,6 @@ body.max-performance .dash-card::after {
         grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: 6px;
     }
-    .dash-card[data-card="enrichment"] .rate-gauge-card {
-        padding: 8px 6px 6px;
-    }
 }
 
 /* Small mobile — tightest */
@@ -69148,9 +68999,6 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="enrichment"] .rate-monitor-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-    .dash-card[data-card="enrichment"] .gauge-card-name {
-        font-size: 10px;
     }
 }
 
