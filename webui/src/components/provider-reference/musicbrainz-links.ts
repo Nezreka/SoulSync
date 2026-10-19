@@ -13,17 +13,6 @@ export function musicBrainzBrowserBase(): string {
   }
 }
 
-export function setMusicBrainzBrowserBase(value: string): void {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    window.localStorage.removeItem(STORAGE_KEY);
-    return;
-  }
-  const url = new URL(trimmed);
-  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use an HTTP or HTTPS URL');
-  window.localStorage.setItem(STORAGE_KEY, `${url.origin}${url.pathname.replace(/\/$/, '')}`);
-}
-
 export function musicBrainzBrowserUrl(kind: 'release' | 'recording', id: string): string {
   return `${musicBrainzBrowserBase()}/${kind}/${encodeURIComponent(id)}`;
 }

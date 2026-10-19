@@ -14,7 +14,6 @@ import json
 import time
 from collections import Counter, defaultdict
 from functools import partial
-from typing import Any
 
 from core.auto_import_worker import _read_file_tags
 from core.imports.staging import AUDIO_EXTENSIONS

@@ -701,18 +701,6 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         conn.close()
 
 
-def safe_finding_ids(db, *, case_id: str = '', include_planned_files: bool = False) -> tuple[list[int], list[str]]:
-    """Select the same effective draft proposals that the album view displays."""
-    conn = db._get_connection()
-    try:
-        cases = effective_case_modes(conn, job_id='library_reconciliation', case_id=case_id)
-        selected = {key: value for key, value in cases.items()
-                    if (not case_id or key == case_id) and value['ready_ids']}
-        return [fid for value in selected.values() for fid in value['ready_ids']], list(selected)
-    finally:
-        conn.close()
-
-
 def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False) -> dict:
     """Reviewable, immutable batch selection used by confirmation and execution."""
     conn = db._get_connection()

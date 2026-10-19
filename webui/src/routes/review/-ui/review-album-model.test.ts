@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
 
-import type { ReviewCase } from '../-review.api';
+import type { ReviewCase, ReviewFinding } from '../-review.api';
 
-import { buildAlbumModel } from './review-album-model';
+import { buildAlbumModel, groupReadyChanges } from './review-album-model';
 
 it('retains first-match selection when one decision owns several assignment rows', () => {
   const rows = [
@@ -57,4 +57,32 @@ it('keeps a cancelled request as a missing-track decision without counting it as
   expect(model.wishlistedCount).toBe(0);
   expect(model.reviewDecisions).toEqual([decision]);
   expect(model.missingAssignments).toEqual([row]);
+});
+
+it('counts a file and library edit once and keeps undecided changes out of ready summaries', () => {
+  const findings = [
+    {
+      id: 1,
+      finding_type: 'reconciliation_metadata',
+      review_tier: 'ready',
+      details: {
+        changes: {
+          title: { old: 'Song', new: 'Song (live)' },
+          library_title: { old: 'Song', new: 'Song (live)' },
+        },
+      },
+    },
+    {
+      id: 2,
+      finding_type: 'reconciliation_metadata',
+      review_tier: 'manual',
+      details: { changes: { title: { old: 'Other', new: 'Other (demo)' } } },
+    },
+  ] as unknown as ReviewFinding[];
+  expect(groupReadyChanges(findings)).toEqual([
+    { key: 'title', label: 'Track titles', count: 1, valueSummary: 'Song → Song (live)' },
+  ]);
+  expect(groupReadyChanges(findings, false)).toEqual([
+    { key: 'title', label: 'Track titles', count: 2, valueSummary: 'Update 2 tracks' },
+  ]);
 });

@@ -1,6 +1,6 @@
-import type { AlbumAssignment, ReviewCase, ReviewDecision } from '../-review.api';
+import type { AlbumAssignment, ReviewCase, ReviewDecision, ReviewFinding } from '../-review.api';
 
-import { assignmentKey } from './review-presentation';
+import { assignmentKey, changeFieldLabel } from './review-presentation';
 
 export const decisionOrder: Record<string, number> = {
   release_conflicts: 0,
@@ -172,4 +172,104 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     decisionMembers,
     releaseOrderedAssignments,
   };
+}
+
+interface ReadyChangeGroup {
+  key: string;
+  label: string;
+  count: number;
+  valueSummary?: string;
+}
+
+export function readyFieldGroup(field: string): { key: string; label: string } {
+  if (['artist', 'album_artist'].includes(field))
+    return { key: 'album_artist', label: 'Album artist' };
+  if (['library_track_artist', 'track_artist'].includes(field))
+    return { key: 'track_artist', label: 'Track artist credits' };
+  if (field === 'filename') return { key: 'filename', label: 'Filenames' };
+  if (['library_recording_mbid', 'musicbrainz_recording_id'].includes(field)) {
+    return { key: 'recording_ids', label: 'Recording IDs' };
+  }
+  if (['title', 'library_title'].includes(field)) return { key: 'title', label: 'Track titles' };
+  if (['album', 'library_album_title'].includes(field)) {
+    return { key: 'album', label: 'Album title' };
+  }
+  if (
+    ['track_number', 'disc_number', 'library_track_number', 'library_disc_number'].includes(field)
+  ) {
+    return { key: 'numbering', label: 'Numbering' };
+  }
+  return { key: field, label: changeFieldLabel(field) };
+}
+
+export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChangeGroup[] {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      values: Array<{ old?: unknown; new?: unknown }>;
+      findingIdSet: Set<number>;
+    }
+  >();
+  for (const item of items.filter(
+    (finding) =>
+      finding.finding_type === 'reconciliation_metadata' &&
+      (!readyOnly || finding.review_tier === 'ready'),
+  )) {
+    const details = item.details && typeof item.details === 'object' ? item.details : {};
+    const changes =
+      details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
+        ? (details.changes as Record<string, { old?: unknown; new?: unknown }>)
+        : {};
+    const fields = Object.keys(changes);
+    if (!fields.length) continue;
+    for (const field of fields) {
+      const semantic = readyFieldGroup(field);
+      const group = groups.get(semantic.key) || {
+        key: semantic.key,
+        label: semantic.label,
+        values: [],
+        findingIdSet: new Set<number>(),
+      };
+      group.findingIdSet.add(item.id);
+      group.values.push(changes[field] || {});
+      groups.set(semantic.key, group);
+    }
+  }
+  return [...groups.values()].map(({ values, findingIdSet, ...group }) => {
+    const count = findingIdSet.size;
+    if (group.key === 'numbering') {
+      const fields = items
+        .filter((item) => findingIdSet.has(item.id))
+        .flatMap((item) => Object.keys((item.details?.changes || {}) as Record<string, unknown>));
+      const hasDisc = fields.some((field) => field.includes('disc_number'));
+      const hasTrack = fields.some((field) => field.includes('track_number'));
+      group.label =
+        hasDisc && hasTrack
+          ? 'Disc and track numbering'
+          : hasDisc
+            ? 'Disc numbering'
+            : 'Track numbering';
+    }
+    let valueSummary: string;
+    if (group.key === 'track_artist' && values.every((value) => !String(value.old ?? '').trim())) {
+      valueSummary = 'Adding missing featured artists to metadata';
+    } else if (group.key === 'recording_ids') {
+      valueSummary = `Add MusicBrainz recording IDs to ${count} track${count === 1 ? '' : 's'}`;
+    } else if (group.key === 'filename') {
+      valueSummary = `Rename ${count} file${count === 1 ? '' : 's'} to clean release titles`;
+    } else {
+      const first = values[0];
+      const same = values.every(
+        (value) =>
+          String(value.old ?? '') === String(first.old ?? '') &&
+          String(value.new ?? '') === String(first.new ?? ''),
+      );
+      valueSummary = same
+        ? `${String(first.old ?? 'empty')} → ${String(first.new ?? 'empty')}`
+        : `Update ${count} track${count === 1 ? '' : 's'}`;
+    }
+    return { ...group, count, valueSummary };
+  });
 }

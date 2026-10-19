@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { ProviderReleaseId } from './provider-release-id';
+import { ProviderReleaseId } from './provider-reference';
 
 afterEach(cleanup);
 

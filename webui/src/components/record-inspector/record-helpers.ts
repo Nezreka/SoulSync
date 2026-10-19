@@ -7,7 +7,7 @@
  * still load-bearing for a page this migration has not reached.
  */
 
-export interface ArtistRecordPayload {
+export interface RecordPayload {
   success?: boolean;
   error?: string;
   artist_id?: string | number;
@@ -91,7 +91,7 @@ export interface RecordFooterStats {
  * value is exactly 'matched' — a per-source enrichment tally, not a count of
  * non-empty ids.
  */
-export function recordFooterStats(payload: ArtistRecordPayload): RecordFooterStats {
+export function recordFooterStats(payload: RecordPayload): RecordFooterStats {
   const record = payload.record ?? {};
   const counts = payload.counts ?? {};
   return {

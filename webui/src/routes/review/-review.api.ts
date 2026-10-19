@@ -411,17 +411,7 @@ export async function startReadyChanges(
     await fetch('/api/repair/review-queue/apply-ready', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ case_id: caseId || '', organize, signature }),
-    }),
-  );
-}
-
-export async function startAlbumMetadataChanges(
-  caseId: string,
-): Promise<{ started: boolean; operation_id?: string; total?: number; error?: string }> {
-  return readJson(
-    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/apply-metadata`, {
-      method: 'POST',
+      body: JSON.stringify({ case_id: caseId, organize, signature }),
     }),
   );
 }
@@ -455,38 +445,6 @@ export async function reanalyzeReviewCase(caseId: string, refreshCatalogue = fal
 
 export async function fetchReviewApplyStatus(operationId?: string): Promise<BulkFixStatus> {
   return fetchBulkFixStatus(readJson<BulkFixStatus>, operationId);
-}
-
-export async function saveAlbumPlan(caseId: string, signature: string) {
-  return readJson<{ success: boolean; message?: string }>(
-    await fetch(`/api/repair/review-queue/${encodeURIComponent(caseId)}/save-plan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signature }),
-    }),
-  );
-}
-
-export interface SavedAlbumPlan {
-  file_actions?: number;
-  case_id: string;
-  album: string;
-  signature: string;
-  ready: number;
-}
-
-export async function fetchSavedAlbumPlans() {
-  return readJson<{ plans: SavedAlbumPlan[] }>(await fetch('/api/repair/review-queue/saved-plans'));
-}
-
-export async function applySavedAlbumPlans(plans: SavedAlbumPlan[]) {
-  return readJson<{ started: boolean; operation_id?: string; error?: string }>(
-    await fetch('/api/repair/review-queue/saved-plans', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ plans }),
-    }),
-  );
 }
 
 export async function resetAlbumScope(caseId: string) {

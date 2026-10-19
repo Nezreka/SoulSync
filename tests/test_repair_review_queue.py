@@ -9,10 +9,16 @@ import threading
 from flask import Flask
 
 from core.repair_review_identity import missing_slot_key, review_case_key
-from core.repair_review_queue import classify_case, get_case, list_cases, safe_finding_ids
+from core.repair_review_queue import classify_case, get_case, list_cases, ready_batch_preview
 from core.library.reconciliation_store import ensure_schema, persist_album_plan, retire_unseen_plans
 from core.repair_worker import RepairWorker, _same_reviewed_file
 from database.music_database import MusicDatabase
+
+
+def _ready_selection(db, *, case_id=''):
+    preview = ready_batch_preview(db, case_id=case_id)
+    return ([action['id'] for album in preview['albums'] for action in album['actions']],
+            [album['case_id'] for album in preview['albums']])
 
 
 def test_reviewed_file_accepts_mount_alias_but_rejects_different_inode(tmp_path):
@@ -48,7 +54,7 @@ def test_metadata_filter_keeps_credit_replacement_in_needs_input():
                       risk='manual')['total'] == 1
     assert list_cases(db, job_id='library_reconciliation', category='metadata',
                       risk='ready')['total'] == 0
-    assert safe_finding_ids(db)[0] == []
+    assert _ready_selection(db)[0] == []
     assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 0
 
 
@@ -834,7 +840,7 @@ def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():
         'SELECT case_id FROM reconcile_album_plans').fetchall() == [('album:1:1099',)]
 
 
-def test_safe_finding_ids_returns_only_planner_approved_metadata():
+def test_ready_preview_returns_only_planner_approved_metadata():
     db = _Database()
     details = {'album_id': 10, 'album_title': 'Album'}
     db.add(1, '/music/Album/01.flac',
@@ -847,7 +853,7 @@ def test_safe_finding_ids_returns_only_planner_approved_metadata():
 
     assert list_cases(db, job_id='library_reconciliation')['ready_total'] == 0
 
-    ids, cases = safe_finding_ids(db, case_id=case_id)
+    ids, cases = _ready_selection(db, case_id=case_id)
 
     assert ids == []
     assert cases == []
@@ -963,7 +969,7 @@ def test_numbering_draft_keeps_independent_metadata_and_invalidates_on_change():
     item = get_case(db, key)['items'][0]
     assert item['details']['db_data'] == {'musicbrainz_recording_id': 'recording'}
     assert item['review_tier'] == 'ready'
-    assert safe_finding_ids(db)[0] == [1]
+    assert _ready_selection(db)[0] == [1]
     assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 1
     conn = db._get_connection()
     raw = json.loads(conn.execute('SELECT details_json FROM repair_findings WHERE id=1').fetchone()[0])
@@ -973,7 +979,7 @@ def test_numbering_draft_keeps_independent_metadata_and_invalidates_on_change():
     conn.commit()
     conn.close()
     assert get_case(db, key)['items'][0]['review_tier'] == 'manual'
-    assert safe_finding_ids(db)[0] == []
+    assert _ready_selection(db)[0] == []
     assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
 
 
@@ -1307,7 +1313,7 @@ def test_saved_approval_readiness_agrees_after_evidence_is_reserialized():
     db.conn.commit()
     assert get_case(db, key)['plan']['ready'] == 0
     assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
-    assert safe_finding_ids(db)[0] == []
+    assert _ready_selection(db)[0] == []
 
 
 def test_saved_file_choice_is_automatically_ready_and_revalidates_evidence():
@@ -1326,20 +1332,19 @@ def test_saved_file_choice_is_automatically_ready_and_revalidates_evidence():
     case = get_case(db, key)
     assert case['plan']['ready'] == 1
     assert case['items'][0]['last_error'] is None
-    assert safe_finding_ids(db)[0] == [1]
-    assert safe_finding_ids(db, include_planned_files=True)[0] == [1]
-    assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == [1]
+    assert _ready_selection(db)[0] == [1]
+    assert _ready_selection(db, case_id=key)[0] == [1]
     assert worker.save_review_plan(key, case['plan_signature'])['success']
     saved = worker.saved_review_plans()
     assert saved[0]['file_actions'] == 1
     db.conn.execute("UPDATE repair_findings SET details_json=json_set(details_json,'$.evidence_signature','changed') WHERE id=1")
     db.conn.commit()
-    assert safe_finding_ids(db, case_id=key, include_planned_files=True)[0] == []
+    assert _ready_selection(db, case_id=key)[0] == []
     assert worker.saved_review_plans() == []
 
 
 def test_whole_album_readiness_counts_choices_and_waiting_consistently():
-    from core.repair_review_queue import queue_summary, ready_batch_preview
+    from core.repair_review_queue import queue_summary
     from core.library import reconciliation_choices as choices
     db = _Database()
     for fid, folder, kind, details in [
@@ -1353,18 +1358,18 @@ def test_whole_album_readiness_counts_choices_and_waiting_consistently():
                job_id='library_reconciliation', kind=kind)
     totals = queue_summary(db, job_id='library_reconciliation')
     assert totals == {'all': 4, 'review': 1, 'ready': 1, 'files': 1, 'waiting': 1, 'ready_total': 1, 'ready_albums_total': 1}
-    assert safe_finding_ids(db)[0] == [4]
+    assert _ready_selection(db)[0] == [4]
     db.conn.rollback()
     # Saving the only remaining choice automatically makes the entire album ready.
     choices.ensure_schema(db.conn)
     key, raw = db.conn.execute('SELECT review_case_key, details_json FROM repair_findings WHERE id=2').fetchone()
     db.conn.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (2,?,?, 'numbering','fix')", (key, raw))
     db.conn.commit()
-    assert set(safe_finding_ids(db)[0]) == {1, 2, 4}
+    assert set(_ready_selection(db)[0]) == {1, 2, 4}
     preview = ready_batch_preview(db)
     assert preview['action_count'] == 3 and len(preview['albums']) == 2
     db.add(6, '/music/mixed/6.flac', {'album_folder': '/music/mixed'}, job_id='library_reconciliation', kind='reconciliation_unresolved')
-    assert safe_finding_ids(db)[0] == [4]
+    assert _ready_selection(db)[0] == [4]
     assert ready_batch_preview(db)['signature'] != preview['signature']
 
 

@@ -3,13 +3,13 @@ import { useEffect, useState, type ReactNode, type SVGProps } from 'react';
 import { Button } from '@/components/form/form';
 import { MetadataComparison } from '@/components/metadata-comparison/metadata-comparison';
 import { Badge } from '@/components/primitives';
+import { musicBrainzBrowserUrl } from '@/components/provider-reference/musicbrainz-links';
+import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
 import { RecordInspector } from '@/components/record-inspector/record-inspector';
 import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
 
 import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
-import { musicBrainzBrowserUrl } from './musicbrainz-links';
-import { ProviderReleaseId } from './provider-release-id';
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';

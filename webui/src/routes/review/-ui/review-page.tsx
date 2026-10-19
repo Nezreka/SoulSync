@@ -5,6 +5,7 @@ import { useConfirmDialog } from '@/components/dialog/use-confirm-dialog';
 import { Button, Select, TextInput } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
 import { Notice } from '@/components/primitives';
+import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
 
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
@@ -23,6 +24,7 @@ import {
   runReconciliationScan,
   reanalyzeReviewCase,
   startMissingTrackRequests,
+  startReadyChanges,
   type AlbumAssignment,
   type ReconciliationRun,
   type ReconciliationScanStatus,
@@ -39,12 +41,16 @@ import { usePolledStatus } from '../../tools/-tools.polling';
 import { AssignmentRow } from './assignment-row';
 import { CompletenessChoice } from './completeness-choice';
 import { MissingTracksChoice } from './missing-tracks-choice';
-import { ProviderReleaseId } from './provider-release-id';
 import { AssignmentEvidence, ReleaseComparison, StatusChip } from './reconciliation-evidence';
-import { buildAlbumModel, decisionOrder } from './review-album-model';
+import {
+  buildAlbumModel,
+  decisionOrder,
+  groupReadyChanges,
+  readyFieldGroup,
+} from './review-album-model';
 import { ReviewArtwork } from './review-artwork';
 import styles from './review-page.module.css';
-import { assignmentKey, changeFieldLabel, record, records, textValue } from './review-presentation';
+import { assignmentKey, record, records, textValue } from './review-presentation';
 import { SelectedActionDetail } from './selected-action-detail';
 
 const requireChoice = new Set([
@@ -161,130 +167,6 @@ function decisionCategoryLabel(category: string): string {
 function numberingSchemeLabel(multipleDiscs: boolean, mode?: string): string {
   if (!multipleDiscs) return 'One disc · match release positions';
   return mode === 'digital' ? 'One continuous album sequence' : 'Numbered by release disc';
-}
-
-interface ReadyChangeGroup {
-  key: string;
-  label: string;
-  count: number;
-  findingIds: number[];
-  valueSummary?: string;
-}
-
-function readyFieldGroup(field: string): { key: string; label: string } {
-  if (['artist', 'album_artist'].includes(field))
-    return { key: 'album_artist', label: 'Album artist' };
-  if (['library_track_artist', 'track_artist'].includes(field))
-    return { key: 'track_artist', label: 'Track artist credits' };
-  if (field === 'filename') return { key: 'filename', label: 'Filenames' };
-  if (['library_recording_mbid', 'musicbrainz_recording_id'].includes(field)) {
-    return { key: 'recording_ids', label: 'Recording IDs' };
-  }
-  if (['title', 'library_title'].includes(field)) return { key: 'title', label: 'Track titles' };
-  if (['album', 'library_album_title'].includes(field)) {
-    return { key: 'album', label: 'Album title' };
-  }
-  if (
-    ['track_number', 'disc_number', 'library_track_number', 'library_disc_number'].includes(field)
-  ) {
-    return { key: 'numbering', label: 'Numbering' };
-  }
-  return { key: field, label: changeFieldLabel(field) };
-}
-
-function groupReadyChanges(items: ReviewFinding[], readyOnly = true): ReadyChangeGroup[] {
-  const groups = new Map<
-    string,
-    ReadyChangeGroup & {
-      values: Array<{ old?: unknown; new?: unknown }>;
-      findingIdSet: Set<number>;
-    }
-  >();
-  for (const item of items.filter(
-    (finding) =>
-      finding.finding_type === 'reconciliation_metadata' &&
-      (!readyOnly || finding.review_tier === 'ready'),
-  )) {
-    const details = item.details && typeof item.details === 'object' ? item.details : {};
-    const changes =
-      details.changes && typeof details.changes === 'object' && !Array.isArray(details.changes)
-        ? (details.changes as Record<string, { old?: unknown; new?: unknown }>)
-        : {};
-    const fields = Object.keys(changes);
-    if (!fields.length) continue;
-    for (const field of fields) {
-      const semantic = readyFieldGroup(field);
-      const group = groups.get(semantic.key) || {
-        key: semantic.key,
-        label: semantic.label,
-        count: 0,
-        findingIds: [],
-        values: [],
-        findingIdSet: new Set<number>(),
-      };
-      group.findingIdSet.add(item.id);
-      group.values.push(changes[field] || {});
-      groups.set(semantic.key, group);
-    }
-  }
-  return [...groups.values()].map(({ values, findingIdSet, ...group }) => {
-    const findingIds = [...findingIdSet];
-    const count = findingIds.length;
-    if (group.key === 'numbering') {
-      const fields = items
-        .filter((item) => findingIdSet.has(item.id))
-        .flatMap((item) => Object.keys((item.details?.changes || {}) as Record<string, unknown>));
-      const hasDisc = fields.some((field) => field.includes('disc_number'));
-      const hasTrack = fields.some((field) => field.includes('track_number'));
-      group.label =
-        hasDisc && hasTrack
-          ? 'Disc and track numbering'
-          : hasDisc
-            ? 'Disc numbering'
-            : 'Track numbering';
-    }
-    if (group.key === 'track_artist' && values.every((value) => !String(value.old ?? '').trim())) {
-      return {
-        ...group,
-        count,
-        findingIds,
-        label: 'Track artist credits',
-        valueSummary: 'Adding missing featured artists to metadata',
-      };
-    }
-    if (group.key === 'recording_ids') {
-      return {
-        ...group,
-        count,
-        findingIds,
-        label: 'Recording IDs',
-        valueSummary: `Add MusicBrainz recording IDs to ${count} track${count === 1 ? '' : 's'}`,
-      };
-    }
-    if (group.key === 'filename') {
-      return {
-        ...group,
-        count,
-        findingIds,
-        valueSummary: `Rename ${count} file${count === 1 ? '' : 's'} to clean release titles`,
-      };
-    }
-    if (!values.length) return { ...group, count, findingIds };
-    const first = values[0];
-    const same = values.every(
-      (value) =>
-        String(value.old ?? '') === String(first.old ?? '') &&
-        String(value.new ?? '') === String(first.new ?? ''),
-    );
-    return {
-      ...group,
-      count,
-      findingIds,
-      valueSummary: same
-        ? `${String(first.old ?? 'empty')} → ${String(first.new ?? 'empty')}`
-        : `Update ${count} track${count === 1 ? '' : 's'}`,
-    };
-  });
 }
 
 export function ReviewPage() {
@@ -597,6 +479,11 @@ export function ReviewPage() {
   const visibleChanges = changeAssignments.filter(matchingFilter);
   const visibleMissing = missingAssignments.filter(matchingFilter);
   const visibleSettled = settledAssignments.filter(matchingFilter);
+  const intentFinding = reviewCase?.items.find(
+    (item) => item.finding_type === 'reconciliation_intent',
+  );
+  const missingFindings =
+    reviewCase?.items.filter((item) => item.finding_type === 'reconciliation_missing') || [];
   const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
   const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
@@ -1057,12 +944,7 @@ export function ReviewPage() {
       });
       if (!confirmed) return;
       setApplyBusy(true);
-      const result = await fetch('/api/repair/review-queue/apply-ready', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ case_id: scopeCaseId, organize, signature: preview.signature }),
-      });
-      const started = await result.json();
+      const started = await startReadyChanges(preview.signature, scopeCaseId, organize);
       if (!started.started) throw new Error(started.error || 'Could not start album changes');
       rememberOperation(started.operation_id, scopeCaseId);
     } catch (cause) {
@@ -1260,7 +1142,6 @@ export function ReviewPage() {
         <Button
           type="button"
           variant="primary"
-          className={styles.primary}
           disabled={mutationBusy}
           onClick={() => void applyReady(reviewCase.case_id)}
         >
@@ -2449,9 +2330,7 @@ export function ReviewPage() {
                         </div>
                         {missingAssignments.length > 0 &&
                           !releaseChoicePending &&
-                          (reviewCase.items.some(
-                            (item) => item.finding_type === 'reconciliation_intent',
-                          ) ? (
+                          (intentFinding ? (
                             <section
                               className={styles.missingChoices}
                               aria-label="Choose album completeness"
@@ -2460,26 +2339,12 @@ export function ReviewPage() {
                               <h4>Choose which missing tracks you want</h4>
                               <CompletenessChoice
                                 key={reviewCase.case_id}
-                                finding={
-                                  reviewCase.items.find(
-                                    (item) => item.finding_type === 'reconciliation_intent',
-                                  )!
-                                }
+                                finding={intentFinding}
                                 busy={mutationBusy}
-                                onChoose={(choice) =>
-                                  void act(
-                                    reviewCase.items.find(
-                                      (item) => item.finding_type === 'reconciliation_intent',
-                                    )!,
-                                    'fix',
-                                    choice,
-                                  )
-                                }
+                                onChoose={(choice) => void act(intentFinding, 'fix', choice)}
                               />
                             </section>
-                          ) : reviewCase.items.some(
-                              (item) => item.finding_type === 'reconciliation_missing',
-                            ) ? (
+                          ) : missingFindings.length > 0 ? (
                             <details
                               className={styles.missingRequests}
                               open={
@@ -2495,9 +2360,7 @@ export function ReviewPage() {
                               <MissingTracksChoice
                                 key={reviewCase.case_id}
                                 scope={reviewCase.album_plan?.intent_scope}
-                                findings={reviewCase.items.filter(
-                                  (item) => item.finding_type === 'reconciliation_missing',
-                                )}
+                                findings={missingFindings}
                                 busy={mutationBusy}
                                 onRequest={(ids) => void requestAllMissing(ids.length, ids)}
                                 onChangeScope={() => void reconsiderScope()}
@@ -2515,83 +2378,63 @@ export function ReviewPage() {
                             <span>Selected release track</span>
                             <span>Status</span>
                           </div>
-                          {trackView === 'release' ? (
-                            releaseOrderedAssignments
-                              .filter(matchingFilter)
-                              .map(renderAssignmentRow)
-                          ) : (
-                            <>
-                              {visibleAttention.length > 0 && (
-                                <div className={styles.assignmentGroup} data-tone="warning">
-                                  <Button
-                                    type="button"
-                                    aria-expanded={openGroups.includes('attention')}
-                                    onClick={() => toggleGroup('attention')}
+                          {trackView === 'release'
+                            ? releaseOrderedAssignments
+                                .filter(matchingFilter)
+                                .map(renderAssignmentRow)
+                            : [
+                                {
+                                  key: 'attention',
+                                  tone: 'warning',
+                                  rows: visibleAttention,
+                                  label: `${visibleAttention.length} track${visibleAttention.length === 1 ? '' : 's'} needing review`,
+                                },
+                                {
+                                  key: 'changes',
+                                  tone: 'info',
+                                  rows: visibleChanges,
+                                  label: `↻ ${visibleChanges.length} proposed track change${visibleChanges.length === 1 ? '' : 's'}`,
+                                },
+                                {
+                                  key: 'missing',
+                                  tone: 'danger',
+                                  rows: visibleMissing,
+                                  label: `${visibleMissing.length} absent release track${visibleMissing.length === 1 ? '' : 's'}`,
+                                },
+                                {
+                                  key: 'settled',
+                                  tone: 'good',
+                                  rows: visibleSettled,
+                                  label: `✓ ${visibleSettled.length} settled release slot${visibleSettled.length === 1 ? '' : 's'}`,
+                                },
+                              ]
+                                .filter((group) => group.rows.length > 0)
+                                .map((group) => (
+                                  <div
+                                    key={group.key}
+                                    className={styles.assignmentGroup}
+                                    data-tone={group.tone}
                                   >
-                                    {openGroups.includes('attention') ? '▾' : '▸'}{' '}
-                                    {visibleAttention.length} track
-                                    {visibleAttention.length === 1 ? '' : 's'} needing review
-                                  </Button>
-                                  {openGroups.includes('attention') &&
-                                    visibleAttention.map(renderAssignmentRow)}
-                                </div>
-                              )}
-                              {visibleChanges.length > 0 && (
-                                <div className={styles.assignmentGroup} data-tone="info">
-                                  <Button
-                                    type="button"
-                                    aria-expanded={openGroups.includes('changes')}
-                                    onClick={() => toggleGroup('changes')}
-                                  >
-                                    {openGroups.includes('changes') ? '▾' : '▸'} ↻{' '}
-                                    {visibleChanges.length} proposed track change
-                                    {visibleChanges.length === 1 ? '' : 's'}
-                                  </Button>
-                                  {openGroups.includes('changes') &&
-                                    visibleChanges.map(renderAssignmentRow)}
-                                </div>
-                              )}
-                              {visibleMissing.length > 0 && (
-                                <div className={styles.assignmentGroup} data-tone="danger">
-                                  <Button
-                                    type="button"
-                                    aria-expanded={openGroups.includes('missing')}
-                                    onClick={() => toggleGroup('missing')}
-                                  >
-                                    {openGroups.includes('missing') ? '▾' : '▸'}{' '}
-                                    {visibleMissing.length} absent release track
-                                    {visibleMissing.length === 1 ? '' : 's'}
-                                  </Button>
-                                  {openGroups.includes('missing') && (
-                                    <>
-                                      {hasIntentDecision && (
-                                        <p>
-                                          Choose missing tracks above, or review album completeness
-                                          on Plan.
-                                        </p>
-                                      )}
-                                      {visibleMissing.map(renderAssignmentRow)}
-                                    </>
-                                  )}
-                                </div>
-                              )}
-                              {visibleSettled.length > 0 && (
-                                <div className={styles.assignmentGroup} data-tone="good">
-                                  <Button
-                                    type="button"
-                                    aria-expanded={openGroups.includes('settled')}
-                                    onClick={() => toggleGroup('settled')}
-                                  >
-                                    {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
-                                    {visibleSettled.length} settled release slot
-                                    {visibleSettled.length === 1 ? '' : 's'}
-                                  </Button>
-                                  {openGroups.includes('settled') &&
-                                    visibleSettled.map(renderAssignmentRow)}
-                                </div>
-                              )}
-                            </>
-                          )}
+                                    <Button
+                                      type="button"
+                                      aria-expanded={openGroups.includes(group.key)}
+                                      onClick={() => toggleGroup(group.key)}
+                                    >
+                                      {openGroups.includes(group.key) ? '▾' : '▸'} {group.label}
+                                    </Button>
+                                    {openGroups.includes(group.key) && (
+                                      <>
+                                        {group.key === 'missing' && hasIntentDecision && (
+                                          <p>
+                                            Choose missing tracks above, or review album
+                                            completeness on Plan.
+                                          </p>
+                                        )}
+                                        {group.rows.map(renderAssignmentRow)}
+                                      </>
+                                    )}
+                                  </div>
+                                ))}
                         </div>
                       </section>
                       <aside
@@ -2643,11 +2486,7 @@ export function ReviewPage() {
                                       </Button>
                                     )}
                                   {!releaseChoicePending &&
-                                  reviewCase.items.some((item) =>
-                                    ['reconciliation_missing', 'reconciliation_intent'].includes(
-                                      item.finding_type,
-                                    ),
-                                  ) ? (
+                                  (intentFinding || missingFindings.length > 0) ? (
                                     <Button
                                       onClick={() => {
                                         setInspectorOpen(false);

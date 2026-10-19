@@ -46,6 +46,16 @@ export function SelectedActionDetail({
     Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag' && !numberingPreview;
   const assignmentOptions = records(record(finding.details).assignment_options);
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
+  const intentChoice = finding.finding_type === 'reconciliation_intent';
+  const directRepair =
+    canApply &&
+    ![
+      'reconciliation_intent',
+      'reconciliation_release',
+      'reconciliation_duplicate',
+      'reconciliation_unresolved',
+      'reconciliation_extra',
+    ].includes(finding.finding_type);
   const wrongAudio = finding.details?.audio_conflict === 'different_recording';
   const versionConflict = finding.details?.version_conflict === true;
   const waitingForDownload = ['wishlisted', 'downloading', 'downloaded'].includes(
@@ -191,7 +201,7 @@ export function SelectedActionDetail({
         onKeepCopy={duplicateChoice ? (trackId) => onAct('fix', trackId) : undefined}
         controls={
           <>
-            {finding.finding_type === 'reconciliation_intent' && (
+            {intentChoice && (
               <CompletenessChoice
                 key={finding.id}
                 finding={finding}
@@ -217,45 +227,37 @@ export function SelectedActionDetail({
                   <Button
                     type="button"
                     variant="primary"
-                    className={styles.primary}
                     disabled={busy}
                     onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
                   >
                     Use assignment in plan: {textValue(proposedSlot.title)}
                   </Button>
                 )}
-                {finding.finding_type === 'reconciliation_intent' ? null : versionConflict &&
-                  canApply ? (
-                  <>
-                    {replacement.source_track_id && (
-                      <>
-                        <Button
-                          type="button"
-                          disabled={busy}
-                          variant="primary"
-                          className={styles.primary}
-                          onClick={() => onAct('fix', 'request_missing')}
-                        >
-                          Plan to keep local and request release version
-                        </Button>
-                        <Button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => onAct('fix', 'replace')}
-                        >
-                          Plan replacement with release version
-                        </Button>
-                      </>
-                    )}
-                  </>
-                ) : wrongAudio && canApply ? (
+                {!intentChoice &&
+                  versionConflict &&
+                  canApply &&
+                  Boolean(replacement.source_track_id) && (
+                    <>
+                      <Button
+                        type="button"
+                        disabled={busy}
+                        variant="primary"
+                        onClick={() => onAct('fix', 'request_missing')}
+                      >
+                        Plan to keep local and request release version
+                      </Button>
+                      <Button type="button" disabled={busy} onClick={() => onAct('fix', 'replace')}>
+                        Plan replacement with release version
+                      </Button>
+                    </>
+                  )}
+                {!intentChoice && !versionConflict && wrongAudio && canApply && (
                   <>
                     {canReplaceWrongAudio && (
                       <Button
                         type="button"
                         disabled={busy}
                         variant="primary"
-                        className={styles.primary}
                         onClick={() => onAct('fix', 'replace')}
                       >
                         {busy ? 'Saving…' : 'Plan replacement with correct track'}
@@ -269,36 +271,26 @@ export function SelectedActionDetail({
                       Plan quarantine of wrong file
                     </Button>
                   </>
-                ) : (
-                  <>
-                    {canApply &&
-                      finding.finding_type !== 'reconciliation_release' &&
-                      finding.finding_type !== 'reconciliation_duplicate' &&
-                      finding.finding_type !== 'reconciliation_unresolved' &&
-                      finding.finding_type !== 'reconciliation_extra' && (
-                        <Button
-                          type="button"
-                          disabled={busy}
-                          variant="primary"
-                          className={styles.primary}
-                          onClick={() => onAct('fix')}
-                        >
-                          {finding.finding_type === 'reconciliation_metadata'
-                            ? busy
-                              ? 'Saving…'
-                              : 'Use proposed change'
-                            : busy
-                              ? 'Applying…'
-                              : suggested
-                                ? typeInfo?.verb || 'Apply repair'
-                                : finding.finding_type === 'reconciliation_extra'
-                                  ? 'Plan quarantine'
-                                  : 'Apply this change'}
-                        </Button>
-                      )}
-                  </>
                 )}
-                {finding.finding_type !== 'reconciliation_intent' && (
+                {directRepair && !versionConflict && !wrongAudio && (
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    variant="primary"
+                    onClick={() => onAct('fix')}
+                  >
+                    {finding.finding_type === 'reconciliation_metadata'
+                      ? busy
+                        ? 'Saving…'
+                        : 'Use proposed change'
+                      : busy
+                        ? 'Applying…'
+                        : suggested
+                          ? typeInfo?.verb || 'Apply repair'
+                          : 'Apply this change'}
+                  </Button>
+                )}
+                {!intentChoice && (
                   <Button
                     type="button"
                     disabled={busy || numberingPreview}
