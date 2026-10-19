@@ -125,6 +125,10 @@ _sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextV
 # reason as _sync_profile_id.
 _sync_user_initiated: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_user_initiated", default=False)
+_sync_is_request_list: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_is_request_list", default=False)
+_sync_auto_remove_fulfilled: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_auto_remove_fulfilled", default=False)
 
 
 def client_for_profile(profile_id, client, server):
@@ -585,17 +589,24 @@ class PlaylistSyncService:
         from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
         _user_token = _sync_user_initiated.set(bool(user_initiated))
+        _req_token = _sync_is_request_list.set(bool(is_request_list))
+        _rm_token = _sync_auto_remove_fulfilled.set(bool(auto_remove_fulfilled))
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
-            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode,
-                                              is_request_list=is_request_list, auto_remove_fulfilled=auto_remove_fulfilled)
+            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
             reset_library_scope(_scope_token)
+            _sync_auto_remove_fulfilled.reset(_rm_token)
+            _sync_is_request_list.reset(_req_token)
             _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
 
     async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str,
-                             is_request_list: bool = False, auto_remove_fulfilled: bool = False) -> SyncResult:
+                             is_request_list: bool = None, auto_remove_fulfilled: bool = None) -> SyncResult:
+        if is_request_list is None:
+            is_request_list = _sync_is_request_list.get()
+        if auto_remove_fulfilled is None:
+            auto_remove_fulfilled = _sync_auto_remove_fulfilled.get()
         # Check if THIS specific playlist is already syncing
         syncing = getattr(self, 'syncing_playlists', None)
         if syncing is None:

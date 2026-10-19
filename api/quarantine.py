@@ -88,11 +88,45 @@ def _get_quarantine_dir():
 def list_quarantine():
     """Return all quarantined files with sidecar metadata."""
     try:
-        from core.imports.quarantine import list_quarantine_entries
-        entries = list_quarantine_entries(_get_quarantine_dir())
+        limit = None
+        offset = 0
+        raw_limit = request.args.get('limit')
+        raw_offset = request.args.get('offset')
+        if raw_limit is not None:
+            if not (raw_limit.isascii() and raw_limit.isdigit() and len(raw_limit) <= 10):
+                return jsonify({"success": False, "error": "limit must be a non-negative integer"}), 400
+            limit = int(raw_limit)
+            if limit < 1:
+                return jsonify({"success": False, "error": "limit must be at least 1"}), 400
+            # Clamp rather than error: client paging advances by the returned
+            # length, so a clamped page is safe and still makes progress.
+            if limit > 500:
+                limit = 500
+        if raw_offset is not None:
+            if not (raw_offset.isascii() and raw_offset.isdigit() and len(raw_offset) <= 10):
+                return jsonify({"success": False, "error": "offset must be a non-negative integer"}), 400
+            offset = int(raw_offset)
+        paginated = limit is not None or raw_offset is not None
+        if paginated:
+            from core.imports.quarantine import (
+                count_quarantine_entries, list_quarantine_entries)
+            entries = list_quarantine_entries(
+                _get_quarantine_dir(), limit=limit, offset=offset)
+            # One entry exists per .quarantined file, so the listdir-only
+            # count equals the full (unpaged) list length.
+            total = count_quarantine_entries(_get_quarantine_dir())
+        else:
+            from core.imports.quarantine import list_quarantine_entries
+            entries = list_quarantine_entries(_get_quarantine_dir())
+            total = len(entries)
         from core.imports.quarantine_library import annotate_quarantine_library
         annotate_quarantine_library(entries, _get_quarantine_dir(), config_manager)
-        return jsonify({"success": True, "entries": entries})
+        payload = {"success": True, "entries": entries, "total": total}
+        if paginated:
+            payload["offset"] = offset
+        if limit is not None:
+            payload["limit"] = limit
+        return jsonify(payload)
     except Exception as e:
         logger.error(f"[Quarantine] Error listing entries: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
