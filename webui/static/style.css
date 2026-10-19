@@ -47562,15 +47562,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     transform: rotate(90deg);
     color: rgb(var(--accent-light-rgb));
 }
-.enhanced-album-type-badge {
-    padding: 2px 8px;
-    border-radius: var(--radius-xs);
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-}
 
 /* ---------- expanded panel ---------- */
 .enhanced-tracks-panel {
@@ -47833,22 +47824,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     color: #fff;
     background: rgba(var(--accent-rgb), 0.22);
     border-color: rgba(var(--accent-rgb), 0.5);
-}
-.enhanced-missing-action-btn.primary {
-    color: #fff;
-    background: rgba(var(--accent-rgb), 0.9);
-    border-color: rgba(var(--accent-light-rgb), 0.55);
-}
-.enhanced-missing-action-btn.primary:hover { background: rgb(var(--accent-light-rgb)); }
-.enhanced-missing-action-btn.secondary {
-    color: rgba(255,255,255,0.68);
-    background: rgba(255,255,255,0.055);
-    border-color: var(--white-a09);
-}
-.enhanced-missing-action-btn.secondary:hover {
-    color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-rgb), 0.11);
-    border-color: rgba(var(--accent-rgb), 0.25);
 }
 
 /* play: quiet until the row is hovered, then it lights up */
@@ -48864,7 +48839,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     background: rgba(0,0,0,0.35); border-radius: var(--radius-circle); width: 30px; height: 30px;
     display: flex; align-items: center; justify-content: center;
 }
-.watchadd-icon { font-size: 22px; }
 .watchadd-title { font-size: 16px; font-weight: 700; color: #fff; }
 .watchadd-sub { font-size: 12px; color: var(--white-a45); }
 .watchadd-close {
