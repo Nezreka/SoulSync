@@ -1371,31 +1371,31 @@
         var srcPill = '<span class="chat-file-src-pill">FILEPOST.DEV</span>';
 
         // Body & preview
-        var bodyPreviewHtml = '';
+        var bodyThumbHtml = '';
         var subDesc = isAudio
             ? 'Streamable audio file'
             : isVideo
                 ? 'Streamable video'
                 : isImage
-                    ? 'Shared image preview'
+                    ? 'Shared image'
                     : 'Shared file';
 
         if (isAudio) {
-            bodyPreviewHtml = '<div class="chat-file-thumb chat-file-thumb--audio">' +
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--audio">' +
                 '<span class="chat-file-thumb-icon">🎵</span>' +
                 '<div class="chat-file-eq chat-file-eq--disc"><i></i><i></i><i></i><i></i></div>' +
                 '</div>';
         } else if (isVideo) {
-            bodyPreviewHtml = '<div class="chat-file-thumb chat-file-thumb--video">' +
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--video">' +
                 '<span class="chat-file-thumb-icon">🎬</span>' +
                 '</div>';
         } else if (isImage) {
-            bodyPreviewHtml = '<div class="chat-file-img-wrap" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="Click to view full image">' +
-                '<img class="chat-file-img-thumb" src="' + attr(url) + '" alt="' + attr(name) + '" loading="lazy">' +
-                '<span class="chat-file-img-zoom-hint">🔍 Expand</span>' +
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--img" data-chat-file-toggle-expand title="Click to toggle expanded preview">' +
+                '<img class="chat-file-thumb-img" src="' + attr(url) + '" alt="' + attr(name) + '">' +
+                '<span class="chat-file-thumb-expand-icon">🔍</span>' +
                 '</div>';
         } else {
-            bodyPreviewHtml = '<div class="chat-file-thumb chat-file-thumb--generic">' +
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--generic">' +
                 '<span class="chat-file-thumb-icon">📄</span>' +
                 '</div>';
         }
@@ -1404,6 +1404,17 @@
             '<div class="chat-file-name" title="' + attr(name) + '">' + esc(name) + '</div>' +
             '<div class="chat-file-sub">' + esc(subDesc) + (f.s ? ' · ' + esc(_fmtBytes(f.s)) : '') + '</div>' +
             '</div>';
+
+        // Expanded preview for images (minified/collapsed by default)
+        var expandedPreviewHtml = '';
+        if (isImage) {
+            expandedPreviewHtml = '<div class="chat-file-expanded-preview" hidden>' +
+                '<div class="chat-file-img-wrap" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="Click to view full image in Lightbox">' +
+                '<img class="chat-file-img-thumb" src="' + attr(url) + '" alt="' + attr(name) + '" loading="lazy">' +
+                '<span class="chat-file-img-zoom-hint">🔍 View Fullscreen</span>' +
+                '</div>' +
+                '</div>';
+        }
 
         // Action buttons
         var actionsHtml = '<div class="chat-file-actions">';
@@ -1418,7 +1429,8 @@
                 '<a class="chat-card-btn chat-card-btn--accent" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download file">⬇ Download</a>' +
                 '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
         } else if (isImage) {
-            actionsHtml += '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="View full image">🔍 View Fullscreen</button>' +
+            actionsHtml += '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-file-toggle-expand title="Expand preview inline">🖼 Expand Preview</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="View in Lightbox">🔍 Fullscreen</button>' +
                 '<a class="chat-card-btn chat-card-btn--accent" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download image">⬇ Download</a>' +
                 '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
         } else {
@@ -1435,9 +1447,10 @@
                 srcPill +
             '</div>' +
             '<div class="chat-file-body">' +
-                bodyPreviewHtml +
+                bodyThumbHtml +
                 metaHtml +
             '</div>' +
+            expandedPreviewHtml +
             actionsHtml +
             '<div class="chat-file-slot"></div>' +
             '</div>';
@@ -9920,6 +9933,24 @@
                         newVid.addEventListener('pause', function () { t.textContent = '▶ Play Video'; });
                         newVid.addEventListener('play', function () { t.textContent = '⏸ Pause Video'; });
                         newVid.addEventListener('ended', function () { t.textContent = '▶ Play Video'; });
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-toggle-expand]');
+            if (t) {
+                var expCard = t.closest('.chat-file-card');
+                if (expCard) {
+                    var expWrap = expCard.querySelector('.chat-file-expanded-preview');
+                    var toggleBtn = expCard.querySelector('[data-chat-file-toggle-expand].chat-card-btn');
+                    if (expWrap) {
+                        var willOpen = expWrap.hidden;
+                        expWrap.hidden = !willOpen;
+                        expCard.classList.toggle('chat-file-card--expanded', willOpen);
+                        if (toggleBtn) {
+                            toggleBtn.textContent = willOpen ? '🔼 Collapse Preview' : '🖼 Expand Preview';
+                            toggleBtn.title = willOpen ? 'Collapse preview inline' : 'Expand preview inline';
+                        }
                     }
                 }
                 return;

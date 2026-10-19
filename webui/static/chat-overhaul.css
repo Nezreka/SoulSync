@@ -5698,6 +5698,47 @@
     color: #22d3ee;
 }
 
+.chat-file-thumb--img {
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.45);
+    border-color: rgba(56, 189, 248, 0.35);
+    position: relative;
+    padding: 0;
+}
+
+.chat-file-thumb-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 8px;
+    display: block;
+    transition: transform 0.22s ease;
+}
+
+.chat-file-thumb--img:hover .chat-file-thumb-img {
+    transform: scale(1.08);
+}
+
+.chat-file-thumb-expand-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    border-radius: 8px;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.chat-file-thumb--img:hover .chat-file-thumb-expand-icon {
+    opacity: 1;
+}
+
 .chat-file-thumb--video {
     background: radial-gradient(circle at center, rgba(168, 85, 247, 0.25) 0%, rgba(15, 23, 42, 0.9) 100%);
     border-color: rgba(168, 85, 247, 0.35);
@@ -5741,37 +5782,61 @@
     to { height: 11px; }
 }
 
-/* Image Attachment Preview on Card */
+/* Minified vs Expanded Preview on Card */
+.chat-file-expanded-preview {
+    width: 100%;
+    margin-top: 10px;
+    animation: filePreviewExpand 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-file-expanded-preview[hidden] {
+    display: none !important;
+}
+
+@keyframes filePreviewExpand {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
 .chat-file-img-wrap {
     position: relative;
-    max-width: 100%;
-    margin-top: 8px;
+    width: 100%;
+    max-height: 380px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
     border-radius: 10px;
     overflow: hidden;
     cursor: pointer;
-    background: rgba(0, 0, 0, 0.3);
     border: 1px solid var(--white-a12);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
 }
 
 .chat-file-img-thumb {
-    display: block;
     max-width: 100%;
-    max-height: 260px;
-    object-fit: cover;
+    max-height: 380px;
+    object-fit: contain;
+    display: block;
     border-radius: 9px;
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .chat-file-img-wrap:hover .chat-file-img-thumb {
     transform: scale(1.02);
 }
 
-.chat-file-img-hover-badge {
+.chat-file-img-zoom-hint {
     position: absolute;
     bottom: 8px;
     right: 8px;
-    padding: 3px 8px;
+    padding: 3px 9px;
     border-radius: var(--radius-pill);
     background: rgba(0, 0, 0, 0.72);
     backdrop-filter: blur(8px);
@@ -5781,22 +5846,26 @@
     font-size: 11px;
     font-weight: 700;
     pointer-events: none;
-    opacity: 0;
-    transform: translateY(4px);
-    transition: all 0.2s ease;
+    opacity: 0.85;
+    transition: all 0.18s ease;
 }
 
-.chat-file-img-wrap:hover .chat-file-img-hover-badge {
+.chat-file-img-wrap:hover .chat-file-img-zoom-hint {
     opacity: 1;
-    transform: translateY(0);
+    background: rgba(0, 0, 0, 0.88);
 }
 
-/* File Metadata */
+/* File Metadata - robust horizontal flex with ellipsis, never wraps vertically */
 .chat-file-meta {
-    flex: 1;
+    flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    justify-content: center;
 }
 
+.chat-file-name,
 .chat-file-title {
     font-size: 13.5px;
     font-weight: 700;
@@ -5807,6 +5876,7 @@
     line-height: 1.35;
 }
 
+.chat-file-sub,
 .chat-file-desc {
     font-size: 11.5px;
     font-weight: 500;
@@ -5814,13 +5884,16 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-top: 2px;
+    line-height: 1.3;
 }
 
 .chat-file-sender {
     font-size: 11px;
     color: var(--white-a45);
-    margin-top: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
 }
 .chat-file-sender b {
     color: var(--white-a85);
@@ -5897,7 +5970,8 @@
 }
 
 .chat-file-card:hover .chat-file-actions,
-.chat-file-card:focus-within .chat-file-actions {
+.chat-file-card:focus-within .chat-file-actions,
+.chat-file-card--expanded .chat-file-actions {
     opacity: 1;
     max-height: 90px;
     margin-top: 10px;
