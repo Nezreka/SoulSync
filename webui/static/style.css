@@ -39391,48 +39391,8 @@ div.artist-hero-badge {
     to { opacity: 1; transform: translateY(0); }
 }
 
-.enhanced-dropdown-content {
-    max-height: none;
-    overflow-y: visible;
-    padding: 0;
-}
-
-/* Close button inside dropdown - hidden on desktop, shown on mobile */
-.enhanced-dropdown-close {
-    display: none;
-}
-
 /* Responsive: mobile adjustments */
 @media (max-width: 700px) {
-    .enhanced-dropdown-close {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        width: 100%;
-        padding: 8px 16px;
-        margin-bottom: 12px;
-        background: var(--white-a06);
-        border: 1px solid var(--white-a08);
-        border-radius: var(--radius-md);
-        color: var(--white-a50);
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .enhanced-dropdown-close:hover,
-    .enhanced-dropdown-close:active {
-        background: var(--white-a10);
-        color: var(--white-a80);
-    }
-
-    .enhanced-dropdown-close span {
-        font-size: 14px;
-        line-height: 1;
-    }
-
     .enhanced-search-bar-container {
         flex-direction: column;
         padding: 8px;
@@ -39493,12 +39453,6 @@ div.artist-hero-badge {
         font-size: 8px;
     }
 
-    .track-item .action-btn {
-        width: 28px;
-        height: 28px;
-        font-size: 11px;
-    }
-
     .search-results-scroll-area {
         padding-right: 3px;
     }
@@ -39507,23 +39461,6 @@ div.artist-hero-badge {
         padding: 12px;
         border-radius: 14px;
     }
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar {
-    width: 6px;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-thumb {
-    background: var(--white-a20);
-    border-radius: 3px;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-thumb:hover {
-    background: var(--white-a30);
 }
 
 /* Loading and Empty States */
@@ -39550,58 +39487,6 @@ div.artist-hero-badge {
     margin-bottom: 12px;
     opacity: 0.5;
 }
-
-/* Dropdown Sections - Enhanced with Premium Design */
-/* Source tabs for multi-source search */
-.enh-source-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 0;
-    margin-bottom: 20px;
-    border: none;
-}
-
-.enh-source-tab {
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    border: none;
-    background: var(--white-a05);
-    color: var(--white-a50);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-    letter-spacing: 0.02em;
-}
-
-.enh-source-tab:hover {
-    background: var(--white-a10);
-    color: var(--white-a85);
-}
-
-.enh-source-tab.active {
-    background: var(--white-a12);
-    color: #fff;
-    font-weight: 700;
-}
-
-.enh-source-tab .enh-tab-count {
-    margin-left: 4px;
-    opacity: 0.5;
-    font-weight: 400;
-}
-
-.enh-source-tab.enh-tab-spotify.active { background: rgba(29, 185, 84, 0.2); color: #1db954; }
-.enh-source-tab.enh-tab-itunes.active { background: rgba(252, 60, 68, 0.2); color: #fc3c44; }
-.enh-source-tab.enh-tab-deezer.active { background: rgba(162, 56, 255, 0.2); color: #a238ff; }
-.enh-source-tab.enh-tab-discogs.active { background: rgba(212, 165, 116, 0.2); color: #D4A574; }
-.enh-source-tab.enh-tab-hydrabase.active { background: rgba(0, 180, 216, 0.2); color: #00b4d8; }
-.enh-source-tab.enh-tab-amazon.active { background: rgba(255, 153, 0, 0.2); color: #FF9900; }
-.enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
-.enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
-.enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
-.enh-source-tab.enh-tab-bandcamp.active { background: rgba(29, 160, 195, 0.2); color: #1da0c3; }
 
 /* ── Source picker — a boxless rail of brand pills; the pills carry the
    color, the way Spotify's filter chips sit bare on the page. ── */
@@ -39944,13 +39829,6 @@ div.artist-hero-badge {
     background: rgba(220, 50, 50, 0.85);
     color: #fff;
     cursor: pointer;
-}
-
-.enh-empty-state {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--white-a30);
-    font-size: 14px;
 }
 
 @media (max-width: 600px) {
@@ -40835,43 +40713,6 @@ div.artist-hero-badge {
     .artist-video-rail-actions {
         flex-direction: column;
     }
-}
-
-.enh-dropdown-section {
-    margin-bottom: 24px;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    backdrop-filter: none;
-    box-shadow: none;
-    position: relative;
-}
-
-.enh-dropdown-section::before {
-    display: none;
-}
-
-.enh-dropdown-section:last-child {
-    margin-bottom: 0;
-}
-
-.enh-section-header {
-    display: flex; align-items: baseline; gap: 10px; padding: 0;
-    margin-bottom: 16px; border-bottom: none; position: relative;
-}
-.enh-section-header::after { display: none; }
-.enh-section-icon { display: none; }
-.enh-section-title {
-    flex-grow: 1; font-size: 21px; font-weight: 800; color: #ffffff; margin: 0;
-    text-transform: none; letter-spacing: -0.02em;
-}
-.enh-section-count {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 22px; height: 22px; padding: 0 8px;
-    background: var(--white-a07); border: none; border-radius: 11px;
-    font-size: 11.5px; font-weight: 700; color: var(--white-a50);
-    box-shadow: none; font-variant-numeric: tabular-nums;
 }
 
 /* ========================================= */
