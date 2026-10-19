@@ -153,3 +153,11 @@ Code image `localhost/soulsync:test-afb0333c369d` is deployed and **Ready 1/1**.
 Music automation was paused for the rollout and restored to its prior enabled state immediately afterward; video automation was unchanged. The feature image remains available for user review, with SoulSync Flux still suspended as it was before this work. GitOps manifests were not changed.
 
 All original checklist items have been rechecked within the documented scope, and the reopened regression items are resolved. No known implementation item remains open. The previous acceptance mistake was treating component reuse and successful rendering as sufficient; this pass additionally checked preserved visual meaning, reachable per-track actions and actual scrolling behavior.
+
+## Adversarial followup — 2026-10-18
+
+The next audit exposed gaps beyond the earlier representative-state checks. Fixed queue refresh responses and totals with one shared request-version/scope guard, including stale errors; made global ready-batch navigation clear search/category filters; kept routine queue and album success feedback non-sticky; and made missing-track instructions respect partial-album intent.
+
+The subsequent pass also found that reopening an already visible ready batch could clear the selected album without triggering a fetch. The button now preserves selection when the scope is already correct, including while results are loading. Refreshing an initially empty selection also selects the first returned album, and superseded album-refresh failures cannot replace newer feedback.
+
+Verification: 43 Review tests passed, including delayed manual refresh responses, global batch filters, repeated ready-batch navigation and partial-album instructions. Type checks reported zero errors with the existing 551 warnings. Browser inspection reproduced the original notice collision (both notices at y=8); corrected feedback scrolls offscreen while the completion notice remains opaque at y=8. Browser checks also verified cleared batch search and partial-album copy using a response fixture; no live scope choices or requests were changed. Final deployment verification follows below.

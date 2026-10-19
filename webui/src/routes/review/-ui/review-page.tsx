@@ -1374,11 +1374,7 @@ export function ReviewPage() {
                 setCategory('');
                 setQueueMode('ready');
                 setPage(0);
-                setCaseId(
-                  queueMode === 'ready' && page === 0 && !query && !category
-                    ? queue?.items[0]?.case_id || ''
-                    : '',
-                );
+                if (queueMode !== 'ready' || page !== 0 || query || category) setCaseId('');
               }}
             >
               Review ready batch
