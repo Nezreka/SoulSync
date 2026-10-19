@@ -168,7 +168,9 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
     const more = document.querySelector('.pl-card-more') as HTMLElement;
     fireEvent.click(more);
 
-    const items = [...document.querySelectorAll('.pl-menu-item')].map((el) => el.textContent?.trim());
+    const items = [...document.querySelectorAll('.pl-menu-item')].map((el) =>
+      el.textContent?.trim(),
+    );
     expect(items.some((t) => t?.includes('Auto-remove fulfilled'))).toBe(true);
     expect(items.some((t) => t?.includes('Convert'))).toBe(false);
   });
@@ -189,7 +191,9 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
     const more = document.querySelector('.pl-card-more') as HTMLElement;
     fireEvent.click(more);
 
-    const items = [...document.querySelectorAll('.pl-menu-item')].map((el) => el.textContent?.trim());
+    const items = [...document.querySelectorAll('.pl-menu-item')].map((el) =>
+      el.textContent?.trim(),
+    );
     expect(items.some((t) => t?.includes('Copy to Request Lists'))).toBe(true);
     expect(items.some((t) => t?.includes('Convert'))).toBe(false);
   });

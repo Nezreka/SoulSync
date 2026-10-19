@@ -595,8 +595,6 @@ export async function patchMirroredCustomName(
   return data;
 }
 
-
-
 /** POST .../copy-to-request-list */
 export async function postCopyToRequestList(
   playlistId: number | string,
@@ -607,8 +605,14 @@ export async function postCopyToRequestList(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ custom_name: customName }),
   });
-  const data = await readJson<{ success: boolean; new_playlist_id?: number; playlist?: MirroredPlaylistRow; error?: string }>(response);
-  if (!response.ok || data.error) throw new Error(data.error || 'Failed to copy playlist to request list');
+  const data = await readJson<{
+    success: boolean;
+    new_playlist_id?: number;
+    playlist?: MirroredPlaylistRow;
+    error?: string;
+  }>(response);
+  if (!response.ok || data.error)
+    throw new Error(data.error || 'Failed to copy playlist to request list');
   return data;
 }
 
@@ -622,8 +626,11 @@ export async function patchRequestListSettings(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ auto_remove_fulfilled: autoRemoveFulfilled }),
   });
-  const data = await readJson<{ success: boolean; playlist?: MirroredPlaylistRow; error?: string }>(response);
-  if (!response.ok || data.error) throw new Error(data.error || 'Failed to update request list settings');
+  const data = await readJson<{ success: boolean; playlist?: MirroredPlaylistRow; error?: string }>(
+    response,
+  );
+  if (!response.ok || data.error)
+    throw new Error(data.error || 'Failed to update request list settings');
   return data;
 }
 
