@@ -84,7 +84,13 @@ describe('buildCollections', () => {
 
 describe('collectionAutomations', () => {
   const rows = () => [
-    auto({ id: 1, is_system: 1, enabled: 1, trigger_type: 'schedule', action_type: 'process_wishlist' }),
+    auto({
+      id: 1,
+      is_system: 1,
+      enabled: 1,
+      trigger_type: 'schedule',
+      action_type: 'process_wishlist',
+    }),
     auto({ id: 2, group_name: 'Nightly', enabled: 1, trigger_type: 'track_downloaded' }),
     auto({ id: 3, group_name: 'Nightly', enabled: 0, trigger_type: 'schedule' }),
     auto({ id: 4, enabled: 1, trigger_type: 'schedule', last_error: 'boom' }),
@@ -128,7 +134,10 @@ describe('collectionAutomations', () => {
   });
 
   it('system wins over group_name, like the old protected section did', () => {
-    const withSystemGroup = [...rows(), auto({ id: 6, is_system: 1, group_name: 'Nightly', action_type: 'clean_search_history' })];
+    const withSystemGroup = [
+      ...rows(),
+      auto({ id: 6, is_system: 1, group_name: 'Nightly', action_type: 'clean_search_history' }),
+    ];
     expect(collectionAutomations(withSystemGroup, 'system').map((a) => a.id)).toEqual([1, 6]);
     expect(collectionAutomations(withSystemGroup, 'group:Nightly').map((a) => a.id)).toEqual([
       2, 3,

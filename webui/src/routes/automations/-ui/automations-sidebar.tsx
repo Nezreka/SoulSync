@@ -115,11 +115,7 @@ export function AutomationsSidebar({
           : null;
     const zoneProps =
       dropKey !== null
-        ? dnd.zoneProps(
-            dropKey,
-            groupName,
-            isProtectedSystem ? { isProtected: true } : undefined,
-          )
+        ? dnd.zoneProps(dropKey, groupName, isProtectedSystem ? { isProtected: true } : undefined)
         : {};
     const isDropTarget = dropKey !== null && dnd.overKey === dropKey;
 
