@@ -45457,7 +45457,6 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .automation-card.disabled:hover { opacity: 0.75; }
 .automation-card.disabled .automation-name { color: var(--white-a50); }
 .automation-card.system { border-left: none; padding: 8px 12px; }
-.system-badge { display: inline-block; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; padding: 1px 5px; border-radius: var(--radius-sm); background: rgba(99,102,241,0.2); color: #818cf8; vertical-align: middle; }
 
 .automation-status { width: 8px; height: 8px; border-radius: var(--radius-circle); flex-shrink: 0; }
 .automation-status.enabled { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.4); }
@@ -46459,9 +46458,6 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 }
 .auto-group-input::placeholder { color: var(--white-a25); }
 .auto-group-input:focus { border-color: rgba(var(--accent-rgb),0.5); }
-
-/* Group section label styling */
-.automations-section .section-group-icon { margin-right: 4px; font-size: 12px; }
 
 /* --- Empty State --- */
 .automations-empty {
