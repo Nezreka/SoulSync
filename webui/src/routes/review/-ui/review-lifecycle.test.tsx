@@ -245,3 +245,135 @@ it('keeps a failed global operation at queue scope while an album is open', asyn
     'Batch verification failed',
   );
 });
+
+it.each(['edit', 'navigate'] as const)(
+  'discards a late manual release lookup after %s',
+  async (action) => {
+    setup();
+    const read = fetchMock.getMockImplementation()!;
+    let finish!: () => void;
+    fetchMock.mockImplementation(async (input: string, options?: RequestInit) => {
+      if (input.endsWith('/release')) {
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        return reply({
+          success: true,
+          candidate: {
+            source: 'musicbrainz',
+            release_id: '11111111-1111-1111-1111-111111111111',
+            release_title: 'Obsolete lookup',
+          },
+        });
+      }
+      return read(input, options);
+    });
+    render(<ReviewPage />);
+    await screen.findByRole('heading', { name: 'First album' });
+    fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
+    fireEvent.change(screen.getByLabelText('MusicBrainz release MBID or URL'), {
+      target: { value: '11111111-1111-1111-1111-111111111111' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load release' }));
+    await waitFor(() => expect(finish).toBeTypeOf('function'));
+    if (action === 'edit') {
+      fireEvent.change(screen.getByLabelText('MusicBrainz release MBID or URL'), {
+        target: { value: '22222222-2222-2222-2222-222222222222' },
+      });
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: /Another album/ }));
+      await screen.findByRole('heading', { name: 'Another album' });
+      fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
+    }
+    await act(async () => finish());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Load release' })).not.toBeDisabled(),
+    );
+    expect(screen.queryByText('Obsolete lookup')).toBeNull();
+    expect(screen.getByLabelText('MusicBrainz release MBID or URL')).toHaveValue(
+      action === 'edit' ? '22222222-2222-2222-2222-222222222222' : '',
+    );
+  },
+);
+
+it('opens a requested decision, then returns to a filtered list with matching decision navigation', async () => {
+  const items = [7, 8, 9].map((id) => ({
+    id,
+    title: `Track ${id}`,
+    description: `Evidence for track ${id}`,
+    file_path: `/music/First/${id}.flac`,
+    finding_type: id === 7 ? 'reconciliation_unresolved' : 'reconciliation_metadata',
+    review_tier: id === 7 ? 'manual' : 'ready',
+    details: { changes: id === 7 ? {} : { title: { old: `track ${id}`, new: `Track ${id}` } } },
+  }));
+  const decisions = [
+    {
+      id: 'audio',
+      category: 'audio_conflicts',
+      label: 'Audio assignment',
+      risk: 'manual',
+      finding_ids: [7],
+      action_count: 1,
+    },
+  ];
+  setup({
+    ...album,
+    count: 3,
+    items,
+    decisions,
+    album_plan: {
+      ...album.album_plan,
+      assignments: items.map((item) => ({
+        status: item.id === 7 ? 'uncertain' : 'change',
+        finding_id: item.id,
+        file_path: item.file_path,
+        file: `${item.id}.flac`,
+        current_title: `Local ${item.id}`,
+        slot_title: `Slot ${item.id}`,
+        changes: item.details.changes,
+      })),
+    },
+  });
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  fireEvent.click(screen.getByRole('button', { name: /Confirm 1 uncertain track assignment/ }));
+  const inspector = screen.getByLabelText('Selected track details');
+  expect(inspector).toHaveAttribute('data-open', 'true');
+  expect(within(inspector).getByText('Evidence for track 7')).toBeTruthy();
+  expect(within(inspector).getByRole('button', { name: /Next decision/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('tab', { name: /^Plan/ }));
+  fireEvent.click(within(screen.getByLabelText('Proposed metadata by field')).getByRole('button'));
+  expect(screen.getByLabelText('Selected track details')).not.toHaveAttribute('data-open');
+  const selected = screen.getByLabelText('Selected action detail');
+  expect(within(selected).getByText('Evidence for track 8')).toBeTruthy();
+  fireEvent.click(within(selected).getByRole('button', { name: /Next decision/ }));
+  expect(screen.getByText('Evidence for track 9')).toBeTruthy();
+  expect(screen.getByRole('button', { name: /Next decision/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: /Previous decision/ }));
+  expect(screen.getByText('Evidence for track 8')).toBeTruthy();
+});
+
+it('does not replace a newly selected album when release pinning finishes late', async () => {
+  setup();
+  const read = fetchMock.getMockImplementation()!;
+  let finish!: () => void;
+  fetchMock.mockImplementation(async (input: string, options?: RequestInit) => {
+    if (input.endsWith('/release')) {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return reply({ success: true });
+    }
+    return read(input, options);
+  });
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'First album' });
+  fireEvent.click(screen.getByRole('tab', { name: 'Release' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Use this release' }));
+  await waitFor(() => expect(finish).toBeTypeOf('function'));
+  fireEvent.click(screen.getByRole('button', { name: /Another album/ }));
+  await screen.findByRole('heading', { name: 'Another album' });
+  await act(async () => finish());
+  expect(screen.queryByRole('heading', { name: 'First album' })).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Another album' })).toBeTruthy();
+});

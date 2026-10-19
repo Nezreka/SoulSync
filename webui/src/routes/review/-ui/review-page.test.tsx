@@ -489,7 +489,7 @@ describe('library reconciliation review queue', () => {
     expect(screen.getAllByText('One disc · match release positions').length).toBeGreaterThan(0);
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
-    expect(screen.getByText(/1 proposed track changes/)).toBeTruthy();
+    expect(screen.getByText(/1 proposed track change/)).toBeTruthy();
     const selectedRow = screen.getByRole('button', { name: /Hourglass/ });
     fireEvent.click(selectedRow);
     const selectedDetail = screen.getByLabelText('Selected action detail');

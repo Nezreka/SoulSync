@@ -308,6 +308,7 @@ export function ReviewPage() {
   const [openGroups, setOpenGroups] = useState<string[]>(['attention', 'changes']);
   const [previewCandidate, setPreviewCandidate] = useState(0);
   const [releaseIdInput, setReleaseIdInput] = useState('');
+  const releaseLookupVersion = useRef(0);
   const [manualRelease, setManualRelease] = useState<Record<string, unknown> | null>(null);
   const [page, setPage] = useState(0);
   const [query, setQuery] = useState('');
@@ -452,6 +453,8 @@ export function ReviewPage() {
   }, [caseId, queueMode]);
 
   useEffect(() => {
+    releaseLookupVersion.current += 1;
+    setReleaseIdInput('');
     if (!caseId) {
       setReviewCase(null);
       return;
@@ -506,8 +509,6 @@ export function ReviewPage() {
     () => reviewCase?.items.find((finding) => finding.id === activeId),
     [reviewCase, activeId],
   );
-  const itemIndex =
-    active && reviewCase ? reviewCase.items.findIndex((f) => f.id === active.id) : -1;
   const caseIndex = queue?.items.findIndex((item) => item.case_id === caseId) ?? -1;
   const pageCount = queue ? Math.max(1, Math.ceil(queue.total / queue.limit)) : 1;
   const albumNumber = queue && caseIndex >= 0 ? page * queue.limit + caseIndex + 1 : null;
@@ -592,6 +593,10 @@ export function ReviewPage() {
         ];
   const filterCount = (filter: string) =>
     filterRows.filter((row) => matchesTrackFilter(row, filter)).length;
+  const visibleAttention = attentionAssignments.filter(matchingFilter);
+  const visibleChanges = changeAssignments.filter(matchingFilter);
+  const visibleMissing = missingAssignments.filter(matchingFilter);
+  const visibleSettled = settledAssignments.filter(matchingFilter);
   const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
   const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
   const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
@@ -613,17 +618,50 @@ export function ReviewPage() {
     (reviewCase?.album_plan?.counts.confirmed || 0) + (reviewCase?.album_plan?.counts.settled || 0);
 
   useEffect(() => {
-    if (albumView !== 'tracks' || !reviewCase) return;
-    if (activeRowKey && assignments.some((row) => assignmentKey(row) === activeRowKey)) return;
+    if (albumView !== 'tracks' || !reviewCase || !assignments.length) return;
+    const visible = filterRows.filter(matchingFilter);
+    if (activeRowKey && visible.some((row) => assignmentKey(row) === activeRowKey)) return;
     const first =
-      assignmentsByFinding.get(activeId) ||
-      assignments.find((row) => row.finding_id && row.action_state !== 'waiting') ||
-      assignments[0];
-    if (first) {
-      setActiveId(first.finding_id ?? null);
-      setActiveRowKey(assignmentKey(first));
-    }
-  }, [albumView, reviewCase, activeRowKey, activeId, assignments]);
+      visible.find((row) => row.finding_id === activeId) ||
+      visible.find((row) => row.finding_id && row.action_state !== 'waiting') ||
+      visible[0];
+    setActiveId(first?.finding_id ?? null);
+    setActiveRowKey(first ? assignmentKey(first) : null);
+  }, [albumView, reviewCase, activeRowKey, activeId, assignments, trackFilter, trackView]);
+
+  const showTrackList = (filter = trackFilter, focus = true) => {
+    setTrackFilter(filter);
+    setAlbumView('tracks');
+    setInspectorOpen(false);
+    setOpenGroups((current) => [
+      ...new Set([
+        ...current,
+        ...(filter === 'missing'
+          ? ['missing']
+          : filter === 'settled'
+            ? ['settled']
+            : ['attention', 'changes']),
+      ]),
+    ]);
+    if (focus)
+      requestAnimationFrame(() => {
+        const list = document.querySelector<HTMLElement>(
+          '[aria-label="Complete album track assignment"]',
+        );
+        list?.focus({ preventScroll: true });
+        list?.scrollIntoView({ block: 'start' });
+      });
+  };
+
+  const focusTrackInspector = () => {
+    requestAnimationFrame(() => {
+      const inspector = inspectorRef.current;
+      if (inspector && getComputedStyle(inspector).position === 'static') {
+        inspector.focus();
+        inspector.scrollIntoView({ block: 'start' });
+      }
+    });
+  };
 
   const selectFinding = (findingId: number | null, rowKey?: string) => {
     setActiveId((current) => (current === findingId ? null : findingId));
@@ -635,7 +673,7 @@ export function ReviewPage() {
 
   const selectCase = (next: string) => {
     setNotice('');
-    setInspectorOpen(true);
+    setInspectorOpen(false);
     setAlbumView('plan');
     setTrackFilter('');
     setTrackView('issues');
@@ -658,6 +696,9 @@ export function ReviewPage() {
       setActiveId(first);
       setActiveRowKey(null);
     } else {
+      trackListScroll.current = [];
+      setInspectorOpen(true);
+      focusTrackInspector();
       setAlbumView('tracks');
       setTrackView('issues');
       setTrackFilter(`decision:${decision.id}`);
@@ -1095,6 +1136,7 @@ export function ReviewPage() {
     const candidate = releaseCandidates[index];
     if (!candidate) return;
     const current = reviewCase.album_plan;
+    const requestedCase = reviewCase.case_id;
     setBusy(true);
     setError('');
     try {
@@ -1105,8 +1147,10 @@ export function ReviewPage() {
         { manual: candidate === manualRelease },
       );
       if (!result.success) throw new Error(result.error || 'Could not select this release');
+      if (selectedCaseRef.current !== requestedCase) return;
       setNotice(result.message || 'Release selected; updating this album plan');
       const updated = await fetchReviewCase(reviewCase.case_id);
+      if (selectedCaseRef.current !== requestedCase) return;
       setReviewCase(updated);
       setManualRelease(null);
       setPreviewCandidate(
@@ -1121,7 +1165,7 @@ export function ReviewPage() {
       );
       await refreshQueue();
     } catch (cause) {
-      setError((cause as Error).message);
+      if (selectedCaseRef.current === requestedCase) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -1139,6 +1183,10 @@ export function ReviewPage() {
     setBusy(true);
     setError('');
     setManualRelease(null);
+    const requestedCase = reviewCase.case_id;
+    const version = ++releaseLookupVersion.current;
+    const isCurrent = () =>
+      selectedCaseRef.current === requestedCase && version === releaseLookupVersion.current;
     try {
       const result = await pinReviewRelease(
         reviewCase.case_id,
@@ -1146,6 +1194,7 @@ export function ReviewPage() {
         reviewCase.album_plan,
         { preview: true },
       );
+      if (!isCurrent()) return;
       if (!result.success) throw new Error(result.error || 'Could not load this release');
       if (!result.candidate) throw new Error('The release comparison could not be loaded');
       setManualRelease(result.candidate);
@@ -1154,7 +1203,7 @@ export function ReviewPage() {
           .length,
       );
     } catch (cause) {
-      setError((cause as Error).message);
+      if (isCurrent()) setError((cause as Error).message);
     } finally {
       setBusy(false);
     }
@@ -1241,11 +1290,7 @@ export function ReviewPage() {
             key={group.key}
             type="button"
             onClick={() => {
-              setTrackFilter(group.key);
-              setAlbumView('tracks');
-              setOpenGroups((current) =>
-                current.includes('changes') ? current : [...current, 'changes'],
-              );
+              showTrackList(group.key);
             }}
           >
             <span>
@@ -1277,25 +1322,42 @@ export function ReviewPage() {
     : '';
   const comparisonDurationMs = assignmentsByPath.get(comparisonPath)?.file_duration_ms || 0;
 
-  const actionDetail = (compact = false) =>
-    active && reviewCase ? (
+  const actionDetail = (compact = false) => {
+    if (!active || !reviewCase) return null;
+    const navigationIds = compact
+      ? [
+          ...new Set(
+            filterRows
+              .filter(matchingFilter)
+              .flatMap((row) =>
+                row.finding_id != null &&
+                reviewCase.items.some((item) => item.id === row.finding_id)
+                  ? [row.finding_id]
+                  : [],
+              ),
+          ),
+        ]
+      : reviewCase.items.map((item) => item.id);
+    const navigationIndex = navigationIds.indexOf(active.id);
+    return (
       <SelectedActionDetail
         key={active.id}
         finding={active}
-        itemIndex={itemIndex}
-        itemCount={reviewCase.count}
+        itemIndex={navigationIndex}
+        itemCount={navigationIds.length}
         typeInfo={typeInfo}
         busy={mutationBusy}
         onAct={(action, choice) => void act(active, action, choice)}
         onSelect={selectFinding}
-        previousId={reviewCase.items[itemIndex - 1]?.id}
-        nextId={reviewCase.items[itemIndex + 1]?.id}
+        previousId={navigationIds[navigationIndex - 1]}
+        nextId={navigationIds[navigationIndex + 1]}
         comparisonPath={comparisonPath || undefined}
         comparisonDurationMs={comparisonDurationMs}
         compact={compact}
         numberingPreview={activeAssignment?.numbering_preview}
       />
-    ) : null;
+    );
+  };
   const selectedActionDetail = actionDetail();
   const compactSelectedActionDetail = actionDetail(true);
 
@@ -1318,13 +1380,7 @@ export function ReviewPage() {
             scrollElement = scrollElement.parentElement;
           }
           selectAssignment(findingId, rowKey);
-          requestAnimationFrame(() => {
-            const inspector = inspectorRef.current;
-            if (inspector && getComputedStyle(inspector).position === 'static') {
-              inspector.focus();
-              inspector.scrollIntoView({ block: 'start' });
-            }
-          });
+          focusTrackInspector();
         }}
       />
     );
@@ -1720,7 +1776,8 @@ export function ReviewPage() {
                             : null;
                   if (next) {
                     event.preventDefault();
-                    setAlbumView(next);
+                    if (next === 'tracks') showTrackList(trackFilter, false);
+                    else setAlbumView(next);
                     document.getElementById(`review-tab-${next}`)?.focus();
                   }
                 }}
@@ -1758,7 +1815,7 @@ export function ReviewPage() {
                   aria-selected={albumView === 'tracks'}
                   tabIndex={albumView === 'tracks' ? 0 : -1}
                   aria-current={albumView === 'tracks' ? 'page' : undefined}
-                  onClick={() => setAlbumView('tracks')}
+                  onClick={() => showTrackList(trackFilter, false)}
                 >
                   Tracks
                   <span>{assignments.length}</span>
@@ -1997,8 +2054,7 @@ export function ReviewPage() {
                                         </Button>
                                         <Button
                                           onClick={() => {
-                                            setAlbumView('tracks');
-                                            setTrackFilter('missing');
+                                            showTrackList('missing');
                                           }}
                                         >
                                           Choose individual tracks →
@@ -2093,7 +2149,7 @@ export function ReviewPage() {
                               <Button
                                 className={styles.decisionSelect}
                                 type="button"
-                                onClick={() => setAlbumView('tracks')}
+                                onClick={() => showTrackList()}
                               >
                                 <span className={styles.decisionStep} aria-hidden="true">
                                   ✓
@@ -2205,8 +2261,7 @@ export function ReviewPage() {
                           type="button"
                           className={styles.secondaryButton}
                           onClick={() => {
-                            setTrackFilter('change');
-                            setAlbumView('tracks');
+                            showTrackList('change');
                           }}
                         >
                           Inspect proposed track edits →
@@ -2231,6 +2286,7 @@ export function ReviewPage() {
                       <section
                         className={styles.trackMatrix}
                         aria-label="Complete album track assignment"
+                        tabIndex={-1}
                       >
                         <div className={styles.sectionHeading}>
                           <div>
@@ -2432,7 +2488,8 @@ export function ReviewPage() {
                               }
                             >
                               <summary>
-                                {missingAssignments.length} missing tracks · Choose tracks to
+                                {missingAssignments.length} missing track
+                                {missingAssignments.length === 1 ? '' : 's'} · Choose tracks to
                                 request
                               </summary>
                               <MissingTracksChoice
@@ -2464,7 +2521,7 @@ export function ReviewPage() {
                               .map(renderAssignmentRow)
                           ) : (
                             <>
-                              {attentionAssignments.filter(matchingFilter).length > 0 && (
+                              {visibleAttention.length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="warning">
                                   <Button
                                     type="button"
@@ -2472,16 +2529,14 @@ export function ReviewPage() {
                                     onClick={() => toggleGroup('attention')}
                                   >
                                     {openGroups.includes('attention') ? '▾' : '▸'}{' '}
-                                    {attentionAssignments.filter(matchingFilter).length} tracks
-                                    needing review
+                                    {visibleAttention.length} track
+                                    {visibleAttention.length === 1 ? '' : 's'} needing review
                                   </Button>
                                   {openGroups.includes('attention') &&
-                                    attentionAssignments
-                                      .filter(matchingFilter)
-                                      .map(renderAssignmentRow)}
+                                    visibleAttention.map(renderAssignmentRow)}
                                 </div>
                               )}
-                              {changeAssignments.filter(matchingFilter).length > 0 && (
+                              {visibleChanges.length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="info">
                                   <Button
                                     type="button"
@@ -2489,16 +2544,14 @@ export function ReviewPage() {
                                     onClick={() => toggleGroup('changes')}
                                   >
                                     {openGroups.includes('changes') ? '▾' : '▸'} ↻{' '}
-                                    {changeAssignments.filter(matchingFilter).length} proposed track
-                                    changes
+                                    {visibleChanges.length} proposed track change
+                                    {visibleChanges.length === 1 ? '' : 's'}
                                   </Button>
                                   {openGroups.includes('changes') &&
-                                    changeAssignments
-                                      .filter(matchingFilter)
-                                      .map(renderAssignmentRow)}
+                                    visibleChanges.map(renderAssignmentRow)}
                                 </div>
                               )}
-                              {missingAssignments.filter(matchingFilter).length > 0 && (
+                              {visibleMissing.length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="danger">
                                   <Button
                                     type="button"
@@ -2506,8 +2559,8 @@ export function ReviewPage() {
                                     onClick={() => toggleGroup('missing')}
                                   >
                                     {openGroups.includes('missing') ? '▾' : '▸'}{' '}
-                                    {missingAssignments.filter(matchingFilter).length} absent
-                                    release tracks
+                                    {visibleMissing.length} absent release track
+                                    {visibleMissing.length === 1 ? '' : 's'}
                                   </Button>
                                   {openGroups.includes('missing') && (
                                     <>
@@ -2517,14 +2570,12 @@ export function ReviewPage() {
                                           on Plan.
                                         </p>
                                       )}
-                                      {missingAssignments
-                                        .filter(matchingFilter)
-                                        .map(renderAssignmentRow)}
+                                      {visibleMissing.map(renderAssignmentRow)}
                                     </>
                                   )}
                                 </div>
                               )}
-                              {settledAssignments.filter(matchingFilter).length > 0 && (
+                              {visibleSettled.length > 0 && (
                                 <div className={styles.assignmentGroup} data-tone="good">
                                   <Button
                                     type="button"
@@ -2532,13 +2583,11 @@ export function ReviewPage() {
                                     onClick={() => toggleGroup('settled')}
                                   >
                                     {openGroups.includes('settled') ? '▾' : '▸'} ✓{' '}
-                                    {settledAssignments.filter(matchingFilter).length} settled
-                                    release slots
+                                    {visibleSettled.length} settled release slot
+                                    {visibleSettled.length === 1 ? '' : 's'}
                                   </Button>
                                   {openGroups.includes('settled') &&
-                                    settledAssignments
-                                      .filter(matchingFilter)
-                                      .map(renderAssignmentRow)}
+                                    visibleSettled.map(renderAssignmentRow)}
                                 </div>
                               )}
                             </>
@@ -2714,8 +2763,10 @@ export function ReviewPage() {
                             aria-label="MusicBrainz release MBID or URL"
                             value={releaseIdInput}
                             onChange={(event) => {
+                              releaseLookupVersion.current += 1;
                               setReleaseIdInput(event.target.value);
                               setManualRelease(null);
+                              setPreviewCandidate(0);
                             }}
                             placeholder="Release MBID or URL"
                           />
@@ -2837,7 +2888,7 @@ export function ReviewPage() {
                           </section>
                         )}
                         <div className={`${styles.actions} ${styles.planContextActions}`}>
-                          <Button type="button" onClick={() => setAlbumView('tracks')}>
+                          <Button type="button" onClick={() => showTrackList()}>
                             Review track assignments
                           </Button>
                           {reviewCase.album_plan.intent_scope && (
@@ -2869,11 +2920,7 @@ export function ReviewPage() {
                               key={group.key}
                               type="button"
                               onClick={() => {
-                                setTrackFilter(group.key);
-                                setAlbumView('tracks');
-                                setOpenGroups((current) =>
-                                  current.includes('changes') ? current : [...current, 'changes'],
-                                );
+                                showTrackList(group.key);
                               }}
                             >
                               <span>

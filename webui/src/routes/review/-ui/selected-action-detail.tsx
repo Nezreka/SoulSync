@@ -44,7 +44,6 @@ export function SelectedActionDetail({
 }) {
   const canApply =
     Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag' && !numberingPreview;
-  const [assignmentSlot, setAssignmentSlot] = useState('');
   const assignmentOptions = records(record(finding.details).assignment_options);
   const duplicateChoice = finding.finding_type === 'reconciliation_duplicate';
   const wrongAudio = finding.details?.audio_conflict === 'different_recording';
@@ -53,10 +52,16 @@ export function SelectedActionDetail({
     textValue(finding.details?.fulfillment_state),
   );
   const replacement = record(finding.details?.replacement_track);
-  const proposedSlot = assignmentOptions.find((slot) => {
-    const sourceTrackId = textValue(replacement.source_track_id);
-    return sourceTrackId && textValue(slot.key).startsWith(`id:${sourceTrackId}:`);
-  });
+  const canAssign = Boolean(finding.file_path) && !numberingPreview && !waitingForDownload;
+  const proposedSlot =
+    canAssign && !wrongAudio && !versionConflict && !duplicateChoice
+      ? assignmentOptions.find(
+          (slot) =>
+            replacement.source_track_id &&
+            textValue(slot.key) ===
+              `id:${textValue(replacement.source_track_id)}:${textValue(replacement.disc_number || 1)}:${textValue(replacement.track_number || 0)}`,
+        )
+      : undefined;
   const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
   const suggested = finding.review_tier === 'ready';
   const compactReason = finding.review_reason || finding.description;
@@ -305,52 +310,21 @@ export function SelectedActionDetail({
               </div>
             )}
 
-            {finding.file_path && assignmentOptions.length > 0 && (
-              <details className={styles.actionDisclosure}>
-                <summary>Change track assignment</summary>
-                <div className={styles.assignmentCorrection}>
-                  <label>
-                    Assign this file to another release track
-                    <Select
-                      value={assignmentSlot}
-                      onChange={(event) => setAssignmentSlot(event.target.value)}
-                    >
-                      <option value="">Choose a release track…</option>
-                      {assignmentOptions.map((slot, index) => (
-                        <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
-                          {formatTrackPosition(
-                            textValue(slot.disc_number),
-                            textValue(slot.track_number),
-                            textValue(details.numbering_mode),
-                            textValue(slot.display_track_number),
-                          )}{' '}
-                          {textValue(slot.title)}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                  <Button
-                    type="button"
-                    disabled={busy || !assignmentSlot}
-                    onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
-                  >
-                    Save plan assignment
-                  </Button>
-                  {details.saved_assignment === true && (
-                    <Button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onAct('fix', 'assign:auto')}
-                    >
-                      Reset plan assignment
-                    </Button>
-                  )}
-                  <small>
-                    This saves your plan choice and recalculates proposed edits. Files stay
-                    unchanged until you apply them.
-                  </small>
-                </div>
-              </details>
+            {canAssign && assignmentOptions.length > 0 && (
+              <AssignmentChoice
+                key={JSON.stringify([
+                  finding.id,
+                  finding.file_path,
+                  details.source,
+                  details.release_id,
+                  assignmentOptions.map((slot) => slot.key),
+                ])}
+                options={assignmentOptions}
+                numberingMode={textValue(details.numbering_mode)}
+                saved={details.saved_assignment === true}
+                busy={busy}
+                onAct={onAct}
+              />
             )}
 
             {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&
@@ -407,5 +381,62 @@ export function SelectedActionDetail({
         }
       />
     </section>
+  );
+}
+
+/** Reset a draft selection whenever its file, release, or available slots change. */
+function AssignmentChoice({
+  options,
+  numberingMode,
+  saved,
+  busy,
+  onAct,
+}: {
+  options: Record<string, unknown>[];
+  numberingMode: string;
+  saved: boolean;
+  busy: boolean;
+  onAct: (action: 'fix', choice: string) => void;
+}) {
+  const [slot, setSlot] = useState('');
+  return (
+    <details className={styles.actionDisclosure}>
+      <summary>Change track assignment</summary>
+      <div className={styles.assignmentCorrection}>
+        <label>
+          Assign this file to another release track
+          <Select value={slot} disabled={busy} onChange={(event) => setSlot(event.target.value)}>
+            <option value="">Choose a release track…</option>
+            {options.map((option, index) => (
+              <option value={textValue(option.key)} key={`${textValue(option.key)}-${index}`}>
+                {formatTrackPosition(
+                  textValue(option.disc_number),
+                  textValue(option.track_number),
+                  numberingMode,
+                  textValue(option.display_track_number) || undefined,
+                )}{' '}
+                {textValue(option.title)}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <Button
+          type="button"
+          disabled={busy || !slot}
+          onClick={() => onAct('fix', `assign:${slot}`)}
+        >
+          Save plan assignment
+        </Button>
+        {saved && (
+          <Button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
+            Reset plan assignment
+          </Button>
+        )}
+        <small>
+          This saves your plan choice and recalculates proposed edits. Files stay unchanged until
+          you apply them.
+        </small>
+      </div>
+    </details>
   );
 }

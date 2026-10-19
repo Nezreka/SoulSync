@@ -993,7 +993,7 @@
   align-items: flex-start;
 }
 .albumIdentity {
-  flex: 1 1 480px;
+  flex: 1 1 400px;
   display: flex;
   align-items: flex-start;
   gap: 16px;
@@ -1005,6 +1005,7 @@
 .albumHeader .nav {
   flex: 0 0 auto;
   flex-wrap: wrap;
+  gap: 8px;
 }
 .albumHeader .nav button {
   white-space: nowrap;
@@ -2767,16 +2768,6 @@
 }
 .decisionGrid .decisionActions {
   padding: 12px 14px 14px;
-}
-.albumIdentity {
-  flex: 1 1 400px;
-}
-.albumHeader {
-  flex-wrap: wrap;
-}
-.albumHeader .nav {
-  flex-wrap: wrap;
-  gap: 8px;
 }
 .reconciliationEvidence {
   gap: 16px;

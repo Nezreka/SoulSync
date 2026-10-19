@@ -72,3 +72,87 @@ it('shows identifier-only proposals immediately', () => {
   expect(screen.getByText('new-id')).toBeTruthy();
   expect(screen.queryByText('1 identifier change')).toBeNull();
 });
+
+const repeatedRecording = {
+  ...finding,
+  finding_type: 'reconciliation_unresolved',
+  details: {
+    replacement_track: { source_track_id: 'recording', disc_number: 2, track_number: 1 },
+    assignment_options: [
+      { key: 'id:recording:1:1', title: 'First occurrence', disc_number: 1, track_number: 1 },
+      { key: 'id:recording:2:1', title: 'Second occurrence', disc_number: 2, track_number: 1 },
+    ],
+  },
+} as ReviewFinding;
+
+function detail(current: ReviewFinding, onAct = vi.fn(), preview = false) {
+  return (
+    <SelectedActionDetail
+      finding={current}
+      itemIndex={0}
+      itemCount={1}
+      busy={false}
+      onAct={onAct}
+      onSelect={vi.fn()}
+      compact
+      numberingPreview={preview}
+      typeInfo={{ fixable: true } as FindingTypeInfo}
+    />
+  );
+}
+
+it('uses the exact release position when a recording appears more than once', () => {
+  const onAct = vi.fn();
+  render(detail(repeatedRecording, onAct));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Use assignment in plan: Second occurrence' }),
+  );
+  expect(onAct).toHaveBeenCalledWith('fix', 'assign:id:recording:2:1');
+  expect(screen.queryByRole('button', { name: /Use assignment in plan: First/ })).toBeNull();
+});
+
+it.each([
+  { audio_conflict: 'different_recording' },
+  { version_conflict: true },
+  { fulfillment_state: 'wishlisted' },
+])('does not recommend assigning conflicting or waiting audio: %j', (details) => {
+  render(detail({ ...repeatedRecording, details: { ...repeatedRecording.details, ...details } }));
+  expect(screen.queryByRole('button', { name: /Use assignment in plan:/ })).toBeNull();
+});
+
+it('exposes no assignment mutation from a numbering preview or a missing file', () => {
+  const { rerender } = render(detail(repeatedRecording, vi.fn(), true));
+  expect(screen.queryByText('Change track assignment')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Use assignment in plan:/ })).toBeNull();
+  rerender(detail({ ...repeatedRecording, file_path: null }));
+  expect(screen.queryByText('Change track assignment')).toBeNull();
+  expect(screen.queryByRole('button', { name: /Use assignment in plan:/ })).toBeNull();
+});
+
+it('clears a draft assignment when the same finding receives another release or options', () => {
+  const onAct = vi.fn();
+  const { rerender } = render(detail(finding, onAct));
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'id:other:1:2' } });
+  expect(screen.getByRole('button', { name: 'Save plan assignment' })).not.toBeDisabled();
+  rerender(
+    detail({ ...finding, details: { ...finding.details, release_id: 'another-release' } }, onAct),
+  );
+  expect(screen.getByRole('combobox')).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Save plan assignment' })).toBeDisabled();
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'id:other:1:2' } });
+  rerender(
+    detail(
+      {
+        ...finding,
+        details: {
+          ...finding.details,
+          assignment_options: [{ key: 'id:new:1:1', title: 'New slot' }],
+        },
+      },
+      onAct,
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save plan assignment' }));
+  expect(onAct).not.toHaveBeenCalled();
+  expect(screen.getByRole('combobox')).toHaveValue('');
+});

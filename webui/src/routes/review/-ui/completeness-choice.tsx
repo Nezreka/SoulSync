@@ -30,12 +30,36 @@ export function CompletenessChoice({
   onChoose: (choice: string) => void;
 }) {
   const missing = records(record(finding.details).missing_tracks);
+  return (
+    <CompletenessOptions
+      key={JSON.stringify([
+        finding.id,
+        finding.details?.source,
+        finding.details?.release_id,
+        missing.map(slotKey),
+      ])}
+      missing={missing}
+      busy={busy}
+      onChoose={onChoose}
+    />
+  );
+}
+
+function CompletenessOptions({
+  missing,
+  busy,
+  onChoose,
+}: {
+  missing: Record<string, unknown>[];
+  busy: boolean;
+  onChoose: (choice: string) => void;
+}) {
   const [wanted, setWanted] = useState<string[]>([]);
   return (
     <div className={styles.completenessChoice}>
       <p>
-        {missing.length} tracks are absent from this folder. Mark any you want to collect if this is
-        a partial album.
+        {missing.length} {missing.length === 1 ? 'track is' : 'tracks are'} absent from this folder.
+        Mark any you want to collect if this is a partial album.
       </p>
       <div className={styles.wantedTracks}>
         {missing.map((slot, index) => {
@@ -43,6 +67,7 @@ export function CompletenessChoice({
           return (
             <label key={`${key}-${index}`}>
               <Checkbox
+                disabled={busy}
                 checked={wanted.includes(key)}
                 onCheckedChange={(checked) =>
                   setWanted((current) =>
