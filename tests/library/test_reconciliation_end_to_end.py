@@ -491,6 +491,7 @@ def _metadata_recommendation_album(tmp_path, monkeypatch, *, mixed=False, record
     mbids = ['80951433-fbbf-45e8-b906-e820652b9ca5', 'e2bd3843-a9f1-447f-b733-f5f3d5dd3d33']
     with db._get_connection() as conn:
         conn.execute("UPDATE albums SET canonical_source='itunes', title='Ashes of the Wake (Deluxe)'")
+        conn.execute("UPDATE artists SET aliases=?", (json.dumps(['ラム・オブ・ゴッド']),))
         conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) VALUES (2,10,1,'Hourglass',2,?)", (str(paths[1]),))
         conn.commit()
     for index, path in enumerate(paths):
@@ -562,6 +563,18 @@ def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp
         assert 'musicbrainz_albumid' not in tags
         assert tags['musicbrainz_trackid']  # Track identity is retained.
         assert tags['album'] == ['Ashes of the Wake (Deluxe)']
+
+
+def test_stored_artist_aliases_support_cross_script_audio_identity(tmp_path, monkeypatch):
+    db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch)
+    for recording in context.acoustid_client.matches.values():
+        recording['artist'] = 'ラム・オブ・ゴッド'
+    assert not LibraryReconciliationJob().scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    items = worker.get_review_case(case_id)['items']
+    assert len(items) == 2
+    assert all(item['finding_type'] == 'reconciliation_metadata' for item in items)
+    assert {item['details']['changes']['musicbrainz_recording_id']['new'] for item in items} == set(mbids)
 
 
 def test_provider_independent_recording_identity_requires_unique_corroboration():

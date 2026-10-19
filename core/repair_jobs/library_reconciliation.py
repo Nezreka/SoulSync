@@ -46,6 +46,7 @@ from core.metadata.album_tracks import get_album_for_source, get_album_tracks_fo
 from core.repair_jobs import register_job
 from core.repair_jobs.base import RepairJob, JobContext, JobResult, all_library_roots, walk_library
 from core.repair_review_identity import missing_slot_key
+from core.text.fold import fold_title
 from utils.logging_config import get_logger
 
 logger = get_logger('repair_job.library_reconciliation')
