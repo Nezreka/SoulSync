@@ -39300,11 +39300,6 @@ div.artist-hero-badge {
     display: none !important;
 }
 
-.enhanced-search-input-wrapper {
-    position: relative;
-    margin-bottom: 0;
-}
-
 /* Enhanced Search Bar — the hero pill. One confident rounded field, the way
    Spotify/Apple lead their search surfaces; the id-lookup row hangs beneath it
    as a quiet utility line instead of a second boxed input. */
@@ -39313,22 +39308,6 @@ div.artist-hero-badge {
     display: flex; flex-direction: column; gap: 6px; align-items: stretch;
 }
 .enhanced-search-bar-container:focus-within { border-color: transparent; background: transparent; }
-.enhanced-search-wrapper {
-    position: relative; display: flex; align-items: center;
-    background: #202024; border-radius: var(--radius-pill);
-    border: 1px solid var(--white-a09);
-    padding: 0 10px 0 22px; min-height: 54px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--white-a05);
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-}
-.enhanced-search-wrapper:hover { background: #26262b; border-color: var(--white-a14); }
-.enhanced-search-wrapper:focus-within {
-    background: #26262b; border-color: rgba(var(--accent-rgb), 0.55);
-    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(var(--accent-rgb), 0.14),
-        inset 0 1px 0 var(--white-a05);
-}
-.enhanced-search-icon { font-size: 18px; margin-right: 12px; opacity: 0.55; animation: none; transition: opacity 0.2s ease; }
-.enhanced-search-wrapper:focus-within .enhanced-search-icon { opacity: 0.9; }
 @keyframes sparkle {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.1); }
@@ -39347,39 +39326,6 @@ div.artist-hero-badge {
 }
 .enhanced-cancel-btn:hover { background: var(--white-a16); color: #fff; }
 
-/* Link / ID lookup row (#775) — a quiet utility line under the hero pill, NOT
-   a second boxed input. But fully transparent with a 28%-white placeholder it
-   read as a caption: "it took a long time to realize this is input" (#1210).
-   Just enough edge to say "type here", still quieter than the pill above. */
-.enh-id-lookup {
-    display: flex; align-items: center; gap: 8px; margin-top: 2px;
-    background: rgba(255, 255, 255, 0.028);
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    padding: 0 8px 0 14px;
-    cursor: text;
-    transition: background 0.2s ease, border-color 0.2s ease;
-}
-.enh-id-lookup:hover { background: rgba(255, 255, 255, 0.045); }
-.enh-id-lookup:focus-within {
-    background: var(--white-a06);
-    border-color: rgba(var(--accent-rgb), 0.35);
-}
-.enh-id-lookup-icon { font-size: 13px; opacity: 0.4; }
-.enh-id-input {
-    flex-grow: 1; background: transparent; border: none; outline: none;
-    font-family: 'Segoe UI', sans-serif; font-size: 12.5px;
-    color: var(--white-a75); padding: 8px 0;
-}
-.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.42); }
-.enh-id-btn {
-    flex-shrink: 0; background: rgba(var(--accent-rgb), 0.14);
-    border: 1px solid rgba(var(--accent-rgb), 0.25); border-radius: var(--radius-pill);
-    padding: 5px 14px; color: rgb(var(--accent-light-rgb)); cursor: pointer;
-    font-size: 12px; font-weight: 600; transition: all 0.2s ease;
-}
-.enh-id-btn:hover { background: rgba(var(--accent-rgb), 0.26); }
-
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;
@@ -39392,104 +39338,11 @@ div.artist-hero-badge {
     border-left: 3px solid rgba(138, 43, 226, 0.8);
 }
 
-.enhanced-status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    background: rgba(138, 43, 226, 0.8);
-    animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-
-    0%,
-    100% {
-        box-shadow: 0 0 4px rgba(138, 43, 226, 0.6);
-    }
-
-    50% {
-        box-shadow: 0 0 12px rgba(138, 43, 226, 0.9);
-    }
-}
-
 #enhanced-search-status-text {
     font-family: 'Segoe UI', sans-serif;
     font-size: 13px;
     color: var(--white-a80);
     margin: 0;
-}
-
-/* Enhanced Search Results */
-.enhanced-search-results-container {
-    background: rgba(20, 20, 20, 0.3);
-    border-radius: var(--radius-xl);
-    border: 2px solid rgba(138, 43, 226, 0.2);
-    padding: 20px;
-    margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    overflow: hidden;
-}
-
-.enhanced-results-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(138, 43, 226, 0.2);
-}
-
-.enhanced-results-header h3 {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 16px;
-    font-weight: 600;
-    margin: 0;
-}
-
-.results-count-badge {
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(123, 31, 162, 0.3));
-    border: 1px solid rgba(138, 43, 226, 0.5);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a90);
-}
-
-.enhanced-results-scroll-area {
-    overflow-y: auto;
-    flex-grow: 1;
-    padding-right: 8px;
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar {
-    width: 8px;
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-track {
-    background: rgba(20, 20, 20, 0.3);
-    border-radius: var(--radius-xs);
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-thumb {
-    background: linear-gradient(to bottom, rgba(138, 43, 226, 0.6), rgba(123, 31, 162, 0.6));
-    border-radius: var(--radius-xs);
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(to bottom, rgba(138, 43, 226, 0.8), rgba(123, 31, 162, 0.8));
-}
-
-/* Enhanced Results Placeholder */
-.enhanced-results-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-    text-align: center;
 }
 
 .placeholder-icon {
@@ -39592,18 +39445,9 @@ div.artist-hero-badge {
 }
 
 @media (max-width: 480px) {
-    .enhanced-search-wrapper {
-        padding: 0 10px;
-    }
-
     #enhanced-search-input {
         font-size: 13px;
         padding: 10px 0;
-    }
-
-    .enhanced-search-icon {
-        font-size: 16px;
-        margin-right: 6px;
     }
 
     /* Better album/track results on mobile */
@@ -39653,11 +39497,6 @@ div.artist-hero-badge {
         width: 28px;
         height: 28px;
         font-size: 11px;
-    }
-
-    /* Search results area */
-    .enhanced-search-results-container {
-        padding: 12px;
     }
 
     .search-results-scroll-area {
