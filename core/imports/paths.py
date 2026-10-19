@@ -15,7 +15,7 @@ from utils.logging_config import get_logger
 from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
 from core.imports.collab_artist import first_listed_artist, listed_primary_of
-from core.imports.compilation import is_various_artists_credit
+from core.imports.compilation import is_various_artists_credit, is_various_artists_name
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
     extract_artist_name,
@@ -577,12 +577,27 @@ def _replace_template_variables(template: str, context: dict) -> str:
         else f"{_coerce_int(_track_number, 1):02d}"
     )
 
+    album_artist_letter_value = artist_letter(album_artist_value)
+    has_albumartist_in_template = bool(re.search(r"\$(?:\{albumartist\}|albumartist(?![a-zA-Z0-9_]))", template))
+    has_artist_in_template = bool(re.search(r"\$(?:\{artist\}|artist(?![a-zA-Z0-9_]))", template))
+
+    if has_albumartist_in_template:
+        letter_artist_name = album_artist_value
+    elif has_artist_in_template:
+        letter_artist_name = clean_context.get("artist", "U")
+    elif clean_context.get("albumartist") and not is_various_artists_name(album_artist_value):
+        letter_artist_name = album_artist_value
+    else:
+        letter_artist_name = clean_context.get("artist", "U")
+    artist_letter_value = artist_letter(letter_artist_name)
+
     bracket_map = {
         "albumartist": album_artist_value,
+        "albumartistletter": album_artist_letter_value,
         "albumtype": clean_context.get("albumtype", "Album"),
         "atypes": clean_context.get("atypes", ""),
         "playlist": clean_context.get("playlist_name", ""),
-        "artistletter": artist_letter(clean_context.get("artist", "U")),
+        "artistletter": artist_letter_value,
         "artist": clean_context.get("artist", "Unknown Artist"),
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
@@ -609,6 +624,8 @@ def _replace_template_variables(template: str, context: dict) -> str:
 
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$label", clean_context.get("label", ""))
+    # $albumartistletter must replace before $albumartist (longest-prefix-first)
+    result = result.replace("$albumartistletter", album_artist_letter_value)
     result = result.replace("$albumartist", album_artist_value)
     result = result.replace("$albumtype", clean_context.get("albumtype", "Album"))
     # Order is not load-bearing here — "$atypes" and "$album" share only "$a",
@@ -616,7 +633,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     # with $album, which is why THAT one has to come first.)
     result = result.replace("$atypes", clean_context.get("atypes", ""))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
-    result = result.replace("$artistletter", artist_letter(clean_context.get("artist", "U")))
+    result = result.replace("$artistletter", artist_letter_value)
     result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
     result = result.replace("$album", clean_context.get("album", "Unknown Album"))
     result = result.replace("$title", clean_context.get("title", "Unknown Track"))

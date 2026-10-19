@@ -15036,6 +15036,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     Returns:
         Processed path string
     """
+    import re
     # Sanitize context values BEFORE template substitution
     # This prevents '/' in metadata from creating unintended path components
     clean_context = _sanitize_context_values(context)
@@ -15081,14 +15082,31 @@ def _apply_path_template(template: str, context: dict) -> str:
     _disc_number = int(clean_context.get('disc_number', 1) or 1)
     cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ''
 
+    from core.imports.compilation import is_various_artists_name
+
+    album_artist_letter_value = _shared_artist_letter(album_artist_value)
+    has_albumartist_in_template = bool(re.search(r"\$(?:\{albumartist\}|albumartist(?![a-zA-Z0-9_]))", template))
+    has_artist_in_template = bool(re.search(r"\$(?:\{artist\}|artist(?![a-zA-Z0-9_]))", template))
+
+    if has_albumartist_in_template:
+        letter_artist_name = album_artist_value
+    elif has_artist_in_template:
+        letter_artist_name = clean_context.get('artist', 'U')
+    elif clean_context.get('albumartist') and not is_various_artists_name(album_artist_value):
+        letter_artist_name = album_artist_value
+    else:
+        letter_artist_name = clean_context.get('artist', 'U')
+    artist_letter_value = _shared_artist_letter(letter_artist_name)
+
     # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
     # Must run before $var replacements to prevent partial matching
     _bracket_map = {
         'albumartist': album_artist_value,
+        'albumartistletter': album_artist_letter_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
         'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
-        'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
+        'artistletter': artist_letter_value,
         'artist': clean_context.get('artist', 'Unknown Artist'),
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
@@ -15106,6 +15124,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         result = result.replace('${' + var_name + '}', val)
 
     result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
+    # Longest prefix first: $albumartistletter before $albumartist
+    result = result.replace('$albumartistletter', album_artist_letter_value)
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     # This replacer is a hand-maintained copy of core.imports.paths, so a new
@@ -15116,7 +15136,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artistletter', _shared_artist_letter(clean_context.get('artist', 'U')))
+    result = result.replace('$artistletter', artist_letter_value)
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
