@@ -28,3 +28,17 @@ it('requests only selected, currently actionable missing tracks and permits chan
   fireEvent.click(screen.getByRole('button', { name: 'Change album completeness' }));
   expect(onChangeScope).toHaveBeenCalledOnce();
 });
+
+it('describes partial-album wanted tracks accurately', () => {
+  render(
+    <MissingTracksChoice
+      scope="partial"
+      findings={[]}
+      busy={false}
+      onRequest={vi.fn()}
+      onChangeScope={vi.fn()}
+    />,
+  );
+  expect(screen.getByText(/Only tracks marked as wanted for this partial album/)).toBeTruthy();
+  expect(screen.queryByText(/this complete album/)).toBeNull();
+});

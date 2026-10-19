@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ReviewPage } from './review-page';
@@ -1269,4 +1269,106 @@ describe('library reconciliation review queue', () => {
       'warning',
     );
   });
+});
+
+it('discards a delayed manual refresh and totals after changing filters', async () => {
+  const pending: Array<(value: unknown) => void> = [];
+  let delay = false;
+  fetchMock.mockImplementation((url: string) => {
+    if (
+      url.startsWith('/api/repair/review-queue?') ||
+      url.startsWith('/api/repair/review-queue/summary?')
+    ) {
+      const filtered = new URL(url, 'http://localhost').searchParams.get('q') === 'new';
+      if (delay && !filtered) return new Promise((resolve) => pending.push(resolve));
+      return Promise.resolve(
+        reply(
+          url.includes('/summary?')
+            ? { all: filtered ? 2 : 1, review: 0, ready: 0, files: 0, ready_total: 0 }
+            : { items: [], total: filtered ? 2 : 1, page: 0, limit: 30 },
+        ),
+      );
+    }
+    return Promise.resolve(auxiliary(url));
+  });
+  render(<ReviewPage />);
+  await screen.findByText('1 album');
+  delay = true;
+  fireEvent.click(screen.getByRole('button', { name: 'Reload queue' }));
+  await waitFor(() => expect(pending).toHaveLength(2));
+  fireEvent.change(screen.getByPlaceholderText('Search findings'), { target: { value: 'new' } });
+  await screen.findByText('2 albums in this view');
+  await act(async () => {
+    pending[0](reply({ all: 99, review: 99, ready: 0, files: 0, ready_total: 0 }));
+    pending[1](reply({ items: [], total: 99, page: 0, limit: 30 }));
+  });
+  expect(screen.getByText('2 albums in this view')).toBeTruthy();
+  expect(screen.queryByText(/99 albums/)).toBeNull();
+});
+
+it('clears search and category when opening the global ready batch', async () => {
+  fetchMock.mockImplementation((url: string) => {
+    if (url.startsWith('/api/repair/review-queue?'))
+      return Promise.resolve(reply({ items: [], total: 0, page: 0, limit: 30 }));
+    return Promise.resolve(auxiliary(url));
+  });
+  render(<ReviewPage />);
+  await screen.findByText('1 album');
+  fireEvent.change(screen.getByPlaceholderText('Search findings'), {
+    target: { value: 'old search' },
+  });
+  fireEvent.change(screen.getByLabelText('Filter by type'), { target: { value: 'numbering' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Review ready batch' }));
+  await waitFor(() => {
+    const calls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).startsWith('/api/repair/review-queue?'),
+    );
+    const params = new URL(calls.at(-1)![0], 'http://localhost').searchParams;
+    expect(params.get('risk')).toBe('ready');
+    expect(params.get('q') || '').toBe('');
+    expect(params.get('category') || '').toBe('');
+  });
+  expect((screen.getByPlaceholderText('Search findings') as HTMLInputElement).value).toBe('');
+});
+
+it('keeps an album selected when reopening the already visible ready batch', async () => {
+  window.history.replaceState(null, '', '/review?mode=ready');
+  fetchMock.mockImplementation((url: string) => {
+    const common = auxiliary(url);
+    if (common) return Promise.resolve(common);
+    if (url.startsWith('/api/repair/review-queue?'))
+      return Promise.resolve(
+        reply({
+          items: [
+            {
+              case_id: 'album:1:10',
+              album: 'Ready Album',
+              artist: 'Artist',
+              pending: 1,
+              finding_types: [],
+            },
+          ],
+          total: 1,
+          page: 0,
+          limit: 30,
+        }),
+      );
+    if (url.startsWith('/api/repair/review-queue/album%3A1%3A10'))
+      return Promise.resolve(
+        reply({
+          case_id: 'album:1:10',
+          album: 'Ready Album',
+          artist: 'Artist',
+          folder: '/music/Album',
+          count: 1,
+          status: 'pending',
+          items: [finding],
+        }),
+      );
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  render(<ReviewPage />);
+  await screen.findByRole('heading', { name: 'Ready Album' });
+  fireEvent.click(screen.getByRole('button', { name: 'Review ready batch' }));
+  expect(screen.getByRole('heading', { name: 'Ready Album' })).toBeTruthy();
 });

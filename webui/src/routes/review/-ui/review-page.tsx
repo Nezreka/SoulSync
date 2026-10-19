@@ -395,37 +395,45 @@ export function ReviewPage() {
     return () => window.clearTimeout(timer);
   }, [searchInput, query]);
 
+  const queueRequestVersion = useRef(0);
+  const queueScope = JSON.stringify([page, query, category, risk]);
+  const currentQueueScope = useRef(queueScope);
+  currentQueueScope.current = queueScope;
   const refreshQueue = useCallback(async () => {
-    const result = await fetchReviewQueue(page, query, category, risk);
-    setQueue(result);
+    const version = ++queueRequestVersion.current;
+    const current = () =>
+      version === queueRequestVersion.current && queueScope === currentQueueScope.current;
     void fetchReviewQueueModeTotals(query, category)
-      .then(setQueueTotals)
+      .then((totals) => {
+        if (current()) setQueueTotals(totals);
+      })
       .catch(() => undefined);
-    return result;
-  }, [page, query, category, risk]);
+    try {
+      const result = await fetchReviewQueue(page, query, category, risk);
+      if (!current()) return null;
+      setQueue(result);
+      return result;
+    } catch (cause) {
+      if (!current()) return null;
+      throw cause;
+    }
+  }, [page, query, category, risk, queueScope]);
 
   useEffect(() => {
     let live = true;
-    void fetchReviewQueueModeTotals(query, category)
-      .then((totals) => {
-        if (live) setQueueTotals(totals);
-      })
-      .catch(() => undefined);
-    void fetchReviewQueue(page, query, category, risk)
+    void refreshQueue()
       .then((result) => {
-        if (!live) return;
-        setQueue(result);
-        if (!caseId && result.items[0]) setCaseId(result.items[0].case_id);
+        if (live && result && !selectedCaseRef.current && result.items[0])
+          setCaseId(result.items[0].case_id);
       })
       .catch((cause: unknown) => {
         if (live) setError((cause as Error).message);
       });
     return () => {
       live = false;
+      ++queueRequestVersion.current;
     };
-    // caseId is deliberately excluded: changing the selected case does not rescan the queue.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, query, category, risk]);
+  }, [refreshQueue, setError]);
 
   useEffect(() => {
     void fetchFindingTypes()
@@ -684,7 +692,8 @@ export function ReviewPage() {
     const requestVersion = ++caseRequestVersion.current;
     try {
       if (!requestedId) {
-        await refreshQueue();
+        const result = await refreshQueue();
+        if (result?.items[0] && !selectedCaseRef.current) setCaseId(result.items[0].case_id);
         return true;
       }
       const updated = await fetchReviewCase(requestedId);
@@ -702,6 +711,7 @@ export function ReviewPage() {
       }
       setReviewCase(updated);
       const updatedQueue = await refreshQueue();
+      if (!updatedQueue) return true;
       if (selectedCaseRef.current !== requestedId || requestVersion !== caseRequestVersion.current)
         return true;
       if (refreshError.current) {
@@ -733,7 +743,10 @@ export function ReviewPage() {
       }
       return true;
     } catch (cause) {
-      if (selectedCaseRef.current === requestedId) {
+      if (
+        selectedCaseRef.current === requestedId &&
+        requestVersion === caseRequestVersion.current
+      ) {
         refreshError.current = (cause as Error).message;
         setError(refreshError.current);
       }
@@ -1356,9 +1369,16 @@ export function ReviewPage() {
             <Button
               type="button"
               onClick={() => {
+                setSearchInput('');
+                setQuery('');
+                setCategory('');
                 setQueueMode('ready');
                 setPage(0);
-                setCaseId('');
+                setCaseId(
+                  queueMode === 'ready' && page === 0 && !query && !category
+                    ? queue?.items[0]?.case_id || ''
+                    : '',
+                );
               }}
             >
               Review ready batch
@@ -1416,7 +1436,7 @@ export function ReviewPage() {
         </Notice>
       )}
       {globalNotice && (
-        <Notice tone="info" className={styles.albumNotice} role="status">
+        <Notice tone="info" role="status">
           <span>{globalNotice}</span>
           <Button
             type="button"
@@ -1757,7 +1777,7 @@ export function ReviewPage() {
                 </Notice>
               )}
               {notice && !reanalyzing && reviewCase.refresh?.state !== 'running' && (
-                <Notice tone="info" className={styles.albumNotice} role="status" aria-live="polite">
+                <Notice tone="info" role="status" aria-live="polite">
                   <span>{notice}</span>
                   <Button type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}>
                     ×
@@ -2407,6 +2427,7 @@ export function ReviewPage() {
                             ) ? (
                             <MissingTracksChoice
                               key={reviewCase.case_id}
+                              scope={reviewCase.album_plan?.intent_scope}
                               findings={reviewCase.items.filter(
                                 (item) => item.finding_type === 'reconciliation_missing',
                               )}

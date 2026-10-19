@@ -10,11 +10,13 @@ import { record, records, textValue } from './review-presentation';
 /** Requests are immediate wishlist actions; unselected tracks keep their album intent. */
 export function MissingTracksChoice({
   findings,
+  scope,
   busy,
   onRequest,
   onChangeScope,
 }: {
   findings: Pick<ReviewFinding, 'id' | 'details' | 'title'>[];
+  scope?: string;
   busy: boolean;
   onRequest: (ids: number[]) => void;
   onChangeScope: () => void;
@@ -31,8 +33,10 @@ export function MissingTracksChoice({
     <section className={styles.missingChoices} aria-label="Choose missing tracks" tabIndex={-1}>
       <h4>Choose tracks to request</h4>
       <p>
-        Selected tracks will be added to the wishlist. Other missing tracks remain wanted for this
-        complete album.
+        Selected tracks will be added to the wishlist.{' '}
+        {scope === 'partial'
+          ? 'Only tracks marked as wanted for this partial album are listed. Your album completeness choice will not change.'
+          : 'Other missing tracks remain wanted for this complete album.'}
       </p>
       <div className={styles.wantedTracks}>
         {available.map((item) => {
