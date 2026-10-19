@@ -2538,7 +2538,7 @@ const AUTO_HUB_REFERENCE = {
                 { type: 'playlist_pipeline', label: 'Playlist Pipeline', desc: 'Full lifecycle: refresh → identify → sync → download missing' },
                 { type: 'process_wishlist', label: 'Process Wishlist', desc: 'Download all pending wishlist items' },
                 { type: 'refresh_mirrored', label: 'Refresh Mirrored', desc: 'Refresh all mirrored playlists from their sources' },
-                { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync a specific playlist to your library' },
+                { type: 'sync_playlist', label: 'Sync Playlist', desc: 'Sync mirrored playlist(s) to your media server' },
                 { type: 'discover_playlist', label: 'Identify Playlist Tracks', desc: 'Run track identification on mirrored playlists' },
                 { type: 'scan_watchlist', label: 'Scan Watchlist', desc: 'Check watched artists for new releases' },
                 { type: 'update_discovery_pool', label: 'Update Discovery', desc: 'Refresh the discovery pool with new recommendations' },
@@ -4801,11 +4801,15 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>`;
     }
     if (blockType === 'sync_playlist') {
+        const allChecked = config.all ? ' checked' : '';
         return `<div class="config-row">
             <label>Playlist</label>
             <select id="cfg-${slotKey}-playlist_id" class="mirrored-playlist-select" data-value="${_escAttr(config.playlist_id || '')}">
                 <option value="">Loading...</option>
             </select>
+        </div>
+        <div class="config-row">
+            <label><input type="checkbox" id="cfg-${slotKey}-all"${allChecked} onchange="_autoTogglePlaylistSelect('${slotKey}')"> Sync all mirrored playlists</label>
         </div>`;
     }
     if (blockType === 'discover_playlist') {
@@ -5383,7 +5387,11 @@ function _readPlacedConfig(slotKey) {
         };
     }
     if (type === 'sync_playlist') {
-        return { playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '' };
+        const allCb = document.getElementById('cfg-' + slotKey + '-all');
+        return {
+            playlist_id: document.getElementById('cfg-' + slotKey + '-playlist_id')?.value || '',
+            all: allCb ? allCb.checked : false,
+        };
     }
     if (type === 'discover_playlist') {
         const allCb = document.getElementById('cfg-' + slotKey + '-all');

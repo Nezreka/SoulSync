@@ -357,7 +357,8 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "sync_playlist", "label": "Sync Playlist", "icon": "sync", "description": "Sync mirrored playlist to media server", "available": True,
      "config_fields": [
-         {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"}
+         {"key": "playlist_id", "type": "mirrored_playlist_select", "label": "Playlist"},
+         {"key": "all", "type": "checkbox", "label": "Sync all mirrored playlists", "default": False}
      ]},
     {"type": "sync_downloaded_playlists", "label": "Sync Downloaded Playlists", "icon": "sync",
      "description": "Automatically sync playlists whose downloaded batches just finished and were updated in the database",
