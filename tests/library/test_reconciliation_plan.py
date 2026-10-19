@@ -75,6 +75,8 @@ def test_artist_spelling_and_collaboration_are_preserved(credit):
 @pytest.mark.parametrize(('local', 'remote'), [
     ('Home (Alpha remix)', 'Home (Beta remix)'),
     ('Home (Alpha remix)', 'Home (Alpha Beta remix)'),
+    ('Home (Alpha mix)', 'Home (Beta mix)'),
+    ('Home (Abraham remix)', 'Home (Abrahams remix)'),
     ('Home (live at Paris)', 'Home (live at London)'),
     ('Home (radio edit)', 'Home (album version)'),
 ])
@@ -118,6 +120,53 @@ def test_filename_version_still_blocks_a_different_named_mix_when_tags_omit_it()
     file['tags']['artist'] = 'Artist'
     slot = {'title': 'Home (Beta remix)', 'artist': 'Artist', 'recording_mbid': 'other', 'duration_ms': 200000}
     assert not reconcile_folder([file], [slot])['pairs']
+
+
+@pytest.mark.parametrize(('local', 'remote'), [
+    ("Horology (live in Utrecht ’19)", "Horology (Live in Utrech '19)"),
+    ('Golden Hair - Peel Session', 'Golden Hair (BBC Peel session)'),
+    ('Song (live at Mill St Brewery, Toronto 2004)', 'Song (live at Mill St Brewery, Toronto 20/9/04)'),
+    ('Song (live at Mill St Brewery, Toronto 2004-09-20)', 'Song (live at Mill St Brewery, Toronto 20/9/04)'),
+    ('Song (live at the Paradise, June 1980)', 'Song (live at the Paradise) (June 1980)'),
+])
+def test_named_performance_detail_allows_catalogue_spelling_and_date_precision(local, remote):
+    from core.library.reconciliation_plan import versions_compatible
+    file = _file(local, f'/album/01 - {local}.flac', 200000)
+    assert versions_compatible(file, {'title': remote})
+
+
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('Song (live at Paris 2004-09-20)', 'Song (live at Paris 2004-09-21)'),
+    ('Song (live at Paris 2004-09-20)', 'Song (live at Paris 20/8/04)'),
+    ('Song (live at Paris 2004)', 'Song (live at Paris 20/9/05)'),
+    ('Song (live at Paris 2004)', 'Song (live at London 20/9/04)'),
+])
+def test_named_performance_dates_cannot_disagree(local, remote):
+    from core.library.reconciliation_plan import versions_compatible
+    assert not versions_compatible(_file(local, '/album/song.flac', 200000), {'title': remote})
+
+
+def test_primary_artist_audio_supports_a_full_local_remixer_credit():
+    file = _file('Home', '/album/Home.flac', 200000,
+                 {'mbid': 'recording', 'title': 'Home', 'artist': 'Röyksopp', 'score': .99})
+    file['tags']['track_artist'] = 'Röyksopp, Maceo Plex'
+    assert not audio_contradicts_local_title(file)
+
+
+def test_named_mix_audio_supports_the_same_remix_on_another_provider():
+    from core.repair_jobs.library_reconciliation import _audio_conflicts_with_slot
+    file = _file('Sordid Affair - Maceo Plex Remix', '/album/02 - Sordid Affair - Maceo Plex Remix.flac', 478266,
+                 {'mbid': 'recording', 'title': 'Sordid Affair (Maceo Plex mix)', 'artist': 'Röyksopp', 'score': .99})
+    file['tags']['track_artist'] = 'Röyksopp, Maceo Plex'
+    slot = {'title': 'Sordid Affair (Maceo Plex Remix)', 'artist': 'Röyksopp', 'duration_ms': 478000}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+    assert not _audio_conflicts_with_slot(file, slot)
+
+
+@pytest.mark.parametrize('qualifier', ['stereo mix', '2009 remastered stereo mix', 'original album mix'])
+def test_generic_mix_labels_do_not_become_named_remixes(qualifier):
+    from core.library.reconciliation_plan import _version_markers
+    assert 'remix' not in _version_markers(f'Song ({qualifier})')
 
 
 def test_acoustic_session_and_alternative_wording_match_equivalent_versions():

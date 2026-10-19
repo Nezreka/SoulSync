@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 from difflib import SequenceMatcher
+from functools import lru_cache
 from typing import Any
 
 from core.matching.assignment import assign_max_weight
@@ -17,7 +18,7 @@ from core.matching.artist_aliases import artist_names_match
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
 from core.text.fold import fold_title
 from core.text.title_match import (
-    _recording_qualifier_segments, numeric_tokens_differ,
+    _recording_qualifier_segments, _RECORDING_NOISE_TOKENS, numeric_tokens_differ,
     recording_version_markers, titles_plausibly_same,
 )
 
@@ -27,6 +28,7 @@ _EDITORIAL_TITLE_SUFFIX = re.compile(
     r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
 
 
+@lru_cache(maxsize=32768)
 def _version_markers(value: str) -> frozenset[str]:
     """Fold equivalent catalogue wording without erasing real versions."""
     markers = set(recording_version_markers(value))
@@ -39,27 +41,70 @@ def _version_markers(value: str) -> frozenset[str]:
     for segment in _recording_qualifier_segments(value):
         if re.search(r'\b(?:radio|single)\s+(?:edit|version)\b', segment, re.I):
             markers.add('edit')
+        words = fold_title(segment, drop_brackets=False).split()
+        if (not markers and words[-1:] == ['mix'] and
+                {word for word in words[:-1] if not word.isdigit()} - _RECORDING_NOISE_TOKENS
+                - {'club', 'dance', 'video', 'long', 'short', 'digital', 'new', 'old', 'the'}):
+            # Catalogue credits may call the same named remix a "Maceo Plex mix".
+            markers.add('remix')
     return frozenset(markers)
 
 
-def _named_version_conflicts(left: str, right: str) -> bool:
-    """Broad labels can omit detail; two different named performances cannot.
+@lru_cache(maxsize=32768)
+def _named_version_details(title: str):
+    """Parse qualifier facts once, rather than for every assignment edge."""
+    segments = _recording_qualifier_segments(title)
+    marked = [(segment, _version_markers(f'({segment})')) for segment in segments]
+    if not any(markers for _, markers in marked):
+        return frozenset(), None
+    tokens = set()
+    for segment, markers in marked:
+        # Dates can occupy a separate bracket after a live-performance label.
+        if markers or re.fullmatch(r'(?:[A-Za-z]{3,9}\s+)?\d{4}', segment):
+            tokens.update(fold_title(segment, drop_brackets=False).split())
+            tokens.difference_update(markers)
+    tokens -= {'version', 'mix', 'recording', 'recorded', 'performance',
+               'session', 'sessions', 'alternate', 'alternative', 'alt',
+               'at', 'in', 'from', 'the', 'a', 'an', 'import', 'bbc', 'radio', 'single'}
+    text = ' '.join(segments)
+    iso = re.search(r'\b((?:19|20)\d{2})[-/]([01]?\d)[-/]([0-3]?\d)\b', text)
+    dmy = re.search(r'(?<!\d)([0-3]?\d)[/-]([01]?\d)[/-](\d{2}|\d{4})(?!\d)', text)
+    date = tuple(map(int, iso.groups())) if iso else tuple(map(int, reversed(dmy.groups()))) if dmy else None
+    return frozenset(str(int(token)) if token.isdigit() else token for token in tokens), date
 
-    Inspect only version qualifiers, so subtitles and main-title words such
-    as "Live Forever" retain their existing matching behavior.
-    """
-    def detail(title):
-        tokens = set()
-        for segment in _recording_qualifier_segments(title):
-            markers = _version_markers(f'({segment})')
-            if markers:
-                tokens.update(fold_title(segment, drop_brackets=False).split())
-                tokens.difference_update(markers)
-        return tokens - {'version', 'mix', 'recording', 'recorded', 'performance',
-                         'session', 'sessions', 'alternate', 'alternative',
-                         'alt', 'at', 'in', 'from', 'the', 'a', 'an', 'import'}
-    a, b = detail(left), detail(right)
-    return bool(a and b and a != b)
+
+def _named_version_conflicts(left: str, right: str) -> bool:
+    """Compare named performances while allowing omitted detail and typos."""
+    a, left_date = _named_version_details(left)
+    b, right_date = _named_version_details(right)
+    if left_date and right_date and (left_date[1:] != right_date[1:] or
+            (left_date[0] != right_date[0] if min(left_date[0], right_date[0]) >= 100
+             else left_date[0] % 100 != right_date[0] % 100)):
+        return True
+    if left_date and right_date:
+        year = str(max(left_date[0], right_date[0]))
+        a = (a - {str(left_date[0])}) | {year}
+        b = (b - {str(right_date[0])}) | {year}
+    # A year-only local label can agree with a catalogue's precise concert
+    # date. Two fully specified dates must still agree on month and day.
+    def year_precision(tokens, date, other):
+        numbers = {token for token in other if token.isdigit()}
+        if date and len(numbers) == 1:
+            year = next(iter(numbers))
+            if len(year) == 4 and (int(year) == date[0] if date[0] >= 100 else int(year) % 100 == date[0]):
+                return frozenset(token for token in tokens if not token.isdigit()) | {year}
+        return tokens
+    a, b = year_precision(a, left_date, b), year_precision(b, right_date, a)
+    if not a or not b or a == b:
+        return False
+    unmatched_a, unmatched_b = a - b, b - a
+    # Utrecht/Utrech is a spelling difference; Alpha/Alpha Beta adds a name.
+    if (len(unmatched_a) == len(unmatched_b) == 1 and
+            _version_markers(left).intersection(_version_markers(right), {'live', 'session', 'sessions'})):
+        x, y = next(iter(unmatched_a)), next(iter(unmatched_b))
+        if x.isalpha() and y.isalpha() and min(len(x), len(y)) >= 6:
+            return SequenceMatcher(None, x, y).ratio() < .90
+    return True
 
 
 def _title_score(a: str, b: str) -> float:
@@ -252,8 +297,10 @@ def _artist_credit_supports(recording_artist: str, slot_artist: str, aliases=Non
     def same_name(left, right):
         folded = fold_title(left, drop_brackets=False)
         return float(bool(folded) and folded == fold_title(right, drop_brackets=False))
-    return artist_names_match(slot_artist, recording_artist, aliases=aliases,
-                              threshold=1.0, similarity=same_name)[0]
+    return (artist_names_match(slot_artist, recording_artist, aliases=aliases,
+                               threshold=1.0, similarity=same_name)[0] or
+            artist_names_match(recording_artist, slot_artist,
+                               threshold=1.0, similarity=same_name)[0])
 
 
 def audio_contradicts_local_title(file: dict) -> bool:
