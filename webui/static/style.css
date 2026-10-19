@@ -39247,78 +39247,7 @@ div.artist-hero-badge {
 /* SEARCH SOURCE PICKER (replaces Enhanced/Basic toggle) */
 /* ========================================= */
 
-.search-source-picker-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0;
-}
-
-.search-source-picker-label {
-    color: var(--white-a70);
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-
-.search-source-picker-wrapper {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-}
-
-.search-source-picker-select {
-    appearance: none;
-    -webkit-appearance: none;
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(64, 64, 64, 0.4);
-    border-radius: 10px;
-    color: #ffffff;
-    padding: 10px 40px 10px 16px;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    min-width: 220px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.search-source-picker-select:hover {
-    border-color: rgba(138, 43, 226, 0.6);
-}
-
-.search-source-picker-select:focus {
-    outline: none;
-    border-color: rgba(138, 43, 226, 0.9);
-    box-shadow: 0 2px 10px rgba(138, 43, 226, 0.35);
-}
-
-.search-source-picker-select option {
-    background: #1e1e1e;
-    color: #ffffff;
-}
-
-.search-source-picker-caret {
-    position: absolute;
-    right: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-    color: var(--white-a60);
-    font-size: 12px;
-}
-
 /* Legacy toggle (kept for any other references, but unused by the Search page) */
-.search-mode-toggle-container {
-    display: flex;
-    justify-content: center;
-    margin: 20px 0;
-}
-
 .search-mode-toggle {
     position: relative;
     background: rgba(30, 30, 30, 0.8);
@@ -39328,41 +39257,6 @@ div.artist-hero-badge {
     gap: 4px;
     border: 1px solid rgba(64, 64, 64, 0.4);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.search-mode-btn {
-    position: relative;
-    z-index: 2;
-    background: transparent;
-    border: none;
-    padding: 10px 24px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--white-a60);
-}
-
-.search-mode-btn:hover {
-    color: var(--white-a90);
-}
-
-.search-mode-btn.active {
-    color: #ffffff;
-}
-
-.mode-icon {
-    font-size: 16px;
-    transition: transform 0.3s ease;
-}
-
-.search-mode-btn.active .mode-icon {
-    transform: scale(1.1);
 }
 
 .search-mode-toggle .toggle-slider {
