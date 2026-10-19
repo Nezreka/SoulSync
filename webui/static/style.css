@@ -43323,19 +43323,6 @@ div.artist-hero-badge {
         inset 0 1px 0 var(--white-a06);
 }
 
-.import-logo {
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    opacity: 0.85;
-    transition: opacity 0.3s ease;
-    filter: invert(1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
-}
-
-.import-button:hover .import-logo {
-    opacity: 1;
-}
-
 /* ========================================
    FAILED DOWNLOAD ERROR TOOLTIP
    ======================================== */
