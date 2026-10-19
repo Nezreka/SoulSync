@@ -103,7 +103,11 @@ export async function createUserPlaylist(
 ): Promise<{ id: number } & Partial<AddTracksResult>> {
   return send(
     '/api/user-playlists',
-    json('POST', { name, tracks, is_request_list: isRequestList }),
+    json('POST', {
+      name,
+      tracks,
+      ...(isRequestList ? { is_request_list: true } : {}),
+    }),
   );
 }
 
