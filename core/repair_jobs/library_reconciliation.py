@@ -2758,9 +2758,9 @@ class LibraryReconciliationJob(RepairJob):
                             # This internal evidence improves later comparisons,
                             # but does not warrant a review decision by itself.
                             continue
-                        if not changed or not file.get('db'):
+                        if not changed:
                             continue
-                        if file['db'].get('metadata_locked'):
+                        if row.get('metadata_locked'):
                             plan_action_changes[file['path']] = {
                                 'changes': dict(changed), 'status': 'uncertain',
                             }
@@ -2777,7 +2777,7 @@ class LibraryReconciliationJob(RepairJob):
                         plan_action_changes[file['path']] = {'changes': dict(changed)}
                         if db_album_title:
                             album_title_proposed = True
-                        details = {**common, 'track_id': file['db']['id'],
+                        details = {**common, 'track_id': row.get('id'),
                                    'tool_checks': file.get('tool_checks') or [],
                                    'assignment_evidence': assignment_evidence(file, pair),
                                    'metadata_review_reason': (
@@ -2814,6 +2814,8 @@ class LibraryReconciliationJob(RepairJob):
                                    'db_track_updates': db_updates,
                                    'db_album_title': db_album_title,
                                    'target_path': target_path}
+                        if not row:
+                            details['file_only'] = True
                         if review_choices.retains_numbering(kept_numbering.get(file['path']), details):
                             projected = review_choices.project(details, ('', json.dumps(details), 'numbering', 'dismiss', ''))
                             for key in ('planned_choice', 'plan_keep'):
@@ -2826,8 +2828,8 @@ class LibraryReconciliationJob(RepairJob):
                                 continue
                         if emit(
                             job_id=self.job_id, finding_type='reconciliation_metadata',
-                            severity='warning', entity_type='track',
-                            entity_id=str(file['db']['id']), file_path=file['path'],
+                            severity='warning', entity_type='track' if row else 'file',
+                            entity_id=str(row['id']) if row else file['path'], file_path=file['path'],
                             title=(f'Rename file: {slot["title"]}'
                                    if set(changed) == {'filename'}
                                    else f'Update metadata: {slot["title"]}'),

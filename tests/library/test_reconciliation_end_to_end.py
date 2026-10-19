@@ -565,6 +565,63 @@ def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp
         assert tags['album'] == ['Ashes of the Wake (Deluxe)']
 
 
+def test_unindexed_album_member_gets_guarded_file_tag_proposal(tmp_path, monkeypatch):
+    db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
+    with db._get_connection() as conn:
+        conn.execute('DELETE FROM tracks WHERE id = 2')
+        conn.commit()
+    assert not LibraryReconciliationJob().scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    items = worker.get_review_case(case_id)['items']
+    item = next(item for item in items if item['file_path'] == str(paths[1]))
+    assert item['finding_type'] == 'reconciliation_metadata'
+    assert item['entity_type'] == 'file'
+    assert item['details']['file_only']
+    assert item['details']['track_id'] is None
+    assert item['details']['changes']['musicbrainz_release_id']['new'] == ''
+    assert item['details']['db_track_updates'] == {}
+    saved = worker.apply_review_decision(case_id, item['id'],
+        evidence_token=item['evidence_token'], action='fix')
+    assert saved['success'], saved
+    result = worker.fix_finding(item['id'], review_approved=True)
+    assert result['success'], result
+    tags = FLAC(str(paths[1]))
+    assert 'musicbrainz_albumid' not in tags
+    assert tags['musicbrainz_trackid'] == [mbids[1]]
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM tracks').fetchone()[0] == 1
+
+
+@pytest.mark.parametrize('changed', ['indexed', 'indexed_alias', 'file_changed'])
+def test_unindexed_metadata_apply_rejects_changed_evidence(tmp_path, monkeypatch, changed):
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
+    with db._get_connection() as conn:
+        conn.execute('DELETE FROM tracks WHERE id = 2')
+        conn.commit()
+    assert not LibraryReconciliationJob().scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = next(item for item in worker.get_review_case(case_id)['items']
+                if item['file_path'] == str(paths[1]))
+    if changed == 'file_changed':
+        tags = FLAC(str(paths[1]))
+        tags['comment'] = ['Changed after review']
+        tags.save()
+    else:
+        stored = paths[1]
+        if changed == 'indexed_alias':
+            stored = tmp_path / 'alias.flac'
+            stored.hardlink_to(paths[1])
+        with db._get_connection() as conn:
+            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, metadata_locked) VALUES (2,10,1,'Hourglass',?,1)", (str(stored),))
+            conn.commit()
+    before = paths[1].read_bytes()
+    result = worker._fix_reconciliation_metadata(item['entity_type'], item['entity_id'],
+                                                str(paths[1]), item['details'])
+    assert not result['success']
+    assert 'indexed' in result['error'] if changed.startswith('indexed') else 'changed' in result['error']
+    assert paths[1].read_bytes() == before
+
+
 @pytest.mark.parametrize('alias_in_catalogue', [False, True])
 def test_stored_artist_aliases_support_cross_script_audio_identity(tmp_path, monkeypatch, alias_in_catalogue):
     import core.repair_jobs.library_reconciliation as module

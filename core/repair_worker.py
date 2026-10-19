@@ -4685,7 +4685,60 @@ class RepairWorker:
                 return 'Could not update the album release before applying'
         return None
 
+    @staticmethod
+    def _refresh_reconciliation_assignment(cursor, file_path, final_path, details):
+        # A guarded tag/name change preserves a manual audio assignment, only
+        # when its original evidence was current before this write.
+        if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
+            final_stat = os.stat(final_path)
+            cursor.execute('''UPDATE reconcile_track_assignment
+                SET file_path=?, size_bytes=?, mtime_ns=?
+                WHERE file_path=? AND size_bytes=? AND mtime_ns=?''',
+                (final_path, final_stat.st_size, final_stat.st_mtime_ns,
+                 file_path, details.get('size_bytes'), details.get('mtime_ns')))
+
+    def _fix_reconciliation_file_tags(self, file_path, details):
+        """Apply a scanned file's tags before a library row exists for it."""
+        if (details.get('track_id') or details.get('db_track_updates') or
+                details.get('db_album_title') or details.get('target_path') or
+                not details.get('db_data')):
+            return {'success': False, 'error': 'Invalid file-only metadata proposal'}
+        error = (self._reconciliation_file_guard(file_path, details) or
+                 self._reconciliation_release_guard(details))
+        if error:
+            return {'success': False, 'error': error}
+        conn = self.db._get_connection()
+        wrote_tags = False
+        try:
+            # Indexing must not introduce a row (possibly metadata-locked) while
+            # tags are being written. Require a fresh proposal if it already did.
+            conn.execute('BEGIN IMMEDIATE')
+            for row in conn.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND file_path != ''"):
+                resolved = _resolve_file_path(row[0], self.transfer_folder,
+                                              config_manager=self._config_manager)
+                if resolved and _same_reviewed_file(resolved, file_path):
+                    return {'success': False,
+                            'error': 'The file is now indexed; reanalyze before applying'}
+            from core.repair_jobs.library_retag import apply_track_plans
+            outcome = apply_track_plans([{'file_path': file_path,
+                                          'db_data': details['db_data']}])
+            if outcome['written'] != 1 or outcome['failed'] or outcome['skipped']:
+                return {'success': False, 'error': 'Tag writer did not complete', **outcome}
+            wrote_tags = True
+            self._refresh_reconciliation_assignment(conn.cursor(), file_path, file_path, details)
+            conn.commit()
+            return {'success': True, 'action': 'reconciliation_metadata',
+                    'message': 'Updated file tags; the file is not yet indexed'}
+        except Exception as exc:
+            logger.error('Reconciliation file tag repair failed: %s', exc, exc_info=True)
+            return {'success': False, 'partial': wrote_tags, 'error': str(exc)}
+        finally:
+            conn.rollback()
+            conn.close()
+
     def _fix_reconciliation_metadata(self, entity_type, entity_id, file_path, details):
+        if details.get('file_only'):
+            return self._fix_reconciliation_file_tags(file_path, details)
         error = (self._reconciliation_file_guard(file_path, details) or
                  self._reconciliation_release_guard(details))
         if error:
@@ -4786,17 +4839,8 @@ class RepairWorker:
                 cursor.execute('''UPDATE albums SET title = ?, updated_at = CURRENT_TIMESTAMP
                                   WHERE id = ?''', (album_title, details.get('album_id')))
             if wrote_tags or renamed:
-                # This guarded operation changes tags/name only. Keep manual
-                # audio assignments bound to the resulting file, while refusing
-                # to refresh an assignment whose original evidence was stale.
-                if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_track_assignment'").fetchone():
-                    final_path = target_path if renamed else file_path
-                    final_stat = os.stat(final_path)
-                    cursor.execute('''UPDATE reconcile_track_assignment
-                        SET file_path=?, size_bytes=?, mtime_ns=?
-                        WHERE file_path=? AND size_bytes=? AND mtime_ns=?''',
-                        (final_path, final_stat.st_size, final_stat.st_mtime_ns,
-                         file_path, details.get('size_bytes'), details.get('mtime_ns')))
+                self._refresh_reconciliation_assignment(
+                    cursor, file_path, target_path if renamed else file_path, details)
             if updates or album_title or wrote_tags or renamed:
                 conn.commit()
             return {'success': True, 'action': 'reconciliation_metadata',
