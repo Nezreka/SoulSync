@@ -160,7 +160,8 @@ def test_active_sources_read_shape(client):
     assert a['metadata']['active']
     expected_options = 7 if config_manager.get('experimental.jiosaavn_enabled') else 6
     assert len(a['metadata']['options']) == expected_options
-    assert len(a['server']['options']) == 4
+    from core.media_server import specs
+    assert len(a['server']['options']) == len(specs.names())
     assert 'mode' in a['download'] and isinstance(a['download']['hybrid_order'], list)
 
 

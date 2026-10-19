@@ -105,6 +105,7 @@ class ConfigManager:
         'plex.token',
         'jellyfin.api_key',
         'navidrome.password',
+        'music_assistant.token',
         # Download sources
         'soulseek.api_key',
         'deezer_download.arl',
@@ -531,6 +532,15 @@ class ConfigManager:
                 "username": "",
                 "password": "",
                 "auto_detect": True
+            },
+            "music_assistant": {
+                "base_url": "",
+                # a long-lived token from Music Assistant (Settings > Users)
+                "token": "",
+                # instance id of the Local files / SMB source the scan reads
+                "source_instance": "",
+                "auto_detect": True,
+                "request_timeout_seconds": 30
             },
             "soulseek": {
                 "slskd_url": "",

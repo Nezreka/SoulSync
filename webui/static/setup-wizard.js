@@ -575,6 +575,9 @@ const _WIZARD_SERVER_FALLBACK = [
       fields: [{ key: 'base_url', kind: 'url', required: true, label: 'Navidrome URL' },
                { key: 'username', kind: 'username', required: true, label: 'Username' },
                { key: 'password', kind: 'password', required: true, label: 'Password' }] },
+    { name: 'music_assistant', display_name: 'Music Assistant', config_section: 'music_assistant', detection: { port: 8095 }, is_external: true,
+      fields: [{ key: 'base_url', kind: 'url', required: true, label: 'Music Assistant URL' },
+               { key: 'token', kind: 'token', required: true, label: 'Long-lived token' }] },
 ];
 let _wizardServers = _WIZARD_SERVER_FALLBACK;
 let _wizardServersLoaded = false;
