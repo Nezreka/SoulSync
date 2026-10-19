@@ -58319,30 +58319,6 @@ tr.tag-diff-same {
     to { opacity: 1; transform: none; }
 }
 
-.sync-card-delete {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    width: 20px;
-    height: 20px;
-    border: none;
-    background: var(--white-a06);
-    color: var(--white-a30);
-    border-radius: var(--radius-circle);
-    font-size: 14px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: all 0.2s;
-    z-index: 2;
-    line-height: 1;
-}
-
-.sync-history-card:hover .sync-card-delete { opacity: 1; }
-.sync-card-delete:hover { background: rgba(239, 83, 80, 0.3); color: #EF5350; }
-
 .sync-history-card::before {
     content: '';
     position: absolute;
@@ -58365,101 +58341,9 @@ tr.tag-diff-same {
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
-.sync-card-thumb {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
-    overflow: hidden;
-    flex-shrink: 0;
-    background: var(--white-a04);
-}
-
-.sync-card-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.sync-card-thumb-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--white-a15);
-    font-size: 18px;
-}
-
 .sync-card-info {
     flex: 1;
     min-width: 0;
-}
-
-.sync-card-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--white-a85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.sync-card-meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 3px;
-}
-
-.sync-card-source {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--white-a40);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.sync-card-time {
-    font-size: 10px;
-    color: var(--white-a25);
-}
-
-.sync-card-stats {
-    flex-shrink: 0;
-    text-align: right;
-    min-width: 60px;
-}
-
-.sync-card-pct {
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--white-a90);
-    line-height: 1;
-}
-
-.sync-card-bar {
-    width: 60px;
-    height: 3px;
-    background: var(--white-a06);
-    border-radius: 3px;
-    margin: 4px 0;
-    overflow: hidden;
-}
-
-.sync-card-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.5s ease;
-}
-
-.health-good .sync-card-bar-fill { background: #4CAF50; }
-.health-warn .sync-card-bar-fill { background: #FFB74D; }
-.health-bad .sync-card-bar-fill { background: #EF5350; }
-
-.sync-card-counts {
-    font-size: 9px;
-    color: var(--white-a30);
-    white-space: nowrap;
 }
 
 /* Sync Detail Modal — wider than default discog modal */
