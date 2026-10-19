@@ -20,6 +20,7 @@ import {
   textValue as label,
   changeFieldLabel as proposedFieldLabel,
   displayChanges,
+  evidenceLabel,
 } from './review-presentation';
 
 type Data = Record<string, unknown>;
@@ -302,8 +303,7 @@ function TrackGroups({ pairs }: { pairs: Data[] }) {
         <details className={styles.confirmedGroup}>
           <summary>
             <EvidenceIcon name="check" />
-            {confirmed.length} confirmed match
-            {confirmed.length === 1 ? '' : 'es'}
+            {confirmed.length} settled assignment{confirmed.length === 1 ? '' : 's'}
             <span>Show</span>
           </summary>
           <TrackRows pairs={confirmed} />
@@ -408,6 +408,14 @@ function DuplicateCopies({
                   <span>Recording: {label(copy.recording_disambiguation)}</span>
                 )}
                 {playlists.length > 0 && <span>Playlist: {playlists.join(', ')}</span>}
+                {trackId && trackId === label(details.recommended_keeper) && (
+                  <>
+                    <StatusChip tone="good" icon="check">
+                      Recommended copy
+                    </StatusChip>
+                    <small>{label(details.keeper_reason)}</small>
+                  </>
+                )}
               </div>
               {onKeepCopy && trackId && (
                 <Button type="button" disabled={busy} onClick={() => onKeepCopy(trackId)}>
@@ -740,7 +748,7 @@ export function ReleaseComparison({
                       : pair.missing
                         ? 'Missing'
                         : label(pair.confidence) === 'clear'
-                          ? 'Strong match'
+                          ? evidenceLabel(pair.assignment_evidence)
                           : 'Needs review'}
                   </StatusChip>
                   {!pair.missing &&
@@ -1050,7 +1058,9 @@ export function AssignmentEvidence({
               ? 'This release track has been requested. Waiting for a verified local file.'
               : 'This release track has no local file. Choose which missing tracks to request, or review album completeness.'
           : row.status === 'confirmed'
-            ? 'Confirmed match · no metadata edit is pending.'
+            ? row.companion_of
+              ? 'Intentional lossy companion · kept alongside its lossless source.'
+              : `${evidenceLabel(row.assignment_evidence)} · no metadata edit is pending.`
             : row.status === 'not_owned'
               ? 'This track is intentionally not collected.'
               : row.review_state === 'reviewed' || row.status === 'settled'
@@ -1164,6 +1174,46 @@ export function ReconciliationEvidence({
   return (
     <div className={styles.reconciliationEvidence}>
       <EvidenceSummary details={details} />
+      {Boolean(details.metadata_review_reason) && (
+        <section className={styles.problemCard} data-tone="warning">
+          <h4>
+            {Object.keys(object(details.recording_id_conflict)).length
+              ? 'Recording ID needs review'
+              : 'Album metadata differs between files'}
+          </h4>
+          <p>
+            {label(details.metadata_review_reason)}. You can accept the proposed values or keep the
+            current values.
+          </p>
+          {Boolean(object(details.recording_id_conflict).title) && (
+            <p>
+              Current ID resolves to:{' '}
+              <strong>{label(object(details.recording_id_conflict).title)}</strong> —{' '}
+              {label(object(details.recording_id_conflict).artist)}
+            </p>
+          )}
+          {Object.entries(object(details.album_consistency)).map(([field, values]) => (
+            <div key={field}>
+              <strong>{proposedFieldLabel(field)}</strong>
+              <ul>
+                {objects(values).map((entry) => (
+                  <li key={label(entry.value)}>
+                    {label(entry.value) || 'Not set'} · {count(entry.files)} files
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {objects(object(details.album_consistency).musicbrainz_release_id).length > 0 &&
+            label(details.source) !== 'musicbrainz' && (
+              <p>
+                The selected provider does not establish a MusicBrainz release ID. The proposal
+                removes conflicting embedded release IDs. The selected release stays unchanged; any
+                recording ID changes are listed separately below.
+              </p>
+            )}
+        </section>
+      )}
       {primaryPairs.length > 0 && (
         <section className={styles.trackSection}>
           <div className={styles.sectionHeading}>
@@ -1195,6 +1245,19 @@ export function ReconciliationEvidence({
       {controls}
       {audioControl}
       <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
+      {objects(details.tool_checks).length > 0 && (
+        <details className={styles.identifierChanges}>
+          <summary>Other maintenance checks ({objects(details.tool_checks).length})</summary>
+          <ul>
+            {objects(details.tool_checks).map((check) => (
+              <li key={label(check.id)}>
+                <strong>{label(check.title)}</strong>
+                <p>{label(check.reason)}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {ambiguityReasons.length > 0 && (
         <section className={styles.problemCard} data-tone="warning">
           <h4>

@@ -22,6 +22,29 @@ logger = logging.getLogger("tag_writer")
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
 
 
+def _clear_musicbrainz_ids(audio, fields):
+    """Remove only explicitly reviewed IDs as part of the atomic tag save."""
+    from core.metadata.common import _norm_mb_key
+    names = {
+        'musicbrainz_recording_id': ('MusicBrainz Track Id', 'MusicBrainz Recording Id'),
+        'musicbrainz_release_id': ('MusicBrainz Album Id', 'MusicBrainz Release Id'),
+    }
+    if not isinstance(fields, list) or any(field not in names for field in fields):
+        raise ValueError('Unsupported MusicBrainz ID removal')
+    tags = audio.tags
+    if tags is None:
+        return
+    wanted = {_norm_mb_key(name) for field in fields for name in names[field]}
+    for key in list(tags.keys()):
+        if isinstance(tags, ID3):
+            if key == 'UFID:http://musicbrainz.org' and 'musicbrainz_recording_id' in fields:
+                tags.delall(key)
+            elif key.startswith('TXXX:') and _norm_mb_key(key[5:]) in wanted:
+                tags.delall(key)
+        elif _norm_mb_key(key.rsplit(':', 1)[-1]) in wanted:
+            del tags[key]
+
+
 def read_file_tags(file_path: str) -> Dict[str, Any]:
     """
     Read current tags from an audio file. Returns a dict of tag values
@@ -505,6 +528,10 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             written = _write_mp4(audio, title, artist, album_artist, album,
                                  year, genre_str, track_num, total_tracks,
                                  disc_num, bpm, artists_list=artists_list)
+
+        if db_data.get('clear_musicbrainz_ids'):
+            _clear_musicbrainz_ids(audio, db_data['clear_musicbrainz_ids'])
+            written.extend(db_data['clear_musicbrainz_ids'])
 
         # Embed already-known source IDs (Spotify / iTunes / MusicBrainz) from
         # db_data, reusing the canonical import-time frame writer — no API

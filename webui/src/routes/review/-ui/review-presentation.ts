@@ -29,6 +29,14 @@ export function findingHeading(finding: ReviewFinding): string {
   return finding.title;
 }
 
+export function evidenceLabel(evidence: unknown): string {
+  if (evidence === 'audio') return 'Audio-supported match';
+  if (evidence === 'metadata') return 'Metadata-supported match';
+  if (evidence === 'user') return 'User-confirmed assignment';
+  if (evidence === 'conflicting') return 'Needs review';
+  return 'Assignment settled';
+}
+
 export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'downloaded') return 'Checking download';
   if (row?.planned_choice?.action === 'dismiss')
@@ -49,9 +57,10 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
   if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
+  if (row?.companion_of && status === 'confirmed') return 'Intentional companion';
   return (
     {
-      confirmed: 'Confirmed match',
+      confirmed: evidenceLabel(row?.assignment_evidence),
       change: 'Change',
       uncertain: 'Review',
       missing: 'Missing',

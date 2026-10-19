@@ -479,6 +479,214 @@ def _minimal_flac(path, tags):
     audio.save()
 
 
+def _metadata_recommendation_album(tmp_path, monkeypatch, *, mixed=False, recordings=None):
+    import core.repair_jobs.library_reconciliation as module
+    root = tmp_path / 'music'
+    folder = root / 'Artist' / 'Album'
+    folder.mkdir(parents=True)
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    paths = [folder / '01 - Laid to Rest.flac', folder / '02 - Hourglass.flac']
+    _album(db, paths[0])
+    titles = ['Laid to Rest', 'Hourglass']
+    mbids = ['80951433-fbbf-45e8-b906-e820652b9ca5', 'e2bd3843-a9f1-447f-b733-f5f3d5dd3d33']
+    with db._get_connection() as conn:
+        conn.execute("UPDATE albums SET canonical_source='itunes', title='Ashes of the Wake (Deluxe)'")
+        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) VALUES (2,10,1,'Hourglass',2,?)", (str(paths[1]),))
+        conn.commit()
+    for index, path in enumerate(paths):
+        _minimal_flac(path, {'title': titles[index], 'artist': 'Lamb of God',
+            'albumartist': 'Lamb of God', 'tracknumber': str(index + 1), 'discnumber': '1',
+            'album': 'Ashes of the Wake' if mixed and index == 0 else 'Ashes of the Wake (Deluxe)',
+            'musicbrainz_trackid': 'feb76071-8125-4e98-8841-7b45a8d37feb',
+            'musicbrainz_albumid': 'first-release' if mixed and index == 0 else 'second-release'})
+    client = _Acoustid({path.name: (recordings if recordings is not None else
+        {'mbid': mbids[index], 'title': titles[index], 'artist': 'Lamb of God', 'score': .99})
+        for index, path in enumerate(paths)})
+    worker = RepairWorker(database=db, transfer_folder=str(root))
+    monkeypatch.setattr(RepairWorker, 'acoustid_client', property(lambda _self: client))
+    monkeypatch.setattr(module, 'all_library_roots', lambda _context: [str(root)])
+    read_tags = module._read_file_tags
+    monkeypatch.setattr(module, '_read_file_tags', lambda path: {**read_tags(path), 'duration_ms': 200000})
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args, **_kwargs: [
+        {'id': str(index + 1), 'name': title, 'artists': [{'name': 'Lamb of God'}],
+         'track_number': index + 1, 'disc_number': 1, 'duration_ms': 200000}
+        for index, title in enumerate(titles)])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
+        'name': 'Ashes of the Wake (Deluxe)', 'artists': [{'name': 'Lamb of God'}]})
+    context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
+                         acoustid_client=client, create_finding=worker._create_finding)
+    return db, worker, context, paths, mbids
+
+
+@pytest.mark.parametrize('source', ['itunes', 'deezer'])
+def test_non_musicbrainz_release_repairs_audio_supported_recording_ids(tmp_path, monkeypatch, source):
+    db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE albums SET canonical_source=?', (source,))
+        conn.commit()
+    result = LibraryReconciliationJob().scan(context)
+    assert not result.errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    case = worker.get_review_case(case_id)
+    items = [item for item in case['items'] if item['finding_type'] == 'reconciliation_metadata']
+    assert len(items) == 2
+    for item in items:
+        details = item['details']
+        expected = mbids[int(details['track_id']) - 1]
+        assert details['changes']['musicbrainz_recording_id']['new'] == expected
+        assert details['source'] == source
+        applied = worker._fix_reconciliation_metadata('track', details['track_id'], item['file_path'], details)
+        assert applied['success'], applied
+        assert FLAC(item['file_path'])['musicbrainz_trackid'] == [expected]
+    assert db.get_album_canonical(10)['source'] == source
+
+
+def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp_path, monkeypatch):
+    from core.repair_review_policy import _finding_tier
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
+    result = LibraryReconciliationJob().scan(context)
+    assert not result.errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    items = worker.get_review_case(case_id)['items']
+    metadata = [item for item in items if item['finding_type'] == 'reconciliation_metadata']
+    assert len(metadata) == 2
+    for item in metadata:
+        details = item['details']
+        assert _finding_tier(item)[0] == 'manual'
+        assert details['changes']['musicbrainz_release_id']['new'] == ''
+        assert details['album_consistency']['album']
+        assert _finding_tier({**item, 'details': {**details, 'plan_approved': True}})[0] == 'ready'
+        applied = worker._fix_reconciliation_metadata('track', details['track_id'], item['file_path'], details)
+        assert applied['success'], applied
+        tags = FLAC(item['file_path'])
+        assert 'musicbrainz_albumid' not in tags
+        assert tags['musicbrainz_trackid']  # Track identity is retained.
+        assert tags['album'] == ['Ashes of the Wake (Deluxe)']
+
+
+def test_provider_independent_recording_identity_requires_unique_corroboration():
+    from core.library.reconciliation_metadata import confirmed_recording
+    slot = {'title': 'Home', 'artist': 'Artist', 'duration_ms': 200000}
+    recording = {'mbid': '80951433-fbbf-45e8-b906-e820652b9ca5', 'title': 'Home', 'artist': 'Artist', 'score': .99}
+    file = {'tags': {'duration_ms': 200000}, 'acoustid': {'status': 'ok', 'recordings': [recording]}}
+    assert confirmed_recording(file, slot, 'itunes') == recording
+    file['acoustid']['recordings'].append({**recording, 'mbid': 'e2bd3843-a9f1-447f-b733-f5f3d5dd3d33'})
+    assert not confirmed_recording(file, slot, 'itunes')
+    file['acoustid']['recordings'] = [{**recording, 'artist': 'Someone Else'}]
+    assert not confirmed_recording(file, slot, 'itunes')
+    file['acoustid']['recordings'] = [{**recording, 'artist': ''}]
+    assert not confirmed_recording(file, slot, 'itunes')
+    file['acoustid']['recordings'] = [recording]
+    file['tags']['duration_ms'] = 210000
+    assert not confirmed_recording(file, slot, 'itunes')
+
+
+def test_ambiguous_replacement_ids_offer_reviewed_removal_after_catalogue_check(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from core.repair_review_policy import _finding_tier
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    first = context.acoustid_client.matches[paths[0].name]
+    context.acoustid_client.matches[paths[0].name] = [first, {**first, 'mbid': '9a43591f-aa6c-45a1-b7fd-b85e79a1f2d3'}]
+    context.mb_client = SimpleNamespace(get_recording=lambda mbid, **kwargs: {
+        'id': mbid, 'title': 'Different Song', 'artist-credit': [{'name': 'Other Artist'}]})
+    assert not LibraryReconciliationJob().scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = next(item for item in worker.get_review_case(case_id)['items'] if item['file_path'] == str(paths[0]))
+    assert _finding_tier(item)[0] == 'manual'
+    assert item['details']['changes']['musicbrainz_recording_id']['new'] == ''
+    assert item['details']['recording_id_conflict']['title'] == 'Different Song'
+    applied = worker._fix_reconciliation_metadata('track', '1', str(paths[0]), item['details'])
+    assert applied['success'], applied
+    assert 'musicbrainz_trackid' not in FLAC(str(paths[0]))
+    assert FLAC(str(paths[0]))['musicbrainz_albumid'] == ['second-release']
+
+
+def test_tool_findings_are_rechecked_before_retirement(tmp_path, monkeypatch):
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    current_id = 'feb76071-8125-4e98-8841-7b45a8d37feb'
+    for index, mbid in enumerate(['obsolete-id', current_id]):
+        worker._create_finding(job_id='mbid_mismatch_detector', finding_type='mbid_mismatch',
+            severity='warning', entity_type='track', entity_id=str(index + 1), file_path=str(paths[index]),
+            title='Old ID warning', description='Earlier finding', details={'mbid': mbid})
+    assert not LibraryReconciliationJob().scan(context).errors
+    with db._get_connection() as conn:
+        rows = conn.execute("SELECT entity_id,status,user_action FROM repair_findings WHERE job_id='mbid_mismatch_detector' ORDER BY entity_id").fetchall()
+    assert tuple(rows[0]) == ('1', 'resolved', 'obsolete')
+    assert rows[1][1] == 'pending'  # A proposed correction has not changed the file yet.
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = next(item for item in worker.get_review_case(case_id)['items'] if item['file_path'] == str(paths[1]))
+    assert item['details']['tool_checks'][0]['state'] == 'open'
+
+
+def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(tmp_path, monkeypatch):
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    assert not LibraryReconciliationJob().scan(context).errors
+    case_id = worker.get_review_cases()['items'][0]['case_id']
+    item = worker.get_review_case(case_id)['items'][0]
+    result = worker.apply_review_decision(case_id, item['id'], evidence_token=item['evidence_token'], action='fix')
+    assert result['success'], result
+    details = {**item['details'], 'assignment_evidence': 'audio', 'tool_checks': [{'title': 'Additional context'}]}
+    def refresh():
+        worker._create_finding(job_id='library_reconciliation', finding_type=item['finding_type'],
+            severity='warning', entity_type=item['entity_type'], entity_id=item['entity_id'],
+            file_path=item['file_path'], title=item['title'], description=item['description'], details=details)
+        return next(row for row in worker.get_review_case(case_id)['items'] if row['id'] == item['id'])
+    assert refresh()['details']['plan_approved']
+    details['metadata_review_reason'] = 'New conflicting recording evidence needs review'
+    changed = refresh()
+    assert not changed['details'].get('plan_approved')
+    assert changed['review_tier'] == 'manual'
+
+
+def test_configured_lossy_companion_shares_assignment_without_duplicate_decision(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    companion = paths[0].with_suffix('.mp3')
+    companion.write_bytes(paths[0].read_bytes())
+    context.acoustid_client.matches[companion.name] = context.acoustid_client.matches[paths[0].name]
+    context.config_manager = SimpleNamespace(get=lambda key, default=None:
+        True if key == 'lossy_copy.enabled' else default)
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, file_path) VALUES (3,10,1,'Laid to Rest',1,?)", (str(companion),))
+        conn.commit()
+    scan = LibraryReconciliationJob()
+    for _ in range(2):  # The protected role is also part of the matching cache key.
+        result = scan.scan(context)
+        assert not result.errors
+        case_id = worker.get_review_cases()['items'][0]['case_id']
+        case = worker.get_review_case(case_id)
+        assert {item['finding_type'] for item in case['items']} == {'reconciliation_metadata'}
+        plan = case['album_plan']
+        assert plan['matched'] == plan['release_track_count'] == 2
+        assert len(plan['assignments']) == 3
+        row = next(row for row in plan['assignments'] if row['file_path'] == str(companion))
+        assert row['companion_of'] == str(paths[0])
+
+
+@pytest.mark.parametrize('container', ['id3', 'vorbis', 'mp4'])
+def test_explicit_id_clear_preserves_recording_and_unrelated_tags(container):
+    from types import SimpleNamespace
+    from mutagen.id3 import ID3, TXXX, UFID
+    from core.tag_writer import _clear_musicbrainz_ids
+    if container == 'id3':
+        tags = ID3()
+        tags.add(TXXX(desc='MUSICBRAINZ_RELEASEID', text=['wrong-release']))
+        tags.add(TXXX(desc='MusicBrainz Album Id', text=['wrong-release']))
+        tags.add(UFID(owner='http://musicbrainz.org', data=b'recording'))
+        tags.add(TXXX(desc='OTHER', text=['keep']))
+    else:
+        prefix = '----:com.apple.iTunes:' if container == 'mp4' else ''
+        tags = {prefix + 'MusicBrainz Album Id': ['wrong-release'],
+                prefix + 'MusicBrainz Track Id': ['recording'], 'OTHER': ['keep']}
+    audio = SimpleNamespace(tags=tags)
+    _clear_musicbrainz_ids(audio, ['musicbrainz_release_id'])
+    assert len(tags) == 2
+    assert any('recording' in str(value) for value in tags.values())
+    assert any('keep' in str(value) for value in tags.values())
+    with pytest.raises(ValueError):
+        _clear_musicbrainz_ids(audio, ['title'])
+
+
 def test_load_rows_indexes_the_scan_mount_when_stored_mount_also_exists(tmp_path):
     server_root = tmp_path / 'server-mount'
     scan_root = tmp_path / 'scan-mount'

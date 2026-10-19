@@ -1388,12 +1388,13 @@ class RepairWorker:
             if existing:
                 existing_id, existing_status, resolved_at = existing[0], existing[1], existing[2]
                 if job_id == 'library_reconciliation':
-                    from core.library.reconciliation_choices import same_relocated_evidence
+                    from core.library.reconciliation_choices import same_relocated_evidence, same_annotated_evidence
                     try:
                         prior_details = json.loads(existing[3] or '{}')
                     except (TypeError, ValueError):
                         prior_details = {}
-                    if same_relocated_evidence(prior_details, details or {}):
+                    if (same_relocated_evidence(prior_details, details or {}) or
+                            same_annotated_evidence(prior_details, details or {})):
                         new_raw = json.dumps(details)
                         new_key = review_case_key(details, file_path, existing_id)
                         review_choices.ensure_schema(conn)
@@ -1429,7 +1430,8 @@ class RepairWorker:
                             prior = {}
                         signals = ('fingerprint_key', 'source', 'release_id',
                                    'evidence_signature', 'fulfillment_state', 'changes',
-                                   'expected_title', 'recording_mbid', 'expected_duration_ms')
+                                   'expected_title', 'recording_mbid', 'expected_duration_ms',
+                                   'metadata_review_reason')
                         changed_reconciliation_evidence = (existing[4] == 'obsolete' or any(
                             prior.get(key) != (details or {}).get(key) for key in signals))
                     if existing_status == 'dismissed' and not changed_reconciliation_evidence:
@@ -2010,7 +2012,7 @@ class RepairWorker:
                     return {'success': False, 'error': 'That release has no track list'}
                 if preview:
                     from core.repair_jobs.library_reconciliation import (
-                        candidate_preview, _score_release_candidates, _read_file_tags,
+                        candidate_preview, _score_release_candidates, _read_file_tags, _mark_lossy_companions,
                     )
                     from core.library.reconciliation_evidence import ReconciliationEvidence
                     paths = list(dict.fromkeys(row['file_path'] for row in plan.get('assignments') or []
@@ -2028,6 +2030,8 @@ class RepairWorker:
                             files.append(cache.file_evidence(resolved, _read_file_tags))
                     finally:
                         cache.close()
+                    from core.library.duplicate_rules import lossy_companion_exts
+                    _mark_lossy_companions(files, lossy_companion_exts(self._config_manager, self.db))
                     scored = _score_release_candidates(files, [(source, release_id)], {}, {release_id})
                     if not scored:
                         return {'success': False, 'error': 'Could not analyze this release track list'}

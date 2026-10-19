@@ -41,6 +41,63 @@ def _file(title, path, duration_ms, recording=None):
                         {'status': 'no_match', 'recordings': []}}
 
 
+def test_same_title_different_artist_is_not_positive_audio_evidence():
+    file = _file('Home', '/album/01 - Home.flac', 200000,
+                 {'mbid': 'other', 'title': 'Home', 'artist': 'Unrelated Performer', 'score': .99})
+    file['tags'].update(artist='Expected Artist', mbid='expected')
+    slot = {'title': 'Home', 'artist': 'Expected Artist',
+            'recording_mbid': 'expected', 'duration_ms': 200000}
+    assert not reconcile_folder([file], [slot])['pairs']
+    assert audio_contradicts_local_title(file)
+    # A known alias supplies the missing artist evidence, without changing IDs.
+    slot['artist_aliases'] = ['Unrelated Performer']
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
+def test_similar_artist_names_require_an_actual_alias_and_compilations_use_track_credit():
+    file = _file('Home', '/album/01 - Home.flac', 200000,
+                 {'mbid': 'other', 'title': 'Home', 'artist': 'Ryan Adams', 'score': .99})
+    file['tags'].update(artist='Bryan Adams')
+    slot = {'title': 'Home', 'artist': 'Bryan Adams', 'duration_ms': 200000}
+    assert not reconcile_folder([file], [slot])['pairs']
+    file['tags'].update(artist='Various Artists', track_artist='Ryan Adams')
+    assert not audio_contradicts_local_title(file)
+
+
+@pytest.mark.parametrize('credit', ['Lïve', 'Live feat. Guest'])
+def test_artist_spelling_and_collaboration_are_preserved(credit):
+    file = _file('Home', '/album/01 - Home.flac', 200000,
+                 {'mbid': 'alternate-id', 'title': 'Home', 'artist': credit, 'score': .99})
+    slot = {'title': 'Home', 'artist': 'Live', 'recording_mbid': 'expected', 'duration_ms': 200000}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('Home (Alpha remix)', 'Home (Beta remix)'),
+    ('Home (Alpha remix)', 'Home (Alpha Beta remix)'),
+    ('Home (live at Paris)', 'Home (live at London)'),
+    ('Home (radio edit)', 'Home (album version)'),
+])
+def test_named_versions_cannot_fill_each_others_release_slots(local, remote):
+    from core.library.reconciliation_plan import display_title_compatible
+    file = _file(local, f'/album/01 - {local}.flac', 200000,
+                 {'mbid': 'local-id', 'title': local, 'artist': 'Artist', 'score': .99})
+    slot = {'title': remote, 'artist': 'Artist', 'recording_mbid': 'remote-id', 'duration_ms': 200000}
+    plan = reconcile_folder([file], [slot])
+    assert not plan['pairs']
+    assert plan['missing_slots'] == [0]
+    assert plan['extra_files'] == [0]
+    assert title_difference_kind(local, slot) == 'version'
+    assert not display_title_compatible(local, slot)
+
+
+def test_generic_version_label_can_omit_a_named_performance():
+    file = _file('Home (live at Paris)', '/album/01 - Home (live at Paris).flac', 200000,
+                 {'mbid': 'live-id', 'title': 'Home', 'artist': 'Artist', 'score': .99})
+    slot = {'title': 'Home (live)', 'artist': 'Artist', 'recording_mbid': 'live-id', 'duration_ms': 200000}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
 def test_acoustic_session_and_alternative_wording_match_equivalent_versions():
     assert file_version_markers(_file('Acts of Man - Acoustic',
                                       '/album/Acts of Man - Acoustic.flac', 200000)) == (

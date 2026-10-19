@@ -68,7 +68,7 @@ def policy_identity():
     # deployment should hit, a normalization/solver/runtime change must miss.
     root = Path(__file__).resolve().parents[2]
     paths = ('core/library/reconciliation_plan.py', 'core/matching/assignment.py',
-             'core/matching/audio_verification.py', 'core/text/fold.py',
+             'core/matching/audio_verification.py', 'core/matching/artist_aliases.py', 'core/text/fold.py',
              'core/text/title_match.py')
     sources = [hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths]
     return digest(canonical([SCHEMA, sys.implementation.name, list(sys.version_info[:3]),
@@ -82,8 +82,9 @@ def input_key(policy, files, slots, forced_pairs, identity):
     local = [{
         'path': f.get('path'), 'size_bytes': f.get('size_bytes'), 'mtime_ns': f.get('mtime_ns'),
         'duration_ms': f.get('duration_ms'), 'tags': f.get('tags'), 'acoustid': f.get('acoustid'),
+        'companion_of': f.get('companion_of'),
         'db': {key: (f.get('db') or {}).get(key) for key in
-               ('title', 'recording_disambiguation', 'owner_profile_id')},
+               ('title', 'recording_disambiguation', 'owner_profile_id', 'artist_aliases')},
     } for f in files]
     remote = [{key: value for key, value in slot.items() if key != 'preview_url'} for slot in slots]
     return digest(canonical([policy, identity, local, remote, sorted((forced_pairs or {}).items())]))

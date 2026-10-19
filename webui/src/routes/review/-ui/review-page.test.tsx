@@ -330,7 +330,7 @@ describe('library reconciliation review queue', () => {
     const images = [...document.querySelectorAll('img')];
     expect(images.some((image) => image.src.includes('local-ashes'))).toBe(true);
     expect(images.some((image) => image.src.includes('release-one'))).toBe(true);
-    expect(screen.getByText('Strong match')).toBeTruthy();
+    expect(screen.getByText('Assignment settled')).toBeTruthy();
     expect(screen.getByText(/US deluxe edition/)).toBeTruthy();
     expect(screen.queryByText(/"release_id"/)).toBeNull();
   });

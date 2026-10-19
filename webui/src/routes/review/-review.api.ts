@@ -38,6 +38,9 @@ export interface AlbumAssignment {
     | 'duplicate'
     | 'settled';
   evidence_status?: string;
+  assignment_evidence?: 'audio' | 'metadata' | 'user' | 'conflicting';
+  companion_of?: string;
+  tool_checks?: Record<string, unknown>[];
   review_state?: 'pending' | 'reviewed' | 'obsolete';
   historical_finding_id?: number;
   planned_choice?: { category: string; action: 'fix' | 'dismiss'; fix_action?: string };

@@ -73,6 +73,51 @@ it('shows identifier-only proposals immediately', () => {
   expect(screen.queryByText('1 identifier change')).toBeNull();
 });
 
+it('explains an unsupported recording ID without implying a release change', () => {
+  render(
+    <ReconciliationEvidence
+      finding={{
+        ...finding,
+        details: {
+          metadata_review_reason: 'Confirm removing the incorrect recording ID',
+          recording_id_conflict: { title: 'Different song', artist: 'Different artist' },
+          changes: { musicbrainz_recording_id: { old: 'incorrect-id', new: '' } },
+        },
+      }}
+    />,
+  );
+  expect(screen.getByRole('heading', { name: 'Recording ID needs review' })).toBeTruthy();
+  expect(screen.getByText('Different song')).toBeTruthy();
+  expect(screen.getByText('incorrect-id')).toBeTruthy();
+  expect(screen.queryByText('Album metadata differs between files')).toBeNull();
+});
+
+it('recommends one duplicate keeper while leaving both copies available for a decision', () => {
+  const onKeepCopy = vi.fn();
+  render(
+    <ReconciliationEvidence
+      onKeepCopy={onKeepCopy}
+      finding={{
+        ...finding,
+        details: {
+          recommended_keeper: 'lossless',
+          keeper_reason: 'Highest quality copy',
+          duplicate_copies: [
+            { track_id: 'lossless', file_path: '/music/song.flac' },
+            { track_id: 'lossy', file_path: '/music/song.mp3' },
+          ],
+        },
+      }}
+    />,
+  );
+  expect(screen.getAllByText('Recommended copy')).toHaveLength(1);
+  expect(screen.getByText('Recommended copy').closest('article')!.textContent).toContain(
+    'song.flac',
+  );
+  fireEvent.click(screen.getAllByRole('button', { name: 'Plan to keep this copy' })[1]);
+  expect(onKeepCopy).toHaveBeenCalledWith('lossy');
+});
+
 const repeatedRecording = {
   ...finding,
   finding_type: 'reconciliation_unresolved',

@@ -1,6 +1,21 @@
 import { expect, it } from 'vitest';
 
-import { changeFieldLabel, displayChanges } from './review-presentation';
+import {
+  changeFieldLabel,
+  displayChanges,
+  evidenceLabel,
+  statusLabel,
+} from './review-presentation';
+
+it('distinguishes audio, metadata, user decisions and unknown older evidence', () => {
+  expect(evidenceLabel('audio')).toBe('Audio-supported match');
+  expect(evidenceLabel('metadata')).toBe('Metadata-supported match');
+  expect(evidenceLabel('user')).toBe('User-confirmed assignment');
+  expect(evidenceLabel(undefined)).toBe('Assignment settled');
+  expect(statusLabel('confirmed', { status: 'confirmed', companion_of: '/source.flac' })).toBe(
+    'Intentional companion',
+  );
+});
 
 it('merges identical file and library edits without losing their scope', () => {
   const changes = displayChanges({

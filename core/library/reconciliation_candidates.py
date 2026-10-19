@@ -20,6 +20,18 @@ class ScoredCandidate(NamedTuple):
     plan: dict
 
 
+def assignment_evidence(file: dict, pair: dict) -> str:
+    if pair.get('confidence') == 'manual':
+        return 'user'
+    if pair.get('confidence') != 'clear':
+        return 'conflicting'
+    audio = file.get('acoustid') or {}
+    if (audio.get('status') == 'ok' and
+            any(reason.startswith('AcoustID ') for reason in pair.get('reasons') or [])):
+        return 'audio'
+    return 'metadata'
+
+
 def pair_display_fields(file: dict, slot: dict, *, duration_fallback: bool = True,
                         strict_title: bool = True) -> dict:
     """Facts shared by finding evidence, assignments and release previews.

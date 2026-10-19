@@ -13,9 +13,13 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from core.matching.assignment import assign_max_weight
+from core.matching.artist_aliases import artist_names_match
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
-from core.text.fold import fold_title
-from core.text.title_match import numeric_tokens_differ, recording_version_markers, titles_plausibly_same
+from core.text.fold import fold_title, title_similarity
+from core.text.title_match import (
+    _recording_qualifier_segments, numeric_tokens_differ,
+    recording_version_markers, titles_plausibly_same,
+)
 
 
 _LEADING_POSITION = re.compile(r'^\s*(?:\d+[-_. ]+){1,2}')
@@ -32,7 +36,30 @@ def _version_markers(value: str) -> frozenset[str]:
     if 'acoustic' in markers:
         # Catalogues commonly call the same acoustic take an acoustic session.
         markers.difference_update({'session', 'sessions'})
+    for segment in _recording_qualifier_segments(value):
+        if re.search(r'\b(?:radio|single)\s+(?:edit|version)\b', segment, re.I):
+            markers.add('edit')
     return frozenset(markers)
+
+
+def _named_version_conflicts(left: str, right: str) -> bool:
+    """Broad labels can omit detail; two different named performances cannot.
+
+    Inspect only version qualifiers, so subtitles and main-title words such
+    as "Live Forever" retain their existing matching behavior.
+    """
+    def detail(title):
+        tokens = set()
+        for segment in _recording_qualifier_segments(title):
+            markers = _version_markers(f'({segment})')
+            if markers:
+                tokens.update(fold_title(segment, drop_brackets=False).split())
+                tokens.difference_update(markers)
+        return tokens - {'version', 'mix', 'recording', 'recorded', 'performance',
+                         'session', 'sessions', 'alternate', 'alternative',
+                         'alt', 'at', 'in', 'from', 'the', 'a', 'an'}
+    a, b = detail(left), detail(right)
+    return bool(a and b and a != b)
 
 
 def _title_score(a: str, b: str) -> float:
@@ -45,7 +72,7 @@ def _title_score(a: str, b: str) -> float:
     if numeric_tokens_differ(a, b):
         return 0.0
     left_versions, right_versions = _version_markers(a), _version_markers(b)
-    if left_versions != right_versions:
+    if left_versions != right_versions or _named_version_conflicts(a, b):
         return 0.0
     return ratio
 
@@ -105,6 +132,8 @@ def display_title_compatible(local_title: str, slot: dict) -> bool:
     still the same recording identity.
     """
     slot_title = str(slot.get('title') or slot.get('name') or '')
+    if _named_version_conflicts(local_title, slot_title):
+        return False
     if _title_score(local_title, slot_title) >= 0.83:
         return True
     left, right = normalize(local_title), normalize(slot_title)
@@ -134,6 +163,8 @@ def title_difference_kind(local_title: str, slot: dict) -> str:
         return 'version'
     if numeric_tokens_differ(local_clean, slot_clean):
         return 'material'
+    if _named_version_conflicts(local_clean, slot_clean):
+        return 'version'
     if local_versions:
         # Both sides identify the same named performance/version, but one
         # carries useful display detail that the other omits. Preserve it.
@@ -158,6 +189,12 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
     file_disambiguation = str(
         (file.get('db') or {}).get('recording_disambiguation') or '').strip()
     slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
+    slot_title = str(slot.get('title') or slot.get('name') or '')
+    if any(_named_version_conflicts(str(title or ''), slot_title) for title in (
+            (file.get('tags') or {}).get('title'),
+            _filename_title(str(file.get('path') or '')),
+            (file.get('db') or {}).get('title'))):
+        return False
     if (file_disambiguation and slot_disambiguation and
             _identity_text(file_disambiguation) != _identity_text(slot_disambiguation)):
         return False
@@ -191,10 +228,10 @@ def _recording_supports_slot(recording: dict, slot: dict) -> bool:
         return False
     recording_artist = str(recording.get('artist') or '')
     slot_artist = str(slot.get('artist') or '')
-    return _artist_credit_supports(recording_artist, slot_artist)
+    return _artist_credit_supports(recording_artist, slot_artist, slot.get('artist_aliases'))
 
 
-def _artist_credit_supports(recording_artist: str, slot_artist: str) -> bool:
+def _artist_credit_supports(recording_artist: str, slot_artist: str, aliases=None) -> bool:
     """Accept a release artist contained in a fuller recording credit.
 
     AcoustID/MusicBrainz often returns the complete collaboration while a
@@ -204,11 +241,9 @@ def _artist_credit_supports(recording_artist: str, slot_artist: str) -> bool:
     """
     if not slot_artist or not recording_artist:
         return True
-    if _title_score(recording_artist, slot_artist) >= 0.75:
-        return True
-    recording = f' {_identity_text(recording_artist)} '
-    expected = f' {_identity_text(slot_artist)} '
-    return len(expected.strip()) >= 3 and expected in recording
+    return artist_names_match(slot_artist, recording_artist, aliases=aliases,
+        threshold=1.0, similarity=lambda a, b: title_similarity(
+            a, b, drop_brackets=False))[0]
 
 
 def audio_contradicts_local_title(file: dict) -> bool:
@@ -220,8 +255,13 @@ def audio_contradicts_local_title(file: dict) -> bool:
               if (float(recording.get('score') or 0) >= 0.90 and
                   str(recording.get('title') or '').strip())]
     return bool(title and strong) and all(
-        _title_score(str(recording.get('title') or ''), title) < 0.83
-        and not _same_base_recording_title(recording.get('title'), title)
+        (_title_score(str(recording.get('title') or ''), title) < 0.83
+         and not _same_base_recording_title(recording.get('title'), title))
+        or not _artist_credit_supports(
+            str(recording.get('artist') or ''),
+            str((file.get('tags') or {}).get('track_artist') or
+                (file.get('tags') or {}).get('artist') or ''),
+            (file.get('db') or {}).get('artist_aliases'))
         for recording in strong
     )
 
@@ -237,7 +277,8 @@ def _same_base_recording_title(left: object, right: object) -> bool:
     helper only prevents the bare AcoustID label from vetoing that agreement.
     """
     a, b = fold_title(str(left or '')), fold_title(str(right or ''))
-    return bool(a and b and a == b)
+    return bool(a and b and a == b and not _named_version_conflicts(
+        str(left or ''), str(right or '')))
 
 
 def _duration_delta_ms(file: dict, slot: dict) -> int | None:
@@ -355,6 +396,8 @@ class _MatchFacts:
 
 def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
                  facts: _MatchFacts | None = None) -> tuple[int, list[str]]:
+    if file.get('companion_of'):
+        return 0, []
     facts = facts or _MatchFacts([file], slots or [slot])
     tags = file.get('tags') or {}
     evidence = file.get('acoustid') or {}
@@ -420,8 +463,10 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
             return 0, []
     if strong_recordings and all(
         recording.get('mbid') != _recording_id(slot)
-        and facts.title_score(str(recording.get('title') or ''), slot_title) < 0.83
-        and not _same_base_recording_title(recording.get('title'), slot_title)
+        and (not _artist_credit_supports(str(recording.get('artist') or ''),
+                                        slot_artist, slot.get('artist_aliases'))
+             or (facts.title_score(str(recording.get('title') or ''), slot_title) < 0.83
+                 and not _same_base_recording_title(recording.get('title'), slot_title)))
         for recording in strong_recordings
     ):
         # A convincing fingerprint for another song must not become a match
@@ -448,7 +493,9 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
             elif facts.supports(recording, slot):
                 fingerprint_weight = max(fingerprint_weight, int(5_000 * score))
                 reasons = ['AcoustID recording title matches release slot']
-            elif _same_base_recording_title(recording.get('title'), slot_title):
+            elif (_same_base_recording_title(recording.get('title'), slot_title)
+                  and _artist_credit_supports(str(recording.get('artist') or ''),
+                                              slot_artist, slot.get('artist_aliases'))):
                 # The local title and slot already passed the symmetric
                 # version check above. A bare AcoustID recording label is
                 # therefore positive audio evidence, rather than merely an

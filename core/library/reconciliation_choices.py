@@ -127,6 +127,17 @@ def same_relocated_evidence(previous, current):
             {k: v for k, v in current.items() if k not in volatile})
 
 
+def same_annotated_evidence(previous, current):
+    """Adding explanations alone preserves an otherwise exact saved choice."""
+    annotations = {'assignment_evidence', 'recording_identity',
+                   'recommended_keeper', 'keeper_reason', 'tool_checks'}
+    empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
+    def substantive(details):
+        return {key: value for key, value in details.items()
+                if key not in annotations and (key not in empty_defaults or value)}
+    return bool(previous) and substantive(previous) == substantive(current)
+
+
 def assignment_for_file(overrides, album_id, source, release_id, file, files, *, db=None):
     """Retain an assignment after a unique, verified move of the same audio."""
     import os

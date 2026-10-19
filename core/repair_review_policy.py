@@ -51,7 +51,7 @@ def needs_numbering_review(details: dict) -> bool:
         and details.get('numbering_mode') == 'digital'
         and details.get('confidence') == 'clear'
         and details.get('release_disc_count') == 1
-        and details.get('local_file_count') == details.get('release_track_count')
+        and (details.get('local_file_count') or 0) - (details.get('companion_count') or 0) == details.get('release_track_count')
         and bool(details.get('release_track_count'))
         and all(str(_change_value(changes[key], 'new')) == '1' for key in positions))
     return not normalized_disc
@@ -148,6 +148,8 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'blocked', 'The selected release must be resolved first'
     if details.get('plan_approved') or details.get('plan_keep'):
         return 'ready', 'Saved in the album plan; no file changes applied yet'
+    if details.get('metadata_review_reason'):
+        return 'manual', str(details['metadata_review_reason'])
     if ((details.get('acoustid') or {}).get('status') == 'fingerprint_error'
             and set(changes) - {'library_album_title'}):
         return 'manual', 'Audio could not be decoded; review before changing this file'
@@ -160,7 +162,11 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         return 'manual', 'The file-to-track assignment is not clear'
     if _replaces_artist_credit(changes):
         return 'manual', 'Confirm the artist credit before replacing an existing credit'
-    return 'ready', 'Audio and release evidence support this metadata repair'
+    if details.get('assignment_evidence') == 'audio':
+        return 'ready', 'Audio and release evidence support this metadata repair'
+    if details.get('assignment_evidence') == 'user':
+        return 'ready', 'The assignment was confirmed during review'
+    return 'ready', 'Metadata supports this repair; audio identity is not independently confirmed'
 
 
 def queue_filter(*, conn, case_modes=None, status: str, job_id: str = "", q: str = "", category: str = "", risk: str = "") -> tuple[str, list[Any]]:
@@ -213,7 +219,8 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict',
                   'title_difference_kind', 'confidence', 'numbering_mode',
                   'release_disc_count', 'local_file_count', 'release_track_count',
-                  'recording_mbid', 'expected_duration_ms', 'expected_title')
+                  'recording_mbid', 'expected_duration_ms', 'expected_title',
+                  'metadata_review_reason', 'assignment_evidence', 'companion_count')
         raw_details = "CASE WHEN json_valid(f.details_json) THEN f.details_json ELSE '{}' END"
         pairs = [f"'{field}', json_extract({raw_details}, '$.{field}')" for field in fields]
         pairs += [f"'current_tags', json_object('duration_ms', json_extract({raw_details}, '$.current_tags.duration_ms'))",

@@ -114,7 +114,7 @@ it('opens evidence for confirmed rows without manufacturing a pending action', a
   );
   fireEvent.click(screen.getByRole('button', { name: 'Release order' }));
   fireEvent.click(await screen.findByRole('button', { name: /Confirmed song/ }));
-  await screen.findByText('Confirmed match · no metadata edit is pending.');
+  await screen.findByText('Assignment settled · no metadata edit is pending.');
   expect(screen.getByText('Recording identity agrees')).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Apply this change' })).toBeNull();
 });
