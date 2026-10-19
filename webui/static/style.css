@@ -38879,13 +38879,6 @@ div.artist-hero-badge {
     flex-shrink: 0;
 }
 
-.build-playlist-no-results {
-    padding: 20px 16px;
-    text-align: center;
-    color: #777;
-    font-size: 13px;
-}
-
 /* -- Selected Artists -- */
 .build-playlist-selected-section {
     margin-bottom: 20px;
