@@ -40792,36 +40792,6 @@ div.artist-hero-badge {
 /* ALBUM CARDS - LARGE Spotify Browse Style */
 /* ========================================= */
 
-/* Album grid — discover-style cards */
-.enh-compact-list.enh-albums-grid {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding-bottom: 12px;
-    scroll-behavior: smooth;
-}
-
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar {
-    height: 6px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-track {
-    background: var(--white-a03);
-    border-radius: 3px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-thumb {
-    background: var(--white-a12);
-    border-radius: 3px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-thumb:hover {
-    background: var(--white-a20);
-}
-
-@media (max-width: 900px) {
-    .enh-compact-list.enh-albums-grid {
-        gap: 12px;
-    }
-}
-
 /* Album cards — Spotify browse tiles: padded panel, rounded cover with its
    own shadow, title + meta BELOW the art instead of stamped over it. */
 .enh-compact-item.album-card {
@@ -40880,36 +40850,6 @@ div.artist-hero-badge {
     font-size: 12px; color: var(--white-a50);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     line-height: 1.3; margin: 0; text-shadow: none; z-index: 1;
-}
-/* Ownership badge sits on the ART's corner, inside the tile padding. */
-.enh-compact-item.album-card .enh-item-lib-badge,
-.enh-compact-item.album-card .enh-item-wishlist-badge { top: 22px; left: 22px; }
-
-/* Floating Play affordance on album & playlist covers — Spotify signature hover */
-.enh-card-floating-play {
-    position: absolute;
-    right: 22px;
-    top: 122px;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
-    color: #ffffff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    font-weight: 700;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(var(--accent-rgb), 0.35);
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 10;
-    pointer-events: none;
-}
-.enh-compact-item.album-card:hover .enh-card-floating-play {
-    opacity: 1;
-    transform: translateY(0);
 }
 
 /* ========================================= */
