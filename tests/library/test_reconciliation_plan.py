@@ -98,6 +98,28 @@ def test_generic_version_label_can_omit_a_named_performance():
     assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
 
 
+@pytest.mark.parametrize(('artist', 'local', 'remote'), [
+    ('Cheap Trick', 'ELO Kiddies - Single Version', 'ELO Kiddies (single version)'),
+    ('Lynyrd Skynyrd', 'Four Walls of Raiford - Undubbed Demo Version', 'Four Walls of Raiford (undubbed demo)'),
+    ('*NSYNC', 'Girlfriend (feat. Nelly) - The Neptunes Remix', 'Girlfriend (The Neptunes remix)'),
+    ('Sixpence None the Richer', 'Kiss Me - Japanese Commercial Single Version Import', 'Kiss Me (Japanese Commercial single version)'),
+])
+def test_artist_prefixes_and_import_labels_do_not_create_named_version_conflicts(artist, local, remote):
+    file = _file(local, f'/album/01 - {artist} - {local}.flac', 200000,
+                 {'mbid': 'recording', 'title': remote, 'artist': artist, 'score': .99})
+    file['tags'].update(artist=artist, mbid='recording')
+    slot = {'title': remote, 'artist': artist, 'recording_mbid': 'recording', 'duration_ms': 200000}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
+def test_filename_version_still_blocks_a_different_named_mix_when_tags_omit_it():
+    file = _file('Home (remix)', '/album/01 - Artist - Home (Alpha remix).flac', 200000,
+                 {'mbid': 'recording', 'title': 'Home (remix)', 'artist': 'Artist', 'score': .99})
+    file['tags']['artist'] = 'Artist'
+    slot = {'title': 'Home (Beta remix)', 'artist': 'Artist', 'recording_mbid': 'other', 'duration_ms': 200000}
+    assert not reconcile_folder([file], [slot])['pairs']
+
+
 def test_acoustic_session_and_alternative_wording_match_equivalent_versions():
     assert file_version_markers(_file('Acts of Man - Acoustic',
                                       '/album/Acts of Man - Acoustic.flac', 200000)) == (

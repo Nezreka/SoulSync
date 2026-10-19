@@ -57,7 +57,7 @@ def _named_version_conflicts(left: str, right: str) -> bool:
                 tokens.difference_update(markers)
         return tokens - {'version', 'mix', 'recording', 'recorded', 'performance',
                          'session', 'sessions', 'alternate', 'alternative',
-                         'alt', 'at', 'in', 'from', 'the', 'a', 'an'}
+                         'alt', 'at', 'in', 'from', 'the', 'a', 'an', 'import'}
     a, b = detail(left), detail(right)
     return bool(a and b and a != b)
 
@@ -77,9 +77,13 @@ def _title_score(a: str, b: str) -> float:
     return ratio
 
 
-def _filename_title(path: str) -> str:
+def _filename_title(path: str, artist: str = '') -> str:
     stem = os.path.splitext(os.path.basename(path))[0]
-    return _LEADING_POSITION.sub('', stem)
+    title = _LEADING_POSITION.sub('', stem)
+    parts = re.split(r'\s+[-–—]\s+', title, maxsplit=1) if artist else []
+    if len(parts) == 2 and fold_title(parts[0]) == fold_title(artist):
+        return parts[1]
+    return title
 
 
 def _recording_id(slot: dict) -> str:
@@ -190,9 +194,11 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
         (file.get('db') or {}).get('recording_disambiguation') or '').strip()
     slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
     slot_title = str(slot.get('title') or slot.get('name') or '')
+    tags = file.get('tags') or {}
     if any(_named_version_conflicts(str(title or ''), slot_title) for title in (
-            (file.get('tags') or {}).get('title'),
-            _filename_title(str(file.get('path') or '')),
+            tags.get('title'),
+            _filename_title(str(file.get('path') or ''),
+                            str(tags.get('track_artist') or tags.get('artist') or '')),
             (file.get('db') or {}).get('title'))):
         return False
     if (file_disambiguation and slot_disambiguation and

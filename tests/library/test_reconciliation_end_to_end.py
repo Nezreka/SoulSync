@@ -601,6 +601,22 @@ def test_provider_independent_recording_identity_requires_unique_corroboration()
     assert not confirmed_recording(file, slot, 'itunes')
 
 
+def test_recording_id_removal_preserves_composer_credits_and_catalogue_aliases():
+    from types import SimpleNamespace
+    from core.library.reconciliation_metadata import recording_id_conflict
+    mbid = '61a45c1a-a717-4c58-abba-0563000f8a1d'
+    file = {'tags': {'mbid': mbid}, 'acoustid': {'status': 'no_match'}}
+    slot = {'title': 'Gnossienne: No. 1', 'artist': 'Alexandre Tharaud'}
+    record = {'id': mbid, 'title': 'Gnossienne No. 1',
+              'artist-credit': [{'name': 'Erik Satie'}]}
+    client = SimpleNamespace(get_recording=lambda *a, **k: record)
+    assert not recording_id_conflict(file, slot, client, {})
+    record.update(title='別の表記', aliases=[{'name': 'Gnossienne No. 1'}])
+    assert not recording_id_conflict(file, slot, client, {})
+    record.update(title='Winter Dies', aliases=[])
+    assert recording_id_conflict(file, slot, client, {})
+
+
 def test_ambiguous_replacement_ids_offer_reviewed_removal_after_catalogue_check(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from core.repair_review_policy import _finding_tier

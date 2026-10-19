@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from uuid import UUID
 
-from core.library.reconciliation_plan import _recording_supports_slot
+from core.library.reconciliation_plan import _recording_supports_slot, _title_score
 
 
 def confirmed_recording(file: dict, slot: dict, source: str) -> dict:
@@ -68,7 +68,7 @@ def recording_id_conflict(file: dict, slot: dict, client, cache: dict) -> dict:
         return {}
     if mbid not in cache:
         try:
-            cache[mbid] = client.get_recording(mbid, includes=['artist-credits']) or {}
+            cache[mbid] = client.get_recording(mbid, includes=['artist-credits', 'aliases']) or {}
         except Exception:
             cache[mbid] = {}
     raw = cache[mbid]
@@ -77,7 +77,12 @@ def recording_id_conflict(file: dict, slot: dict, client, cache: dict) -> dict:
     artist = ' & '.join(str(row.get('name') or (row.get('artist') or {}).get('name') or '')
                         for row in raw.get('artist-credit') or [] if isinstance(row, dict))
     recording = {'mbid': raw['id'], 'title': raw['title'], 'artist': artist}
-    if _recording_supports_slot(recording, slot):
+    titles = [raw['title'], *[row.get('name') or '' for row in raw.get('aliases') or []]]
+    # Composer and performer credits can legitimately differ. An artist-only
+    # disagreement cannot justify removing a stored recording ID, nor can a
+    # title whose catalogue aliases already support the selected track.
+    if (_recording_supports_slot(recording, slot) or
+            any(_title_score(title, slot.get('title') or '') >= .88 for title in titles)):
         return {}
     return {'mbid': mbid, 'title': raw['title'], 'artist': artist,
-            'reason': 'The embedded recording ID describes a different catalogue recording; confirm removing it or keep the current value'}
+            'reason': 'The embedded recording ID has a conflicting catalogue title; review its removal or keep the current value'}
