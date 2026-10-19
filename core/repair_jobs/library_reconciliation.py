@@ -614,9 +614,10 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
                               release_cache: dict,
                               exact_musicbrainz_releases: set[str] | None = None) -> list[tuple]:
     scored = []
-    aliases = {fold_title(row['artist_name']): row['artist_aliases']
+    aliases = {fold_title(name): [row['artist_name'], *row['artist_aliases']]
                for file in files for row in [file.get('db') or {}]
-               if row.get('artist_name') and row.get('artist_aliases')}
+               if row.get('artist_name') and row.get('artist_aliases')
+               for name in [row['artist_name'], *row['artist_aliases']]}
     for source, release_id in candidates:
         key = (source, release_id)
         if key not in release_cache:
@@ -1727,7 +1728,7 @@ class LibraryReconciliationJob(RepairJob):
                 if data.get('artist_aliases'):
                     try:
                         aliases = json.loads(data['artist_aliases'])
-                        data['artist_aliases'] = aliases if isinstance(aliases, list) else []
+                        data['artist_aliases'] = [name for name in aliases if isinstance(name, str) and name.strip()] if isinstance(aliases, list) else []
                     except (ValueError, TypeError):
                         data['artist_aliases'] = []
                 path = data.get('file_path')

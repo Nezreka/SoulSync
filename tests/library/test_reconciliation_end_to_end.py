@@ -565,10 +565,17 @@ def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp
         assert tags['album'] == ['Ashes of the Wake (Deluxe)']
 
 
-def test_stored_artist_aliases_support_cross_script_audio_identity(tmp_path, monkeypatch):
+@pytest.mark.parametrize('alias_in_catalogue', [False, True])
+def test_stored_artist_aliases_support_cross_script_audio_identity(tmp_path, monkeypatch, alias_in_catalogue):
+    import core.repair_jobs.library_reconciliation as module
     db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch)
-    for recording in context.acoustid_client.matches.values():
-        recording['artist'] = 'ラム・オブ・ゴッド'
+    if alias_in_catalogue:
+        get_tracks = module.get_album_tracks_for_source
+        monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *a, **k: [
+            {**track, 'artists': [{'name': 'ラム・オブ・ゴッド'}]} for track in get_tracks(*a, **k)])
+    else:
+        for recording in context.acoustid_client.matches.values():
+            recording['artist'] = 'ラム・オブ・ゴッド'
     assert not LibraryReconciliationJob().scan(context).errors
     case_id = worker.get_review_cases()['items'][0]['case_id']
     items = worker.get_review_case(case_id)['items']

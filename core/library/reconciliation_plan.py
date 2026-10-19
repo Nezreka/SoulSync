@@ -15,7 +15,7 @@ from typing import Any
 from core.matching.assignment import assign_max_weight
 from core.matching.artist_aliases import artist_names_match
 from core.matching.audio_verification import fingerprint_is_ambiguous, normalize
-from core.text.fold import fold_title, title_similarity
+from core.text.fold import fold_title
 from core.text.title_match import (
     _recording_qualifier_segments, numeric_tokens_differ,
     recording_version_markers, titles_plausibly_same,
@@ -241,9 +241,13 @@ def _artist_credit_supports(recording_artist: str, slot_artist: str, aliases=Non
     """
     if not slot_artist or not recording_artist:
         return True
+    # Only equality after folding is accepted here. SequenceMatcher would
+    # produce the same answer at threshold 1, at considerable per-edge cost.
+    def same_name(left, right):
+        folded = fold_title(left, drop_brackets=False)
+        return float(bool(folded) and folded == fold_title(right, drop_brackets=False))
     return artist_names_match(slot_artist, recording_artist, aliases=aliases,
-        threshold=1.0, similarity=lambda a, b: title_similarity(
-            a, b, drop_brackets=False))[0]
+                              threshold=1.0, similarity=same_name)[0]
 
 
 def audio_contradicts_local_title(file: dict) -> bool:
