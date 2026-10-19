@@ -1564,8 +1564,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     folder_path, filename_base = get_file_path_from_template(template_context, "single_path")
     if filename_base:
         if folder_path:
-            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
+            # #1788: steer into the folder that already exists when it differs only
+            # in case, identical to the album path above (#1091).
+            single_dir = resolve_existing_case_dir(transfer_dir, folder_path)
+            final_path = os.path.join(single_dir, filename_base + file_ext)
+            _ensure_dir(single_dir, exist_ok=True)
         else:
             final_path = os.path.join(transfer_dir, filename_base + file_ext)
             _ensure_dir(transfer_dir, exist_ok=True)
@@ -1573,9 +1576,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
 
     artist_name_sanitized = sanitize_filename(template_context["artist"])
     final_track_name_sanitized = sanitize_filename(clean_track_name)
-    artist_dir = os.path.join(transfer_dir, artist_name_sanitized)
     single_folder_name = f"{artist_name_sanitized} - {final_track_name_sanitized}"
-    single_dir = os.path.join(artist_dir, single_folder_name)
+    single_relative = os.path.join(artist_name_sanitized, single_folder_name)
+    # #1788, same rule on the no-template singles path.
+    single_dir = resolve_existing_case_dir(transfer_dir, single_relative)
     _ensure_dir(single_dir, exist_ok=True)
     new_filename = f"{final_track_name_sanitized}{file_ext}"
     return os.path.join(single_dir, new_filename), True
