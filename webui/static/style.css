@@ -77165,7 +77165,7 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
     overflow-y: auto;
 }
 
-/* ── movie night (watch-together ballot, rail card under the jukebox) ── */
+/* ── watch together (watch-together ballot, rail card under the jukebox) ── */
 .chat-watch {
     flex: 0 0 auto;
     padding: 10px 12px;
@@ -77207,7 +77207,7 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
     border-top: 1px solid rgba(255, 176, 32, 0.25);
 }
 .chat-watch-stage-warn[hidden] { display: none !important; }
-/* The header was wrapping "Movie night" onto two lines AND clipping the
+/* The header was wrapping "Watch Together" onto two lines AND clipping the
    + Nominate button off the panel edge (screenshots, Aug 13). The title must
    never wrap, the meta may shrink to nothing, and the button keeps its width. */
 .chat-watch-headrow {
@@ -77300,7 +77300,7 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
     align-self: center; white-space: nowrap; }
 .chat-watch-resnom { font-size: 11px; color: var(--white-a50); }
 .chat-watch-resnow { font-size: 11px; }
-/* ── movie night picker modal — its OWN design. The jukebox's landscape
+/* ── watch together picker modal — its OWN design. The jukebox's landscape
    video-card grid (minmax(180px) columns, 16:9 thumbs) cannot hold 2:3
    posters; these are row cards: poster left, title/meta/overview right. ── */
 .chat-watch-modal { width: min(720px, 94%); max-height: 88%; }

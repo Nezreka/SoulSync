@@ -1326,7 +1326,7 @@ Every video delete lands here first (upgrade replaces, YouTube retention, watche
 
 ## Watch party (watch together)
 
-Movie night runs on what someone can actually play. The chat page's ballot is a deterministic fold over the room's protocol bus — every client sees the same nominations, but **ownership is personal**: each SoulSync checks its own library and renders Play or Grab. "Owned" means a real playable file, not mere library presence.
+Watch Together runs on what someone can actually play. The chat page's ballot is a deterministic fold over the room's protocol bus — every client sees the same nominations, but **ownership is personal**: each SoulSync checks its own library and renders Play or Grab. "Owned" means a real playable file, not mere library presence.
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|

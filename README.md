@@ -263,7 +263,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Poster Manager** for TMDB posters, including textless ones.
 - **Maintenance jobs**: broken files, duplicates, naming, quality upgrades, watched cleanup and more. Plus backups and mass rename.
 - **Server Activity**: a Tautulli-style live view of streams, history and stats.
-- **Movie night** in chat: vote on a title and watch together.
+- **Watch Together** in chat: vote on a title and watch together.
 
 **YouTube**
 - Follow channels and playlists as TV shows, with no API key.
@@ -309,7 +309,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 - `/np`, `/want`, `/poll` and friends.
 - **Room activities**:
   - A shared YouTube **jukebox** with voting.
-  - **Movie night**, polls and trivia.
+  - **Watch Together**, polls and trivia.
 - **Arcade**: chess, Connect 4, Battleship, Othello and Gomoku, plus a slot machine.
   - Everyone's client computes the same game state from the room messages, so no game server is needed.
   - Room-vs-player voting, and commit-reveal boards so nobody can cheat.
