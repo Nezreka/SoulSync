@@ -711,7 +711,8 @@ def test_tool_findings_are_rechecked_before_retirement(tmp_path, monkeypatch):
     assert item['details']['tool_checks'][0]['state'] == 'open'
 
 
-def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(tmp_path, monkeypatch):
+@pytest.mark.parametrize('previous_annotation_scan', [False, True])
+def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(tmp_path, monkeypatch, previous_annotation_scan):
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
     assert not LibraryReconciliationJob().scan(context).errors
     case_id = worker.get_review_cases()['items'][0]['case_id']
@@ -719,6 +720,12 @@ def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(t
     result = worker.apply_review_decision(case_id, item['id'], evidence_token=item['evidence_token'], action='fix')
     assert result['success'], result
     details = {**item['details'], 'assignment_evidence': 'audio', 'tool_checks': [{'title': 'Additional context'}]}
+    details['match_reasons'] = ['AcoustID recording title matches release slot']
+    if previous_annotation_scan:
+        with db._get_connection() as conn:
+            conn.execute('UPDATE repair_findings SET details_json=? WHERE id=?',
+                         (json.dumps(details), item['id']))
+            conn.commit()
     def refresh():
         worker._create_finding(job_id='library_reconciliation', finding_type=item['finding_type'],
             severity='warning', entity_type=item['entity_type'], entity_id=item['entity_id'],

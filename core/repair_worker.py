@@ -1398,10 +1398,20 @@ class RepairWorker:
                         new_raw = json.dumps(details)
                         new_key = review_case_key(details, file_path, existing_id)
                         review_choices.ensure_schema(conn)
-                        # Rebind only a choice that still matches its old evidence.
+                        # An earlier scan may have changed explanations before
+                        # this compatibility rule existed. Recover that choice
+                        # only when its substantive evidence is still identical.
+                        saved = review_choices.load_choices(conn, existing_id).get(existing_id)
+                        saved_raw = existing[3]
+                        if saved and saved[0] == new_key:
+                            try:
+                                if same_annotated_evidence(json.loads(saved[1]), details or {}):
+                                    saved_raw = saved[1]
+                            except (TypeError, ValueError):
+                                pass
                         cursor.execute('''UPDATE reconcile_review_choices SET case_id=?, evidence_json=?
                             WHERE finding_id=? AND evidence_json=?''',
-                            (new_key, new_raw, existing_id, existing[3]))
+                            (new_key, new_raw, existing_id, saved_raw))
                         cursor.execute('''UPDATE repair_findings SET file_path=?, review_case_key=?, details_json=?
                             WHERE id=?''', (file_path, new_key, new_raw, existing_id))
                         if existing_status in ('resolved', 'dismissed') and existing[4] != 'obsolete':

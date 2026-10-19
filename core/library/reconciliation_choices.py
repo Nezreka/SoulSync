@@ -130,7 +130,7 @@ def same_relocated_evidence(previous, current):
 def same_annotated_evidence(previous, current):
     """Adding explanations alone preserves an otherwise exact saved choice."""
     annotations = {'assignment_evidence', 'recording_identity',
-                   'recommended_keeper', 'keeper_reason', 'tool_checks'}
+                   'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons'}
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
     def substantive(details):
         return {key: value for key, value in details.items()
