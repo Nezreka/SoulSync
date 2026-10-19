@@ -55884,98 +55884,6 @@ tr.tag-diff-same {
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 
-/* Body — single centered column */
-.stg-body {
-    max-width: 820px;
-    width: 100%;
-}
-
-/* Panel visibility */
-.stg-panel { display: none; }
-.stg-panel.active { display: block; }
-
-/* Section header — clean divider */
-.stg-section-title {
-    font-size: 0.72em;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--white-a35);
-    padding: 20px 0 8px;
-    margin: 0;
-    border: none;
-}
-.stg-section-title:first-child { padding-top: 0; }
-
-/* Setting row — label left, control right */
-.stg-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 13px 16px;
-    border-bottom: 1px solid var(--white-a04);
-    min-height: 48px;
-}
-.stg-row:last-child { border-bottom: none; }
-
-.stg-row-info {
-    flex: 1;
-    min-width: 0;
-}
-.stg-row-label {
-    font-size: 0.9em;
-    color: rgba(255, 255, 255, 0.88);
-    font-weight: 400;
-    line-height: 1.3;
-}
-.stg-row-desc {
-    font-size: 0.78em;
-    color: var(--white-a35);
-    margin-top: 2px;
-    line-height: 1.4;
-}
-.stg-row-control {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.stg-row-control input[type="text"],
-.stg-row-control input[type="password"],
-.stg-row-control input[type="number"],
-.stg-row-control input[type="url"] {
-    width: 280px;
-    max-width: 100%;
-    padding: 8px 12px;
-    background: var(--white-a06);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    color: #fff;
-    font-size: 0.88em;
-    font-family: inherit;
-    transition: border-color 0.2s;
-}
-.stg-row-control input:focus {
-    border-color: var(--accent);
-    outline: none;
-}
-.stg-row-control select {
-    padding: 8px 12px;
-    background: var(--white-a06);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    color: #fff;
-    font-size: 0.88em;
-    font-family: inherit;
-    cursor: pointer;
-    min-width: 160px;
-}
-.stg-row-control select:focus {
-    border-color: var(--accent);
-    outline: none;
-}
-
 /* Service accordion (API services, expandable sections) */
 .stg-service {
     border-bottom: 1px solid var(--white-a04);
@@ -56039,43 +55947,6 @@ tr.tag-diff-same {
     box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
 }
 
-/* Action buttons in settings */
-.stg-actions {
-    display: flex;
-    gap: 8px;
-    padding: 8px 16px 14px;
-}
-.stg-btn {
-    padding: 8px 16px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--white-a10);
-    background: var(--white-a05);
-    color: var(--white-a75);
-    font-size: 0.82em;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.stg-btn:hover {
-    background: var(--white-a08);
-    color: #fff;
-    transform: translateY(-1px);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2);
-}
-.stg-btn:active {
-    transform: scale(0.97);
-    box-shadow: none;
-}
-.stg-btn-primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-    font-weight: 500;
-}
-.stg-btn-primary:hover {
-    filter: brightness(1.15);
-}
-
 /* Toggle switch (replaces checkbox for booleans) */
 .stg-toggle {
     position: relative;
@@ -56088,32 +55959,6 @@ tr.tag-diff-same {
     width: 0;
     height: 0;
     position: absolute;
-}
-.stg-toggle-track {
-    position: absolute;
-    inset: 0;
-    background: var(--white-a12);
-    border-radius: 11px;
-    cursor: pointer;
-    transition: background 0.25s;
-}
-.stg-toggle-track::after {
-    content: '';
-    position: absolute;
-    left: 2px;
-    top: 2px;
-    width: 18px;
-    height: 18px;
-    background: #fff;
-    border-radius: var(--radius-circle);
-    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-}
-.stg-toggle input:checked + .stg-toggle-track {
-    background: var(--accent);
-}
-.stg-toggle input:checked + .stg-toggle-track::after {
-    transform: translateX(18px);
 }
 
 /* ── Settings page layout override — transform old layout ── */
