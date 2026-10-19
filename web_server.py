@@ -768,13 +768,17 @@ def _set_profile_context():
                                   login_mode=_require_login_enabled(),
                                   profile_count=_profile_count)
     if pid is None:
+        if _require_login_enabled() and session.get('login_authenticated'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
         g.profile_id = None
         g.is_admin = False
         g.can_download = False
         g.profile_name = "No profile"
         g.allowed_sides = 'none'
         if no_profile_request_is_blocked(path, request.method):
-            return jsonify({"error": "profile_required", "profile_required": True}), 401
+            return jsonify({"error": "profile_required", "profile_required": True,
+                            "signed_out": True}), 401
         return
 
     # "sign out everywhere": a session signed in before the profile's epoch
@@ -794,7 +798,7 @@ def _set_profile_context():
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
         if _signed_out:
-            for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated', 'launch_pin_verified'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
                 session.pop(_k, None)
             g.profile_id = None
             g.is_admin = False
@@ -824,6 +828,12 @@ def _set_profile_context():
             try:
                 database = get_database()
                 profile = database.get_profile(pid)
+                if not profile:
+                    for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                        session.pop(_k, None)
+                    g.profile_id = None
+                    g.is_admin = False
+                    return
                 g.is_admin = bool((profile or {}).get('is_admin', False))
             except Exception:
                 g.is_admin = False
@@ -835,15 +845,23 @@ def _set_profile_context():
             database = get_database()
             profile = database.get_profile(pid)
             if not profile:
-                session.pop('profile_id', None)
-                from flask import jsonify as _jsonify
-                return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                    session.pop(_k, None)
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.profile_name = "No profile"
+                g.allowed_sides = 'none'
+                if no_profile_request_is_blocked(path, request.method):
+                    return jsonify({"error": "profile_required", "profile_required": True,
+                                    "signed_out": True, "message": "Profile no longer exists"}), 401
+                return
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
             # a turned-off profile is kept but can't be used, same as gone
             if (profile or {}).get('disabled') and not g.is_admin:
-                for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated'):
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
                     session.pop(_k, None)
                 g.profile_id = None
                 g.is_admin = False
@@ -23149,9 +23167,11 @@ def _ws_session_profile():
         return pid, True
     try:
         profile = get_database().get_profile(pid)
+        if not profile:
+            return None, False
         return pid, bool((profile or {}).get('is_admin', False))
     except Exception:
-        return pid, False
+        return None, False
 
 # --- Phase 2: Dashboard emitters ---
 

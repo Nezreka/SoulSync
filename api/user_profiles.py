@@ -815,13 +815,27 @@ def get_current_profile():
 
         pid = session.get('profile_id')
         if not pid:
+            if _require_login_enabled():
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                    session.pop(_k, None)
+                return jsonify({'success': False, 'login_required': True}), 200
             return jsonify({'success': False, 'error': 'No profile selected'}), 200
 
         database = get_database()
         profile = database.get_profile(pid)
         if not profile:
-            session.pop('profile_id', None)
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            if _require_login_enabled():
+                return jsonify({'success': False, 'login_required': True}), 200
             return jsonify({'success': False, 'error': 'Profile not found'}), 200
+
+        if profile.get('disabled') and not profile.get('is_admin'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
+            if _require_login_enabled():
+                return jsonify({'success': False, 'login_required': True}), 200
+            return jsonify({'success': False, 'error': 'This profile is turned off', 'disabled': True}), 403
 
         # Check if launch PIN is required
         require_pin = config_manager.get('security.require_pin_on_launch', False) if config_manager else False
@@ -961,6 +975,7 @@ def logout_profile():
     session.pop('profile_id', None)
     session.pop('profile_epoch', None)
     session.pop('device_id', None)
+    session.pop('device_owner', None)
     session.pop('login_authenticated', None)
     session.pop('launch_pin_verified', None)
     return jsonify({'success': True})
