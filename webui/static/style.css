@@ -71780,21 +71780,6 @@ body.em-scroll-lock { overflow: hidden; }
     flex: 0 0 auto;
 }
 
-.origin-context-badge {
-    flex: 0 0 auto;
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 3px 11px;
-    border-radius: var(--radius-pill);
-    font-size: 11px;
-    font-weight: 600;
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    background: rgba(var(--accent-rgb), 0.1);
-    color: rgb(var(--accent-light-rgb));
-}
-
 .origin-modal-loading,
 .origin-modal-empty {
     padding: 48px 24px;
@@ -72417,26 +72402,6 @@ select.ma-input { appearance: auto; }
     gap: 18px;
 }
 
-.adl-client-section {
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-lg);
-    background: var(--white-a02);
-    padding: 12px 14px;
-}
-
-.adl-client-section-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-}
-
-.adl-client-section-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--white-a90);
-}
-
 .adl-client-section-type {
     font-size: 11px;
     color: var(--white-a45);
@@ -72460,25 +72425,6 @@ select.ma-input { appearance: auto; }
     color: var(--white-a40);
     padding: 10px 4px;
 }
-
-.adl-client-state {
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    border: 1px solid var(--white-a20);
-    border-radius: var(--radius-pill);
-    padding: 1px 8px;
-    color: var(--white-a60);
-    white-space: nowrap;
-}
-
-.adl-client-state-downloading { color: #4aa3ff; border-color: rgba(74, 163, 255, 0.5); }
-.adl-client-state-seeding { color: #2ecc71; border-color: rgba(46, 204, 113, 0.5); }
-.adl-client-state-completed { color: #2ecc71; border-color: rgba(46, 204, 113, 0.5); }
-.adl-client-state-paused { color: #f1c40f; border-color: rgba(241, 196, 15, 0.5); }
-.adl-client-state-stalled { color: #f39c12; border-color: rgba(243, 156, 18, 0.5); }
-.adl-client-state-error { color: #e74c3c; border-color: rgba(231, 76, 60, 0.5); }
 
 .adl-client-owner {
     font-size: 10.5px;
@@ -73844,7 +73790,6 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     color: #8b93b0; cursor: pointer; user-select: none;
 }
 .wlx-opt input { accent-color: #7aa2f7; }
-.watchlist-export-btn .watchlist-all-icon { font-weight: 700; }
 
 /* =========================================================================
    Re-identify Track Modal (#889)
