@@ -40719,51 +40719,6 @@ div.artist-hero-badge {
 /* ARTIST CARDS - Clean Spotify Style       */
 /* ========================================= */
 
-.enh-artists-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    margin-bottom: 24px;
-}
-
-.enh-artist-section {
-    margin-bottom: 0 !important;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    backdrop-filter: none;
-    box-shadow: none;
-    position: relative;
-    overflow: visible;
-}
-
-.enh-artist-section::before {
-    display: none;
-}
-
-.enh-artist-section .enh-section-header {
-    border-bottom: none;
-}
-
-.enh-artist-section .enh-section-header::after {
-    display: none;
-}
-
-/* Artist grid — flexbox wrap with fixed-size cards */
-.enh-compact-list.enh-artists-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    padding-bottom: 4px;
-}
-
-@media (max-width: 600px) {
-    .enh-compact-list.enh-artists-grid {
-        gap: 10px;
-    }
-}
-
 /* Artist cards — Spotify-style circle tiles: a quiet tile that raises on
    hover, a circular portrait with its own shadow, name + meta beneath. */
 .enh-compact-item.artist-card {
@@ -40825,71 +40780,8 @@ div.artist-hero-badge {
 }
 .enh-compact-item.artist-card .enh-item-badge { display: none; }
 
-/* In Library badge on search results */
-.enh-item-lib-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(var(--accent-rgb), 0.85);
-    color: #fff;
-    padding: 3px 7px;
-    z-index: 5;
-    animation: libBadgeFadeIn 0.3s ease;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-/* Track items need relative positioning for the badge */
-@keyframes libBadgeFadeIn {
-    from { opacity: 0; transform: scale(0.8); }
-    to { opacity: 1; transform: scale(1); }
-}
-
-.enh-compact-item.track-item .enh-item-lib-badge {
-    position: static;
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 9px;
-}
-
-.enh-item-wishlist-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(251, 191, 36, 0.85);
-    color: #1a1a2e;
-    padding: 3px 7px;
-    z-index: 5;
-    animation: libBadgeFadeIn 0.3s ease;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.enh-compact-item.track-item .enh-item-wishlist-badge {
-    position: static;
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 9px;
-}
-
 /* Hydrabase badge (dev mode) */
 .enh-badge-hydrabase {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
-    border: 1px solid rgba(99, 102, 241, 0.5);
-    color: rgba(139, 92, 246, 1);
-}
-
-.enh-sr-artist-badge-hydrabase {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
     border: 1px solid rgba(99, 102, 241, 0.5);
     color: rgba(139, 92, 246, 1);
