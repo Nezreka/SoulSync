@@ -51655,101 +51655,6 @@ tr.tag-diff-same {
     z-index: 10;
 }
 
-/* Modal overlay */
-.repair-modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-}
-
-.repair-modal {
-    background: rgba(14, 14, 14, 0.98);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-xl);
-    width: 94vw;
-    max-width: 1100px;
-    max-height: 90vh;
-    max-height: 90dvh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
-}
-
-.repair-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 24px;
-    border-bottom: 1px solid var(--white-a06);
-    background: linear-gradient(135deg, var(--white-a02) 0%, rgba(var(--accent-rgb), 0.04) 100%);
-}
-
-.repair-modal-header-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    min-width: 0;
-}
-
-.repair-modal-logo {
-    width: 56px;
-    height: 56px;
-    object-fit: contain;
-    flex-shrink: 0;
-    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.3));
-}
-
-.repair-modal-header-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.repair-modal-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0;
-    line-height: 1.2;
-}
-
-.repair-modal-subtitle {
-    font-size: 12px;
-    color: var(--white-a35);
-    margin: 0;
-    line-height: 1.3;
-}
-
-.repair-modal-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-}
-
-.repair-modal-close {
-    background: none;
-    border: none;
-    color: var(--white-a50);
-    font-size: 24px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    transition: all 0.2s ease;
-}
-
-.repair-modal-close:hover {
-    color: #fff;
-    background: var(--white-a10);
-}
-
 /* Master toggle */
 .repair-master-toggle {
     display: flex;
@@ -52239,120 +52144,6 @@ tr.tag-diff-same {
 
 .repair-save-settings-btn:hover {
     opacity: 0.85;
-}
-
-/* ── Findings Dashboard ── */
-.repair-findings-dashboard {
-    margin-bottom: 16px;
-}
-
-.repair-dashboard-summary {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 14px;
-    flex-wrap: wrap;
-}
-
-.repair-dashboard-stat {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: var(--white-a04);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-md);
-    font-size: 12px;
-    color: var(--white-a50);
-}
-
-.repair-dashboard-stat .stat-count {
-    font-size: 18px;
-    font-weight: 700;
-    color: #fff;
-    line-height: 1;
-}
-
-.repair-dashboard-stat.pending .stat-count {
-    color: #f59e0b;
-}
-
-.repair-dashboard-stat.resolved .stat-count {
-    color: #22c55e;
-}
-
-.repair-dashboard-stat.dismissed .stat-count {
-    color: var(--white-a35);
-}
-
-.repair-dashboard-stat.auto-fixed .stat-count {
-    color: #3b82f6;
-}
-
-.repair-dashboard-jobs {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-}
-
-.repair-dashboard-chip {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    background: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    min-width: 0;
-}
-
-.repair-dashboard-chip:hover {
-    background: var(--white-a08);
-    border-color: var(--white-a14);
-}
-
-.repair-dashboard-chip.active {
-    background: rgba(var(--accent-rgb), 0.12);
-    border-color: rgba(var(--accent-rgb), 0.3);
-}
-
-.repair-dashboard-chip-name {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--white-a75);
-    white-space: nowrap;
-}
-
-.repair-dashboard-chip-count {
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-    min-width: 20px;
-    text-align: center;
-}
-
-.repair-dashboard-chip-bar {
-    display: flex;
-    gap: 3px;
-    align-items: center;
-}
-
-.repair-dashboard-chip-severity {
-    display: inline-block;
-    width: 6px;
-    height: 6px;
-    border-radius: var(--radius-circle);
-}
-
-.repair-dashboard-chip-severity.warning {
-    background: #f59e0b;
-    box-shadow: 0 0 4px rgba(245, 158, 11, 0.4);
-}
-
-.repair-dashboard-chip-severity.info {
-    background: #3b82f6;
-    box-shadow: 0 0 4px rgba(59, 130, 246, 0.3);
 }
 
 /* ── Cache Health Bar (Repair Dashboard) ── */
@@ -53306,12 +53097,6 @@ tr.tag-diff-same {
     border: 1px solid rgba(56, 189, 248, 0.35);
 }
 
-.repair-album-tag.fake-flac {
-    background: rgba(249, 115, 22, 0.2);
-    color: #fdba74;
-    border: 1px solid rgba(249, 115, 22, 0.35);
-}
-
 .repair-album-tag.missing_lyrics,
 .repair-album-tag.missing-lyrics {
     background: rgba(56, 189, 248, 0.18);
@@ -53899,17 +53684,6 @@ tr.tag-diff-same {
     background: #1a1a1a;
 }
 
-.repair-findings-summary {
-    display: flex;
-    gap: 16px;
-    font-size: 12px;
-    color: var(--white-a40);
-}
-.repair-findings-summary strong {
-    color: #fff;
-    font-weight: 600;
-}
-
 .repair-select-all {
     display: flex;
     align-items: center;
@@ -54419,25 +54193,6 @@ tr.tag-diff-same {
     fill: currentColor;
 }
 
-/* Artwork preview (for missing cover art) */
-.repair-artwork-preview {
-    margin-top: 8px;
-    display: flex;
-    align-items: flex-end;
-    gap: 10px;
-}
-.repair-artwork-preview img {
-    width: 80px;
-    height: 80px;
-    border-radius: var(--radius-sm);
-    object-fit: cover;
-    border: 1px solid var(--white-a10);
-}
-.repair-artwork-label {
-    font-size: 10px;
-    color: var(--white-a35);
-}
-
 /* Completion bar (for incomplete albums) */
 .repair-completion-bar {
     margin: 8px 0 4px;
@@ -54683,30 +54438,6 @@ tr.tag-diff-same {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
-    .repair-modal {
-        width: 98vw;
-        max-height: 95vh;
-        max-height: 95dvh;
-        border-radius: var(--radius-lg);
-    }
-
-    .repair-modal-header {
-        padding: 14px 16px;
-    }
-
-    .repair-modal-logo {
-        width: 40px;
-        height: 40px;
-    }
-
-    .repair-modal-title {
-        font-size: 16px;
-    }
-
-    .repair-modal-subtitle {
-        display: none;
-    }
-
     .repair-tab-content {
         padding: 12px 14px;
     }
@@ -55800,35 +55531,8 @@ tr.tag-diff-same {
     background: rgba(99, 102, 241, 0.12);
 }
 
-.operations-playbook-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 10px;
-}
-
 .operations-playbook-icon {
     font-size: 20px;
-}
-
-.operations-playbook-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    background: var(--white-a20);
-}
-
-.operations-playbook-status-dot.running {
-    background: #34d399;
-    box-shadow: 0 0 8px #34d399;
-    animation: pulse 1.5s infinite;
-}
-
-.operations-playbook-title {
-    font-size: 13.5px;
-    font-weight: 600;
-    color: #fff;
-    margin-bottom: 4px;
 }
 
 .operations-playbook-desc {
@@ -55837,15 +55541,6 @@ tr.tag-diff-same {
     line-height: 1.4;
     flex: 1;
     margin-bottom: 14px;
-}
-
-.operations-playbook-action {
-    font-size: 11px;
-    font-weight: 600;
-    color: rgb(var(--accent-rgb));
-    display: flex;
-    align-items: center;
-    gap: 4px;
 }
 
 /* Strategic Pillars Section */
@@ -55891,11 +55586,6 @@ tr.tag-diff-same {
     font-size: 15px;
     font-weight: 600;
     color: #fff;
-}
-
-.operations-pillars-count {
-    font-size: 12px;
-    color: var(--white-a40);
 }
 
 .operations-pillars-grid {
