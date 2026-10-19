@@ -37,18 +37,31 @@ def dest_path_for(target_dir: str, src_path: str) -> str:
     return os.path.join(str(target_dir or ""), basename_of(src_path))
 
 
-def target_dir_for(kind: str, paths: dict) -> str:
+def tv_root_for(series_type: Any, tv_root: Any, anime_root: Any) -> str:
+    """The TV library folder for a show of this series type: the anime folder
+    for an anime show when one is set, else the TV folder. An empty anime
+    folder means the setting is off and every show goes to the TV folder,
+    exactly as before it existed. Pure."""
+    anime = str(anime_root or "").strip()
+    if anime and str(series_type or "").strip().lower() == "anime":
+        return anime
+    return str(tv_root or "")
+
+
+def target_dir_for(kind: str, paths: dict, series_type: Any = None) -> str:
     """Pick the library folder for a download's kind. ``paths`` = the config dict
-    ({movies_path, tv_path, youtube_path})."""
+    ({movies_path, tv_path, anime_path, youtube_path}). ``series_type`` is the
+    show's effective type (standard / daily / anime); TV downloads of an anime
+    show go to ``anime_path`` when it is set (see ``tv_root_for``)."""
     paths = paths or {}
     k = str(kind or "").lower()
     if k == "movie":
         return paths.get("movies_path") or ""
     if k in ("show", "tv", "episode", "season", "series"):
-        return paths.get("tv_path") or ""
+        return tv_root_for(series_type, paths.get("tv_path"), paths.get("anime_path"))
     if k == "youtube":
         return paths.get("youtube_path") or ""
     return ""
 
 
-__all__ = ["basename_of", "find_completed_file", "dest_path_for", "target_dir_for"]
+__all__ = ["basename_of", "find_completed_file", "dest_path_for", "target_dir_for", "tv_root_for"]

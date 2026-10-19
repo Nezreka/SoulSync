@@ -95,6 +95,7 @@ The video side keeps its own library paths, migrated from the legacy single vide
 
 - \`movies_path\` — where finished movie downloads are organized
 - \`tv_path\` — where finished TV downloads are organized
+- \`anime_path\` — optional: where finished episodes of anime-type shows are organized instead of \`tv_path\` (empty = anime goes to \`tv_path\`)
 - \`youtube_path\` — where YouTube channel downloads land
 
 The engine routes each finished download to the library path matching its type. See [Video: Downloads](#video-downloads) for the full pipeline.

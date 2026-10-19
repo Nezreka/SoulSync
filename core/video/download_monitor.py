@@ -234,7 +234,7 @@ def _sweep_import_temps(db) -> int:
     files older than an hour are touched — an in-flight transfer is never that idle.
     Returns the count removed. Best-effort; never raises."""
     roots = set()
-    for key in ("movies_path", "tv_path", "youtube_path", "transfer_path"):
+    for key in ("movies_path", "tv_path", "anime_path", "youtube_path", "transfer_path"):
         try:
             v = db.get_setting(key)
         except Exception:   # noqa: BLE001
