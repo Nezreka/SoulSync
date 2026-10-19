@@ -50325,10 +50325,6 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     color: var(--white-a80);
     margin-bottom: 6px;
 }
-.reorganize-template-section {
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--white-a06);
-}
 .reorganize-template-hint {
     font-size: 11px;
     color: var(--white-a35);
@@ -50368,40 +50364,6 @@ select.reorganize-template-input,
 .reorganize-template-input:disabled {
     opacity: 0.55;
     cursor: not-allowed;
-}
-.reorganize-variables {
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--white-a06);
-}
-.reorganize-var-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-}
-.reorganize-var-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: all 0.15s;
-    font-size: 12px;
-}
-.reorganize-var-chip:hover {
-    background: rgba(100, 149, 237, 0.1);
-    border-color: rgba(100, 149, 237, 0.3);
-}
-.reorganize-var-chip code {
-    color: rgba(100, 149, 237, 0.9);
-    font-size: 12px;
-    font-weight: 600;
-}
-.reorganize-var-desc {
-    color: var(--white-a40);
-    font-size: 11px;
 }
 .reorganize-preview-section {
     flex: 1;
@@ -50556,11 +50518,6 @@ select.reorganize-template-input,
     color: #fff;
 }
 
-.col-writetag {
-    width: 60px;
-    text-align: center;
-}
-
 /* Tag Preview Modal */
 .tag-preview-modal {
     max-width: 700px;
@@ -50667,24 +50624,6 @@ tr.tag-diff-same {
     font-size: 13px;
     border-top: 1px solid var(--white-a04);
     margin-top: 8px;
-}
-
-.tag-preview-cover-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--white-a60);
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.tag-preview-cover-label input[type="checkbox"] {
-    accent-color: rgb(var(--accent-rgb));
-}
-
-.tag-preview-footer-actions {
-    display: flex;
-    gap: 8px;
 }
 
 .tag-preview-modal .enhanced-bulk-modal-footer {
