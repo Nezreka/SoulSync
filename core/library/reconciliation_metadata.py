@@ -82,7 +82,7 @@ def recording_id_conflict(file: dict, slot: dict, client, cache: dict) -> dict:
     # disagreement cannot justify removing a stored recording ID, nor can a
     # title whose catalogue aliases already support the selected track.
     if (_recording_supports_slot(recording, slot) or
-            any(_title_score(title, slot.get('title') or '') >= .88 for title in titles)):
+            any(_title_score(title, slot.get('title') or '') >= .83 for title in titles)):
         return {}
     return {'mbid': mbid, 'title': raw['title'], 'artist': artist,
             'reason': 'The embedded recording ID has a conflicting catalogue title; review its removal or keep the current value'}

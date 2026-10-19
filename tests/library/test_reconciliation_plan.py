@@ -114,6 +114,28 @@ def test_artist_prefixes_and_import_labels_do_not_create_named_version_conflicts
     assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
 
 
+@pytest.mark.parametrize(('artist', 'local', 'remote', 'audio'), [
+    ('*NSYNC', 'For the Girl Who Has Everything - Radio Mix',
+     'For the Girl Who Has Everything (radio mix)', 'For the Girl Who Has Everything'),
+    ('Sixpence None the Richer', 'Kiss Me - Japanese Commercial Single Version Import',
+     'Kiss Me (Japanese Commercial single version)', 'Kiss Me (Japanese Commercial single version)'),
+    ('Stone Sour', 'Zzyzx Rd. - Pop Mix', 'Zzyzx Rd.', 'Zzyzx Rd. (Pop version)'),
+    ('The Who', 'Join Together (unedited version / Steven Wilson stereo mix)',
+     'Join Together (unedited version / Steven Wilson stereo mix)', 'Join Together (unedited remix)'),
+])
+def test_catalogue_qualifiers_and_artist_prefixed_filenames_agree(artist, local, remote, audio):
+    filename = f'01 - {artist} - {local}.flac'.replace('*', '_').replace('/', '_')
+    path = f'/album/{filename}'
+    file = _file(local, path, 200000,
+                 {'mbid': 'audio-id', 'title': audio, 'artist': artist, 'score': .99})
+    file['tags']['track_artist'] = artist
+    slot = {'title': remote, 'artist': artist, 'duration_ms': 200000}
+    assert not audio_contradicts_local_title(file)
+    plan = reconcile_folder([file], [slot])
+    assert plan['pairs'][0]['confidence'] == 'clear'
+    assert not plan['extra_files']
+
+
 def test_filename_version_still_blocks_a_different_named_mix_when_tags_omit_it():
     file = _file('Home (remix)', '/album/01 - Artist - Home (Alpha remix).flac', 200000,
                  {'mbid': 'recording', 'title': 'Home (remix)', 'artist': 'Artist', 'score': .99})

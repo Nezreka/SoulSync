@@ -658,17 +658,22 @@ def test_provider_independent_recording_identity_requires_unique_corroboration()
     assert not confirmed_recording(file, slot, 'itunes')
 
 
-def test_recording_id_removal_preserves_composer_credits_and_catalogue_aliases():
+@pytest.mark.parametrize(('local_title', 'catalogue_title'), [
+    ('Gnossienne: No. 1', 'Gnossienne No. 1'),
+    ('Cello Suite No. 1 in G Major, BWV 1007: II. Allemande',
+     'Unaccompanied Cello Suite no. 1 in G major, BWV 1007: II. Allemande'),
+])
+def test_recording_id_removal_preserves_composer_credits_and_catalogue_aliases(local_title, catalogue_title):
     from types import SimpleNamespace
     from core.library.reconciliation_metadata import recording_id_conflict
     mbid = '61a45c1a-a717-4c58-abba-0563000f8a1d'
     file = {'tags': {'mbid': mbid}, 'acoustid': {'status': 'no_match'}}
-    slot = {'title': 'Gnossienne: No. 1', 'artist': 'Alexandre Tharaud'}
-    record = {'id': mbid, 'title': 'Gnossienne No. 1',
+    slot = {'title': local_title, 'artist': 'Alexandre Tharaud'}
+    record = {'id': mbid, 'title': catalogue_title,
               'artist-credit': [{'name': 'Erik Satie'}]}
     client = SimpleNamespace(get_recording=lambda *a, **k: record)
     assert not recording_id_conflict(file, slot, client, {})
-    record.update(title='別の表記', aliases=[{'name': 'Gnossienne No. 1'}])
+    record.update(title='別の表記', aliases=[{'name': local_title}])
     assert not recording_id_conflict(file, slot, client, {})
     record.update(title='Winter Dies', aliases=[])
     assert recording_id_conflict(file, slot, client, {})

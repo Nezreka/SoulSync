@@ -28,9 +28,15 @@ _EDITORIAL_TITLE_SUFFIX = re.compile(
     r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
 
 
+def _comparison_title(value: str) -> str:
+    # Some storefronts append an import label after a recording qualifier.
+    return re.sub(r'(?i)(\b(?:version|mix|edit))\s+import$', r'\1', value)
+
+
 @lru_cache(maxsize=32768)
 def _version_markers(value: str) -> frozenset[str]:
     """Fold equivalent catalogue wording without erasing real versions."""
+    value = _comparison_title(value)
     markers = set(recording_version_markers(value))
     if markers.intersection({'alt', 'alternate', 'alternative'}):
         markers.difference_update({'alt', 'alternate', 'alternative'})
@@ -44,7 +50,7 @@ def _version_markers(value: str) -> frozenset[str]:
         words = fold_title(segment, drop_brackets=False).split()
         if (not markers and words[-1:] == ['mix'] and
                 {word for word in words[:-1] if not word.isdigit()} - _RECORDING_NOISE_TOKENS
-                - {'club', 'dance', 'video', 'long', 'short', 'digital', 'new', 'old', 'the'}):
+                - {'club', 'dance', 'pop', 'video', 'long', 'short', 'digital', 'new', 'old', 'the'}):
             # Catalogue credits may call the same named remix a "Maceo Plex mix".
             markers.add('remix')
     return frozenset(markers)
@@ -53,7 +59,7 @@ def _version_markers(value: str) -> frozenset[str]:
 @lru_cache(maxsize=32768)
 def _named_version_details(title: str):
     """Parse qualifier facts once, rather than for every assignment edge."""
-    segments = _recording_qualifier_segments(title)
+    segments = _recording_qualifier_segments(_comparison_title(title))
     marked = [(segment, _version_markers(f'({segment})')) for segment in segments]
     if not any(markers for _, markers in marked):
         return frozenset(), None
@@ -65,7 +71,8 @@ def _named_version_details(title: str):
             tokens.difference_update(markers)
     tokens -= {'version', 'mix', 'recording', 'recorded', 'performance',
                'session', 'sessions', 'alternate', 'alternative', 'alt',
-               'at', 'in', 'from', 'the', 'a', 'an', 'import', 'bbc', 'radio', 'single'}
+               'at', 'in', 'from', 'the', 'a', 'an', 'import', 'bbc', 'radio', 'single',
+               'unedited', 'mono', 'stereo'}
     text = ' '.join(segments)
     iso = re.search(r'\b((?:19|20)\d{2})[-/]([01]?\d)[-/]([0-3]?\d)\b', text)
     dmy = re.search(r'(?<!\d)([0-3]?\d)[/-]([01]?\d)[/-](\d{2}|\d{4})(?!\d)', text)
@@ -108,6 +115,7 @@ def _named_version_conflicts(left: str, right: str) -> bool:
 
 
 def _title_score(a: str, b: str) -> float:
+    a, b = _comparison_title(a), _comparison_title(b)
     left, right = normalize(a), normalize(b)
     if not left or not right:
         return 0.0
@@ -129,6 +137,12 @@ def _filename_title(path: str, artist: str = '') -> str:
     if len(parts) == 2 and fold_title(parts[0]) == fold_title(artist):
         return parts[1]
     return title
+
+
+def _local_filename_title(file: dict) -> str:
+    tags = file.get('tags') or {}
+    return _filename_title(str(file.get('path') or ''),
+                           str(tags.get('track_artist') or tags.get('artist') or ''))
 
 
 def _recording_id(slot: dict) -> str:
@@ -159,7 +173,7 @@ def file_version_markers(file: dict) -> frozenset[str]:
     tags = file.get('tags') or {}
     row = file.get('db') or {}
     markers = set(_version_markers(str(tags.get('title') or '')))
-    markers.update(_version_markers(_filename_title(str(file.get('path') or ''))))
+    markers.update(_version_markers(_local_filename_title(file)))
     markers.update(_version_markers(str(row.get('title') or '')))
     markers.update(_disambiguation_markers(row.get('recording_disambiguation')))
     return frozenset(markers)
@@ -242,8 +256,7 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
     tags = file.get('tags') or {}
     if any(_named_version_conflicts(str(title or ''), slot_title) for title in (
             tags.get('title'),
-            _filename_title(str(file.get('path') or ''),
-                            str(tags.get('track_artist') or tags.get('artist') or '')),
+            _local_filename_title(file),
             (file.get('db') or {}).get('title'))):
         return False
     if (file_disambiguation and slot_disambiguation and
@@ -428,7 +441,7 @@ class _MatchFacts:
         tags = file.get('tags') or {}
         support = sum((
             self.title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= 0.83,
-            self.title_score(_filename_title(str(file.get('path') or '')),
+            self.title_score(_local_filename_title(file),
                              str(slot.get('title') or '')) >= 0.83,
             bool(tags.get('mbid') and _recording_id(slot) and tags['mbid'] == _recording_id(slot)),
         ))
@@ -563,7 +576,7 @@ def _pair_weight(file: dict, slot: dict, slots: list[dict] | None = None,
     if alternate_wording:
         reasons.append('Exact audio identity supports alternate version wording; review qualifiers')
     tag_title = facts.title_score(str(tags.get('title') or ''), slot_title)
-    filename_title = facts.title_score(_filename_title(str(file.get('path') or '')), slot_title)
+    filename_title = facts.title_score(_local_filename_title(file), slot_title)
     if not fingerprint_weight and max(tag_title, filename_title) < 0.83:
         return 0, []
 
@@ -664,13 +677,14 @@ def reconcile_folder(files: list[dict], slots: list[dict],
         )
         corroborating_metadata = sum((
             facts.title_score(str(tags.get('title') or ''), str(slot.get('title') or '')) >= 0.83,
-            facts.title_score(_filename_title(str(files[file_index].get('path') or '')),
+            facts.title_score(_local_filename_title(files[file_index]),
                          str(slot.get('title') or '')) >= 0.83,
             bool(tags.get('mbid') and _recording_id(slot)
                  and tags['mbid'] == _recording_id(slot)),
         ))
-        artist_agrees = bool(tags.get('artist') and slot.get('artist')) and _artist_credit_supports(
-            str(tags.get('artist') or ''), str(slot.get('artist') or ''))
+        local_artist = str(tags.get('track_artist') or tags.get('artist') or '')
+        artist_agrees = bool(local_artist and slot.get('artist')) and _artist_credit_supports(
+            local_artist, str(slot.get('artist') or ''), slot.get('artist_aliases'))
         position_agrees = (
             bool(tags.get('track_number') and slot.get('track_number'))
             and
@@ -846,7 +860,7 @@ def reconcile_folder(files: list[dict], slots: list[dict],
             for extra_index in extra_files:
                 extra = files[extra_index]
                 extra_title = str((extra.get('tags') or {}).get('title') or
-                                  _filename_title(extra.get('path') or ''))
+                                  _local_filename_title(extra))
                 if facts.title_score(extra_title, str(neighbor.get('title') or '')) < 0.83:
                     continue
                 extra_length = int((extra.get('tags') or {}).get('duration_ms') or
