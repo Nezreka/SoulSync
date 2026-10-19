@@ -484,9 +484,7 @@ export function MirroredTab({
     } catch (err) {
       const message = err instanceof Error ? err.message : 'unknown error';
       const scopeLabel = scope === 'requests' ? 'request' : scope === 'user' ? 'your' : 'mirrored';
-      setPlaceholder(
-        `Error loading ${scopeLabel} playlists: ${message}`,
-      );
+      setPlaceholder(`Error loading ${scopeLabel} playlists: ${message}`);
     }
   }, []);
 
@@ -522,7 +520,8 @@ export function MirroredTab({
   const registerRef = useRef(registerReload);
   registerRef.current = registerReload;
   useEffect(() => {
-    const key = scope === 'requests' ? 'request-lists' : scope === 'user' ? 'my-playlists' : 'mirrored';
+    const key =
+      scope === 'requests' ? 'request-lists' : scope === 'user' ? 'my-playlists' : 'mirrored';
     registerRef.current(reload, key);
   }, [reload, scope]);
 
@@ -926,41 +925,45 @@ export function MirroredTab({
     }
   }, []);
 
-  const copyToRequests = useCallback(async (mirrorId: number) => {
-    try {
-      const res = await postCopyToRequestList(mirrorId);
-      if (res.new_playlist_id) {
-        const data = await fetchMirroredPlaylist(res.new_playlist_id);
-        if (!data.error) setDetail({ playlistId: res.new_playlist_id, data });
+  const copyToRequests = useCallback(
+    async (mirrorId: number) => {
+      try {
+        const res = await postCopyToRequestList(mirrorId);
+        if (res.new_playlist_id) {
+          const data = await fetchMirroredPlaylist(res.new_playlist_id);
+          if (!data.error) setDetail({ playlistId: res.new_playlist_id, data });
+        }
+        reload();
+        window.showToast?.('Copied to Request Lists', 'success');
+      } catch (err) {
+        window.showToast?.(
+          err instanceof Error ? err.message : 'Could not copy to Request Lists',
+          'error',
+        );
       }
-      await reload();
-      window.showToast?.('Copied to Request Lists', 'success');
-    } catch (err) {
-      window.showToast?.(
-        err instanceof Error ? err.message : 'Could not copy to Request Lists',
-        'error',
-      );
-    }
-  }, [reload]);
+    },
+    [reload],
+  );
 
-
-
-  const toggleAutoRemove = useCallback(async (row: MirroredPlaylistRow) => {
-    try {
-      const next = !row.auto_remove_fulfilled;
-      await patchRequestListSettings(row.id, next);
-      await reload();
-      window.showToast?.(
-        next ? 'Auto-removal of fulfilled tracks enabled' : 'Auto-removal disabled',
-        'success',
-      );
-    } catch (err) {
-      window.showToast?.(
-        err instanceof Error ? err.message : 'Could not update request list settings',
-        'error',
-      );
-    }
-  }, [reload]);
+  const toggleAutoRemove = useCallback(
+    async (row: MirroredPlaylistRow) => {
+      try {
+        const next = !row.auto_remove_fulfilled;
+        await patchRequestListSettings(row.id, next);
+        reload();
+        window.showToast?.(
+          next ? 'Auto-removal of fulfilled tracks enabled' : 'Auto-removal disabled',
+          'success',
+        );
+      } catch (err) {
+        window.showToast?.(
+          err instanceof Error ? err.message : 'Could not update request list settings',
+          'error',
+        );
+      }
+    },
+    [reload],
+  );
 
   const onCardClick = useCallback(
     (row: MirroredPlaylistRow) => {
@@ -1088,8 +1091,10 @@ export function MirroredTab({
         <button
           type="button"
           // on My Playlists and Request Lists, New playlist is the one accent button
-          className={(userScope || requestsScope) ? 'library-select-toggle' : 'refresh-button mirrored'}
-          id={(userScope || requestsScope) ? undefined : 'mirrored-refresh-btn'}
+          className={
+            userScope || requestsScope ? 'library-select-toggle' : 'refresh-button mirrored'
+          }
+          id={userScope || requestsScope ? undefined : 'mirrored-refresh-btn'}
           onClick={() => void load()}
         >
           Update list
