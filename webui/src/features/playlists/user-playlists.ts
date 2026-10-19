@@ -99,8 +99,9 @@ export async function fetchUserPlaylists(): Promise<UserPlaylistSummary[]> {
 export async function createUserPlaylist(
   name: string,
   tracks: readonly UserPlaylistTrack[] = [],
+  isRequestList = false,
 ): Promise<{ id: number } & Partial<AddTracksResult>> {
-  return send('/api/user-playlists', json('POST', { name, tracks }));
+  return send('/api/user-playlists', json('POST', { name, tracks, is_request_list: isRequestList }));
 }
 
 /** a song already in the playlist comes back in `duplicates` and is not added,

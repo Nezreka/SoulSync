@@ -1387,6 +1387,9 @@ class MusicDatabase:
                     track_count INTEGER DEFAULT 0,
                     profile_id INTEGER DEFAULT 1,
                     quality_profile_id INTEGER DEFAULT NULL,
+                    is_request_list INTEGER NOT NULL DEFAULT 0,
+                    auto_remove_fulfilled INTEGER NOT NULL DEFAULT 0,
+                    upstream_playlist_id TEXT DEFAULT NULL,
                     mirrored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source, source_playlist_id, profile_id)
@@ -1485,6 +1488,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
+            self._add_mirrored_playlist_request_list_columns(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -2960,6 +2964,23 @@ class MusicDatabase:
                 logger.info("Added quality_profile_id column to mirrored_playlists")
         except Exception as e:
             logger.error(f"Error adding mirrored playlist quality profile column: {e}")
+
+    def _add_mirrored_playlist_request_list_columns(self, cursor):
+        """Add request list and upstream tracking columns to mirrored_playlists."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {column[1] for column in cursor.fetchall()}
+            if cols and 'is_request_list' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN is_request_list INTEGER NOT NULL DEFAULT 0")
+                logger.info("Added is_request_list column to mirrored_playlists")
+            if cols and 'auto_remove_fulfilled' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN auto_remove_fulfilled INTEGER NOT NULL DEFAULT 0")
+                logger.info("Added auto_remove_fulfilled column to mirrored_playlists")
+            if cols and 'upstream_playlist_id' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN upstream_playlist_id TEXT DEFAULT NULL")
+                logger.info("Added upstream_playlist_id column to mirrored_playlists")
+        except Exception as e:
+            logger.error(f"Error adding request list columns to mirrored_playlists: {e}")
 
     def _backfill_native_quality_profile_assignments(self, cursor):
         """Repair missing/dangling Watchlist and playlist assignments.
@@ -25025,8 +25046,8 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         source_skipped, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -25041,6 +25062,18 @@ class MusicDatabase:
                             WHEN ? THEN excluded.source_skipped
                             ELSE mirrored_playlists.source_skipped
                         END,
+                        is_request_list = CASE
+                            WHEN ? THEN excluded.is_request_list
+                            ELSE mirrored_playlists.is_request_list
+                        END,
+                        auto_remove_fulfilled = CASE
+                            WHEN ? THEN excluded.auto_remove_fulfilled
+                            ELSE mirrored_playlists.auto_remove_fulfilled
+                        END,
+                        upstream_playlist_id = CASE
+                            WHEN ? THEN excluded.upstream_playlist_id
+                            ELSE mirrored_playlists.upstream_playlist_id
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     source, source_playlist_id, name,
@@ -25048,8 +25081,14 @@ class MusicDatabase:
                     kwargs.get('image_url'), len(tracks), profile_id,
                     resolved_quality_profile_id,
                     self._source_skipped_json(kwargs.get('source_skipped')),
+                    1 if kwargs.get('is_request_list') else 0,
+                    1 if kwargs.get('auto_remove_fulfilled') else 0,
+                    kwargs.get('upstream_playlist_id'),
                     1 if quality_profile_id is not None else 0,
                     1 if 'source_skipped' in kwargs else 0,
+                    1 if 'is_request_list' in kwargs else 0,
+                    1 if 'auto_remove_fulfilled' in kwargs else 0,
+                    1 if 'upstream_playlist_id' in kwargs else 0,
                 ))
                 playlist_id = cursor.execute(
                     "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
@@ -25270,8 +25309,12 @@ class MusicDatabase:
             logger.error(f"Error backfilling mirrored covers: {e}")
         return filled
 
-    def get_mirrored_playlists(self, profile_id: int = 1) -> List[Dict]:
-        """Return all mirrored playlists for a profile, newest first."""
+    def get_mirrored_playlists(self, profile_id: int = 1, is_request_list: Optional[bool] = None) -> List[Dict]:
+        """Return all mirrored playlists for a profile, newest first.
+        If is_request_list is True, return only request lists.
+        If is_request_list is False, return only non-request lists.
+        If is_request_list is None, return all (backward compatible).
+        """
         # Most sources supply no poster of their own, so a playlist borrows one
         # from the first track discovery matched. Doing it here means the first
         # visit after an upgrade fixes the whole library; every later visit
@@ -25280,9 +25323,15 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                if is_request_list is True:
+                    req_clause = " AND is_request_list = 1"
+                elif is_request_list is False:
+                    req_clause = " AND (is_request_list = 0 OR is_request_list IS NULL)"
+                else:
+                    req_clause = ""
+                cursor.execute(f"""
                     SELECT * FROM mirrored_playlists
-                    WHERE profile_id = ?
+                    WHERE profile_id = ?{req_clause}
                     ORDER BY updated_at DESC
                 """, (profile_id,))
                 return [
@@ -25356,11 +25405,85 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        pl['is_request_list'] = bool(pl.get('is_request_list', 0))
+        pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
+        pl['upstream_playlist_id'] = pl.get('upstream_playlist_id') or None
         try:
             pl['source_skipped'] = json.loads(pl['source_skipped']) if pl.get('source_skipped') else None
         except (TypeError, ValueError):
             pl['source_skipped'] = None
         return pl
+
+    def set_mirrored_playlist_auto_remove(
+        self,
+        playlist_id: int,
+        auto_remove_fulfilled: bool,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Update auto_remove_fulfilled on a request list."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET auto_remove_fulfilled = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [1 if auto_remove_fulfilled else 0, playlist_id, *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting auto_remove_fulfilled for playlist {playlist_id}: {e}")
+            return False
+
+    def copy_to_request_list(
+        self,
+        playlist_id: int,
+        name: Optional[str] = None,
+        profile_id: Optional[int] = None,
+        **kwargs,
+    ) -> Optional[int]:
+        """Clone an existing mirrored playlist or user playlist into a new request list."""
+        import uuid
+        if not name and 'new_name' in kwargs:
+            name = kwargs['new_name']
+        mirror = self.get_mirrored_playlist(playlist_id, profile_id=profile_id)
+        if not mirror:
+            return None
+        tracks = self.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
+
+        original_source = mirror.get('source', '')
+        original_source_id = mirror.get('source_playlist_id', '')
+        unique_suffix = uuid.uuid4().hex[:8]
+        new_source_playlist_id = f"{original_source_id}_req_{unique_suffix}"
+
+        from core.playlists.naming import effective_mirrored_name
+        base_name = name or effective_mirrored_name(mirror) or mirror.get('name') or 'Request List'
+        new_name = name if name else f"{base_name} (Requests)"
+
+        upstream_id = mirror.get('upstream_playlist_id')
+        if not upstream_id:
+            if original_source == 'spotify':
+                upstream_id = original_source_id
+            elif original_source == 'spotify_public':
+                from core.playlists.source_refs import _parse_spotify_ref
+                parsed = _parse_spotify_ref(mirror.get('description') or '')
+                upstream_id = (parsed.get('id') if parsed else None) or original_source_id
+
+        return self.mirror_playlist(
+            source=original_source,
+            source_playlist_id=new_source_playlist_id,
+            name=new_name,
+            tracks=tracks,
+            profile_id=int(profile_id or mirror.get('profile_id') or 1),
+            description=mirror.get('description'),
+            owner=mirror.get('owner'),
+            image_url=mirror.get('image_url'),
+            quality_profile_id=mirror.get('quality_profile_id'),
+            is_request_list=1,
+            auto_remove_fulfilled=1 if original_source in ('spotify', 'spotify_public') else 0,
+            upstream_playlist_id=upstream_id,
+        )
 
     def set_mirrored_playlist_source_skipped(
         self,

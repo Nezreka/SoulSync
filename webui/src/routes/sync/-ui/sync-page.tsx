@@ -297,6 +297,16 @@ export function SyncPage() {
         registerReload={page.registerMirroredReload}
       />
     ),
+    'request-lists': (
+      <MirroredTab
+        scope="requests"
+        vertical={page.verticals.mirrored}
+        onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
+        sourceName={sourceName}
+        pipeline={page.pipeline}
+        registerReload={page.registerMirroredReload}
+      />
+    ),
   };
 
   return (

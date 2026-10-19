@@ -65,7 +65,7 @@ export const MAINTENANCE_ACTIONS = new Set([
 
 export function isMaintenanceAutomation(a: Automation): boolean {
   if (a.owned_by === 'system:repair_job') return true;
-  return MAINTENANCE_ACTIONS.has(a.action_type);
+  return Boolean(a.action_type && MAINTENANCE_ACTIONS.has(a.action_type));
 }
 
 export function isOperationAutomation(a: Automation): boolean {

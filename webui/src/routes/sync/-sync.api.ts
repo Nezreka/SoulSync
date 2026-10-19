@@ -11,7 +11,7 @@
 import type { ExportJob, ExportMode, ExportStartResponse } from './-sync.export';
 import type { SyncHistoryEntry, SyncHistoryResyncTrack } from './-sync.history';
 import type { MirrorPayload } from './-sync.import';
-import type { MirroredTrackStatus } from './-sync.mirrored';
+import type { MirroredPlaylistRow, MirroredTrackStatus } from './-sync.mirrored';
 import type { MirroredPipelineState } from './-sync.pipeline';
 import type { SourceVerticalConfig } from './-sync.sources';
 import type { SourceSkipped } from './-sync.state';
@@ -517,6 +517,9 @@ export interface MirroredPlaylistDetail {
   }[];
   /** how many tracks sit in each status (#1721) */
   status_counts?: Partial<Record<MirroredTrackStatus, number>>;
+  is_request_list?: boolean;
+  auto_remove_fulfilled?: boolean;
+  upstream_playlist_id?: string | null;
 }
 
 /** GET /api/mirrored-playlists/<id> (1069). */
@@ -589,6 +592,38 @@ export async function patchMirroredCustomName(
   });
   const data = await readJson<{ error?: string }>(response);
   if (!response.ok || data.error) throw new Error(data.error || 'Failed to update name');
+  return data;
+}
+
+
+
+/** POST .../copy-to-request-list */
+export async function postCopyToRequestList(
+  playlistId: number | string,
+  customName?: string,
+): Promise<{ success: boolean; new_playlist_id?: number; playlist?: MirroredPlaylistRow }> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/copy-to-request-list`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ custom_name: customName }),
+  });
+  const data = await readJson<{ success: boolean; new_playlist_id?: number; playlist?: MirroredPlaylistRow; error?: string }>(response);
+  if (!response.ok || data.error) throw new Error(data.error || 'Failed to copy playlist to request list');
+  return data;
+}
+
+/** PATCH .../request-list-settings */
+export async function patchRequestListSettings(
+  playlistId: number | string,
+  autoRemoveFulfilled: boolean,
+): Promise<{ success: boolean; playlist?: MirroredPlaylistRow }> {
+  const response = await fetch(`/api/mirrored-playlists/${playlistId}/request-list-settings`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ auto_remove_fulfilled: autoRemoveFulfilled }),
+  });
+  const data = await readJson<{ success: boolean; playlist?: MirroredPlaylistRow; error?: string }>(response);
+  if (!response.ok || data.error) throw new Error(data.error || 'Failed to update request list settings');
   return data;
 }
 

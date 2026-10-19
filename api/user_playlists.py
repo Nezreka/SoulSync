@@ -92,7 +92,10 @@ def create_user_playlist():
     data = request.get_json(silent=True) or {}
     try:
         database = get_database()
-        playlist_id = up.create_playlist(database, get_current_profile_id(), data.get('name'))
+        is_req = bool(data.get('is_request_list'))
+        playlist_id = up.create_playlist(
+            database, get_current_profile_id(), data.get('name'), is_request_list=is_req
+        )
         result = {"success": True, "id": playlist_id}
         # the picker's "new playlist" makes it and adds the song in one go
         if data.get('tracks'):

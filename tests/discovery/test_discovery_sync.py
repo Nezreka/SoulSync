@@ -76,8 +76,9 @@ class _FakeSyncService:
         self.cleared_callbacks.append(playlist_name)
 
     async def sync_playlist(self, playlist, download_missing=False, profile_id=1, sync_mode='replace',
-                            user_initiated=False):
+                            user_initiated=False, **kwargs):
         self.user_initiated = user_initiated
+        self.extra_kwargs = kwargs
         if self._raise_on_sync:
             raise self._raise_on_sync
         return self._sync_result

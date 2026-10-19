@@ -578,7 +578,7 @@ class PlaylistSyncService:
         )
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
-                            user_initiated: bool = False) -> SyncResult:
+                            user_initiated: bool = False, is_request_list: bool = False, auto_remove_fulfilled: bool = False) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
@@ -587,13 +587,15 @@ class PlaylistSyncService:
         _user_token = _sync_user_initiated.set(bool(user_initiated))
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
-            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
+            return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode,
+                                              is_request_list=is_request_list, auto_remove_fulfilled=auto_remove_fulfilled)
         finally:
             reset_library_scope(_scope_token)
             _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
 
-    async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
+    async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str,
+                             is_request_list: bool = False, auto_remove_fulfilled: bool = False) -> SyncResult:
         # Check if THIS specific playlist is already syncing
         syncing = getattr(self, 'syncing_playlists', None)
         if syncing is None:
@@ -715,10 +717,11 @@ class PlaylistSyncService:
             # longer on the server (#1754); filled in the write branch below
             # and read back when the per-track history details are built.
             server_missing_results: set = set()
-            if server_type == 'soulsync':
+            if is_request_list or server_type == 'soulsync':
+                step_title = "Request list: library check complete" if is_request_list else "Standalone: library check complete"
                 self._update_progress(
                     playlist.name,
-                    "Standalone: library check complete",
+                    step_title,
                     "",
                     80, 5, 4,
                     total_tracks=total_tracks,
@@ -729,9 +732,14 @@ class PlaylistSyncService:
                 synced_tracks = len(matched_tracks)
                 failed_tracks = unmatched_count
                 logger.info(
-                    f"Standalone playlist sync '{playlist.name}': "
+                    f"{'Request list' if is_request_list else 'Standalone'} playlist sync '{playlist.name}': "
                     f"{len(matched_tracks)} in library, {unmatched_count} missing"
                 )
+                if is_request_list and auto_remove_fulfilled and matched_tracks and self.spotify_client:
+                    try:
+                        self._handle_request_list_spotify_removal(playlist, matched_tracks, profile_id)
+                    except Exception as rm_err:
+                        logger.warning(f"Failed to auto-remove fulfilled tracks from Spotify: {rm_err}")
             else:
                 self._update_progress(
                     playlist.name,
@@ -1683,3 +1691,48 @@ class PlaylistSyncService:
         except Exception as e:
             logger.error(f"Error generating library comparison: {e}")
             return {"error": str(e)}
+
+    def _handle_request_list_spotify_removal(self, playlist, matched_tracks, profile_id):
+        """Delete fulfilled tracks from the upstream Spotify playlist if collaborative/owned."""
+        from core.playlists.source_refs import extract_mirrored_pk, _parse_spotify_ref, _SPOTIFY_ID_RE
+        from database.music_database import MusicDatabase
+        try:
+            db = MusicDatabase()
+            pk = extract_mirrored_pk(getattr(playlist, 'id', None))
+            pl_row = db.get_mirrored_playlist(pk, profile_id=profile_id) if pk else None
+
+            source = (pl_row.get('source') if pl_row else '') or ''
+            if source not in ('spotify', 'spotify_public'):
+                return
+
+            spotify_playlist_id = None
+            if pl_row:
+                upstream = pl_row.get('upstream_playlist_id')
+                if upstream and _SPOTIFY_ID_RE.match(str(upstream)):
+                    spotify_playlist_id = str(upstream)
+                elif source == 'spotify' and _SPOTIFY_ID_RE.match(str(pl_row.get('source_playlist_id') or '')):
+                    spotify_playlist_id = str(pl_row.get('source_playlist_id'))
+                else:
+                    desc = pl_row.get('description') or ''
+                    parsed = _parse_spotify_ref(desc)
+                    if parsed and parsed.get('type') == 'playlist':
+                        spotify_playlist_id = parsed.get('id')
+
+            if not spotify_playlist_id:
+                logger.debug("Could not resolve Spotify playlist ID for request list removal")
+                return
+
+            spotify_track_ids = []
+            for r in matched_tracks:
+                t = r.spotify_track
+                tid = getattr(t, 'source_track_id', None) or getattr(t, 'id', None)
+                if tid and not str(tid).startswith('file:') and _SPOTIFY_ID_RE.match(str(tid)):
+                    spotify_track_ids.append(str(tid))
+
+            if not spotify_track_ids:
+                return
+
+            logger.info(f"Request list auto-removal: removing {len(spotify_track_ids)} fulfilled tracks from Spotify playlist {spotify_playlist_id}")
+            self.spotify_client.remove_playlist_tracks(spotify_playlist_id, spotify_track_ids)
+        except Exception as e:
+            logger.warning(f"Error during request list Spotify track removal: {e}")

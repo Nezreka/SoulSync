@@ -348,6 +348,8 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             # a playlist's own Sync & download click, not a schedule (#1603)
             'user_initiated': bool(config.get('user_initiated')),
             'sync_mode': own_sync_mode,
+            'is_request_list': bool(pl.get('is_request_list')),
+            'auto_remove_fulfilled': bool(pl.get('auto_remove_fulfilled')),
         },
         daemon=True,
         name=f'auto-sync-{playlist_id}',
