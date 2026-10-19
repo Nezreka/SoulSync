@@ -1599,10 +1599,31 @@ def clear_profile_navidrome_login():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _home_user_link_closed():
+    """linking a plex home user takes no proof that you are that user (the
+    admin token switches to them), which fits one household on the profile
+    picker. login mode is for people who are not one household: there a
+    member could link anyone in the admin's plex home without a pin and act
+    as them on the server. so in login mode it is for admins only, and
+    members use connect with plex, which proves the account on plex's page."""
+    if not _require_login_enabled():
+        return False
+    pid = get_current_profile_id()
+    if pid is None:
+        return True
+    if int(pid) == 1:
+        return False
+    return not bool((get_database().get_profile(pid) or {}).get('is_admin'))
+
+
 @bp.route('/api/profiles/me/plex-home-users', methods=['GET'])
 def list_plex_home_users():
     """the plex home users a profile can link itself to. names and ids only,
-    and only the flag saying whether one needs a pin."""
+    and only the flag saying whether one needs a pin. a member in login mode
+    gets none (an empty list, not a 4xx, so my account just leaves the
+    picker out)."""
+    if _home_user_link_closed():
+        return jsonify({'success': True, 'users': []})
     try:
         engine = _media_server_engine()
         client = engine.client('plex') if engine is not None else None
@@ -1619,6 +1640,9 @@ def link_plex_home_user():
     switches to that user once (with their profile pin when they have one,
     which is used for that call and not kept) and the user's own server
     access token is stored; the profile's playlists are then theirs."""
+    if _home_user_link_closed():
+        return jsonify({'success': False,
+                        'error': 'Use Connect with Plex to link your own Plex account'}), 403
     try:
         data = request.json or {}
         user_id = str(data.get('user_id') or '').strip()

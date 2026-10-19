@@ -100,3 +100,49 @@ def test_unlink_clears_the_link(client, as_kid, plex):
 def test_the_link_is_per_profile(client, as_kid, plex):
     client.post('/api/profiles/me/plex-home-user', json={'user_id': '1'})
     assert web_server.get_database().get_profile_plex_home_user(1) is None
+
+
+# -- login mode: members are not one household --
+
+@pytest.fixture
+def login_mode(monkeypatch):
+    real_get = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, 'get',
+                        lambda k, d=None: True if k == 'security.require_login' else real_get(k, d))
+
+
+def _signed_in(client, pid):
+    with client.session_transaction() as sess:
+        sess['profile_id'] = pid
+        sess['login_authenticated'] = True
+
+
+def test_in_login_mode_a_member_sees_no_home_users(client, as_kid, plex, login_mode):
+    _signed_in(client, as_kid)
+    r = client.get('/api/profiles/me/plex-home-users')
+    # an empty list, not a 4xx: my account opening must not be a refused call
+    assert r.status_code == 200 and r.get_json() == {'success': True, 'users': []}
+
+
+def test_in_login_mode_a_member_cannot_link_someone_elses_home_user(client, as_kid, plex, login_mode):
+    _signed_in(client, as_kid)
+    r = client.post('/api/profiles/me/plex-home-user', json={'user_id': '1'})
+    assert r.status_code == 403 and 'Connect with Plex' in r.get_json()['error']
+    assert plex.minted == []  # the admin token never switched to that user
+    assert web_server.get_database().get_profile_plex_home_user(as_kid) is None
+
+
+def test_in_login_mode_a_member_can_still_unlink(client, as_kid, plex, login_mode):
+    web_server.get_database().set_profile_plex_home_user(as_kid, '1', 'Kids', 'srvtoken-Kids')
+    _signed_in(client, as_kid)
+    assert client.delete('/api/profiles/me/plex-home-user').get_json()['success']
+    assert web_server.get_database().get_profile_plex_home_user(as_kid) is None
+
+
+def test_in_login_mode_an_admin_still_links(client, plex, login_mode):
+    db = web_server.get_database()
+    boss = db.create_profile(name=f'boss_{os.urandom(3).hex()}', is_admin=True)
+    _signed_in(client, boss)
+    assert [u['title'] for u in client.get('/api/profiles/me/plex-home-users').get_json()['users']] == ['Kids', 'Annie']
+    r = client.post('/api/profiles/me/plex-home-user', json={'user_id': '1'})
+    assert r.status_code == 200 and r.get_json()['title'] == 'Kids'
