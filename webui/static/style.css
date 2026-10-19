@@ -43153,26 +43153,6 @@ div.artist-hero-badge {
     background: #a238ff;
 }
 
-.audiodb-card-icon:hover {
-    background: #1a6bc4;
-}
-
-.spotify-card-icon:hover {
-    background: #1db954;
-}
-
-.itunes-card-icon:hover {
-    background: #fc3c44;
-}
-
-.lastfm-card-icon:hover {
-    background: #d51007;
-}
-
-.genius-card-icon:hover {
-    background: #ffff64;
-}
-
 .tidal-card-icon:hover {
     background: #000000;
 }
@@ -43295,83 +43275,6 @@ div.artist-hero-badge {
     .source-link-btn span {
         display: none;
     }
-}
-
-.watchlist-card-icon {
-    position: absolute;
-    right: 8px;
-    width: 28px;
-    height: 28px;
-    background: rgba(0, 0, 0, 0.75);
-    border: 1px solid rgba(var(--accent-rgb), 0.4);
-    border-radius: var(--radius-xs);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0.9;
-    z-index: 100;
-    font-size: 14px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-    pointer-events: none;
-}
-
-.library-card-watchlist-btn {
-    position: absolute;
-    right: 8px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
-    background: rgba(0, 0, 0, 0.75);
-    border: 1px solid var(--white-a15);
-    border-radius: var(--radius-lg);
-    color: #e0e0e0;
-    font-size: 11px;
-    font-weight: 600;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    cursor: pointer;
-    z-index: 100;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    opacity: 0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-}
-
-.library-artist-card:hover .library-card-watchlist-btn {
-    opacity: 1;
-}
-
-.library-card-watchlist-btn:hover {
-    background: rgba(var(--accent-rgb), 0.25);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: #fff;
-    transform: scale(1.05);
-}
-
-.library-card-watchlist-btn.watching {
-    background: rgba(255, 193, 7, 0.2);
-    color: #ffc107;
-    border-color: rgba(255, 193, 7, 0.4);
-    opacity: 1;
-}
-
-.library-card-watchlist-btn.watching:hover {
-    background: rgba(255, 193, 7, 0.35);
-    border-color: rgba(255, 193, 7, 0.6);
-    color: #fff;
-}
-
-.library-card-watchlist-btn:disabled {
-    opacity: 0.5;
-    cursor: wait;
-    transform: none;
-}
-
-.library-card-watchlist-btn .watchlist-icon {
-    font-size: 12px;
-}
-
-.library-card-watchlist-btn .watchlist-text {
-    line-height: 1;
 }
 
 /* ============================= */
