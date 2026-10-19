@@ -39229,6 +39229,9 @@ div.artist-hero-badge {
     margin-bottom: 20px;
 }
 
+/* Nothing renders .discover-section-subsection, but these stay: they are the
+   only place .listenbrainz-tab-content (radio-sections.tsx) is declared, and
+   artefact-parity.test.ts reads the stylesheets to learn the known classes. */
 .listenbrainz-tab-content .discover-section-subsection {
     margin-bottom: 40px;
 }
