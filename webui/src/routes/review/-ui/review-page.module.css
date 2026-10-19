@@ -2919,3 +2919,102 @@
 .missingChoices .decisionActions {
   padding: 0;
 }
+
+/* Keep the proposed result and primary choice ahead of optional technical context. */
+.actionDisclosure,
+.identifierChanges {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+.actionDisclosure > summary,
+.identifierChanges > summary,
+.releaseReference > summary {
+  padding: 10px 12px;
+  min-height: 40px;
+  box-sizing: border-box;
+  cursor: pointer;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.actionDisclosure > summary:hover,
+.identifierChanges > summary:hover,
+.releaseReference > summary:hover {
+  color: var(--text-1);
+  background: var(--surface-1);
+}
+.actionDisclosure > summary:focus-visible,
+.identifierChanges > summary:focus-visible,
+.releaseReference > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.actionDisclosure .assignmentCorrection {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+}
+.identifierChanges {
+  margin-top: 12px;
+}
+.decisionNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 12px;
+}
+.decisionNavigation button[data-slot='control'] {
+  font-size: 12px;
+  min-height: 32px;
+}
+.trackMatrix > .sectionHeading {
+  display: block;
+}
+.trackMatrix > .sectionHeading h3 {
+  font-size: 24px;
+  margin-block: 4px 8px;
+}
+.trackMatrix > .sectionHeading .matrixCounts {
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+.releaseReference {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+.releaseReference[open] {
+  flex-basis: 100%;
+  padding-bottom: 8px;
+}
+.releaseReference > span,
+.releaseReference > button {
+  margin-inline: 12px;
+}
+.missingRequests {
+  margin-bottom: 16px;
+  border: 1px solid rgba(var(--warning-rgb), 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(var(--warning-rgb), 0.04);
+}
+.missingRequests > summary {
+  padding: 12px;
+  cursor: pointer;
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+.missingRequests > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.missingRequests .missingChoices {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.planContext .releaseReference {
+  margin-top: 8px;
+}

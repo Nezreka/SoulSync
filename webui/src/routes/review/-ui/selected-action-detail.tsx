@@ -85,7 +85,15 @@ export function SelectedActionDetail({
           <span className={styles.severity}>{finding.severity}</span>
         </div>
       )}
-      <nav className={styles.actions} aria-label="Decision navigation">
+      <h3>{findingHeading(finding)}</h3>
+      <p className={styles.description}>
+        {versionConflict
+          ? 'The local audio and release track may be different versions. Listen before choosing how to keep them.'
+          : compact
+            ? compactReason || 'Review the supporting evidence.'
+            : finding.description || 'Review the evidence below.'}
+      </p>
+      <nav className={styles.decisionNavigation} aria-label="Decision navigation">
         <Button
           type="button"
           disabled={busy || previousId == null}
@@ -101,14 +109,6 @@ export function SelectedActionDetail({
           Next decision →
         </Button>
       </nav>
-      <h3>{findingHeading(finding)}</h3>
-      <p className={styles.description}>
-        {versionConflict
-          ? 'The local audio and release track may be different versions. Listen before choosing how to keep them.'
-          : compact
-            ? compactReason || 'Review the supporting evidence.'
-            : finding.description || 'Review the evidence below.'}
-      </p>
       {Array.isArray(details.competing_copies) && details.competing_copies.length > 0 && (
         <p className={styles.competingFileNotice}>
           Other local file{details.competing_copies.length === 1 ? '' : 's'} fitting this slot:{' '}
@@ -194,64 +194,6 @@ export function SelectedActionDetail({
                 onChoose={(choice) => onAct('fix', choice)}
               />
             )}
-            {finding.file_path && assignmentOptions.length > 0 && (
-              <div className={styles.assignmentCorrection}>
-                {proposedSlot && (
-                  <Button
-                    type="button"
-                    variant="primary"
-                    className={styles.primary}
-                    disabled={busy}
-                    onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
-                  >
-                    Use assignment in plan: {textValue(proposedSlot.title)}
-                  </Button>
-                )}
-                <label>
-                  Assign this file to another release track
-                  <Select
-                    value={assignmentSlot}
-                    onChange={(event) => setAssignmentSlot(event.target.value)}
-                  >
-                    <option value="">Choose a release track…</option>
-                    {assignmentOptions.map((slot, index) => (
-                      <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
-                        {formatTrackPosition(
-                          textValue(slot.disc_number),
-                          textValue(slot.track_number),
-                          textValue(details.numbering_mode),
-                          textValue(slot.display_track_number),
-                        )}{' '}
-                        {textValue(slot.title)}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                <Button
-                  type="button"
-                  disabled={busy || !assignmentSlot}
-                  onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
-                >
-                  Save plan assignment
-                </Button>
-                {details.saved_assignment === true && (
-                  <Button type="button" disabled={busy} onClick={() => onAct('fix', 'assign:auto')}>
-                    Reset plan assignment
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  disabled={busy || numberingPreview}
-                  onClick={() => onAct('dismiss')}
-                >
-                  Keep current values
-                </Button>
-                <small>
-                  This saves your plan choice and recalculates proposed edits. Files stay unchanged
-                  until you apply them.
-                </small>
-              </div>
-            )}
             {waitingForDownload && (
               <p className={styles.waitingNotice} role="status">
                 {finding.details?.fulfillment_state === 'downloaded'
@@ -266,6 +208,17 @@ export function SelectedActionDetail({
             )}
             {!waitingForDownload && (
               <div className={styles.actions}>
+                {proposedSlot && (
+                  <Button
+                    type="button"
+                    variant="primary"
+                    className={styles.primary}
+                    disabled={busy}
+                    onClick={() => onAct('fix', `assign:${textValue(proposedSlot.key)}`)}
+                  >
+                    Use assignment in plan: {textValue(proposedSlot.title)}
+                  </Button>
+                )}
                 {finding.finding_type === 'reconciliation_intent' ? null : versionConflict &&
                   canApply ? (
                   <>
@@ -340,7 +293,7 @@ export function SelectedActionDetail({
                       )}
                   </>
                 )}
-                {assignmentOptions.length === 0 && (
+                {finding.finding_type !== 'reconciliation_intent' && (
                   <Button
                     type="button"
                     disabled={busy || numberingPreview}
@@ -350,6 +303,54 @@ export function SelectedActionDetail({
                   </Button>
                 )}
               </div>
+            )}
+
+            {finding.file_path && assignmentOptions.length > 0 && (
+              <details className={styles.actionDisclosure}>
+                <summary>Change track assignment</summary>
+                <div className={styles.assignmentCorrection}>
+                  <label>
+                    Assign this file to another release track
+                    <Select
+                      value={assignmentSlot}
+                      onChange={(event) => setAssignmentSlot(event.target.value)}
+                    >
+                      <option value="">Choose a release track…</option>
+                      {assignmentOptions.map((slot, index) => (
+                        <option value={textValue(slot.key)} key={`${textValue(slot.key)}-${index}`}>
+                          {formatTrackPosition(
+                            textValue(slot.disc_number),
+                            textValue(slot.track_number),
+                            textValue(details.numbering_mode),
+                            textValue(slot.display_track_number),
+                          )}{' '}
+                          {textValue(slot.title)}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <Button
+                    type="button"
+                    disabled={busy || !assignmentSlot}
+                    onClick={() => onAct('fix', `assign:${assignmentSlot}`)}
+                  >
+                    Save plan assignment
+                  </Button>
+                  {details.saved_assignment === true && (
+                    <Button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onAct('fix', 'assign:auto')}
+                    >
+                      Reset plan assignment
+                    </Button>
+                  )}
+                  <small>
+                    This saves your plan choice and recalculates proposed edits. Files stay
+                    unchanged until you apply them.
+                  </small>
+                </div>
+              </details>
             )}
 
             {['reconciliation_extra', 'reconciliation_unresolved'].includes(finding.finding_type) &&

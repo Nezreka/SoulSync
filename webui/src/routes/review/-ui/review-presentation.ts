@@ -81,6 +81,7 @@ export function changeFieldLabel(field: string, locations?: string[]): string {
       library_recording_disambiguation: 'Recording description · library',
       filename: 'Filename',
       musicbrainz_recording_id: 'Recording ID',
+      musicbrainz_release_id: 'MusicBrainz release ID',
       library_recording_mbid: 'Recording ID · library',
     }[field] || field.replaceAll('_', ' ');
   if (!locations || field === 'filename') return name;

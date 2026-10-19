@@ -1868,49 +1868,6 @@ export function ReviewPage() {
                         </div>
                       </div>
                       <div className={styles.decisionGrid}>
-                        {!releaseChoicePending && reviewCase.album_plan && (
-                          <article data-state="complete">
-                            <Button
-                              className={styles.decisionSelect}
-                              type="button"
-                              onClick={() => setAlbumView('release')}
-                            >
-                              <span className={styles.decisionStep} aria-hidden="true">
-                                ✓
-                              </span>
-                              <span>
-                                <small>Release</small>
-                                <strong>
-                                  Release selected · {mappedSlots}/{totalSlots} assigned
-                                </strong>
-                                <small>
-                                  {reviewCase.album_plan.counts.missing
-                                    ? `${reviewCase.album_plan.counts.missing} release tracks are absent · compare editions →`
-                                    : 'Compare editions →'}
-                                </small>
-                              </span>
-                            </Button>
-                          </article>
-                        )}
-                        {!releaseChoicePending &&
-                          !reviewDecisions.some((step) => step.category === 'numbering') && (
-                            <article data-state="complete">
-                              <div className={styles.decisionSelect}>
-                                <span className={styles.decisionStep} aria-hidden="true">
-                                  ✓
-                                </span>
-                                <span>
-                                  <small>Numbering</small>
-                                  <strong>
-                                    {numberingSchemeLabel(
-                                      releaseHasMultipleDiscs,
-                                      reviewCase.album_plan?.numbering_mode,
-                                    )}
-                                  </strong>
-                                </span>
-                              </div>
-                            </article>
-                          )}
                         {reviewDecisions.map((decision, decisionIndex) => {
                           const selected = active
                             ? decision.finding_ids.includes(active.id)
@@ -2080,6 +2037,49 @@ export function ReviewPage() {
                             </Fragment>
                           );
                         })}
+                        {!releaseChoicePending && reviewCase.album_plan && (
+                          <article data-state="complete">
+                            <Button
+                              className={styles.decisionSelect}
+                              type="button"
+                              onClick={() => setAlbumView('release')}
+                            >
+                              <span className={styles.decisionStep} aria-hidden="true">
+                                ✓
+                              </span>
+                              <span>
+                                <small>Release</small>
+                                <strong>
+                                  Release selected · {mappedSlots}/{totalSlots} assigned
+                                </strong>
+                                <small>
+                                  {reviewCase.album_plan.counts.missing
+                                    ? `${reviewCase.album_plan.counts.missing} release tracks are absent · compare editions →`
+                                    : 'Compare editions →'}
+                                </small>
+                              </span>
+                            </Button>
+                          </article>
+                        )}
+                        {!releaseChoicePending &&
+                          !reviewDecisions.some((step) => step.category === 'numbering') && (
+                            <article data-state="complete">
+                              <div className={styles.decisionSelect}>
+                                <span className={styles.decisionStep} aria-hidden="true">
+                                  ✓
+                                </span>
+                                <span>
+                                  <small>Numbering</small>
+                                  <strong>
+                                    {numberingSchemeLabel(
+                                      releaseHasMultipleDiscs,
+                                      reviewCase.album_plan?.numbering_mode,
+                                    )}
+                                  </strong>
+                                </span>
+                              </div>
+                            </article>
+                          )}
                         {!releaseChoicePending &&
                           !reviewDecisions.some((step) =>
                             [
@@ -2285,13 +2285,16 @@ export function ReviewPage() {
                           </div>
                         </div>
                         <div className={styles.releaseContext}>
-                          <span>
-                            Selected {reviewCase.album_plan?.source || 'catalog'} release
+                          <details className={styles.releaseReference}>
+                            <summary>Selected release details</summary>
                             <ProviderReleaseId
                               source={reviewCase.album_plan?.source}
                               releaseId={reviewCase.album_plan?.release_id}
                             />
-                          </span>
+                            <Button variant="ghost" onClick={() => setAlbumView('release')}>
+                              Compare editions →
+                            </Button>
+                          </details>
                           {reviewCase.album_plan?.intent_scope && (
                             <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
                           )}
@@ -2421,16 +2424,28 @@ export function ReviewPage() {
                           ) : reviewCase.items.some(
                               (item) => item.finding_type === 'reconciliation_missing',
                             ) ? (
-                            <MissingTracksChoice
-                              key={reviewCase.case_id}
-                              scope={reviewCase.album_plan?.intent_scope}
-                              findings={reviewCase.items.filter(
-                                (item) => item.finding_type === 'reconciliation_missing',
-                              )}
-                              busy={mutationBusy}
-                              onRequest={(ids) => void requestAllMissing(ids.length, ids)}
-                              onChangeScope={() => void reconsiderScope()}
-                            />
+                            <details
+                              className={styles.missingRequests}
+                              open={
+                                trackFilter === 'missing' ||
+                                assignmentsByKey.get(activeRowKey || '')?.status === 'missing'
+                              }
+                            >
+                              <summary>
+                                {missingAssignments.length} missing tracks · Choose tracks to
+                                request
+                              </summary>
+                              <MissingTracksChoice
+                                key={reviewCase.case_id}
+                                scope={reviewCase.album_plan?.intent_scope}
+                                findings={reviewCase.items.filter(
+                                  (item) => item.finding_type === 'reconciliation_missing',
+                                )}
+                                busy={mutationBusy}
+                                onRequest={(ids) => void requestAllMissing(ids.length, ids)}
+                                onChangeScope={() => void reconsiderScope()}
+                              />
+                            </details>
                           ) : null)}
                         <div
                           className={styles.trackTable}
@@ -2591,6 +2606,8 @@ export function ReviewPage() {
                                           const choices = document.querySelector<HTMLElement>(
                                             '[aria-label="Choose missing tracks"], [aria-label="Choose album completeness"]',
                                           );
+                                          const disclosure = choices?.closest('details');
+                                          if (disclosure) disclosure.open = true;
                                           choices?.focus({ preventScroll: true });
                                           choices?.scrollIntoView({ block: 'center' });
                                         });
@@ -2742,11 +2759,14 @@ export function ReviewPage() {
                           <div>
                             <dt>Selected release</dt>
                             <dd>
-                              {reviewCase.album_plan.source || 'Catalog'}{' '}
-                              <ProviderReleaseId
-                                source={reviewCase.album_plan.source}
-                                releaseId={reviewCase.album_plan.release_id}
-                              />
+                              {primaryCandidate?.release_title || reviewCase.album}
+                              <details className={styles.releaseReference}>
+                                <summary>Source and release ID</summary>
+                                <ProviderReleaseId
+                                  source={reviewCase.album_plan.source}
+                                  releaseId={reviewCase.album_plan.release_id}
+                                />
+                              </details>
                             </dd>
                           </div>
                           <div>

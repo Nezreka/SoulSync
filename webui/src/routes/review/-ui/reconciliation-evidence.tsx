@@ -1104,6 +1104,14 @@ export function ReconciliationEvidence({
   const details = object(finding.details);
   const changes = object(details.changes);
   const shownChanges = displayChanges(changes);
+  const identifierChanges = shownChanges.filter((change) => /(?:_id|_mbid)$/.test(change.field));
+  const visibleChanges = shownChanges.filter((change) => !identifierChanges.includes(change));
+  const comparisonRows = (rows: typeof shownChanges) =>
+    rows.map((change) => ({
+      field: proposedFieldLabel(change.field, change.locations),
+      current: change.old,
+      planned: change.next,
+    }));
   const missing = objects(details.missing_tracks);
   const reasons = Array.isArray(details.match_reasons) ? details.match_reasons.map(label) : [];
   const ambiguityReasons = Array.isArray(details.ambiguity_reasons)
@@ -1171,12 +1179,17 @@ export function ReconciliationEvidence({
             <EvidenceIcon name="check" /> Proposed changes
           </h4>
           <MetadataComparison
-            rows={shownChanges.map((change) => ({
-              field: proposedFieldLabel(change.field, change.locations),
-              current: change.old,
-              planned: change.next,
-            }))}
+            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierChanges)}
           />
+          {visibleChanges.length > 0 && identifierChanges.length > 0 && (
+            <details className={styles.identifierChanges}>
+              <summary>
+                {identifierChanges.length} identifier{' '}
+                {identifierChanges.length === 1 ? 'change' : 'changes'}
+              </summary>
+              <MetadataComparison rows={comparisonRows(identifierChanges)} />
+            </details>
+          )}
         </section>
       )}
       {controls}
