@@ -5328,6 +5328,9 @@ def _run_sync_task(
     skip_wishlist_add=False,
     organize_by_playlist=False,
     user_initiated=False,
+    is_request_list=False,
+    auto_remove_fulfilled=False,
+    **kwargs,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5353,6 +5356,8 @@ def _run_sync_task(
         skip_wishlist_add=skip_wishlist_add,
         organize_by_playlist=organize_by_playlist,
         user_initiated=user_initiated,
+        is_request_list=is_request_list,
+        auto_remove_fulfilled=auto_remove_fulfilled,
     )
 
 

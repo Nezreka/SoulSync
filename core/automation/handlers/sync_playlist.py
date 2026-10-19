@@ -333,8 +333,33 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
         skip_add = callable(_cm_get) and not _cm_get('playlist_sync.wishlist_missing_tracks', True)
     skip_wishlist_add = organize_by_playlist or bool(skip_add)
+    def _safe_run_sync_task(*args, **kwargs):
+        try:
+            deps.run_sync_task(*args, **kwargs)
+        except Exception as exc:
+            import logging
+            logging.getLogger("soulsync.automation").exception("Background sync task %s failed", sync_id)
+            sync_states = getattr(deps, 'sync_states', None)
+            if sync_states is None and hasattr(deps, 'get_sync_states'):
+                sync_states = deps.get_sync_states()
+            if isinstance(sync_states, dict):
+                sync_states[sync_id] = {
+                    'status': 'error',
+                    'playlist_name': sync_name,
+                    'error': str(exc),
+                }
+            if auto_id and hasattr(deps, 'update_progress'):
+                deps.update_progress(
+                    auto_id,
+                    status='error',
+                    progress=100,
+                    phase='Sync error',
+                    log_line=f'Sync error: {exc}',
+                    log_type='error',
+                )
+
     threading.Thread(
-        target=deps.run_sync_task,
+        target=_safe_run_sync_task,
         args=(
             sync_id, sync_name, tracks_json, auto_id,
             int(pl.get('profile_id') or 1), pl.get('image_url', ''),

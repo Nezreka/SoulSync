@@ -2979,6 +2979,15 @@ class MusicDatabase:
             if cols and 'upstream_playlist_id' not in cols:
                 cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN upstream_playlist_id TEXT DEFAULT NULL")
                 logger.info("Added upstream_playlist_id column to mirrored_playlists")
+            cursor.execute("""
+                UPDATE mirrored_playlists
+                SET upstream_playlist_id = CASE
+                    WHEN source_playlist_id LIKE '%_req_%' THEN
+                        substr(source_playlist_id, 1, instr(source_playlist_id, '_req_') - 1)
+                    ELSE source_playlist_id
+                END
+                WHERE is_request_list = 1 AND (upstream_playlist_id IS NULL OR upstream_playlist_id = '')
+            """)
         except Exception as e:
             logger.error(f"Error adding request list columns to mirrored_playlists: {e}")
 
@@ -25469,6 +25478,12 @@ class MusicDatabase:
                 from core.playlists.source_refs import _parse_spotify_ref
                 parsed = _parse_spotify_ref(mirror.get('description') or '')
                 upstream_id = (parsed.get('id') if parsed else None) or original_source_id
+            elif original_source_id:
+                import re
+                upstream_id = re.sub(r'_req_[a-f0-9]+$', '', original_source_id)
+        if upstream_id and '_req_' in str(upstream_id):
+            import re
+            upstream_id = re.sub(r'_req_[a-f0-9]+$', '', str(upstream_id))
 
         return self.mirror_playlist(
             source=original_source,

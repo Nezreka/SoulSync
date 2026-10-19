@@ -1575,18 +1575,24 @@ class SpotifyClient:
         if not self.is_spotify_authenticated():
             return None
 
+        clean_id = re.sub(r'_req_[a-f0-9]+$', '', str(playlist_id or ''))
+
         # "Liked Songs" is virtual — no playlist URI exists for it, so the
         # playlist endpoint 400s ("Unsupported URL / URI"). Serve it from the
         # saved-tracks endpoint instead, so mirrored playlists / anything that
         # re-resolves by stored id can refresh it like a normal playlist.
-        if playlist_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs'):
+        if (
+            clean_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs')
+            or clean_id.startswith(f"{LIKED_SONGS_PLAYLIST_ID}")
+            or clean_id.startswith("liked-songs")
+        ):
             return self._liked_songs_as_playlist()
 
         try:
-            playlist_data = self.sp.playlist(playlist_id)
+            playlist_data = self.sp.playlist(clean_id)
             # A failed track fetch must not come back as an empty playlist: a
             # mirror refresh would store it, deleting every track it had.
-            tracks = self._get_playlist_tracks(playlist_id, raise_errors=True)
+            tracks = self._get_playlist_tracks(clean_id, raise_errors=True)
             return Playlist.from_spotify_playlist(playlist_data, tracks)
 
         except Exception as e:

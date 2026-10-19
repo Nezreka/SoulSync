@@ -192,8 +192,15 @@ def _fetch_detail(
     if registry is None:
         return None
 
+    # For request lists, use upstream_playlist_id if available,
+    # or strip the _req_ suffix from source_id so the upstream adapter
+    # resolves the actual upstream collection/playlist.
+    playlist_input = pl.get('upstream_playlist_id') or source_id
+    if pl.get('is_request_list') or '_req_' in str(playlist_input):
+        import re
+        playlist_input = re.sub(r'_req_[a-f0-9]+$', '', str(playlist_input))
+
     # URL-backed sources: pull the upstream URL out of `description`.
-    playlist_input = source_id
     if source in _URL_BACKED_SOURCES:
         # ``require_refresh_url`` raises ValueError on missing URL.
         # The outer try/except in the loop catches it and reports as
