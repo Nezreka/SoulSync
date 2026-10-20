@@ -322,7 +322,7 @@ Soulseek rooms and private messages through slskd, in a Discord-style layout.
 - **Inbound request webhook**: `POST /api/v1/request` with a query and SoulSync searches, matches and downloads it. Good for Discord bots and shortcuts.
 - **MCP server** at `/mcp`, so Claude and other AI apps can search, check your library and download through SoulSync with an API key. A read-only key can look but not change anything.
 - **Lidarr compatible API** at `/lidarr`, so request apps that only speak Lidarr (Singarr, MusicSeerr 1.x) can send their album requests to SoulSync instead.
-- Both are off until you turn them on in **Settings > SoulSync API**. See [Support/API.md](Support/API.md#mcp-for-ai-clients).
+- Both are off until you turn them on in **Settings > Advanced > SoulSync API**. See [Support/API.md](Support/API.md#mcp-for-ai-clients).
 
 ## Mobile, PWA & theming
 
