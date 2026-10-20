@@ -993,14 +993,6 @@ body.max-performance .nav-button.active:hover {
     height: 4px;
 }
 
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    border-radius: 2px;
-    width: 0%;
-    transition: width 0.1s linear;
-}
-
 .player-top-progress .progress-bar {
     position: absolute;
     top: 0;
@@ -1155,9 +1147,6 @@ body.max-performance .nav-button.active:hover {
 
 .track-title {
     font-family: -apple-system, 'Segoe UI', sans-serif;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: #ffffff;
     letter-spacing: -0.1px;
     line-height: 1.3;
     cursor: pointer;
@@ -3292,8 +3281,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .activity-time {
-    font-size: 11px;
-    color: var(--white-a50);
     min-width: 80px;
 }
 
@@ -3323,12 +3310,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         0 0 20px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a15);
     border-color: rgba(var(--accent-rgb), 0.25);
-}
-
-.stat-label {
-    font-size: 12px;
-    color: var(--white-a70);
-    font-weight: 500;
 }
 
 /* ======================================
@@ -5418,25 +5399,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .progress-bar {
-    width: 100%;
-    height: 8px;
-    background: var(--white-a10);
-    border-radius: var(--radius-xs);
-    overflow: hidden;
     margin-bottom: 12px;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
-    width: 0%;
-    transition: width 0.3s ease;
 }
 
 .progress-text {
     text-align: center;
-    color: var(--white-a80);
-    font-size: 14px;
 }
 
 /* ======================================================= */
@@ -5698,10 +5665,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .album-action-btn {
     height: 36px;
     width: 160px;
-    border-radius: 18px;
     border: 2px solid;
     font-size: 12px;
-    font-weight: bold;
     cursor: pointer;
     transition: background 0.2s ease;
 }
@@ -5744,19 +5709,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .track-item {
-    background: rgba(40, 40, 40, 0.5);
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(60, 60, 60, 0.3);
     margin: 2px 16px 6px 80px;
-    padding: 8px 12px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.track-item:hover {
-    background: rgba(50, 50, 50, 0.7);
-    border-color: rgba(var(--accent-rgb), 0.5);
 }
 
 .track-item__info {
@@ -5789,10 +5742,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-direction: column;
 }
 
-.download-manager__tabs {
-    display: flex;
-}
-
 .download-manager__content {
     background: #282828;
     border: 1px solid #404040;
@@ -5802,37 +5751,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     flex-grow: 1;
 }
 
-.download-queue {
-    display: none;
-}
-
-.download-queue.active {
-    display: block;
-}
-
-.download-queue__empty-message {
-    text-align: center;
-    padding: 20px;
-    color: var(--white-a50);
-    font-size: 12px;
-}
-
 /* Download Queue Item */
 .download-item {
-    background: rgba(45, 45, 45, 0.95);
-    border-radius: var(--radius-sm);
-    border: 1px solid rgba(60, 60, 60, 0.6);
-    padding: 12px;
     margin-bottom: 6px;
-}
-
-.download-item__title {
-    font-size: 10px;
-    font-weight: 500;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
 }
 
 .download-item__bottom-row {
@@ -5844,8 +5765,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .download-item__uploader {
-    font-size: 9px;
-    color: #b8b8b8;
     flex-grow: 1;
     white-space: nowrap;
     overflow: hidden;
@@ -5857,43 +5776,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     text-align: center;
 }
 
-.progress-bar {
-    height: 6px;
-    background: rgba(60, 60, 60, 0.8);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.progress-fill {
-    height: 100%;
-    background: rgb(var(--accent-light-rgb));
-    border-radius: 3px;
-    width: 0%;
-    transition: width 0.2s linear;
-}
-
-.progress-text {
-    font-size: 8px;
-    color: #c0c0c0;
-}
-
-.download-item__cancel-btn {
-    width: 60px;
-    height: 35px;
-    background: rgba(220, 53, 69, 0.9);
-    color: white;
-    border: 1px solid rgba(220, 53, 69, 0.6);
-    border-radius: var(--radius-xs);
-    font-size: 9px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.2s ease;
-}
-
-.download-item__cancel-btn:hover {
-    background: rgba(240, 73, 89, 1.0);
-}
-
 .download-item__status-container {
     width: auto;
     text-align: right;
@@ -5902,23 +5784,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .download-item__open-btn {
     width: 60px;
     height: 35px;
-    background: rgba(40, 167, 69, 0.9);
-    color: white;
-    border: 1px solid rgba(var(--accent-rgb), 0.6);
-    border-radius: var(--radius-xs);
-    font-size: 9px;
     font-weight: 500;
-    cursor: pointer;
     transition: background 0.2s ease;
 }
 
 .download-item__open-btn:hover {
     background: rgba(50, 187, 79, 1.0);
-}
-
-.download-item__status-text {
-    font-weight: bold;
-    font-size: 10px;
 }
 
 
@@ -7714,7 +7585,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .track-artist {
     font-size: 12px;
-    color: #b3b3b3;
     margin-bottom: 2px;
 }
 
@@ -8055,17 +7925,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .progress-bar {
     width: 100%;
-    height: 6px;
-    background: var(--white-a10);
-    border-radius: 3px;
-    overflow: hidden;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, rgb(var(--accent-light-rgb)), rgb(var(--accent-rgb)));
-    border-radius: 3px;
-    transition: width 0.3s ease;
 }
 
 .progress-text {
@@ -8217,16 +8076,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .filter-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
     margin-bottom: 8px;
-}
-
-.filter-label {
-    color: var(--white-a80);
-    font-size: 11px;
-    font-weight: 600;
 }
 
 .sort-order-btn {
@@ -8598,12 +8448,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .section-title {
     font-family: 'SF Pro Display', -apple-system, sans-serif;
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--white-a50);
     text-transform: uppercase;
     letter-spacing: 1.2px;
-    margin: 0 0 8px 0;
     line-height: 1.2;
     padding-bottom: 10px;
     position: relative;
@@ -9913,14 +9759,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: none;
     border-radius: 2px;
     overflow: hidden;
-}
-
-.progress-bar-fill {
-    height: 100%;
-    background: rgb(var(--accent-rgb));
-    border-radius: var(--radius-xs);
-    width: 0%;
-    transition: width 0.3s ease;
 }
 
 /* Backup Manager List */
@@ -11278,7 +11116,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: rgba(244, 67, 54, 0.2); border-color: rgba(244, 67, 54, 0.5);
 }
 .sync-history-empty {
-    text-align: center; padding: 48px 24px; color: var(--white-a30); font-size: 14px;
+    text-align: center;
 }
 .sync-history-loading { text-align: center; padding: 48px; color: var(--white-a30); }
 .sync-history-pagination {
