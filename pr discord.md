@@ -1,13 +1,13 @@
-**SoulSync 3.5.7 is out** :musical_note:
+**SoulSync 3.5.8 is out** :musical_note:
 
-Beatport charts are real playlists now. Every chart opens to be identified instead of downloading as a fake "Various Artists" compilation, tracks match by ISRC, mirrored charts refresh and can join the pipeline, and you can save a dated snapshot of a chart. Beatport is also an enrichment source for BPM, key, label and catalog number.
+Request Lists are a new tab on the Sync page for playlists that only download. Copy any playlist there and syncing it grabs what's missing without building a playlist on your media server. Spotify lists can opt in to removing tracks you now own from the Spotify playlist, and only ID-matched tracks are ever removed.
 
-Playlist sync gives Spotify tracks your primary source misses a second pass by their own Spotify id instead of turning them into Wing It, every track of a mirrored playlist shows where it stands, and a stale cached match can't pin the wrong song (thanks @kevin2xk). Scheduled auto-sync regenerates Discovery Shuffle (thanks @Bloopser), and failed Navidrome writes are reported properly (thanks @zikasak).
+Playlists now re-sync on their own once their downloads land and the database update runs, so new tracks reach your server playlist right away. The Sync Playlist automation can also sync every mirrored playlist at once.
 
-New automatic album completion finishes incomplete albums in your library (thanks @kiwijar). Chosen spoken-word artists can route to the audiobook library (thanks @SimpleSimonLA).
+The dashboard shows your Discover quick mixes, chat uploads get a preview step with captions and inline players, and audiobooks fire automation triggers like Import Complete (thanks @SimpleSimonLA).
 
-Video wishlist episodes find releases named by TVDB's episode numbering, and stop rejecting shows with a year in the name. There's a new video stats API endpoint (thanks @hilburn).
+Fixes: members stop getting banned by CrowdSec on their first visit, and deleting a profile no longer strands its browsers (thanks @PapaBearDoes). Downloads > Review stops freezing on a big queue, and artist letter folders stop scattering (thanks @QT3496). "No track picked" imports use the file's own tags (thanks @edy80), re-identify fixes and lost tracks come back (thanks @kevin2xk), and the watchlist opens the right artist (thanks @splitsec2).
 
-Importing albums you already own no longer fails every track: they count as already in library (thanks SeadogsBooty). Plex paths resolve when a folder differs only by case.
+Under the hood: one descriptor per media server (thanks @splitsec2), about 12,000 lines of dead CSS gone (thanks @Thundernerd) and the replaced vanilla pages retired (thanks @AnonymousMorris).
 
 Full notes on GitHub.
