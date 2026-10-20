@@ -168,6 +168,99 @@ def test_named_performance_dates_cannot_disagree(local, remote):
     assert not versions_compatible(_file(local, '/album/song.flac', 200000), {'title': remote})
 
 
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('Home (live at Wembley)', 'Home (live at Wembley, London)'),
+    ('Home (live at Wembley 1986)', 'Home (live at Wembley, 12 July 1986)'),
+    ('Home (live at Wembley, 12 July 1986)', 'Home (live at Wembley, 1986-07-12)'),
+    ('Home (live at Wembley, July 12, 1986)', 'Home (live at Wembley, 12/7/86)'),
+    ('Home (live at Wembley, July 1986)', 'Home (live at Wembley, 1986-07-12)'),
+    ('Home (live at Wembley) (July 12, 1986)', 'Home (live at Wembley, 1986-07-12)'),
+    ('Home (live at Wembley ’86)', 'Home (live at Wembley, 1986)'),
+    ('Bring Me to Life (live on Triple M’s Garage Session, Australia – June 2020)',
+     'Bring Me to Life (live on Triple M’s Garage Session/2020)'),
+    ('My Immortal (live at O2 Arena, London – November 14, 2022)',
+     'My Immortal (live at O2 Arena/2022)'),
+    ('Kick Out the Jams - Live At Columbia Records Radio Hour, New York, NY, June 4, 1995',
+     'Kick Out the Jams (live, Columbia radio Hour)'),
+    ('Somewhere Only We Know - Live At Forum, London/2008',
+     'Somewhere Only We Know (live at The Forum, London)'),
+    ('Overprotected (the Darkchild remix)', 'Overprotected (The Darkchild Remix – Remastered)'),
+])
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('with_audio', [False, True])
+def test_compatible_performance_detail_preserves_assignment_and_local_title(local, remote, reverse, with_audio):
+    from core.library.reconciliation_plan import display_title_compatible
+    if reverse:
+        local, remote = remote, local
+    # Use a real filename-safe date; tags and filename are independent layers.
+    filename = local.replace('/', '-')
+    file = _file(local, f'/album/01 - {filename}.flac', 200000,
+                 {'mbid': 'recording', 'title': remote, 'artist': 'Artist', 'score': .99})
+    file['tags'].update(artist='Artist', mbid='recording', track_number=1)
+    if not with_audio:
+        file['acoustid'] = {'status': 'no_match', 'recordings': []}
+    slot = {'title': remote, 'artist': 'Artist', 'duration_ms': 200000,
+            'recording_mbid': 'recording', 'track_number': 1}
+    result = reconcile_folder([file], [slot])
+    # Removing independent audio may lower confidence, but must not turn
+    # compatible qualifier detail into an extra/missing version conflict.
+    assert result['pairs'][0]['confidence'] in (('clear',) if with_audio else ('clear', 'likely'))
+    assert not result['extra_files'] and not result['missing_slots']
+    assert display_title_compatible(local, slot)
+    assert title_difference_kind(local, slot) == 'version_detail'
+
+
+@pytest.mark.parametrize(('local', 'remote'), [
+    ('Home (live at Wembley, July 12, 1986)', 'Home (live at Wembley, 1986-07-13)'),
+    ('Home (live at Wembley, July 1986)', 'Home (live at Wembley, June 1986)'),
+    ('Home (live at Wembley 1986)', 'Home (live at Wembley, 12 July 1987)'),
+    ('Home (live at Paris, 1986-07-12)', 'Home (live at London, July 12, 1986)'),
+    ('Home (Alpha remix)', 'Home (Alpha Beta remix)'),
+    ('Home (live Alpha remix)', 'Home (live Alpha Beta remix)'),
+    ('Home (live at Hall 1, 1986-07-12)', 'Home (live at Hall 2, July 12, 1986)'),
+    ('Home (live, take 1)', 'Home (live, take 2)'),
+])
+def test_conflicting_performance_facts_are_not_overridden_by_same_recording_id(local, remote):
+    file = _file(local, f'/album/01 - {local}.flac', 200000,
+                 {'mbid': 'recording', 'title': remote, 'artist': 'Artist', 'score': .99})
+    slot = {'title': remote, 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000}
+    assert not reconcile_folder([file], [slot])['pairs']
+
+
+def test_date_normalization_does_not_hide_song_numbers():
+    from core.library.reconciliation_plan import display_title_compatible, _title_score
+    local = 'Song 1986 (live at Wembley, July 12, 1986)'
+    remote = 'Song 1987 (live at Wembley, 1986-07-12)'
+    assert _title_score(local, remote) == 0
+    assert not display_title_compatible(local, {'title': remote})
+    assert title_difference_kind(local, {'title': remote}) == 'material'
+
+
+@pytest.mark.parametrize('conflicting_layer', ['filename', 'database_title', 'disambiguation'])
+def test_additional_detail_does_not_hide_an_independent_venue_conflict(conflicting_layer):
+    local = 'Home (live at Wembley)'
+    file = _file(local, f'/album/01 - {local}.flac', 200000,
+                 {'mbid': 'recording', 'title': local, 'artist': 'Artist', 'score': .99})
+    if conflicting_layer == 'filename':
+        file['path'] = '/album/01 - Home (live at Paris).flac'
+    elif conflicting_layer == 'database_title':
+        file['db'] = {'title': 'Home (live at Paris)'}
+    else:
+        file['db'] = {'recording_disambiguation': 'live at Paris'}
+    slot = {'title': 'Home (live at Wembley, London)', 'artist': 'Artist',
+            'recording_mbid': 'recording', 'duration_ms': 200000}
+    assert not reconcile_folder([file], [slot])['pairs']
+
+
+def test_recording_comments_allow_compatible_performance_details():
+    file = _file('Home', '/album/01 - Home.flac', 200000,
+                 {'mbid': 'recording', 'title': 'Home', 'artist': 'Artist', 'score': .99})
+    file['db'] = {'recording_disambiguation': 'live at Wembley, July 1986'}
+    slot = {'title': 'Home', 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000,
+            'recording_disambiguation': 'live at Wembley, London, 1986-07-12'}
+    assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
 def test_primary_artist_audio_supports_a_full_local_remixer_credit():
     file = _file('Home', '/album/Home.flac', 200000,
                  {'mbid': 'recording', 'title': 'Home', 'artist': 'Röyksopp', 'score': .99})

@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
 
-import type { ReviewCase, ReviewFinding } from '../-review.api';
+import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
 
 import { buildAlbumModel, groupReadyChanges } from './review-album-model';
+import { metadataNeedsReview, statusLabel } from './review-presentation';
 
 it('retains first-match selection when one decision owns several assignment rows', () => {
   const rows = [
@@ -19,6 +20,92 @@ it('retains first-match selection when one decision owns several assignment rows
   expect(model.missingAssignments).toEqual([rows[1]]);
   expect(model.settledAssignments).toEqual([rows[2]]);
   expect(rows.map((row) => row.status)).toEqual(['extra', 'missing', 'confirmed']);
+});
+
+it('groups metadata decisions by action state while preserving matching confidence and previews', () => {
+  const base = {
+    status: 'change',
+    confidence: 'clear',
+    assignment_evidence: 'audio',
+    finding_id: 1,
+    review_tier: 'manual',
+  };
+  const rows = [
+    base,
+    { ...base, action_state: 'manual' },
+    { ...base, action_state: 'blocked' },
+    { ...base, action_state: 'ready', planned_choice: { action: 'fix', category: 'metadata' } },
+    { ...base, action_state: 'ready', planned_choice: { action: 'dismiss', category: 'metadata' } },
+    { ...base, action_state: 'preview' },
+    { ...base, numbering_preview: true },
+    { ...base, action_state: 'ready' },
+  ] as AlbumAssignment[];
+  const model = buildAlbumModel({
+    items: [],
+    album_plan: { assignments: rows },
+  } as unknown as ReviewCase);
+  expect(model.attentionAssignments).toEqual(rows.slice(0, 3));
+  expect(model.changeAssignments).toEqual(rows.slice(3));
+  expect(model.metadataDecisionCount).toBe(3);
+  expect(model.proposedChangeCount).toBe(5);
+  expect(model.attentionAssignments.every(metadataNeedsReview)).toBe(true);
+  expect(rows[0].confidence).toBe('clear');
+  expect(statusLabel(rows[0].status, rows[0])).toBe('Review metadata');
+  expect(statusLabel(rows[3].status, rows[3])).toBe('Change planned');
+  expect(statusLabel(rows[4].status, rows[4])).toBe('Keep values planned');
+  expect(statusLabel(rows[6].status, rows[6])).toBe('Numbering proposal');
+});
+
+function idFinding(id: number, old: unknown, next: unknown, libraryOld = old): ReviewFinding {
+  return {
+    id,
+    finding_type: 'reconciliation_metadata',
+    review_tier: 'ready',
+    details: {
+      changes: {
+        musicbrainz_recording_id: { old, new: next },
+        library_recording_mbid: { old: libraryOld, new: next },
+      },
+    },
+  } as unknown as ReviewFinding;
+}
+
+it.each([
+  ['', 'recording', 'Add'],
+  ['old', 'recording', 'Replace'],
+  ['old', '', 'Remove'],
+  [null, 'recording', 'Add'],
+])('describes ID operations and counts file/library copies once: %s → %s', (old, next, verb) => {
+  const [group] = groupReadyChanges([idFinding(1, old, next)]);
+  expect(group.count).toBe(1);
+  expect(group.valueSummary).toBe(`${verb} MusicBrainz recording IDs on 1 track`);
+});
+
+it('counts mixed ID operations per track, including different file/library effects', () => {
+  const [group] = groupReadyChanges([
+    idFinding(1, '', 'new'),
+    idFinding(2, 'old', 'new'),
+    idFinding(3, 'old', ''),
+    idFinding(4, '', 'new', 'old'),
+    idFinding(5, 'unchanged', 'unchanged'),
+  ]);
+  expect(group.count).toBe(4);
+  expect(group.valueSummary).toBe(
+    'Add on 1 track; Replace on 1 track; Remove on 1 track; Mixed edits on 1 track',
+  );
+});
+
+it('retains whitespace cleanup as a real proposed edit', () => {
+  const [group] = groupReadyChanges([
+    {
+      id: 1,
+      finding_type: 'reconciliation_metadata',
+      review_tier: 'ready',
+      details: { changes: { title: { old: ' Home ', new: 'Home' } } },
+    } as unknown as ReviewFinding,
+  ]);
+  expect(group.count).toBe(1);
+  expect(group.valueSummary).toBe(' Home  → Home');
 });
 
 it('does not turn a wanted download into a new review decision', () => {

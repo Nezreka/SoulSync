@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import date
 from difflib import SequenceMatcher
 from functools import lru_cache
 from typing import Any
@@ -26,6 +27,23 @@ from core.text.title_match import (
 _LEADING_POSITION = re.compile(r'^\s*(?:\d+[-_. ]+){1,2}')
 _EDITORIAL_TITLE_SUFFIX = re.compile(
     r'\s*[\(\[]\s*(?:bonus\s+track|bonus)\s*[\)\]]\s*$', re.IGNORECASE)
+_MONTHS = {
+    name: number for number, names in enumerate((
+        'jan january', 'feb february', 'mar march', 'apr april', 'may',
+        'jun june', 'jul july', 'aug august', 'sep sept september',
+        'oct october', 'nov november', 'dec december'), 1)
+    for name in names.split()
+}
+_MONTH = '(?:' + '|'.join(_MONTHS) + r')\.?'
+_YEAR = r"(?:19|20)\d{2}|[’']?\d{2}"
+_PERFORMANCE_DATES = tuple(re.compile(pattern, re.I) for pattern in (
+    r'\b(?P<year>(?:19|20)\d{2})[-/.](?P<month>\d{1,2})[-/.](?P<day>\d{1,2})(?!\d)',
+    rf'(?<!\d)(?P<day>\d{{1,2}})[/-](?P<month>\d{{1,2}})[/-](?P<year>{_YEAR})(?!\d)',
+    rf'\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<month>{_MONTH})\s*,?\s*(?P<year>{_YEAR})(?!\d)',
+    rf'\b(?P<month>{_MONTH})\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?(?:\s*,\s*|\s+)(?P<year>{_YEAR})(?!\d)',
+    rf'\b(?P<month>{_MONTH})\s*,?\s*(?P<year>{_YEAR})(?!\d)',
+    r"(?<!\w)(?P<year>(?:19|20)\d{2}|[’']\d{2})(?!\d)",
+))
 
 
 def _comparison_title(value: str) -> str:
@@ -58,56 +76,90 @@ def _version_markers(value: str) -> frozenset[str]:
 
 @lru_cache(maxsize=32768)
 def _named_version_details(title: str):
-    """Parse qualifier facts once, rather than for every assignment edge."""
+    """Keep names and dates separate; a fuller date is not another performance.
+
+    Only recognized qualifier dates are excluded from numeric title checks.
+    Numbers in the song title, venue names, take numbers and unknown date
+    formats remain evidence, rather than being globally stripped.
+    """
     segments = _recording_qualifier_segments(_comparison_title(title))
     marked = [(segment, _version_markers(f'({segment})')) for segment in segments]
     if not any(markers for _, markers in marked):
-        return frozenset(), None
-    tokens = set()
+        return frozenset(), (), title
+    tokens, dates, spans = set(), set(), set()
     for segment, markers in marked:
-        # Dates can occupy a separate bracket after a live-performance label.
-        if markers or re.fullmatch(r'(?:[A-Za-z]{3,9}\s+)?\d{4}', segment):
-            tokens.update(fold_title(segment, drop_brackets=False).split())
+        parsed = _performance_date(segment)
+        remaining = (segment[:parsed[0]] + segment[parsed[1]:]) if parsed else segment
+        # A date may occupy a separate bracket. Other unmarked subtitles and
+        # guest credits must not become performance names.
+        if markers or (parsed and not remaining.strip(' ,.-/')):
+            if parsed:
+                dates.add(parsed[2])
+                start = title.rfind(segment)
+                if start >= 0:
+                    spans.add((start + parsed[0], start + parsed[1]))
+            tokens.update(fold_title(remaining, drop_brackets=False).split())
             tokens.difference_update(markers)
     tokens -= {'version', 'mix', 'recording', 'recorded', 'performance',
                'session', 'sessions', 'alternate', 'alternative', 'alt',
                'at', 'in', 'from', 'the', 'a', 'an', 'import', 'bbc', 'radio', 'single',
-               'unedited', 'mono', 'stereo'}
-    text = ' '.join(segments)
-    iso = re.search(r'\b((?:19|20)\d{2})[-/]([01]?\d)[-/]([0-3]?\d)\b', text)
-    dmy = re.search(r'(?<!\d)([0-3]?\d)[/-]([01]?\d)[/-](\d{2}|\d{4})(?!\d)', text)
-    date = tuple(map(int, iso.groups())) if iso else tuple(map(int, reversed(dmy.groups()))) if dmy else None
-    return frozenset(str(int(token)) if token.isdigit() else token for token in tokens), date
+               'unedited', 'mono', 'stereo', 'remaster', 'remastered'}
+    without_dates = title
+    for start, end in sorted(spans, reverse=True):
+        without_dates = without_dates[:start] + without_dates[end:]
+    return (frozenset(str(int(token)) if token.isdigit() else token for token in tokens),
+            tuple(dates), without_dates)
+
+
+def _performance_date(text: str):
+    for index, pattern in enumerate(_PERFORMANCE_DATES):
+        match = pattern.search(text)
+        if not match:
+            continue
+        parts = match.groupdict()
+        year = int(parts['year'].lstrip("'’"))
+        raw_month = (parts.get('month') or '').lower().rstrip('.')
+        month = (int(raw_month) if raw_month.isdigit() else _MONTHS.get(raw_month))
+        day = int(parts['day']) if parts.get('day') else None
+        # Accept an unambiguous US numeric date too (4/15/2003).
+        if index == 1 and day and month and month > 12 >= day:
+            month, day = day, month
+        try:
+            date(year if year >= 100 else year + 2000, month or 1, day or 1)
+        except ValueError:
+            continue
+        return match.start(), match.end(), (year, month, day)
+    return None
+
+
+def _title_numbers_differ(left: str, right: str) -> bool:
+    return numeric_tokens_differ(
+        _named_version_details(left)[2], _named_version_details(right)[2])
 
 
 def _named_version_conflicts(left: str, right: str) -> bool:
     """Compare named performances while allowing omitted detail and typos."""
-    a, left_date = _named_version_details(left)
-    b, right_date = _named_version_details(right)
-    if left_date and right_date and (left_date[1:] != right_date[1:] or
-            (left_date[0] != right_date[0] if min(left_date[0], right_date[0]) >= 100
-             else left_date[0] % 100 != right_date[0] % 100)):
-        return True
-    if left_date and right_date:
-        year = str(max(left_date[0], right_date[0]))
-        a = (a - {str(left_date[0])}) | {year}
-        b = (b - {str(right_date[0])}) | {year}
-    # A year-only local label can agree with a catalogue's precise concert
-    # date. Two fully specified dates must still agree on month and day.
-    def year_precision(tokens, date, other):
-        numbers = {token for token in other if token.isdigit()}
-        if date and len(numbers) == 1:
-            year = next(iter(numbers))
-            if len(year) == 4 and (int(year) == date[0] if date[0] >= 100 else int(year) % 100 == date[0]):
-                return frozenset(token for token in tokens if not token.isdigit()) | {year}
-        return tokens
-    a, b = year_precision(a, left_date, b), year_precision(b, right_date, a)
+    a, left_dates, _ = _named_version_details(left)
+    b, right_dates, _ = _named_version_details(right)
+    for first in left_dates:
+        for second in right_dates:
+            years_differ = (first[0] != second[0] if min(first[0], second[0]) >= 100
+                            else first[0] % 100 != second[0] % 100)
+            if years_differ or any(x is not None and y is not None and x != y
+                                  for x, y in zip(first[1:], second[1:])):
+                return True
     if not a or not b or a == b:
+        return False
+    performance_markers = {'live', 'session', 'sessions', 'acoustic', 'unplugged'}
+    performance = bool(
+        _version_markers(left) & performance_markers
+        and _version_markers(right) & performance_markers
+        and 'remix' not in _version_markers(left) | _version_markers(right))
+    if performance and (a <= b or b <= a):
         return False
     unmatched_a, unmatched_b = a - b, b - a
     # Utrecht/Utrech is a spelling difference; Alpha/Alpha Beta adds a name.
-    if (len(unmatched_a) == len(unmatched_b) == 1 and
-            _version_markers(left).intersection(_version_markers(right), {'live', 'session', 'sessions'})):
+    if performance and len(unmatched_a) == len(unmatched_b) == 1:
         x, y = next(iter(unmatched_a)), next(iter(unmatched_b))
         if x.isalpha() and y.isalpha() and min(len(x), len(y)) >= 6:
             return SequenceMatcher(None, x, y).ratio() < .90
@@ -122,7 +174,7 @@ def _title_score(a: str, b: str) -> float:
     ratio = SequenceMatcher(None, left, right).ratio()
     if ratio < 0.78 or not titles_plausibly_same(left, right, ratio):
         return 0.0
-    if numeric_tokens_differ(a, b):
+    if _title_numbers_differ(a, b):
         return 0.0
     left_versions, right_versions = _version_markers(a), _version_markers(b)
     if left_versions != right_versions or _named_version_conflicts(a, b):
@@ -205,7 +257,7 @@ def display_title_compatible(local_title: str, slot: dict) -> bool:
     ratio = SequenceMatcher(None, left, right).ratio()
     if ratio < 0.83 or not titles_plausibly_same(left, right, ratio):
         return False
-    if numeric_tokens_differ(local_title, slot_title):
+    if _title_numbers_differ(local_title, slot_title):
         return False
     return _version_markers(local_title) == slot_version_markers(slot)
 
@@ -224,10 +276,10 @@ def title_difference_kind(local_title: str, slot: dict) -> str:
     slot_versions = slot_version_markers({**slot, 'title': slot_clean})
     if local_versions != slot_versions:
         return 'version'
-    if numeric_tokens_differ(local_clean, slot_clean):
+    if _title_numbers_differ(local_clean, slot_clean):
         return 'material'
     if _named_version_conflicts(local_clean, slot_clean):
-        return 'version'
+        return 'material' if numeric_tokens_differ(local_clean, slot_clean) else 'version'
     if local_versions:
         # Both sides identify the same named performance/version, but one
         # carries useful display detail that the other omits. Preserve it.
@@ -254,14 +306,23 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
     slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
     slot_title = str(slot.get('title') or slot.get('name') or '')
     tags = file.get('tags') or {}
-    if any(_named_version_conflicts(str(title or ''), slot_title) for title in (
-            tags.get('title'),
-            _local_filename_title(file),
-            (file.get('db') or {}).get('title'))):
+    local_titles = [tags.get('title'), _local_filename_title(file), (file.get('db') or {}).get('title')]
+    remote_titles = [slot_title]
+    if file_disambiguation:
+        local_titles.append(f'({file_disambiguation})')
+    if slot_disambiguation:
+        remote_titles.append(f'({slot_disambiguation})')
+    if any(_named_version_conflicts(str(left or ''), right)
+           for left in local_titles for right in remote_titles):
         return False
     if (file_disambiguation and slot_disambiguation and
             _identity_text(file_disambiguation) != _identity_text(slot_disambiguation)):
-        return False
+        comments_agree = (
+            _disambiguation_markers(file_disambiguation)
+            and _disambiguation_markers(file_disambiguation) == _disambiguation_markers(slot_disambiguation)
+            and not _named_version_conflicts(f'({file_disambiguation})', f'({slot_disambiguation})'))
+        if not comments_agree:
+            return False
     if local == remote:
         return True
     # A release may name an exact session while its recording comment adds

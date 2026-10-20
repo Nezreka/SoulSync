@@ -2,7 +2,12 @@ import type { AlbumAssignment } from '../-review.api';
 
 import styles from './review-page.module.css';
 import { formatTrackPosition } from './review-position';
-import { assignmentKey, shortDuration, statusLabel } from './review-presentation';
+import {
+  assignmentKey,
+  metadataNeedsReview,
+  shortDuration,
+  statusLabel,
+} from './review-presentation';
 
 export function AssignmentRow({
   row,
@@ -43,7 +48,9 @@ export function AssignmentRow({
       data-status={
         row.status === 'settled' && ['extra', 'duplicate'].includes(row.evidence_status || '')
           ? row.evidence_status
-          : row.status
+          : metadataNeedsReview(row)
+            ? 'uncertain'
+            : row.status
       }
       data-selected={selected || undefined}
       aria-pressed={selected}

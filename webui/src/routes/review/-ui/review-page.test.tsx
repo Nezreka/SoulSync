@@ -656,7 +656,7 @@ describe('library reconciliation review queue', () => {
     await waitFor(() => expect(screen.getByText(/Library reconciliation queued/)).toBeTruthy());
   });
 
-  it('separates ready album changes and applies only the planned subset', async () => {
+  it.each(['metadata', 'user', undefined])('applies a ready plan (%s)', async (evidence) => {
     const readyFinding = {
       ...finding,
       finding_type: 'reconciliation_metadata',
@@ -665,12 +665,19 @@ describe('library reconciliation review queue', () => {
         album_id: 10,
         album_title: 'Ashes of the Wake',
         artist_name: 'Lamb of God',
+        assignment_evidence: evidence,
         changes: {
           album_artist: { old: 'Various Artists', new: 'Lamb of God' },
+          ...(evidence !== 'metadata'
+            ? { musicbrainz_recording_id: { old: 'old-id', new: 'new-id' } }
+            : {}),
         },
       },
       review_tier: 'ready',
-      review_reason: 'Audio and release evidence support this metadata repair',
+      review_reason:
+        evidence === 'user'
+          ? 'The assignment was confirmed during review'
+          : 'Metadata supports this repair; audio identity is not independently confirmed',
     };
     const plan = {
       ready: 1,
@@ -720,7 +727,10 @@ describe('library reconciliation review queue', () => {
             action_count: 1,
             file_actions: 0,
             albums: [
-              { album: 'Ashes of the Wake', actions: [{ description: 'Update artist metadata' }] },
+              {
+                album: 'Ashes of the Wake',
+                actions: [{ description: 'Update artist metadata' }],
+              },
             ],
           }),
         );
@@ -777,6 +787,12 @@ describe('library reconciliation review queue', () => {
 
     expect((await screen.findAllByText('Various Artists → Lamb of God')).length).toBeGreaterThan(0);
     expect(screen.getByText('Plan ready to apply · 1 action')).toBeTruthy();
+    expect(screen.getByText(/All required decisions are complete/)).toBeVisible();
+    expect(
+      screen.queryByText(
+        /passed the album and audio checks|supported by the album and audio evidence/,
+      ),
+    ).toBeNull();
     expect(screen.queryByRole('heading', { name: '1 question for this album' })).toBeNull();
     expect(screen.queryByText('Review ready changes')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Apply 1 ready change' }));

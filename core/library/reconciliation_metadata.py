@@ -38,11 +38,16 @@ def confirmed_recording(file: dict, slot: dict, source: str) -> dict:
 
 
 def album_consistency(files: list[dict]) -> dict:
-    """Describe differing embedded values across the logical album."""
+    """Describe contradictory nonempty values, not incomplete tagging.
+
+    Missing values are handled as additions by the metadata planner. Their
+    absence cannot invalidate another file's title or release identity.
+    """
     conflicts = {}
     for field in ('album', 'musicbrainz_release_id'):
         values = Counter(str((file.get('tags') or {}).get(field) or '').strip()
                          for file in files)
+        values.pop('', None)
         if len(values) > 1:
             conflicts[field] = [{'value': value, 'files': count}
                                 for value, count in sorted(values.items())]

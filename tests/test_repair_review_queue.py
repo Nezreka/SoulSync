@@ -818,9 +818,27 @@ def test_recording_id_only_album_says_what_ready_changes_do():
 
     decision = classify_case(rows)['decisions'][0]
 
-    assert decision['label'] == 'Link MusicBrainz recording IDs'
+    assert decision['label'] == 'Add MusicBrainz recording IDs'
+    assert decision['summary'] == 'Add on 3 tracks.'
+
+
+def test_recording_id_summary_distinguishes_replace_remove_and_mixed_without_double_counting():
+    def row(old, new, library_old=None):
+        return {'finding_type': 'reconciliation_metadata', 'details': {
+            'changes': {'musicbrainz_recording_id': {'old': old, 'new': new},
+                        'library_recording_mbid': {
+                            'old': old if library_old is None else library_old, 'new': new}},
+        }}
+    for old, new, verb in [('old', 'new', 'Replace'), ('old', '', 'Remove')]:
+        decision = classify_case([row(old, new)])['decisions'][0]
+        assert decision['label'] == f'{verb} MusicBrainz recording IDs'
+        assert decision['summary'] == f'{verb} on 1 track.'
+    decision = classify_case([
+        row('', 'new'), row('old', 'new'), row('old', ''), row('', 'new', 'old'),
+    ])['decisions'][0]
+    assert decision['label'] == 'Review recording ID changes'
     assert decision['summary'] == (
-        'Link 3 tracks to their confirmed MusicBrainz recordings.')
+        'Add on 1 track; Replace on 1 track; Remove on 1 track; Mixed edits on 1 track.')
 
 
 def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():

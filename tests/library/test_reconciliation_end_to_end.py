@@ -548,7 +548,13 @@ def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp
     result = LibraryReconciliationJob().scan(context)
     assert not result.errors
     case_id = worker.get_review_cases()['items'][0]['case_id']
-    items = worker.get_review_case(case_id)['items']
+    case = worker.get_review_case(case_id)
+    items = case['items']
+    rows = [row for row in case['album_plan']['assignments'] if row.get('file_path')]
+    assert len(rows) == 2
+    assert all(row['confidence'] == 'clear' and row['status'] == 'change'
+               and row['action_state'] == 'manual' for row in rows)
+    assert not case['plan']['can_apply_ready']
     metadata = [item for item in items if item['finding_type'] == 'reconciliation_metadata']
     assert len(metadata) == 2
     for item in metadata:
@@ -563,6 +569,107 @@ def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp
         assert 'musicbrainz_albumid' not in tags
         assert tags['musicbrainz_trackid']  # Track identity is retained.
         assert tags['album'] == ['Ashes of the Wake (Deluxe)']
+
+
+@pytest.mark.parametrize('source', ['itunes', 'deezer'])
+def test_missing_release_id_does_not_invalidate_another_files_identity(tmp_path, monkeypatch, source):
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    with db._get_connection() as conn:
+        conn.execute('UPDATE albums SET canonical_source=?', (source,))
+        conn.commit()
+    audio = FLAC(str(paths[1]))
+    del audio['musicbrainz_albumid']
+    audio.save()
+    assert not LibraryReconciliationJob().scan(context).errors
+    case = worker.get_review_case(worker.get_review_cases()['items'][0]['case_id'])
+    metadata = [item for item in case['items'] if item['finding_type'] == 'reconciliation_metadata']
+    assert len(metadata) == 2
+    for item in metadata:
+        assert 'musicbrainz_release_id' not in item['details']['album_consistency']
+        assert 'musicbrainz_release_id' not in item['details']['changes']
+        assert not item['details']['db_data'].get('clear_musicbrainz_ids')
+        assert item['review_tier'] == 'ready'
+        # Applying unrelated supported edits must also preserve the stored ID.
+        result = worker._fix_reconciliation_metadata('track', item['details']['track_id'],
+                                                     item['file_path'], item['details'])
+        assert result['success'], result
+    assert FLAC(str(paths[0]))['musicbrainz_albumid'] == ['second-release']
+    assert 'musicbrainz_albumid' not in FLAC(str(paths[1]))
+
+
+@pytest.mark.parametrize(('release_id', 'locked', 'expected'), [
+    ('second-release', False, ['second-release', 'second-release']),
+    ('new-release', False, ['second-release', None]),
+    ('new-release', True, ['new-release', 'new-release']),
+])
+def test_sparse_release_tags_respect_selected_identity_and_explicit_pin(
+        tmp_path, monkeypatch, release_id, locked, expected):
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    assert db.set_album_canonical(10, 'musicbrainz', release_id, score=1, locked=locked)
+    audio = FLAC(str(paths[1]))
+    del audio['musicbrainz_albumid']
+    audio.save()
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
+        'name': 'Ashes of the Wake (Deluxe)', 'artists': [{'name': 'Lamb of God'}],
+        'musicbrainz_release_id': release_id})
+    assert not LibraryReconciliationJob().scan(context).errors
+    cases = worker.get_review_cases()['items']
+    if release_id == 'new-release' and not locked:
+        assert cases == []  # No tag repair is justified by the other pressing.
+        items = []
+    else:
+        case = worker.get_review_case(cases[0]['case_id'])
+        items = case['items']
+        assert not any(item['finding_type'] == 'reconciliation_release' for item in items)
+    for item in items:
+        if item['finding_type'] == 'reconciliation_metadata':
+            assert 'musicbrainz_release_id' not in item['details']['album_consistency']
+            result = worker._fix_reconciliation_metadata('track', item['details']['track_id'],
+                                                         item['file_path'], item['details'])
+            assert result['success'], result
+    assert [FLAC(str(path)).get('musicbrainz_albumid', [None])[0] for path in paths] == expected
+
+
+@pytest.mark.parametrize('blank', ['', '   '])
+def test_missing_album_title_does_not_disable_preservation_of_useful_title(tmp_path, monkeypatch, blank):
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    for index, path in enumerate(paths):
+        audio = FLAC(str(path))
+        if index == 0:
+            audio['album'] = ['Ashes of the Wake']
+        else:
+            if blank:
+                audio['album'] = [blank]
+            else:
+                del audio['album']
+        audio.save()
+    # A harmless provider suffix is not a reason to rewrite the useful title
+    # on the first file just because the second file lacks an album tag.
+    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
+        'name': 'Ashes of the Wake (Remastered)', 'artists': [{'name': 'Lamb of God'}]})
+    assert not LibraryReconciliationJob().scan(context).errors
+    case = worker.get_review_case(worker.get_review_cases()['items'][0]['case_id'])
+    items = {item['file_path']: item for item in case['items']
+             if item['finding_type'] == 'reconciliation_metadata'}
+    assert 'album' not in items[str(paths[0])]['details']['changes']
+    assert items[str(paths[1])]['details']['changes']['album'] == {
+        'old': '', 'new': 'Ashes of the Wake'}  # The tag reader normalizes whitespace-only values.
+    assert all('album' not in item['details']['album_consistency'] for item in items.values())
+
+
+def test_album_consistency_distinguishes_missing_values_from_conflicts():
+    from core.library.reconciliation_metadata import album_consistency
+    files = [{'tags': {'album': 'Album', 'musicbrainz_release_id': 'first'}},
+             {'tags': {'album': '  Album  ', 'musicbrainz_release_id': ''}},
+             {'tags': {}}]
+    assert album_consistency(files) == {}
+    files.append({'tags': {'album': 'Different album', 'musicbrainz_release_id': 'second'}})
+    assert album_consistency(files) == {
+        'album': [{'value': 'Album', 'files': 2}, {'value': 'Different album', 'files': 1}],
+        'musicbrainz_release_id': [{'value': 'first', 'files': 1}, {'value': 'second', 'files': 1}],
+    }
 
 
 def test_unindexed_album_member_gets_guarded_file_tag_proposal(tmp_path, monkeypatch):
@@ -766,6 +873,55 @@ def test_configured_lossy_companion_shares_assignment_without_duplicate_decision
         assert len(plan['assignments']) == 3
         row = next(row for row in plan['assignments'] if row['file_path'] == str(companion))
         assert row['companion_of'] == str(paths[0])
+
+
+@pytest.mark.parametrize('assignment', ['unmatched', 'source', 'companion', 'both'])
+def test_companion_projection_preserves_every_local_file_once(assignment):
+    from core.repair_jobs.library_reconciliation import _match_release, _album_plan_assignments
+    files = [
+        {'path': '/album/Home.flac', 'tags': {'title': 'Home', 'artist': 'Artist'}, 'acoustid': {}},
+        {'path': '/album/Home.mp3', 'tags': {'title': 'Home', 'artist': 'Artist'}, 'acoustid': {},
+         'companion_of': '/album/Home.flac'},
+    ]
+    slots = [{'title': 'Different Song', 'artist': 'Other Artist', 'track_number': 1},
+             {'title': 'Another Song', 'artist': 'Other Artist', 'track_number': 2}]
+    forced = {'unmatched': {}, 'source': {0: 0}, 'companion': {1: 0}, 'both': {0: 0, 1: 1}}[assignment]
+    plan = _match_release(files, slots, source='musicbrainz', release_id='release', forced_pairs=forced)
+    rows, _ = _album_plan_assignments(files, slots, plan)
+    local = [row for row in rows if row.get('file_path')]
+    assert sorted(row['file_path'] for row in local) == sorted(file['path'] for file in files)
+    companion = next(row for row in local if row['file_path'].endswith('.mp3'))
+    assert companion['companion_of'] == '/album/Home.flac'
+    assert len(plan['pairs']) == len(forced)  # Inherited assignments never consume another slot.
+    assert plan['extra_files'] == {
+        'unmatched': [0, 1], 'source': [], 'companion': [0], 'both': [],
+    }[assignment]
+
+
+def test_unmatched_companions_remain_visible_in_persisted_review(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    companion = paths[0].with_suffix('.mp3')
+    companion.write_bytes(paths[0].read_bytes())
+    context.acoustid_client.matches[companion.name] = context.acoustid_client.matches[paths[0].name]
+    context.config_manager = SimpleNamespace(get=lambda key, default=None:
+        True if key == 'lossy_copy.enabled' else default)
+    read_tracks = module.get_album_tracks_for_source
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *args, **kwargs: [
+        {**track, 'name': 'Completely Different Song'} if index == 0 else track
+        for index, track in enumerate(read_tracks(*args, **kwargs))])
+    assert not LibraryReconciliationJob().scan(context).errors
+    case = worker.get_review_case(worker.get_review_cases()['items'][0]['case_id'])
+    assignments = case['album_plan']['assignments']
+    assert {row['file_path'] for row in assignments if row.get('file_path')} == {
+        str(paths[0]), str(paths[1]), str(companion)}
+    assert next(row for row in assignments if row.get('file_path') == str(companion))['status'] == 'extra'
+    # The album release question precedes individual extra-file decisions.
+    # All files must remain inspectable while that question is unresolved.
+    row = next(row for row in assignments if row.get('file_path') == str(companion))
+    assert row['action_state'] == 'preview'
+    assert any(item['finding_type'] == 'reconciliation_release' for item in case['items'])
 
 
 @pytest.mark.parametrize('container', ['id3', 'vorbis', 'mp4'])
@@ -2618,9 +2774,11 @@ def test_release_identity_repairs_mixed_tags_without_rewriting_coherent_pressing
     file = lambda release: {'tags': {'musicbrainz_release_id': release}}
     assert _release_identity_target([file('old'), file('old')], {}, 'musicbrainz', 'new') == ''
     assert _release_identity_target([file('old'), file('other')], {}, 'musicbrainz', 'new') == 'new'
-    assert _release_identity_target([file('old'), file('')], {}, 'musicbrainz', 'new') == 'new'
+    assert _release_identity_target([file('old'), file('')], {}, 'musicbrainz', 'new') == ''
+    assert _release_identity_target([file('old'), file('')], {}, 'musicbrainz', 'old') == 'old'
     assert _release_identity_target([file(''), file('')], {}, 'musicbrainz', 'new') == ''
     assert _release_identity_target([file('old')], {'canonical_locked': True}, 'musicbrainz', 'new') == 'new'
+    assert _release_identity_target([file('old'), file('')], {'canonical_locked': True}, 'musicbrainz', 'new') == 'new'
     assert _release_identity_target([file('old'), file('other')], {}, 'deezer', '123') == ''
 
 

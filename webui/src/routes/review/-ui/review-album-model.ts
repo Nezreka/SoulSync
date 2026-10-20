@@ -1,6 +1,13 @@
 import type { AlbumAssignment, ReviewCase, ReviewDecision, ReviewFinding } from '../-review.api';
 
-import { assignmentKey, changeFieldLabel } from './review-presentation';
+import {
+  assignmentKey,
+  changeFieldLabel,
+  changeOperation,
+  changeValue,
+  isIdentifierField,
+  metadataNeedsReview,
+} from './review-presentation';
 
 export const decisionOrder: Record<string, number> = {
   release_conflicts: 0,
@@ -50,7 +57,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
         (row) =>
           !row.planned_choice &&
           row.relationship !== 'version_conflict' &&
-          row.status !== 'change' &&
+          (row.status !== 'change' || metadataNeedsReview(row)) &&
           row.status !== 'missing' &&
           !(row.status === 'uncertain' && duplicateExtraFindings.has(row.finding_id)),
       )
@@ -67,7 +74,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
       }),
   ];
   const changeAssignments = pendingAssignments.filter(
-    (row) => row.status === 'change' || Boolean(row.planned_choice),
+    (row) => (row.status === 'change' && !metadataNeedsReview(row)) || Boolean(row.planned_choice),
   );
   const missingAssignments = pendingAssignments.filter(
     (row) => row.status === 'missing' && row.relationship !== 'version_conflict',
@@ -94,7 +101,6 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
   const hasIntentDecision = reviewDecisions.some(
     (decision) => decision.category === 'album_completeness',
   );
-  const readyDecisions = decisions.filter((decision) => decision.risk === 'ready');
   const reviewMetadataCount =
     reviewCase?.items.filter(
       (item) => item.finding_type === 'reconciliation_metadata' && item.review_tier !== 'ready',
@@ -153,6 +159,8 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     assignments,
     attentionAssignments,
     changeAssignments,
+    metadataDecisionCount: assignments.filter(metadataNeedsReview).length,
+    proposedChangeCount: changeAssignments.filter((row) => row.status === 'change').length,
     missingAssignments,
     pairedConflictCount,
     settledAssignments,
@@ -162,7 +170,6 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     releaseChoicePending,
     releaseHasMultipleDiscs,
     hasIntentDecision,
-    readyDecisions,
     reviewMetadataCount,
     readyIncludedInGroup,
     assignmentsByFinding,
@@ -210,6 +217,7 @@ export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): Rea
       label: string;
       values: Array<{ old?: unknown; new?: unknown }>;
       findingIdSet: Set<number>;
+      operationsByFinding: Map<number, Set<string>>;
     }
   >();
   for (const item of items.filter(
@@ -225,19 +233,26 @@ export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): Rea
     const fields = Object.keys(changes);
     if (!fields.length) continue;
     for (const field of fields) {
+      const value = changes[field] || {};
+      const operation = changeOperation(value.old, value.new);
+      if (operation === 'unchanged') continue;
       const semantic = readyFieldGroup(field);
       const group = groups.get(semantic.key) || {
         key: semantic.key,
         label: semantic.label,
         values: [],
         findingIdSet: new Set<number>(),
+        operationsByFinding: new Map<number, Set<string>>(),
       };
       group.findingIdSet.add(item.id);
-      group.values.push(changes[field] || {});
+      group.values.push(value);
+      const operations = group.operationsByFinding.get(item.id) || new Set<string>();
+      operations.add(operation);
+      group.operationsByFinding.set(item.id, operations);
       groups.set(semantic.key, group);
     }
   }
-  return [...groups.values()].map(({ values, findingIdSet, ...group }) => {
+  return [...groups.values()].map(({ values, findingIdSet, operationsByFinding, ...group }) => {
     const count = findingIdSet.size;
     if (group.key === 'numbering') {
       const fields = items
@@ -253,22 +268,42 @@ export function groupReadyChanges(items: ReviewFinding[], readyOnly = true): Rea
             : 'Track numbering';
     }
     let valueSummary: string;
-    if (group.key === 'track_artist' && values.every((value) => !String(value.old ?? '').trim())) {
-      valueSummary = 'Adding missing featured artists to metadata';
-    } else if (group.key === 'recording_ids') {
-      valueSummary = `Add MusicBrainz recording IDs to ${count} track${count === 1 ? '' : 's'}`;
+    const operations = new Map<string, number>();
+    for (const trackOperations of operationsByFinding.values()) {
+      const operation = trackOperations.size === 1 ? [...trackOperations][0] : 'mixed';
+      operations.set(operation, (operations.get(operation) || 0) + 1);
+    }
+    if (
+      group.key === 'recording_ids' ||
+      isIdentifierField(group.key) ||
+      operations.size > 1 ||
+      operations.has('mixed')
+    ) {
+      const verbs: Record<string, string> = {
+        add: 'Add',
+        replace: 'Replace',
+        remove: 'Remove',
+        mixed: 'Mixed edits',
+      };
+      const subject = group.key === 'recording_ids' ? 'MusicBrainz recording IDs' : group.label;
+      valueSummary = [...operations]
+        .map(
+          ([operation, total]) =>
+            `${verbs[operation]}${operations.size === 1 && operation !== 'mixed' ? ` ${subject}` : ''} on ${total} track${total === 1 ? '' : 's'}`,
+        )
+        .join('; ');
     } else if (group.key === 'filename') {
-      valueSummary = `Rename ${count} file${count === 1 ? '' : 's'} to clean release titles`;
+      valueSummary = `Rename ${count} file${count === 1 ? '' : 's'}`;
     } else {
       const first = values[0];
       const same = values.every(
         (value) =>
-          String(value.old ?? '') === String(first.old ?? '') &&
-          String(value.new ?? '') === String(first.new ?? ''),
+          changeValue(value.old) === changeValue(first.old) &&
+          changeValue(value.new) === changeValue(first.new),
       );
       valueSummary = same
-        ? `${String(first.old ?? 'empty')} → ${String(first.new ?? 'empty')}`
-        : `Update ${count} track${count === 1 ? '' : 's'}`;
+        ? `${changeValue(first.old) || 'empty'} → ${changeValue(first.new) || 'empty'}`
+        : `${operations.has('add') ? 'Add values on' : operations.has('remove') ? 'Remove values from' : 'Update'} ${count} track${count === 1 ? '' : 's'}`;
     }
     return { ...group, count, valueSummary };
   });

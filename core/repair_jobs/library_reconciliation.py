@@ -70,9 +70,13 @@ def _release_identity_target(files, album, source, release_id):
     """
     if source != 'musicbrainz':
         return ''
-    identities = {str((file.get('tags') or {}).get('musicbrainz_release_id') or '')
-                  for file in files}
-    return release_id if (len(identities) > 1 or (album or {}).get('canonical_locked')) else ''
+    identities = {str((file.get('tags') or {}).get('musicbrainz_release_id') or '').strip()
+                  for file in files} - {''}
+    # A missing tag is not evidence against the coherent existing pressing.
+    # Fill it only when that identity agrees with the selected release, or the
+    # user has explicitly pinned the target edition.
+    return release_id if (len(identities) > 1 or identities == {release_id}
+                          or (album or {}).get('canonical_locked')) else ''
 
 _SOURCES = {
     'musicbrainz_release_id': 'musicbrainz',
@@ -598,8 +602,9 @@ def _match_release(files, slots, *, source, release_id, forced_pairs=None):
                         forced_pairs=forced_pairs, compute=reconcile_folder)
     # The cached solver retains a complete partition. Intentional companions
     # share their source's assignment without consuming another release slot.
+    assigned_paths = {files[pair['file_index']]['path'] for pair in plan['pairs']}
     return {**plan, 'extra_files': [index for index in plan['extra_files']
-                                   if not files[index].get('companion_of')]}
+                                   if files[index].get('companion_of') not in assigned_paths]}
 
 
 def _review_pairs(files, plan):
@@ -607,7 +612,7 @@ def _review_pairs(files, plan):
     return [*plan['pairs'], *[
         {**pairs_by_path[file['companion_of']], 'file_index': index}
         for index, file in enumerate(files)
-        if file.get('companion_of') in pairs_by_path]]
+        if file.get('companion_of') in pairs_by_path and file['path'] not in pairs_by_path]]
 
 
 def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str]],
@@ -1246,6 +1251,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
                        'audio_conflicts' if different_recording else 'extra_files')
         assignments.append({
             'status': 'duplicate' if duplicate else 'extra',
+            'companion_of': file.get('companion_of') or '',
             'file_path': file['path'], 'file': os.path.basename(file['path']),
             'track_id': (file.get('db') or {}).get('id'),
             'current_title': tags.get('title') or '',
@@ -2488,6 +2494,11 @@ class LibraryReconciliationJob(RepairJob):
                                         if source == 'musicbrainz' else None) or release_id
                     identity_target = _release_identity_target(files, album, source, exact_release_id)
                     consistency = album_consistency(files)
+                    consistent_album_title = (next(
+                        (str((member.get('tags') or {}).get('album') or '').strip()
+                         for member in files if str(
+                             (member.get('tags') or {}).get('album') or '').strip()), '')
+                        if 'album' not in consistency else '')
                     release_title = (release_meta.get('name') or release_meta.get('title') or
                                      (album.get('album_title') if album else '') or
                                      os.path.basename(folder))
@@ -2632,10 +2643,12 @@ class LibraryReconciliationJob(RepairJob):
                                               for name in slot.get('artist_names') or
                                               ([slot['artist']] if slot['artist'] else [])]}
                         current_album_title = tags.get('album') or ''
-                        metadata_album_title = (current_album_title
+                        preserved_album_title = (current_album_title if current_album_title.strip()
+                                                 else consistent_album_title)
+                        metadata_album_title = (preserved_album_title
                             if settings['album_title_policy'] == 'preserve' and
                             'album' not in consistency and
-                            _album_title_preservable(current_album_title, release_title)
+                            _album_title_preservable(preserved_album_title, release_title)
                             else common['album_title'])
                         # MusicBrainz exposes the individual artists but not its
                         # join phrases in this adapter. Keep a complete local
@@ -2836,6 +2849,8 @@ class LibraryReconciliationJob(RepairJob):
                             description=(details['metadata_review_reason'] or
                                 ('Audio and release evidence support these metadata corrections.'
                                  if details['assignment_evidence'] == 'audio' else
+                                 'The assignment was confirmed during review.'
+                                 if details['assignment_evidence'] == 'user' else
                                  'Metadata agrees with the release; audio identity is not independently confirmed.')),
                             details=details):
                             result.findings_created += 1

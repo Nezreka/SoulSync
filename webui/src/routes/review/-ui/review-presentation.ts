@@ -37,6 +37,16 @@ export function evidenceLabel(evidence: unknown): string {
   return 'Assignment settled';
 }
 
+/** Assignment confidence does not approve the metadata edits attached to it. */
+export function metadataNeedsReview(row: AlbumAssignment): boolean {
+  return (
+    row.status === 'change' &&
+    !row.planned_choice &&
+    !row.numbering_preview &&
+    ['manual', 'destructive', 'blocked'].includes(row.action_state || row.review_tier || '')
+  );
+}
+
 export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'downloaded') return 'Checking download';
   if (row?.planned_choice?.action === 'dismiss')
@@ -57,6 +67,7 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
   if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
+  if (row && metadataNeedsReview(row)) return 'Review metadata';
   if (row?.companion_of && status === 'confirmed') return 'Intentional companion';
   return (
     {
@@ -122,6 +133,19 @@ export function changeValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(changeValue).join(', ');
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
+}
+
+export function changeOperation(old: unknown, next: unknown) {
+  const before = changeValue(old);
+  const after = changeValue(next);
+  if (before === after) return 'unchanged';
+  if (!before.trim() && after.trim()) return 'add';
+  if (before.trim() && !after.trim()) return 'remove';
+  return 'replace';
+}
+
+export function isIdentifierField(field: string): boolean {
+  return /(?:_id|_mbid)$/.test(field);
 }
 
 /** Merge identical file/library edits for display; preserve differing old or new values. */

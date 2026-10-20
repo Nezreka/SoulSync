@@ -403,6 +403,8 @@ export function ReviewPage() {
     assignments,
     attentionAssignments,
     changeAssignments,
+    metadataDecisionCount,
+    proposedChangeCount,
     missingAssignments,
     pairedConflictCount,
     settledAssignments,
@@ -412,7 +414,6 @@ export function ReviewPage() {
     releaseChoicePending,
     releaseHasMultipleDiscs,
     hasIntentDecision,
-    readyDecisions,
     reviewMetadataCount,
     readyIncludedInGroup,
     assignmentsByFinding,
@@ -486,7 +487,6 @@ export function ReviewPage() {
     reviewCase?.items.filter((item) => item.finding_type === 'reconciliation_missing') || [];
   const activeDecision = active ? decisionsByFinding.get(active.id) : undefined;
   const activeAssignment = active ? assignmentsByFinding.get(active.id) : undefined;
-  const primaryReadyDecision = readyDecisions.length === 1 ? readyDecisions[0] : undefined;
   const releaseCandidates = [
     ...(reviewCase?.album_plan?.candidates || records(record(active?.details).candidates)).filter(
       (candidate) => !manualRelease || candidate.release_id !== manualRelease.release_id,
@@ -2086,10 +2086,8 @@ export function ReviewPage() {
                                     : `${readyChangeGroups.length} supported updates across ${plan.ready} track${plan.ready === 1 ? '' : 's'}`}
                                 </strong>
                                 <p>
-                                  {readyChangeGroups.length > 1
-                                    ? `${readyChangeGroups.length} groups of changes passed the album and audio checks.`
-                                    : primaryReadyDecision?.summary ||
-                                      'All proposed changes are supported by the album and audio evidence.'}
+                                  All required decisions are complete. Review the proposed edits
+                                  before applying this album plan.
                                 </p>
                               </div>
                               <div className={styles.planBadges}>
@@ -2184,9 +2182,16 @@ export function ReviewPage() {
                                 {reviewCase.album_plan?.counts.confirmed} confirmed
                               </StatusChip>
                             )}
-                            {(reviewCase.album_plan?.counts.changed || 0) > 0 && (
+                            {proposedChangeCount > 0 && (
                               <StatusChip tone="info" icon="arrow">
-                                {reviewCase.album_plan?.counts.changed} changes
+                                {proposedChangeCount} proposed change
+                                {proposedChangeCount === 1 ? '' : 's'}
+                              </StatusChip>
+                            )}
+                            {metadataDecisionCount > 0 && (
+                              <StatusChip tone="warning" icon="warning">
+                                {metadataDecisionCount} metadata decision
+                                {metadataDecisionCount === 1 ? '' : 's'}
                               </StatusChip>
                             )}
                             {(reviewCase.album_plan?.counts.uncertain || 0) > 0 && (

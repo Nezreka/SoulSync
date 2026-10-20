@@ -85,13 +85,26 @@ def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | Non
         return None
     field_sets = [set(change) for change in changes]
     if all(fields and fields <= _RECORDING_ID_CHANGE_KEYS for fields in field_sets):
-        count = len(rows)
-        return (
-            'Link MusicBrainz recording IDs',
-            f'Link {count} track{"s" if count != 1 else ""} to '
-            f'{"their" if count != 1 else "its"} confirmed MusicBrainz '
-            f'recording{"s" if count != 1 else ""}.',
-        )
+        counts = {}
+        for change in changes:
+            operations = set()
+            for value in change.values():
+                old, new = (_change_value(value, key).strip() for key in ('old', 'new'))
+                if old != new:
+                    operations.add('add' if not old else 'remove' if not new else 'replace')
+            if operations:
+                operation = next(iter(operations)) if len(operations) == 1 else 'mixed'
+                counts[operation] = counts.get(operation, 0) + 1
+        if not counts:
+            return None
+        verbs = {'add': 'Add', 'replace': 'Replace', 'remove': 'Remove', 'mixed': 'Mixed edits'}
+        label = (f'{verbs[next(iter(counts))]} MusicBrainz recording IDs'
+                 if len(counts) == 1 and 'mixed' not in counts
+                 else 'Review recording ID changes')
+        summary = '; '.join(
+            f'{verbs[operation]} on {count} track{"s" if count != 1 else ""}'
+            for operation, count in counts.items())
+        return label, summary + '.'
     if (all(fields <= _TRACK_ARTIST_CHANGE_KEYS for fields in field_sets) and
             all('track_artist' in fields or 'artist' in fields for fields in field_sets)):
         expanded = False

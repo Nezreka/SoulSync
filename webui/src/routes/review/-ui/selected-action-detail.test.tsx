@@ -49,15 +49,39 @@ it('keeps accept and keep choices visible while allowing alternative reassignmen
   expect(onAct).toHaveBeenCalledWith('fix', 'assign:id:other:1:2');
 });
 
-it('keeps readable changes visible and exposes exact identifier edits on demand', () => {
+it('shows identity replacement alongside readable edits before approval', () => {
   render(<ReconciliationEvidence finding={finding} />);
   expect(screen.getAllByText('Song').length).toBeGreaterThan(0);
-  const disclosure = screen.getByText('1 identifier change').closest('details')!;
+  expect(screen.getByText('Replace MusicBrainz release ID · file tag')).toBeVisible();
+  expect(screen.getByText('old-id')).toBeVisible();
+  expect(screen.getByText('new-id')).toBeVisible();
+  expect(screen.getByText('old-id').closest('details')).toBeNull();
+});
+
+it('keeps removals visible beside a filename edit and labels additions in the disclosure', () => {
+  render(
+    <ReconciliationEvidence
+      finding={{
+        ...finding,
+        details: {
+          changes: {
+            filename: { old: 'old.flac', new: 'new.flac' },
+            musicbrainz_recording_id: { old: 'remove-id', new: '' },
+            library_recording_mbid: { old: 'remove-id', new: '' },
+            musicbrainz_release_id: { old: '', new: 'added-id' },
+          },
+        },
+      }}
+    />,
+  );
+  expect(screen.getByText('Remove Recording ID · file and library')).toBeVisible();
+  expect(screen.getAllByText('remove-id')).toHaveLength(1);
+  expect(screen.getByText('remove-id').closest('details')).toBeNull();
+  const disclosure = screen.getByText('Add 1 missing identifier').closest('details')!;
   expect(disclosure.open).toBe(false);
-  fireEvent.click(screen.getByText('1 identifier change'));
+  fireEvent.click(screen.getByText('Add 1 missing identifier'));
   expect(disclosure.open).toBe(true);
-  expect(screen.getByText('old-id')).toBeTruthy();
-  expect(screen.getByText('new-id')).toBeTruthy();
+  expect(screen.getByText('added-id')).toBeVisible();
 });
 
 it('shows identifier-only proposals immediately', () => {

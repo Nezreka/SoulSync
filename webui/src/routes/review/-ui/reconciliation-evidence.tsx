@@ -21,6 +21,8 @@ import {
   changeFieldLabel as proposedFieldLabel,
   displayChanges,
   evidenceLabel,
+  changeOperation,
+  isIdentifierField,
 } from './review-presentation';
 
 type Data = Record<string, unknown>;
@@ -1114,11 +1116,20 @@ export function ReconciliationEvidence({
   const details = object(finding.details);
   const changes = object(details.changes);
   const shownChanges = displayChanges(changes);
-  const identifierChanges = shownChanges.filter((change) => /(?:_id|_mbid)$/.test(change.field));
-  const visibleChanges = shownChanges.filter((change) => !identifierChanges.includes(change));
+  const identifierAdditions = shownChanges.filter(
+    (change) =>
+      isIdentifierField(change.field) && changeOperation(change.old, change.next) === 'add',
+  );
+  const visibleChanges = shownChanges.filter((change) => !identifierAdditions.includes(change));
   const comparisonRows = (rows: typeof shownChanges) =>
     rows.map((change) => ({
-      field: proposedFieldLabel(change.field, change.locations),
+      field: `${
+        isIdentifierField(change.field)
+          ? { add: 'Add ', replace: 'Replace ', remove: 'Remove ', unchanged: '' }[
+              changeOperation(change.old, change.next)
+            ]
+          : ''
+      }${proposedFieldLabel(change.field, change.locations)}`,
       current: change.old,
       planned: change.next,
     }));
@@ -1229,15 +1240,15 @@ export function ReconciliationEvidence({
             <EvidenceIcon name="check" /> Proposed changes
           </h4>
           <MetadataComparison
-            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierChanges)}
+            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierAdditions)}
           />
-          {visibleChanges.length > 0 && identifierChanges.length > 0 && (
+          {visibleChanges.length > 0 && identifierAdditions.length > 0 && (
             <details className={styles.identifierChanges}>
               <summary>
-                {identifierChanges.length} identifier{' '}
-                {identifierChanges.length === 1 ? 'change' : 'changes'}
+                Add {identifierAdditions.length} missing identifier
+                {identifierAdditions.length === 1 ? '' : 's'}
               </summary>
-              <MetadataComparison rows={comparisonRows(identifierChanges)} />
+              <MetadataComparison rows={comparisonRows(identifierAdditions)} />
             </details>
           )}
         </section>

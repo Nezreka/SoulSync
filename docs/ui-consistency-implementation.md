@@ -1,5 +1,156 @@
 # UI reuse and consistency implementation
 
+## Recovery assessment and Stage 1 — 2026-10-20
+
+The user accepted the historical reassessment and authorized **Stage 1 only**.
+Earlier statements that every original requirement was complete are superseded
+by this assessment. Do not infer completion from component reuse, passing
+existing tests, or absence of document overflow.
+
+### Historical findings to preserve
+
+- Both named sessions forked at `9c7465cc8`; `814ea7557` precedes architecture
+  implementation and `827f04e30` precedes UI standardization. The initial UI
+  rewrite is `23e3f0ddc`. Later recommendation policy changes start at
+  `3d1d52244`; they are distinct from the UI rewrite and cache work.
+- The assessment inspected source at `119abe4db`, deployed review code at
+  `1a5406d9d9d0`, session logs, original edge cases, identical captured responses
+  rendered through historical/current frontends, and local matching probes.
+- Named-performance matching rejects compatible added location detail and
+  equivalent textual/numeric dates, even with matching recording ID/duration.
+  Historical evidence contained five distinct tracks affected by that new
+  rule; this is not a claim that all five are currently unmatched.
+- Album consistency conflates absent and contradictory metadata. A local
+  integration probe with one stored release ID and one blank proposed removing
+  the stored ID under a non-MusicBrainz release. It required review, but lacked
+  evidence that the ID was wrong. Missing album titles can similarly disable
+  preservation of useful nonempty titles.
+- Unmatched intentional companions disappear: `_match_release` removes them
+  from extras even when `_review_pairs` cannot attach them to an assigned source.
+- New identifier removal/replacement operations outgrew UI summaries that
+  unconditionally say “Add”. Consequential identity edits can be collapsed
+  merely because another visible field also changes.
+- Assignment confidence and required user input are distinct. Manual metadata
+  proposals can be grouped and colored as ordinary changes; ready summaries
+  still claim audio verification for metadata-supported/user-approved plans.
+- Current motionblur ambiguity is not proven to be a new solver regression:
+  both solver versions produce the same classifications on its current input.
+  The selected provider/evidence also changed. The Evanescence AOL-session
+  missing/extra case and overly broad artist-credit replacement policy predate
+  these sessions.
+- Preserve the improved decision authority, whole-album eligibility, signed
+  apply/revalidation, relocation handling, validated pure-match caching,
+  exact-file player, shared record inspector, artwork provenance and accessible
+  controls. Cache parity does not prove recommendation correctness.
+- Deferred Stage 2 findings: specific ambiguity explanations occur below
+  controls/audio; comparison stacking is too tall at ordinary inspector widths;
+  selection/success hues and muted hierarchy need improvement; accumulated
+  header/control space reduces useful content; mobile header clips internally
+  at 390px; album-wide concerns still need clearer decision presentation.
+- Durable visual route baselines omit Review. Existing backend tests passed
+  258/258 during assessment despite the reproduced failures. Later acceptance
+  must cover exact effects, complete inventory and semantic presentation, not
+  just successful rendering or DOM presence.
+
+### Stage 1 scope and acceptance
+
+- [x] S1. Compatible named-performance detail and equivalent dates remain
+  assignable and preserve useful local wording. Distinct mixes, venues, dates,
+  versions, song numbers and independent conflicting evidence stay protected.
+  Check tag, filename and recording-disambiguation paths, not only one helper.
+- [x] S2. Missing, conflicting and invalid album metadata are distinguished.
+  Blanks cannot justify erasing a coherent ID or replacing useful titles.
+  Existing explicit release selection and evidence-supported repairs remain
+  available. Keep unsupported removal manual and explain actual evidence.
+- [x] S3. Every inventory file remains represented after companion processing,
+  including unmatched sources, explicit assignments and incomplete evidence.
+  Matched companions must not consume slots or become false duplicates.
+- [x] S4. Group/track summaries truthfully name additions, replacements,
+  removals and mixed operations. File/library copies do not double-count tracks.
+- [x] S5. Consequential identity edits are visible before approval even when
+  title/filename fields also change. Raw identifiers may be secondary; actual
+  effects may not be hidden.
+- [x] S6. Manual decision state controls attention grouping/labels independently
+  of matching confidence. Preserve saved choices, release-blocked previews,
+  numbering dependencies, missing/extra relationships and whole-album readiness.
+- [x] S7. Readiness and evidence copy never implies audio verification for
+  metadata-only, missing-audio or user-confirmed evidence. Cover aggregates,
+  findings, candidate previews and fallback paths.
+
+Verification will include new regression cases with negative controls, affected
+and wider planner/worker suites, focused frontend behavior tests, check/build,
+historical evidence replay where available, and rendered desktop/mobile checks
+of the Stage 1 presentation changes. Live repair/file mutations are not a
+presentation test. Record actual results and remaining limitations below before
+marking any item complete. Stage 2 layout work remains deferred.
+
+### Stage 1 implementation and verification
+
+- **S1:** Named qualifier facts now separate venue/mix names from dates. Date
+  comparisons use shared precision (year, month, day), allowing English textual,
+  ISO, day/month/year, unambiguous month/day/year, and abbreviated-year forms.
+  Dates are excluded from numeric-title comparison only inside recognized
+  qualifiers; main-title numbers remain material differences. Compatible
+  performance-name detail can be a subset; distinct named remixes remain
+  protected. Tags, filenames, database titles, and recording comments all
+  participate. Sparse audio can still lower confidence: compatibility does not
+  manufacture independent verification.
+- **S2:** Blank values no longer create album consistency conflicts. A coherent
+  release ID is retained when a sibling lacks the tag. Missing MusicBrainz IDs
+  can be filled when the selected identity agrees; an explicit pin still permits
+  replacing the identity. Non-MusicBrainz sources cannot erase the coherent ID
+  because of a blank sibling. Missing album titles inherit a compatible,
+  consistent local title under the preserve policy. Genuine disagreements and
+  catalog-proven recording-ID conflicts retain manual review.
+- **S3:** Companions leave the extra-file list only when their source has an
+  assignment. Explicitly assigned companions are not projected a second time.
+  Unmatched sources/companions remain in persisted review, including previews
+  governed by an album release question. Matched companions consume no new slot.
+- **S4–S5:** Backend decision summaries and frontend field summaries distinguish
+  add/replace/remove/mixed effects. File/library copies count once per track;
+  mixed effects on the same track count as one mixed track. Whitespace cleanup
+  remains an actual edit. Identifier replacements/removals stay expanded beside
+  filename/title changes, with explicit operation labels and both values.
+  Identifier additions may be collapsed under an explicit “Add …” summary.
+- **S6–S7:** Manual metadata decisions use attention grouping, amber row/group
+  styling, a review label and a separate aggregate decision count. Matching
+  confidence is unchanged. Saved choices and release/numbering previews retain
+  their states. Readiness copy describes completed decisions without claiming
+  universal audio support. User-confirmed assignments have distinct finding copy.
+
+Verification:
+
+- **615 Python tests passed** across reconciliation plan/end-to-end/authority/
+  cache/inventory/catalogue/fulfillment/Tools suites, review queue/inbox, finding
+  lifecycle, and recording-ID repair. New cases include real temporary-file
+  scan/apply checks, sparse tags, explicit pins, genuine conflicts and companion
+  inventory. Matcher regressions run both fresh and through persisted cache.
+- **69 frontend tests passed** in the Review route. Check completed with
+  **zero errors** (485 existing warnings); production app and shell builds passed.
+- The browser spec `webui/tests/review-recommendations.spec.ts` uses production
+  bundles with local API fixtures and blocked external requests. It covers
+  manual and saved metadata plans at **1800, 1280 and 390 pixels**, grouped and
+  release-order rows, ID effects visible before approval, evidence-neutral
+  readiness, and screenshots. Inspection found an inherited fixed minimum width
+  overflowing the mobile ready-summary card; the grid now respects its container,
+  with a browser bounds assertion. This is a local summary fix, not Stage 2.
+- Historical replay examined **13,497 paired rows**, checking tags and filenames
+  against release titles. All **10 false-conflict comparisons on five tracks**
+  identified in the assessment became compatible, preserving local display
+  wording. No new named-title conflicts appeared in that paired-row corpus.
+  This is not a full catalogue rescan or proof about every unmatched file;
+  synthetic negative controls cover genuinely different performances.
+- Local evidence logs/screenshots are under `/tmp/soulsync-stage1-*`; they are
+  diagnostic artifacts, not committed application data. Findings, acceptance
+  criteria, tests and these results are the durable record.
+
+**Stage 2 is still open.** The desktop inspector still stacks comparisons too
+early, the plan repeats summaries, mobile/header space remains inefficient, and
+selection/success hierarchy and broader decision ordering still need the
+separate Stage 2 pass. Stage 1 completion must not be described as completion of
+the entire original UI recovery plan. No live repair plans were applied for
+verification.
+
 Approved 2026-10-18. Baseline: `827f04e30`. This is the implementation ledger for the user's 22-part plan; keep it updated with evidence, limitations, and remaining work. No Operations redesign or matching-policy redesign. Preserve concurrent work and backend approval/signature, readiness, fulfillment, and relocation contracts. Never apply live repair plans merely to test presentation.
 
 ## Acceptance checklist

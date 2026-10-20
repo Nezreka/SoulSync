@@ -995,11 +995,12 @@
 }
 .readySummaryList {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   margin-top: 14px;
 }
 .readySummaryList button {
   display: flex;
+  min-width: 0;
   justify-content: space-between;
   align-items: flex-start;
   gap: 16px;
@@ -1013,6 +1014,8 @@
 }
 .readySummaryList button > span {
   display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: 3px;
 }
 .readySummaryList small {
@@ -2682,6 +2685,10 @@
 .page .assignmentGroup[data-tone='danger'] > button {
   color: var(--danger-light);
   background: rgba(var(--danger-rgb), 0.1);
+}
+.page .assignmentGroup[data-tone='warning'] > button {
+  color: var(--warning);
+  background: rgba(var(--warning-rgb), 0.1);
 }
 .page .assignmentGroup[data-tone='good'] > button {
   color: var(--success);
