@@ -383,7 +383,7 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
         author_hits = sum(1 for token in author_tokens if token in haystack)
         author_score = author_hits / len(author_tokens)
     if score >= 0.5:
-        author_score = max(author_score, _series_name_score(series, haystack))
+        author_score = max(author_score, _series_name_score(series, haystack, set(wanted)))
     if author_tokens or author_score:
         if len(wanted) == 1:
             # Single-word book titles (e.g. "Infortunio") have a high risk of false
@@ -395,11 +395,19 @@ def title_relevance(release_title: Optional[str], book_title: Optional[str],
     return round(min(1.0, score), 4)
 
 
-def _series_name_score(series: Optional[Sequence[Any]], haystack: set) -> float:
-    """1.0 when every word of some series name is in the release, else 0.0."""
+def _series_name_score(series: Optional[Sequence[Any]], haystack: set,
+                       title_tokens: set) -> float:
+    """1.0 when the words of some series name that are NOT in the book title are all in the release.
+
+    A series name that is part of the book's own title vouches for nothing: in
+    "Harry Potter and the Chamber of Secrets" the words "harry potter" are in
+    every volume's release, so counting them would let the wrong volume clear
+    the relevance floor. Only words the title does not already contain can be
+    evidence ("Die drei !!!" for "Nixensommer").
+    """
     for item in series or []:
         name = item.get("title") if isinstance(item, dict) else item
-        tokens = significant_tokens(str(name or ""))
+        tokens = [t for t in significant_tokens(str(name or "")) if t not in title_tokens]
         if tokens and all(token in haystack for token in tokens):
             return 1.0
     return 0.0

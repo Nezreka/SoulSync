@@ -70,6 +70,22 @@ def test_series_name_alone_never_makes_another_book_look_right():
         [{"title": "Die drei !!!", "sequence": "25"}]) < 0.5
 
 
+def test_series_words_already_in_the_title_do_not_vouch_for_the_release():
+    # review: the series name is part of the title, so it must not count twice
+    harry = [{"title": "Harry Potter", "sequence": "2"}]
+    assert title_relevance(
+        "Harry Potter and the Prisoner of Azkaban",
+        "Harry Potter and the Chamber of Secrets", ["J.K. Rowling"], harry) < 0.5
+    # "Dune Messiah" is another book than "Dune"
+    assert title_relevance(
+        "Dune Messiah", "Dune", ["Frank Herbert"],
+        [{"title": "Dune", "sequence": "1"}]) < 0.5
+    # the right volume still passes on its title and author alone
+    assert title_relevance(
+        "Harry Potter and the Chamber of Secrets (Unabridged) - J.K. Rowling",
+        "Harry Potter and the Chamber of Secrets", ["J.K. Rowling"], harry) >= 0.5
+
+
 def test_without_series_the_old_rule_is_unchanged():
     assert title_relevance(
         "Die drei Ausrufezeichen - Folge 43 - Nixensommer",
