@@ -2955,6 +2955,13 @@ async function loadSettingsData() {
         loadNavidromePlaylistLogin();
         loadMediaServerNames();
 
+        // Populate Music Assistant settings
+        const maUrl = document.getElementById('music_assistant-url');
+        const maToken = document.getElementById('music_assistant-token');
+        if (maUrl) maUrl.value = settings.music_assistant?.base_url || '';
+        if (maToken) maToken.value = settings.music_assistant?.token || '';
+        if (maUrl && maUrl.value && maToken && maToken.value) loadMusicAssistantSources(true);
+
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
         // Remember the persisted music server so a save from the VIDEO side keeps
@@ -4029,7 +4036,7 @@ async function clearPlexConfiguration() {
 // The media server names, in UI order. Refreshed from GET /api/media-servers
 // (the per-server descriptor) when the settings page loads; this list is
 // what the page knew before the endpoint existed and stays the fallback.
-let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'soulsync'];
+let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'];
 
 async function loadMediaServerNames() {
     try {
@@ -6366,6 +6373,11 @@ async function saveSettings(quiet = false) {
             api_key: document.getElementById('jellyfin-api-key').value,
             api_timeout: parseInt(document.getElementById('jellyfin-timeout').value) || 30
         },
+        music_assistant: {
+            base_url: document.getElementById('music_assistant-url')?.value || '',
+            token: document.getElementById('music_assistant-token')?.value || '',
+            source_instance: document.getElementById('music_assistant-source')?.value || ''
+        },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
             username: document.getElementById('navidrome-username').value,
@@ -7223,6 +7235,69 @@ async function autoDetectJellyfin() {
         showToast('Failed to auto-detect Jellyfin server', 'error');
     } finally {
         hideLoadingOverlay();
+    }
+}
+
+async function autoDetectMusicAssistant() {
+    try {
+        const response = await fetch('/api/detect-media-server', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server_type: 'music_assistant' })
+        });
+        const result = await response.json();
+        if (result.success && result.found_url) {
+            document.getElementById('music_assistant-url').value = result.found_url;
+            showToast(`Music Assistant found at ${result.found_url}`, 'success');
+        } else {
+            showToast(result.error || 'No Music Assistant server found', 'error');
+        }
+    } catch (e) {
+        showToast('Auto-detect failed: ' + e.message, 'error');
+    }
+}
+
+async function loadMusicAssistantSources(quiet = false) {
+    const container = document.getElementById('music_assistant-source-selector-container');
+    const selector = document.getElementById('music_assistant-source');
+    if (!container || !selector) return;
+    try {
+        const response = await fetch('/api/music-assistant/sources');
+        const result = await response.json();
+        if (!result.success) {
+            container.style.display = 'none';
+            if (!quiet) showToast(result.error || 'Could not load Music Assistant sources', 'error');
+            return;
+        }
+        selector.innerHTML = '';
+        for (const s of result.sources || []) {
+            const opt = document.createElement('option');
+            opt.value = s.key;
+            opt.textContent = `${s.title} (${s.domain})`;
+            if (s.key === result.selected) opt.selected = true;
+            selector.appendChild(opt);
+        }
+        container.style.display = (result.sources || []).length ? '' : 'none';
+        if (!quiet && !(result.sources || []).length) showToast('Music Assistant has no Local files or SMB source', 'warning');
+    } catch (e) {
+        container.style.display = 'none';
+        if (!quiet) showToast('Could not load Music Assistant sources: ' + e.message, 'error');
+    }
+}
+
+async function selectMusicAssistantSource() {
+    const selector = document.getElementById('music_assistant-source');
+    if (!selector || !selector.value) return;
+    try {
+        const response = await fetch('/api/music-assistant/select-source', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_id: selector.value })
+        });
+        const result = await response.json();
+        showToast(result.success ? `Music source set to ${selector.selectedOptions[0]?.textContent || selector.value}` : (result.error || 'Could not set the source'), result.success ? 'success' : 'error');
+    } catch (e) {
+        showToast('Could not set the source: ' + e.message, 'error');
     }
 }
 

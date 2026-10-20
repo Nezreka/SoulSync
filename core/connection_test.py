@@ -179,6 +179,20 @@ def run_service_test(service, test_config):
 
             except Exception as e:
                 return False, f"Navidrome connection error: {str(e)}"
+        elif service == "music_assistant":
+            base_url = (test_config.get('base_url') or '').strip()
+            token = (test_config.get('token') or '').strip()
+            if not base_url or not token:
+                return False, "Missing Music Assistant URL or token."
+            try:
+                from core.music_assistant_client import MusicAssistantClient
+                client = MusicAssistantClient()
+                client.base_url = base_url.rstrip('/')
+                client.token = token
+                client.source_instance = (test_config.get('source_instance') or '').strip() or None
+                return client.test_connection()
+            except Exception as e:
+                return False, f"Music Assistant connection error: {str(e)}"
         elif service == "soulsync":
             transfer_path = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
             if os.path.isdir(transfer_path):

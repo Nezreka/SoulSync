@@ -94,6 +94,7 @@ from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_defaul
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
+from core.music_assistant_client import MusicAssistantClient
 from core.soulseek_client import SoulseekClient
 from core.download_orchestrator import DownloadOrchestrator, set_download_orchestrator
 from core.tidal_client import TidalClient # Added import for Tidal
@@ -1215,6 +1216,7 @@ try:
         'plex':      _safe_init_media_client(PlexClient, "Plex"),
         'jellyfin':  _safe_init_media_client(JellyfinClient, "Jellyfin"),
         'navidrome': _safe_init_media_client(NavidromeClient, "Navidrome"),
+        'music_assistant': _safe_init_media_client(MusicAssistantClient, "Music Assistant"),
         'soulsync':  _safe_init_media_client(SoulSyncClient, "SoulSync library"),
     })
     # Install as process-wide singleton so callers reaching via
@@ -4363,7 +4365,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -23483,6 +23485,11 @@ app.register_blueprint(_create_stats_blueprint())
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
 app.register_blueprint(_create_media_servers_blueprint())
+
+# Music Assistant source picker (which Local files source the scan reads).
+from api.music_assistant import configure as _configure_music_assistant_api, create_blueprint as _create_music_assistant_blueprint
+_configure_music_assistant_api(engine_getter=lambda: media_server_engine, config_manager_=config_manager)
+app.register_blueprint(_create_music_assistant_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three
 # self-contained clusters lifted to their own api/ modules.

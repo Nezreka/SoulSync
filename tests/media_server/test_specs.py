@@ -77,7 +77,7 @@ def test_describe_is_case_insensitive_and_none_safe():
 def test_flag_queries():
     assert specs.names_where(supports_own_libraries=True) == ['plex', 'jellyfin']
     assert specs.names_where(per_user_accounts=True) == ['plex', 'jellyfin', 'navidrome']
-    assert specs.external_names() == ['plex', 'jellyfin', 'navidrome']
+    assert specs.external_names() == ['plex', 'jellyfin', 'navidrome', 'music_assistant']
 
 
 def test_public_dict_carries_field_kinds_but_no_values():
