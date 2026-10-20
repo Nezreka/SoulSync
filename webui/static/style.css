@@ -19277,16 +19277,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: 0 4px 12px rgba(255, 107, 107, 0.3);
 }
 
-.youtube-discovery-modal .sync-progress-display {
-    color: rgb(var(--accent-light-rgb));
-    font-size: 14px;
-    font-weight: 500;
-    padding: 8px 12px;
-    background: rgba(var(--accent-rgb), 0.1);
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-}
-
 /* Modal state management */
 .modal-overlay.hidden {
     display: none !important;
@@ -19786,110 +19776,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Watchlist Modal Styles */
 
-/* Fullscreen modifier for watchlist modal */
-.watchlist-fullscreen {
-    max-width: 95vw;
-    width: 95vw;
-    max-height: 95vh;
-    max-height: 95dvh;
-    position: relative;
-    overflow: hidden;
-    border-top: 1px solid var(--white-a15);
-}
-
-/* Override playlist-modal-body within watchlist to allow grid scrolling */
-.watchlist-fullscreen .playlist-modal-body {
-    overflow-y: auto;
-    padding: 0;
-    min-height: 0;
-}
-
-/* ── Header polish ─────────────────────────────── */
-.watchlist-fullscreen .playlist-header-content h2 {
-    font-size: 26px;
-    letter-spacing: -0.3px;
-    padding-bottom: 12px;
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.watchlist-fullscreen .playlist-header-content h2::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    width: 48px;
-    height: 3px;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)), transparent);
-    border-radius: 2px;
-}
-
-.watchlist-header-icon {
-    flex-shrink: 0;
-    filter: drop-shadow(0 0 8px rgba(var(--accent-rgb), 0.4));
-}
-
-.watchlist-fullscreen .playlist-quick-info {
-    gap: 10px;
-}
-
-.watchlist-fullscreen .playlist-track-count,
-.watchlist-fullscreen .playlist-owner {
-    background: var(--white-a05);
-    padding: 4px 14px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-}
-
-.watchlist-fullscreen .playlist-track-count {
-    border: 1px solid rgba(var(--accent-rgb), 0.2);
-}
-
-.watchlist-fullscreen .playlist-owner {
-    border: 1px solid var(--white-a08);
-}
-
-/* ── Close button ──────────────────────────────── */
-.watchlist-fullscreen .playlist-modal-close {
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-circle);
-    background: var(--white-a06);
-    transition: all 0.25s ease;
-    font-size: 20px;
-}
-
-.watchlist-fullscreen .playlist-modal-close:hover {
-    background: rgba(255, 59, 48, 0.15);
-    color: #ff6b6b;
-    transform: rotate(90deg) scale(1.1);
-}
-
-/* ── Action buttons ────────────────────────────── */
-.watchlist-actions {
-    border-bottom: 1px solid var(--white-a05);
-    padding-bottom: 16px !important;
-}
-
-.watchlist-actions .playlist-modal-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    white-space: nowrap;
-}
-
-.watchlist-actions .playlist-modal-btn svg {
-    flex-shrink: 0;
-}
-
-/* Scan button: shimmer on hover */
 /* ── Processing Button Animation (rotating border gradient) ── */
 
 .btn-processing {
@@ -19930,47 +19816,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     syntax: '<angle>';
     initial-value: 0deg;
     inherits: false;
-}
-
-.watchlist-btn-scan {
-    position: relative;
-    overflow: hidden;
-}
-
-.watchlist-btn-scan::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent, var(--white-a15), transparent);
-    transform: translateX(-100%);
-    transition: none;
-}
-
-.watchlist-btn-scan:not(:disabled):hover::before {
-    transform: translateX(100%);
-    transition: transform 0.6s ease;
-}
-
-/* Similar Artists button: discovery blue identity */
-.watchlist-btn-similar {
-    border: 1px solid rgba(99, 179, 237, 0.15) !important;
-    transition: all 0.25s ease !important;
-}
-
-.watchlist-btn-similar:not(:disabled):hover {
-    background: rgba(99, 179, 237, 0.1) !important;
-    border-color: rgba(99, 179, 237, 0.35) !important;
-    color: #90cdf4 !important;
-    box-shadow: 0 0 20px rgba(99, 179, 237, 0.08);
-}
-
-/* Settings button: subtle warm */
-.watchlist-btn-settings {
-    transition: all 0.25s ease !important;
-}
-
-.watchlist-btn-settings:hover {
-    background: var(--white-a10) !important;
 }
 
 /* ── Search bar ────────────────────────────────── */
@@ -20230,76 +20075,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .watchlist-artist-card:hover .watchlist-card-checkbox,
 .watchlist-card-checkbox:has(input:checked) {
     opacity: 1;
-}
-
-/* Remove × button — top-right, visible on hover */
-.watchlist-card-remove {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 3;
-    opacity: 0;
-    transition: opacity 0.2s ease, background 0.2s ease;
-    width: 30px;
-    height: 30px;
-    border-radius: var(--radius-circle);
-    border: none;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(8px);
-    color: var(--white-a70);
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.watchlist-artist-card:hover .watchlist-card-remove {
-    opacity: 1;
-}
-
-.watchlist-card-remove:hover {
-    background: rgba(255, 59, 48, 0.7);
-    color: #ffffff;
-}
-
-/* Gear icon — top-right, visible on hover */
-.watchlist-card-gear {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 3;
-    opacity: 0;
-    transition: opacity 0.2s ease, background 0.2s ease, transform 0.3s ease;
-    width: 30px;
-    height: 30px;
-    border-radius: var(--radius-circle);
-    border: none;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(8px);
-    color: var(--white-a70);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-}
-
-.watchlist-artist-card:hover .watchlist-card-gear {
-    opacity: 1;
-}
-
-.watchlist-card-gear:hover {
-    background: rgba(var(--accent-rgb), 0.7);
-    color: #ffffff;
-    transform: rotate(45deg);
-}
-
-.watchlist-card-gear svg {
-    width: 16px;
-    height: 16px;
-    fill: currentColor;
 }
 
 /* Watchlist Artist Detail Overlay */
@@ -20582,85 +20357,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .watchlist-detail-remove-btn:hover {
     background: rgba(255, 59, 48, 0.2);
     color: #ff3b30;
-}
-
-/* Live activity classes (replaces inline styles) */
-.watchlist-live-activity {
-    display: flex;
-    gap: 18px;
-    margin-top: 15px;
-    padding: 16px 20px;
-    background: var(--white-a03);
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(var(--accent-rgb), 0.15);
-    backdrop-filter: blur(8px);
-    justify-content: center;
-    align-items: flex-start;
-}
-
-.watchlist-live-activity-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-}
-
-.watchlist-live-activity-artist-img {
-    width: 80px;
-    height: 80px;
-    border-radius: var(--radius-circle);
-    border: 2px solid rgb(var(--accent-rgb));
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.25);
-    object-fit: cover;
-    background: #1a1a1a;
-}
-
-.watchlist-live-activity-album-img {
-    width: 80px;
-    height: 80px;
-    border-radius: var(--radius-md);
-    border: 2px solid #ffc107;
-    box-shadow: 0 0 16px rgba(255, 193, 7, 0.2);
-    object-fit: cover;
-    background: #1a1a1a;
-}
-
-.watchlist-live-activity-label {
-    font-size: 11px;
-    font-weight: bold;
-    color: #fff;
-    text-align: center;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.watchlist-live-activity-feed {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 250px;
-    max-width: 300px;
-}
-
-.watchlist-live-activity-feed-label {
-    font-size: 10px;
-    color: #b3b3b3;
-    text-transform: uppercase;
-}
-
-.watchlist-live-activity-feed-label-orange {
-    font-size: 10px;
-    color: #ff9800;
-    text-transform: uppercase;
-}
-
-.watchlist-live-activity-track {
-    font-size: 11px;
-    font-weight: bold;
-    color: rgb(var(--accent-light-rgb));
-    margin-bottom: 8px;
 }
 
 .watchlist-live-addition-item {
@@ -21186,49 +20882,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin-bottom: 4px;
 }
 
-/* ── Wishlist media tabs: music vs audiobooks ────────────────────────── */
-/* Two isolated lists sharing one page, the way the video side keeps movies,
-   shows and channels apart. A segmented control rather than chips because
-   this switches WHAT you are looking at, while the chips below it filter
-   the thing you already chose. */
-
-.wl-media-tabs {
-    display: inline-flex;
-    gap: 3px;
-    padding: 4px;
-    margin: 4px 0 20px;
-    border-radius: 14px;
-    background: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    border-top-color: var(--white-a14);
-}
-
-.wl-media-tab {
-    padding: 9px 22px;
-    border: none;
-    border-radius: 11px;
-    background: none;
-    color: var(--white-a55);
-    font-size: 13px;
-    font-weight: 620;
-    letter-spacing: 0.01em;
-    font-family: inherit;
-    cursor: pointer;
-    transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.wl-media-tab:hover {
-    color: #ffffff;
-}
-
-.wl-media-tab.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.95) 0%,
-            rgba(var(--accent-rgb), 0.75) 100%);
-    color: #ffffff;
-    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.32);
-}
-
 /* ── #831 round 3: watchlist action chips (artist-page button language) ── */
 
 .wl-chip {
@@ -21492,25 +21145,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 /* Watchlist & Wishlist Checkbox */
-.watchlist-checkbox-wrapper,
-.wishlist-checkbox-wrapper {
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-right: 12px;
-    flex-shrink: 0;
-    cursor: pointer;
-}
-
-.watchlist-checkbox-wrapper input[type="checkbox"],
-.wishlist-checkbox-wrapper input[type="checkbox"] {
-    position: absolute;
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
 .watchlist-checkbox-custom,
 .wishlist-checkbox-custom {
     width: 20px;
@@ -21522,26 +21156,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-}
-
-.watchlist-checkbox-wrapper:hover .watchlist-checkbox-custom,
-.wishlist-checkbox-wrapper:hover .wishlist-checkbox-custom {
-    border-color: var(--white-a40);
-    background: var(--white-a06);
-}
-
-.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom,
-.wishlist-checkbox-wrapper input:checked+.wishlist-checkbox-custom {
-    background: rgba(var(--accent-rgb), 0.3);
-    border-color: rgb(var(--accent-rgb));
-}
-
-.watchlist-checkbox-wrapper input:checked+.watchlist-checkbox-custom::after,
-.wishlist-checkbox-wrapper input:checked+.wishlist-checkbox-custom::after {
-    content: '✓';
-    color: rgb(var(--accent-rgb));
-    font-size: 13px;
-    font-weight: 700;
 }
 
 /* ===== WISHLIST OVERVIEW MODAL STYLES ===== */
@@ -22468,15 +22082,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .wl-linked-search-close:hover { color: #fff; }
 
 /* Keep existing search styles */
-.watchlist-linked-search {
-    margin-top: 12px;
-}
-
-.watchlist-linked-search-input-row {
-    display: flex;
-    gap: 8px;
-}
-
 .watchlist-linked-search-input {
     flex: 1;
     padding: 10px 14px;
@@ -22507,15 +22112,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .watchlist-linked-search-btn:hover {
     background: rgba(var(--accent-rgb), 0.3);
-}
-
-.watchlist-linked-search-results {
-    margin-top: 8px;
-    max-height: 260px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
 }
 
 .watchlist-linked-search-result {
@@ -24377,11 +23973,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 32px;
 }
 
-.artists-search-state.fade-out {
-    opacity: 0;
-    transform: translateY(-20px);
-}
-
 .artists-search-container {
     max-width: 600px;
     width: 100%;
@@ -24641,12 +24232,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a06);
 }
 
-.artists-hero-content {
-    position: relative;
-    z-index: 2;
-    padding: 32px 36px 36px;
-}
-
 .artists-hero-name {
     font-size: 2.6em;
     font-weight: 800;
@@ -24676,10 +24261,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     .artists-hero-stats {
         justify-content: center;
-    }
-
-    .artists-hero-content {
-        padding: 20px 16px 24px;
     }
 }
 
@@ -25351,27 +24932,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     vertical-align: middle;
 }
 
-/* Wishlist enhance badge */
-.wishlist-enhance-badge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: var(--radius-xs);
-    font-size: 9px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: #4fc3f7;
-    background: rgba(79, 195, 247, 0.12);
-    margin-left: 6px;
-}
-
-.artist-detail-info {
-    display: flex;
-    align-items: center;
-    gap: 24px;
-    flex: 1;
-}
-
 .artist-detail-image {
     width: 80px;
     height: 80px;
@@ -25397,68 +24957,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-.artist-detail-genres {
-    font-size: 16px;
-    color: var(--white-a70);
-    font-weight: 500;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
 .artist-detail-content {
     margin-bottom: 40px;
 }
 
-.artist-detail-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 30px;
-    padding: 6px;
-
-    background: var(--white-a06);
-    border-radius: 20px;
-    border: 1px solid var(--white-a10);
-}
-
-.artist-tab {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 14px 24px;
-    font-size: 14px;
-    font-weight: 600;
-    font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-
-    background: transparent;
-    color: var(--white-a60);
-    border: none;
-    border-radius: var(--radius-xl);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    outline: none;
-}
-
-.artist-tab.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(24, 156, 71, 0.15) 100%);
-    color: rgba(var(--accent-rgb), 1.0);
-    box-shadow:
-        0 4px 12px rgba(var(--accent-rgb), 0.2),
-        inset 0 1px 0 var(--white-a10);
-}
-
-.artist-tab:not(.active):hover {
-    background: var(--white-a08);
-    color: var(--white-a80);
-    transform: translateY(-1px);
-}
-
 .tab-icon {
     font-size: 16px;
-}
-
-.artist-detail-discography {
-    min-height: 400px;
 }
 
 .tab-content {
@@ -25834,10 +25338,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         gap: 20px;
     }
 
-    .artist-detail-info {
-        width: 100%;
-    }
-
     .artist-detail-name {
         font-size: 24px;
     }
@@ -25846,11 +25346,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .singles-cards-container {
         grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
         gap: 16px;
-    }
-
-    .artist-detail-tabs {
-        overflow-x: auto;
-        padding-bottom: 5px;
     }
 }
 
@@ -26080,20 +25575,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: modalFadeIn 0.4s ease-out;
 }
 
-.artist-download-modal-header {
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    /* Enhanced gradient with subtle transparency and glow */
-    background: linear-gradient(135deg,
-            rgba(45, 45, 45, 0.8) 0%,
-            rgba(26, 26, 26, 0.9) 100%);
-    border-bottom: 1px solid var(--white-a08);
-    /* Subtle inner glow */
-    box-shadow: inset 0 1px 0 var(--white-a10);
-}
-
 /* Artist Modal Hero Section */
 .artist-download-modal-hero {
     display: flex;
@@ -26219,23 +25700,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 500;
     margin: 0;
     opacity: 0.9;
-}
-
-.artist-download-modal-header-actions {
-    position: relative;
-    z-index: 3;
-    padding: 16px 24px 0 0;
-    display: flex;
-    justify-content: flex-end;
-}
-
-.artist-download-modal-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.95);
-    margin: 0;
-    flex: 1;
-    font-family: "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .artist-download-modal-close {
@@ -26929,13 +26393,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     opacity: 0.7;
     pointer-events: none;
     cursor: wait;
-}
-
-.library-watchlist-all-btn.all-added {
-    background: rgba(var(--accent-rgb), 0.2);
-    border-color: rgba(var(--accent-rgb), 0.5);
-    color: #fff;
-    pointer-events: none;
 }
 
 .library-watchlist-all-btn .watchlist-all-icon {
@@ -27701,12 +27158,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-wrap: wrap;
 }
 
-.artist-stat {
-    color: #b3b3b3;
-    font-size: 14px;
-    font-weight: 500;
-}
-
 /* Artist Detail Content */
 .artist-detail-content {
     flex: 1;
@@ -27858,19 +27309,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 12px;
     font-weight: 500;
     text-transform: capitalize;
-}
-
-.artist-summary-stats {
-    display: flex;
-    gap: 40px;
-    flex-wrap: wrap;
-}
-
-.summary-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
 }
 
 .stat-number {
@@ -28195,11 +27633,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
         font-size: 36px;
         white-space: normal;
         text-align: center;
-    }
-
-    .artist-summary-stats {
-        justify-content: center;
-        gap: 30px;
     }
 
     .section-header {
@@ -28943,21 +28376,6 @@ div.artist-hero-badge {
     height: 80px;
 }
 
-.add-to-wishlist-modal-hero-icon {
-    width: 80px;
-    height: 80px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 36px;
-    border-radius: var(--radius-lg);
-    background: linear-gradient(135deg,
-            var(--white-a10) 0%,
-            var(--white-a05) 100%);
-    border: 1px solid var(--white-a10);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
 .add-to-wishlist-modal-hero-metadata {
     flex: 1;
     display: flex;
@@ -29358,13 +28776,6 @@ div.artist-hero-badge {
     .add-to-wishlist-modal-hero-image.artist {
         width: 60px;
         height: 60px;
-    }
-
-    .add-to-wishlist-modal-hero-icon {
-        width: 60px;
-        height: 60px;
-        font-size: 28px;
-        margin: 0 auto;
     }
 
     .add-to-wishlist-modal-hero-title {
@@ -33284,26 +32695,9 @@ div.artist-hero-badge {
    Retag Tool Modal Styles
    ==================================== */
 
-.retag-modal-overlay,
-.retag-search-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(18, 18, 18, 0.85);
-    backdrop-filter: blur(12px);
-    z-index: 10001;
-    align-items: center;
-    justify-content: center;
-}
-
-.retag-search-overlay {
-    z-index: 10002;
-}
-
-/* Main modal — fullscreen glassmorphic */
+/* Main modal — fullscreen glassmorphic. The modal markup is gone, but
+   css-class-refs.mjs keeps this one live: settings.js builds
+   `${name}-container` ids and 'retag-modal' is a token in wishlist-tools.js. */
 .retag-modal-container {
     background: linear-gradient(135deg,
             rgba(20, 20, 20, 0.95) 0%,
@@ -33335,23 +32729,11 @@ div.artist-hero-badge {
     flex-shrink: 0;
 }
 
-.retag-modal-header-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
 .retag-modal-title {
     font-size: 22px;
     font-weight: 700;
     color: #fff;
     margin: 0;
-}
-
-.retag-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .retag-clear-all-btn {
@@ -33369,21 +32751,6 @@ div.artist-hero-badge {
 .retag-clear-all-btn:hover {
     background: rgba(255, 59, 48, 0.15);
     border-color: rgba(255, 59, 48, 0.5);
-}
-
-.retag-modal-close {
-    background: none;
-    border: none;
-    color: #b3b3b3;
-    font-size: 28px;
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    transition: color 0.2s;
-}
-
-.retag-modal-close:hover {
-    color: #fff;
 }
 
 .retag-modal-body {
@@ -33418,23 +32785,6 @@ div.artist-hero-badge {
     font-size: 13px;
     font-weight: 600;
     color: var(--white-a80);
-}
-
-.retag-batch-remove-btn {
-    background: none;
-    border: 1px solid rgba(255, 59, 48, 0.4);
-    color: #ff6b6b;
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.retag-batch-remove-btn:hover {
-    background: rgba(255, 59, 48, 0.2);
-    border-color: rgba(255, 59, 48, 0.6);
 }
 
 /* Artist sections */
@@ -33695,58 +33045,6 @@ div.artist-hero-badge {
     padding: 10px 0;
     text-align: center;
     margin: 0;
-}
-
-/* Search sub-modal — glassmorphic */
-.retag-search-container {
-    background: linear-gradient(135deg,
-            rgba(20, 20, 20, 0.95) 0%,
-            rgba(12, 12, 12, 0.98) 100%);
-    backdrop-filter: blur(20px) saturate(1.2);
-    border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a12);
-    max-width: 650px;
-    width: 90%;
-    max-height: 80vh;
-    max-height: 80dvh;
-    display: flex;
-    flex-direction: column;
-    box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.6),
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 0 30px rgba(var(--accent-rgb), 0.08);
-    overflow: hidden;
-}
-
-.retag-search-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--white-a08);
-    flex-shrink: 0;
-}
-
-.retag-search-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: #fff;
-    margin: 0;
-}
-
-.retag-search-close {
-    background: none;
-    border: none;
-    color: #b3b3b3;
-    font-size: 24px;
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    transition: color 0.2s;
-}
-
-.retag-search-close:hover {
-    color: #fff;
 }
 
 .retag-search-input-section {
@@ -63579,11 +62877,6 @@ body.max-performance #page-particles-canvas {
     transition: opacity 0.3s;
 }
 
-.watchlist-page-scan-status:has(.watchlist-live-activity[style*="flex"])::before {
-    opacity: 1;
-    animation: scanPulse 2s ease-in-out infinite;
-}
-
 @keyframes scanPulse {
     0%, 100% { opacity: 0.5; }
     50% { opacity: 1; }
@@ -75782,8 +75075,6 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
     background: var(--white-a08); border: 1px solid var(--white-a10);
     border-radius: 5px; padding: 1px 6px;
 }
-.chat-msg-text .chat-link { color: #58a6ff; word-break: break-all; }
-.chat-msg-text .chat-link:hover { text-decoration: underline; }
 .chat-quote {
     display: inline-block; border-left: 3px solid rgba(var(--accent-rgb), 0.6);
     padding-left: 10px; color: var(--white-a60); font-style: italic;
@@ -75981,9 +75272,6 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
 .chat-settings-label { display: flex; flex-direction: column; gap: 6px;
     font-size: 12.5px; font-weight: 600; color: var(--white-a75); }
 .chat-settings-hint { font-size: 11px; font-weight: 500; color: var(--white-a40); }
-.chat-settings-check { display: flex; align-items: center; gap: 9px;
-    font-size: 13px; color: var(--white-a80); cursor: pointer; }
-.chat-settings-check input { accent-color: rgb(var(--accent-rgb)); width: 15px; height: 15px; }
 .chat-settings-actions {
     margin-top: 18px;
     padding: 14px 24px 18px;
