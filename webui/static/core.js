@@ -675,7 +675,7 @@ function showWitnessMeDialog(orphanCount) {
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
 
         overlay.innerHTML = `
-            <div style="background:var(--bg-secondary, #1e1e2e);border:2px solid #e74c3c;border-radius:12px;padding:28px;max-width:480px;width:90%;color:var(--text-primary);font-family:inherit;">
+            <div style="background:var(--bg-secondary);border:2px solid #e74c3c;border-radius:12px;padding:28px;max-width:480px;width:90%;color:var(--text-primary);font-family:inherit;">
                 <h3 style="margin:0 0 8px;color:#e74c3c;font-size:1.2em;">Mass Deletion Warning</h3>
                 <p style="margin:0 0 12px;font-size:0.95em;opacity:0.9;">
                     You are about to <strong>permanently delete ${orphanCount.toLocaleString()} files</strong> from your disk.

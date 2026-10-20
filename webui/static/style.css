@@ -4427,7 +4427,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
    would have left the tiles too narrow to read.
 
    The column is --settings-max-width wide now, so the trade is gone: the tiles
-   keep about 1070px, which is wider than the whole column used to be. Hanging
+   keep about 830px, nearly the whole width the column used to be. Hanging
    outside had also started to LOOK wrong once the settings card grew a visible
    border, because the panel was sitting past it with nothing behind it. */
 .qp-layout {
@@ -7007,9 +7007,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 
     /* Deliberately nothing here. The settings width is set by
-       --settings-max-width on the layout override further down; a cap at this
-       level is overridden by its `max-width: 100% !important` and only looks
-       like it works. */
+       --settings-max-width on #settings-page .settings-content in
+       settings-premier.css; a cap at this level only looks like it works. */
 }
 
 /* ===== VERSION MODAL STYLES ===== */
@@ -21239,10 +21238,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
             rgba(138, 43, 226, 0.35) 50%,
             rgba(255, 20, 147, 0.35) 100%);
     background-size: 200% 200%;
-    animation: gradientShift 8s ease infinite;
     z-index: 0;
-    opacity: 0;
-    animation: fadeInRow 1s ease-out forwards, gradientShift 8s ease infinite;
+    /* the resting opacity is the fade's end value, so Max Performance (which
+       kills animations) still shows the gradient */
+    opacity: 0.7;
+    animation: fadeInRow 1s ease-out both, gradientShift 8s ease infinite;
 }
 
 @keyframes gradientShift {
@@ -48519,7 +48519,7 @@ tr.tag-diff-same {
     top: 100%;
     right: 0;
     margin-top: 4px;
-    background: #1e1e2e;
+    background: var(--bg-secondary);
     border: 1px solid var(--white-a10);
     border-radius: 10px;
     padding: 4px;
@@ -53488,9 +53488,9 @@ tr.tag-diff-same {
 
 /* ── Settings page layout override — transform old layout ── */
 
-/* One number for the whole page: --settings-max-width (tokens.css). The nav
-   row and the columns MUST agree or the tabs and the content below them line
-   up differently. */
+/* One number for the whole page: --settings-max-width (tokens.css) caps
+   .settings-content in settings-premier.css. The nav row and the columns fill
+   it rather than carrying caps of their own, so they always agree. */
 
 /* Center everything in a single column */
 #settings-page .settings-content {
@@ -53502,12 +53502,6 @@ tr.tag-diff-same {
 /* Tab bar + save action sit on one control row. */
 #settings-page .settings-nav-row {
     width: 100%;
-    /* Was 920px. That is what actually set the page width — the earlier
-       .settings-content cap never applied (settings-premier.css sets its
-       max-width with !important), so the page caps the CHILDREN instead.
-       920px also made the tab bar wrap: the tabs fit fine, the row they sit
-       in did not. */
-    max-width: var(--settings-max-width);
     margin: 0 auto 28px;
 }
 
@@ -53536,24 +53530,8 @@ tr.tag-diff-same {
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
-    /* settings-premier.css overrides this with max-width: none !important.
-       It stays because test_the_page_width_is_one_number pins it. */
-    max-width: var(--settings-max-width);
     margin-bottom: 0;
 }
-/* The Logs tab uses the full available width — the log terminal benefits from
-   the extra horizontal space (other tabs stay at the readable 920px). Matches
-   only while the logs group is the visible one (switchSettingsTab clears its
-   inline display when active, sets display:none otherwise). */
-#settings-page .settings-columns:has(> .settings-group[data-stg="logs"]:not([style*="none"])) {
-    max-width: 100%;
-}
-/* Sources is a grid, not a form — it uses width the way the log terminal does,
-   fitting more tiles per row instead of stretching text fields. */
-#settings-page .settings-columns:has(> .settings-group[data-stg="sources"]:not([style*="none"])) {
-    max-width: 100%;
-}
-
 #settings-page .settings-group[data-stg="logs"] {
     width: 100%;
     max-width: 100%;
@@ -70574,15 +70552,15 @@ body.max-performance {
 
 /* Server Activity — click-through to the SoulSync detail page */
 .sact-card--link { cursor: pointer; }
-.sact-card--link .sact-title { color: rgb(var(--vd-accent-rgb, 88 101 242)); }
+.sact-card--link .sact-title { color: rgb(var(--vd-accent-rgb, 88, 101, 242)); }
 .sact-card--link:hover .sact-title { filter: brightness(1.25); }
 /* a PERSISTENT 'Open' pill so it's obviously clickable (was hover-only, easy to miss) */
 .sact-open { display: inline-flex; align-items: center; margin-left: 8px; font-size: 9.5px; font-weight: 800;
-    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vd-accent-rgb, 88 101 242));
-    background: rgba(var(--vd-accent-rgb, 88 101 242), 0.16); padding: 2px 7px; border-radius: var(--radius-sm);
+    letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vd-accent-rgb, 88, 101, 242));
+    background: rgba(var(--vd-accent-rgb, 88, 101, 242), 0.16); padding: 2px 7px; border-radius: var(--radius-sm);
     vertical-align: 2px; transition: all 0.15s ease; }
 .sact-open::after { content: 'Open ↗'; }
-.sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88 101 242), 0.3); }
+.sact-card--link:hover .sact-open { background: rgba(var(--vd-accent-rgb, 88, 101, 242), 0.3); }
 
 /* ── Artist photo picker (hover overlay on the artist-detail hero image) ─── */
 /* Mirrors .enhanced-art-edit-overlay: invisible until hover, click opens the
@@ -77624,22 +77602,6 @@ body.src-modal-open { overflow: hidden; }
     .svc-glyph { font-size: 1.05rem; }
     .svc-monogram { font-size: 1rem; }
 
-    /* Server toggles had NO narrow-screen rules at all: four capped-at-176px
-       buttons in a flex row do not fit a 360px screen, and the row scrolled
-       sideways or squeezed the logos into slivers. Two per line, and the logo
-       cap comes down with them. */
-    #settings-page .settings-group[data-svc-side] .server-toggle-container {
-        gap: 8px;
-    }
-    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
-        flex: 1 1 calc(50% - 4px);
-        max-width: none;
-        min-height: 66px;
-        padding: 10px 12px;
-    }
-    #settings-page .settings-group[data-svc-side] .server-logo {
-        max-height: 30px;
-    }
     /* label above control, so a URL field is not 60px wide next to its label */
     #settings-page .settings-group[data-svc-side] .form-group > select,
     #settings-page .settings-group[data-svc-side] .form-group > input {
@@ -77725,6 +77687,23 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .settings-group[data-svc-side] .server-toggle-btn.active {
     box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45),
                 0 0 20px -8px rgba(var(--accent-rgb), 0.6);
+}
+/* Phones: four capped-at-176px buttons in a flex row do not fit a 360px
+   screen, so the row scrolled sideways or squeezed the logos into slivers. Two
+   per line, and the logo cap comes down with them. This has to come after the
+   base rules above, which have the same specificity. The logo cap goes through
+   the token because video-side.css loads last and reads it for the video half. */
+@media (max-width: 560px) {
+    #settings-page .settings-group[data-svc-side] .server-toggle-container {
+        --svc-server-logo-max: 30px;
+        gap: 8px;
+    }
+    #settings-page .settings-group[data-svc-side] .server-toggle-btn {
+        flex: 1 1 calc(50% - 4px);
+        max-width: none;
+        min-height: 66px;
+        padding: 10px 12px;
+    }
 }
 
 /* Rows inside a server section follow the page's grammar: one setting per row,

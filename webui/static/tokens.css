@@ -75,6 +75,9 @@
     --text-secondary: #9aa0aa;
     --text-muted: var(--text-3);
     --bg-primary: #0b0b0f;
+    /* Solid raised panel (dialogs, menus). Read for a long time with this value
+       as its fallback before anything defined it. */
+    --bg-secondary: #1e1e2e;
 
     /* ── Status ─────────────────────────────────────────────────────── */
     --danger-rgb: 239, 68, 68;
@@ -116,9 +119,10 @@
     --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* ── Layout ─────────────────────────────────────────────────────── */
-    /* One number for the whole settings page. The nav row and the columns
-       MUST agree or the tabs and the content below them line up differently. */
-    --settings-max-width: 1400px;
+    /* One number for the whole settings page: the cap on #settings-page
+       .settings-content (settings-premier.css). The nav row and the columns
+       fill it, so the tabs and the content below them always line up. */
+    --settings-max-width: 1240px;
 }
 
 /* ── Shared keyframes ─────────────────────────────────────────────────
