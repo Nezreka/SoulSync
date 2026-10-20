@@ -8,7 +8,12 @@ import { ProviderReleaseId } from '@/components/provider-reference/provider-refe
 import { RecordInspector } from '@/components/record-inspector/record-inspector';
 import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
 
-import type { AlbumAssignment, ReviewCase, ReviewFinding } from '../-review.api';
+import type {
+  AlbumAssignment,
+  AlbumReconciliationPlan,
+  ReviewCase,
+  ReviewFinding,
+} from '../-review.api';
 
 import { ReviewArtwork } from './review-artwork';
 import { ReviewAudio } from './review-audio';
@@ -26,6 +31,7 @@ import {
 } from './review-presentation';
 
 type Data = Record<string, unknown>;
+export type ReleaseEvidence = NonNullable<AlbumReconciliationPlan['candidates']>[number];
 type Tone = 'good' | 'warning' | 'danger' | 'info' | 'muted';
 type IconName = 'check' | 'warning' | 'x' | 'audio' | 'disc' | 'info' | 'arrow';
 
@@ -852,7 +858,15 @@ function CheckedFiles({ details }: { details: Data }) {
   );
 }
 
-function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>; details: Data }) {
+function Facts({
+  finding,
+  details,
+  release,
+}: {
+  finding: Pick<ReviewFinding, 'file_path'>;
+  details: Data;
+  release?: ReleaseEvidence;
+}) {
   const [recordOpen, setRecordOpen] = useState(false);
   const tags = object(details.current_tags);
   const currentTitle = label(tags.title || details.current_title);
@@ -861,6 +875,14 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
   const currentDisambiguation = label(details.current_recording_disambiguation);
   const expectedDisambiguation = label(details.expected_recording_disambiguation);
   const folder = label(details.album_folder);
+  // The local display album can intentionally differ from the selected edition.
+  // Never borrow details from an inspected or stale candidate with another ID.
+  const selected =
+    release?.source === details.source && release?.release_id === details.release_id
+      ? release
+      : undefined;
+  const releaseTitle = selected ? selected.release_title : label(details.release_title);
+  const edition = selected ? selected.disambiguation : label(details.release_disambiguation);
   return (
     <div className={styles.evidenceColumns}>
       <section className={styles.technicalCard}>
@@ -957,16 +979,16 @@ function Facts({ finding, details }: { finding: Pick<ReviewFinding, 'file_path'>
               <dd>{formatDuration(details.expected_duration_ms || replacement.duration_ms)}</dd>
             </div>
           )}
-          {Boolean(details.album_title) && (
+          {Boolean(releaseTitle) && (
             <div>
               <dt>Album</dt>
-              <dd>{label(details.album_title)}</dd>
+              <dd>{releaseTitle}</dd>
             </div>
           )}
-          {Boolean(details.release_disambiguation) && (
+          {Boolean(edition) && (
             <div>
               <dt>Edition</dt>
-              <dd>{label(details.release_disambiguation)}</dd>
+              <dd>{edition}</dd>
             </div>
           )}
           {Boolean(details.expected_artist || replacement.artist || details.artist_name) && (
@@ -1034,12 +1056,19 @@ export function AssignmentEvidence({
     file_duration_ms: row.file_duration_ms,
     expected_duration_ms: row.slot_duration_ms,
     album_folder: row.file_path?.split('/').slice(0, -1).join('/') || album.folder,
-    album_title: album.album,
     expected_artist: row.slot_artist,
     source: album.album_plan?.source,
     release_id: album.album_plan?.release_id,
     acoustid: row.acoustid,
   };
+  const release = album.album_plan?.candidates?.find(
+    (candidate) =>
+      candidate.source === details.source && candidate.release_id === details.release_id,
+  );
+  const needsReview =
+    !row.planned_choice &&
+    row.review_state !== 'reviewed' &&
+    !['confirmed', 'settled', 'not_owned', 'missing'].includes(row.status);
   return (
     <section className={styles.findingDetail}>
       <h3>{row.current_title || row.slot_title || 'Track assignment'}</h3>
@@ -1069,7 +1098,22 @@ export function AssignmentEvidence({
                 ? 'You previously reviewed this assignment.'
                 : row.preview_reason || 'This assignment needs review.'}
       </p>
-      {controls}
+      {needsReview && Boolean(row.ambiguity_reasons?.length) && (
+        <section
+          className={styles.problemCard}
+          data-tone="warning"
+          aria-label="Why this needs review"
+        >
+          <h4>
+            <EvidenceIcon name="warning" /> Why this needs review
+          </h4>
+          <ul>
+            {row.ambiguity_reasons?.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </section>
+      )}
       {row.audio_conflict === 'different_recording' && (
         <p className={styles.error}>
           This file’s tags suggest it belongs on this album, but its fingerprint identifies
@@ -1077,6 +1121,7 @@ export function AssignmentEvidence({
           to handle it.
         </p>
       )}
+      {controls}
       <ReviewAudio
         localPath={row.file_path || ''}
         localTitle={row.current_title || ''}
@@ -1086,7 +1131,7 @@ export function AssignmentEvidence({
         previewUrl={row.slot_preview_url || ''}
         previewSource={album.album_plan?.source || ''}
       />
-      <Facts finding={{ file_path: row.file_path || null }} details={details} />
+      <Facts finding={{ file_path: row.file_path || null }} details={details} release={release} />
       {row.acoustid && <AudioEvidence details={details} />}
       {Boolean(row.reasons?.length) && (
         <section className={styles.technicalCard}>
@@ -1105,6 +1150,7 @@ export function ReconciliationEvidence({
   prominent = false,
   controls,
   audio: audioControl,
+  release,
 }: {
   finding: ReviewFinding;
   onKeepCopy?: (trackId: string) => void;
@@ -1112,6 +1158,7 @@ export function ReconciliationEvidence({
   prominent?: boolean;
   controls?: ReactNode;
   audio?: ReactNode;
+  release?: ReleaseEvidence;
 }) {
   const details = object(finding.details);
   const changes = object(details.changes);
@@ -1165,10 +1212,6 @@ export function ReconciliationEvidence({
         ]),
     ).values(),
   ];
-  const localDuration = count(details.file_duration_ms || object(details.current_tags).duration_ms);
-  const expectedDuration = count(details.expected_duration_ms);
-  const durationDelta =
-    localDuration && expectedDuration ? Math.abs(localDuration - expectedDuration) : 0;
   const expectedTitle = label(
     details.expected_title ||
       object(details.replacement_track).title ||
@@ -1225,63 +1268,16 @@ export function ReconciliationEvidence({
             )}
         </section>
       )}
-      {primaryPairs.length > 0 && (
-        <section className={styles.trackSection}>
-          <div className={styles.sectionHeading}>
-            <h4>Track matching</h4>
-            <span>Best fitting release</span>
-          </div>
-          <TrackGroups pairs={primaryPairs} />
-        </section>
-      )}
-      {Object.keys(changes).length > 0 && (
-        <section className={styles.changesCard}>
-          <h4>
-            <EvidenceIcon name="check" /> Proposed changes
-          </h4>
-          <MetadataComparison
-            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierAdditions)}
-          />
-          {visibleChanges.length > 0 && identifierAdditions.length > 0 && (
-            <details className={styles.identifierChanges}>
-              <summary>
-                Add {identifierAdditions.length} missing identifier
-                {identifierAdditions.length === 1 ? '' : 's'}
-              </summary>
-              <MetadataComparison rows={comparisonRows(identifierAdditions)} />
-            </details>
-          )}
-        </section>
-      )}
-      {controls}
-      {audioControl}
-      <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
-      {objects(details.tool_checks).length > 0 && (
-        <details className={styles.identifierChanges}>
-          <summary>Other maintenance checks ({objects(details.tool_checks).length})</summary>
-          <ul>
-            {objects(details.tool_checks).map((check) => (
-              <li key={label(check.id)}>
-                <strong>{label(check.title)}</strong>
-                <p>{label(check.reason)}</p>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       {ambiguityReasons.length > 0 && (
         <section className={styles.problemCard} data-tone="warning">
           <h4>
             <EvidenceIcon name="warning" /> Why this needs review
           </h4>
-          {durationDelta > 3000 && (
-            <p>
-              <strong>Length mismatch:</strong> {formatDuration(localDuration)} local versus{' '}
-              {formatDuration(expectedDuration)} on the release ({(durationDelta / 1000).toFixed(1)}{' '}
-              seconds apart).
-            </p>
-          )}
-          <p>{ambiguityReasons.join(' · ')}</p>
+          <ul>
+            {ambiguityReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
           {competingAudioIdentities.length > 0 && (
             <div className={styles.competingIdentities}>
               <strong>Other recordings linked to this fingerprint</strong>
@@ -1327,20 +1323,64 @@ export function ReconciliationEvidence({
             </ul>
           </section>
         )}
+      {prominent && label(audio.status) === 'ok' && expectedTitle && !audioSupportsExpected && (
+        <section className={styles.problemCard} data-tone="warning">
+          <h4>
+            <EvidenceIcon name="warning" /> No AcoustID candidate names this release track
+          </h4>
+          <p>
+            The fingerprint returned other recording identities. Compare the audio before choosing
+            this assignment.
+          </p>
+        </section>
+      )}
+      {primaryPairs.length > 0 && (
+        <section className={styles.trackSection}>
+          <div className={styles.sectionHeading}>
+            <h4>Track matching</h4>
+            <span>Best fitting release</span>
+          </div>
+          <TrackGroups pairs={primaryPairs} />
+        </section>
+      )}
+      {Object.keys(changes).length > 0 && (
+        <section className={styles.changesCard}>
+          <h4>
+            <EvidenceIcon name="check" /> Proposed changes
+          </h4>
+          <MetadataComparison
+            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierAdditions)}
+          />
+          {visibleChanges.length > 0 && identifierAdditions.length > 0 && (
+            <details className={styles.identifierChanges}>
+              <summary>
+                Add {identifierAdditions.length} missing identifier
+                {identifierAdditions.length === 1 ? '' : 's'}
+              </summary>
+              <MetadataComparison rows={comparisonRows(identifierAdditions)} />
+            </details>
+          )}
+        </section>
+      )}
+      <DuplicateCopies details={details} onKeepCopy={onKeepCopy} busy={busy} />
+      {controls}
+      {audioControl}
+      {objects(details.tool_checks).length > 0 && (
+        <details className={styles.identifierChanges}>
+          <summary>Other maintenance checks ({objects(details.tool_checks).length})</summary>
+          <ul>
+            {objects(details.tool_checks).map((check) => (
+              <li key={label(check.id)}>
+                <strong>{label(check.title)}</strong>
+                <p>{label(check.reason)}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       {prominent && (
         <div className={styles.prominentEvidence}>
-          {label(audio.status) === 'ok' && expectedTitle && !audioSupportsExpected && (
-            <section className={styles.problemCard} data-tone="warning">
-              <h4>
-                <EvidenceIcon name="warning" /> No AcoustID candidate names this release track
-              </h4>
-              <p>
-                The fingerprint returned other recording identities. Compare the audio before
-                choosing this assignment.
-              </p>
-            </section>
-          )}
-          <Facts finding={finding} details={details} />
+          <Facts finding={finding} details={details} release={release} />
           <AudioEvidence details={details} />
         </div>
       )}
@@ -1353,7 +1393,7 @@ export function ReconciliationEvidence({
       )}
       {(!prominent || objects(details.checked_files).length > 0) && (
         <div className={styles.technicalGrid}>
-          {!prominent && <Facts finding={finding} details={details} />}
+          {!prominent && <Facts finding={finding} details={details} release={release} />}
           {!prominent && <AudioEvidence details={details} />}
           <CheckedFiles details={details} />
           {!prominent && reasons.length > 0 && (

@@ -1,5 +1,90 @@
 # UI reuse and consistency implementation
 
+## Stage 2 recovery — authorized 2026-10-20
+
+Baseline: `c836973fe` (application code deployed as `6f42d601ba6e`).
+Stage 1 is complete; the user now authorizes Stage 2. Preserve its matching,
+inventory, saved-choice authority, readiness, and signed-apply behavior.
+
+### Acceptance checklist
+
+- [x] T1. Explain the actual unresolved issue before acceptance controls and
+  playback. Show the proposed result before technical evidence. Cover ambiguous
+  audio, conflicting versions, metadata, duplicates, blocked previews and
+  missing tracks without inventing stronger evidence.
+- [x] T2. Keep current/planned values comparable at ordinary inspector widths;
+  preserve strikethrough, direction, add/remove labels, full values and copy
+  controls. Verify the shared component's Library consumer as well as Review.
+- [x] T3. Ready albums have one primary apply area and one field summary.
+  Completed prerequisites and supporting context do not overshadow outstanding
+  choices. Preserve editing saved choices and access to individual changes.
+- [x] T4. Reduce header/control overhead and fix internal clipping. Phone and
+  tablet users can browse/filter/page the queue without a permanently expanded
+  album browser above their task. Preserve keyboard focus, navigation, filter
+  state, and returning from track details.
+- [x] T5. Selection remains recognizable independently of green success and
+  amber/red severity. Improve heading/body hierarchy and useful information
+  density using existing controls/tokens, retaining semantic track colors.
+- [x] T6. Album-wide release/completeness/numbering choices explain the proposed
+  outcome and dependencies. Missing-track selection, duplicates, pending file
+  actions, waiting/cancelled requests and manual assignment remain reachable.
+- [x] T7. Selected-release evidence uses the exact matching source/release ID,
+  title and edition metadata. Local identity stays local. Missing catalogue
+  metadata is honestly absent, never borrowed from a different candidate.
+- [ ] T8. Maintain durable Review visual fixtures and behavioral/layout checks,
+  compare identical data before/after at desktop/tablet/phone widths, inspect
+  screenshots, run affected tests/check/build, deploy and inspect the live UI.
+  No live repairs are applied merely for testing.
+
+Measurements and results will be recorded here as each item is verified.
+Known baseline issues include a 520px comparison breakpoint that stacks field,
+current, arrow and planned into four rows, giant default inspector headings,
+duplicate ready/field summaries, green selection borders, and a 390px header
+whose nowrap count can clip inside the shared header's overflow boundary.
+
+### Implementation and verification
+
+- T1: ambiguity, competing identities/files and missing-track explanations now
+  precede proposed edits, decisions and playback. Duplicate keeper evidence
+  precedes the generic fallback action. The existing duration warning remains
+  first and is no longer repeated in a second card. The no-named-fingerprint
+  warning retains its original applicability; no evidence threshold changed.
+- T2: comparisons keep current → planned columns together, with the field label
+  above at narrow widths. Strikethrough, additions/removals, unchanged values,
+  full text and copy controls remain. On identical captured data, the two-field
+  comparison at an 1800px viewport shrank from 286px to 183px high; at 390px,
+  from 331px to 239px. The Library tag-preview consumer is covered at 1440/390px.
+- T3/T6: ready plans have one apply surface and one field summary. Removed the
+  duplicate completed timeline and ready-summary panel; supporting context still
+  shows release, coverage, scope and numbering. Acquisition status and editing
+  saved choices remain available below the primary task. Group decision headings
+  link to their exact affected tracks, with an explicit inspection cue. Release
+  dependencies are named. A stale ready flag cannot hide visible open decisions.
+- T4/T5: narrower outer gutters/sidebar, consistent 20px inspector headings,
+  compact facts, wrapped header counts, two-column phone actions and a collapsible
+  phone/tablet album browser. Browsing preserves filtering and pagination and
+  restores focus when an album is selected. Mobile track details clear the shell
+  navigation button. Selection uses a neutral outline/inset marker on tracks,
+  albums and release candidates; amber/red/blue/green retain their issue meanings.
+- T7: catalogue title/edition come from the candidate with the exact source AND
+  release ID. Local display titles and embedded album tags remain local; a stale
+  or inspected candidate cannot supply another edition's metadata. The Plan
+  context reuses release badges. Missing catalogue fields stay absent.
+- T8 local gates: 167 focused UI tests; 94 backend queue/group tests; 14 browser
+  workflow/layout checks including 1800/1280/768/390/320px; production build and
+  check with zero errors and the same 485 existing warnings. Ten identical-data
+  before/after capture scenarios cover Stone Sour, Split Chain, SOUR and Trilogy.
+  Eleven pinned-container visual baselines cover Review and Library tag previews.
+  Final screenshot comparison and deployment verification are recorded below.
+
+Corrections during verification: the first ready-card draft inherited unwanted
+blue button chrome, and hiding the completed decision board would have hidden
+acquisition status on a ready album. Both were corrected before deployment.
+Repeated numbering summaries and green candidate-selection backgrounds were
+also caught in visual inspection and removed. Settled/saved assignments do not
+revive an old ambiguity as a new review warning. Matcher, persistence and signed
+apply code remain unchanged.
+
 ## Recovery assessment and Stage 1 — 2026-10-20
 
 The user accepted the historical reassessment and authorized **Stage 1 only**.

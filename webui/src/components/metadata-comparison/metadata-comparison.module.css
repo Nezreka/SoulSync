@@ -12,7 +12,7 @@
 .comparison td {
   text-align: left;
   vertical-align: top;
-  padding: 10px;
+  padding: 8px;
   overflow-wrap: anywhere;
   border-bottom: 1px solid var(--line);
 }
@@ -43,18 +43,20 @@
   color: var(--text-2);
   font-size: 12px;
 }
-@container (max-width:520px) {
+/* Keep old and new values together even in a narrow track inspector. */
+@container (max-width: 520px) {
   .comparison thead {
     display: none;
   }
   .comparison tr {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    padding-block: 8px;
+    grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+    padding-block: 6px;
     border-bottom: 1px solid var(--line);
   }
   .comparison th:first-child {
     width: auto;
+    grid-column: 1 / -1;
   }
   .comparison th,
   .comparison td {
@@ -90,11 +92,10 @@
 .comparison tr[data-changed='false'] .direction {
   color: var(--text-2);
 }
-@container (max-width:520px) {
+@container (max-width: 520px) {
   .comparison .direction {
     width: auto;
-    text-align: left;
-    padding: 0 8px;
+    padding: 25px 0 6px;
   }
   .comparison .direction::before {
     content: none;

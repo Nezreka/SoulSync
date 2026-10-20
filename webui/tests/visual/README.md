@@ -9,6 +9,14 @@ see [Refreshing the baselines without Docker](#refreshing-the-baselines-without-
 
 They cover the main routes, overlays and states.
 
+Review has its own `review.visual.spec.ts`: ready plans, uncertain track evidence
+and release comparison at 1800, 768 and 390 pixels. It also exercises the shared
+metadata comparison in Library's tag preview on desktop and phone.
+`tests/review-layout.spec.ts` checks layout and navigation behavior down to 320
+pixels; `tests/review-recommendations.spec.ts` protects visible identity effects
+and manual-versus-ready presentation. These use the production build and local
+API fixtures, without applying library changes.
+
 ```sh
 npm run test:visual          # build, then compare every shot with its baseline
 npm run test:visual:update   # build, then rewrite the baselines

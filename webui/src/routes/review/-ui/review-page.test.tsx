@@ -787,7 +787,7 @@ describe('library reconciliation review queue', () => {
 
     expect((await screen.findAllByText('Various Artists → Lamb of God')).length).toBeGreaterThan(0);
     expect(screen.getByText('Plan ready to apply · 1 action')).toBeTruthy();
-    expect(screen.getByText(/All required decisions are complete/)).toBeVisible();
+    expect(screen.getByText(/All required decisions are planned/)).toBeVisible();
     expect(
       screen.queryByText(
         /passed the album and audio checks|supported by the album and audio evidence/,
@@ -916,6 +916,8 @@ describe('library reconciliation review queue', () => {
       await screen.findByText('Choose whether this folder represents the complete album')
     ).closest('section');
     const safeChanges = screen.getByLabelText('Independent safe changes');
+    // Even a contradictory/stale ready flag must not hide outstanding choices.
+    expect(screen.queryByRole('button', { name: 'Apply 1 ready change' })).toBeNull();
     expect(choices).not.toBeNull();
     expect(
       choices!.compareDocumentPosition(safeChanges) & Node.DOCUMENT_POSITION_FOLLOWING,

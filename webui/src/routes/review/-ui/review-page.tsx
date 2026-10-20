@@ -6,6 +6,7 @@ import { Button, Select, TextInput } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
 import { Notice } from '@/components/primitives';
 import { ProviderReleaseId } from '@/components/provider-reference/provider-reference';
+import { ReleaseBadges } from '@/components/release-metadata/release-metadata';
 
 import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
@@ -174,6 +175,8 @@ export function ReviewPage() {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialMode = initialParams.get('mode');
   const [queue, setQueue] = useState<ReviewQueuePage | null>(null);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const queueToggleRef = useRef<HTMLButtonElement | null>(null);
   const caseListRef = useRef<HTMLDivElement | null>(null);
   const caseRequestVersion = useRef(0);
   const [queueTotals, setQueueTotals] = useState<ReviewQueueModeTotals | null>(null);
@@ -423,6 +426,7 @@ export function ReviewPage() {
     decisionMembers,
     releaseOrderedAssignments,
   } = albumModel;
+  const albumReady = plan.can_apply_ready && reviewDecisions.length === 0;
   const sourceFolders = useMemo(
     () =>
       [
@@ -559,6 +563,9 @@ export function ReviewPage() {
   };
 
   const selectCase = (next: string) => {
+    setQueueExpanded(false);
+    // Keep focus on a visible control when the compact browser closes.
+    if (queueToggleRef.current?.offsetParent) queueToggleRef.current.focus();
     setNotice('');
     setInspectorOpen(false);
     setAlbumView('plan');
@@ -1137,7 +1144,7 @@ export function ReviewPage() {
   };
 
   const readyActionControls =
-    reviewCase && plan.can_apply_ready ? (
+    reviewCase && albumReady ? (
       <div className={styles.inlineActions}>
         <Button
           type="button"
@@ -1224,6 +1231,7 @@ export function ReviewPage() {
       <SelectedActionDetail
         key={active.id}
         finding={active}
+        release={primaryCandidate}
         itemIndex={navigationIndex}
         itemCount={navigationIds.length}
         typeInfo={typeInfo}
@@ -1299,13 +1307,14 @@ export function ReviewPage() {
                   ? `${queueTotals.ready_albums_total} fully decided album${queueTotals.ready_albums_total === 1 ? '' : 's'} · `
                   : ''}
                 {queue
-                  ? `${queueTotals?.ready_total ?? queue.ready_total ?? 0} ready changes across the library`
+                  ? `${queueTotals?.ready_total ?? queue.ready_total ?? 0} ready change${(queueTotals?.ready_total ?? queue.ready_total ?? 0) === 1 ? '' : 's'} across the library`
                   : 'Loading ready changes…'}
               </span>
             </div>
             <Button
               type="button"
               onClick={() => {
+                setQueueExpanded(true);
                 setSearchInput('');
                 setQuery('');
                 setCategory('');
@@ -1425,144 +1434,164 @@ export function ReviewPage() {
 
       <div className={styles.workspace}>
         <aside className={styles.sidebar} aria-label="Reconciliation albums">
-          <nav className={styles.queueModes} aria-label="Queue view">
-            {queueModes.map((mode) => (
-              <Button
-                key={mode.value}
-                type="button"
-                aria-current={queueMode === mode.value ? 'page' : undefined}
-                onClick={() => {
-                  setQueueMode(mode.value);
+          <Button
+            ref={queueToggleRef}
+            className={styles.queueToggle}
+            aria-expanded={queueExpanded}
+            aria-controls="review-album-browser"
+            onClick={() => setQueueExpanded((expanded) => !expanded)}
+          >
+            <span>{queueExpanded ? 'Hide album browser' : 'Browse albums'}</span>
+            <span>
+              {queueModes.find((mode) => mode.value === queueMode)?.label} · {queue?.total ?? '…'}
+              {query || category ? ' · Filtered' : ''}
+            </span>
+          </Button>
+          <div
+            id="review-album-browser"
+            className={styles.queueBrowser}
+            data-expanded={queueExpanded}
+          >
+            <nav className={styles.queueModes} aria-label="Queue view">
+              {queueModes.map((mode) => (
+                <Button
+                  key={mode.value}
+                  type="button"
+                  aria-current={queueMode === mode.value ? 'page' : undefined}
+                  onClick={() => {
+                    setQueueMode(mode.value);
+                    setPage(0);
+                    setCaseId('');
+                  }}
+                >
+                  <span>{mode.label}</span>
+                  <b>{queueTotals?.[mode.value] ?? '—'}</b>
+                </Button>
+              ))}
+            </nav>
+            <label htmlFor="review-search">Find album or track</label>
+            <TextInput
+              id="review-search"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Search findings"
+            />
+            <label className={styles.categoryFilter}>
+              Filter by type
+              <Select
+                value={category}
+                onChange={(event) => {
+                  setCategory(event.target.value);
                   setPage(0);
                   setCaseId('');
                 }}
               >
-                <span>{mode.label}</span>
-                <b>{queueTotals?.[mode.value] ?? '—'}</b>
-              </Button>
-            ))}
-          </nav>
-          <label htmlFor="review-search">Find album or track</label>
-          <TextInput
-            id="review-search"
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search findings"
-          />
-          <label className={styles.categoryFilter}>
-            Filter by type
-            <Select
-              value={category}
-              onChange={(event) => {
-                setCategory(event.target.value);
-                setPage(0);
-                setCaseId('');
-              }}
-            >
-              {categoryOptions.map(([value, label]) => (
-                <option key={value || 'all'} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </label>
-          <div className={styles.caseList} ref={caseListRef} aria-busy={!queue}>
-            {!queue && <p role="status">Loading albums…</p>}
-            {queue?.items.map((item) => (
-              <Button
-                key={item.case_id}
-                type="button"
-                className={item.case_id === caseId ? styles.selectedCase : styles.caseButton}
-                onClick={() => selectCase(item.case_id)}
-              >
-                <ReviewArtwork
-                  title={item.album || 'Unassigned files'}
-                  url={item.album_thumb_url}
-                  size="list"
-                />
-                <span className={styles.caseCopy}>
-                  <strong>{item.album || 'Unassigned files'}</strong>
-                  <span>{item.artist || item.case_id.split(':')[0]}</span>
-                  <small>
-                    {caseStatusSummary(item)}
-                    {item.error_count ? ` · ${item.error_count} failed` : ''}
-                  </small>
-                </span>
-              </Button>
-            ))}
-            {queue && queue.total === 0 && (
-              <div className={styles.queueEmpty}>
-                <strong>No albums in this view</strong>
-                <p>
-                  {category
-                    ? `There are no ${categoryOptions.find(([value]) => value === category)?.[1].toLowerCase() || 'matching'} albums in ${queueModes.find((mode) => mode.value === queueMode)?.label.toLowerCase()}.`
-                    : 'No albums match the current search and queue view.'}
-                </p>
-                {queueMode !== 'all' && (
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setQueueMode('all');
-                      setPage(0);
-                    }}
-                  >
-                    Show all {category ? 'albums of this type' : 'albums'}
-                  </Button>
-                )}
-                {query && (
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setSearchInput('');
-                      setQuery('');
-                    }}
-                  >
-                    Clear search
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className={styles.pagination}>
-            <Button
-              type="button"
-              disabled={page === 0}
-              onClick={() => {
-                setCaseId('');
-                setPage(page - 1);
-              }}
-            >
-              Previous
-            </Button>
-            <span className={styles.paginationCenter}>
-              <span>
-                Page {page + 1} of {pageCount}
-              </span>
-              <Select
-                aria-label="Jump to page"
-                value={page}
-                onChange={(event) => {
-                  setCaseId('');
-                  setPage(Number(event.target.value));
-                }}
-              >
-                {Array.from({ length: pageCount }, (_, index) => (
-                  <option key={index} value={index}>
-                    Page {index + 1}
+                {categoryOptions.map(([value, label]) => (
+                  <option key={value || 'all'} value={value}>
+                    {label}
                   </option>
                 ))}
               </Select>
-            </span>
-            <Button
-              type="button"
-              disabled={!queue || (page + 1) * queue.limit >= queue.total}
-              onClick={() => {
-                setCaseId('');
-                setPage(page + 1);
-              }}
-            >
-              Next
-            </Button>
+            </label>
+            <div className={styles.caseList} ref={caseListRef} aria-busy={!queue}>
+              {!queue && <p role="status">Loading albums…</p>}
+              {queue?.items.map((item) => (
+                <Button
+                  key={item.case_id}
+                  type="button"
+                  className={item.case_id === caseId ? styles.selectedCase : styles.caseButton}
+                  aria-current={item.case_id === caseId ? 'true' : undefined}
+                  onClick={() => selectCase(item.case_id)}
+                >
+                  <ReviewArtwork
+                    title={item.album || 'Unassigned files'}
+                    url={item.album_thumb_url}
+                    size="list"
+                  />
+                  <span className={styles.caseCopy}>
+                    <strong>{item.album || 'Unassigned files'}</strong>
+                    <span>{item.artist || item.case_id.split(':')[0]}</span>
+                    <small>
+                      {caseStatusSummary(item)}
+                      {item.error_count ? ` · ${item.error_count} failed` : ''}
+                    </small>
+                  </span>
+                </Button>
+              ))}
+              {queue && queue.total === 0 && (
+                <div className={styles.queueEmpty}>
+                  <strong>No albums in this view</strong>
+                  <p>
+                    {category
+                      ? `There are no ${categoryOptions.find(([value]) => value === category)?.[1].toLowerCase() || 'matching'} albums in ${queueModes.find((mode) => mode.value === queueMode)?.label.toLowerCase()}.`
+                      : 'No albums match the current search and queue view.'}
+                  </p>
+                  {queueMode !== 'all' && (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setQueueMode('all');
+                        setPage(0);
+                      }}
+                    >
+                      Show all {category ? 'albums of this type' : 'albums'}
+                    </Button>
+                  )}
+                  {query && (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setSearchInput('');
+                        setQuery('');
+                      }}
+                    >
+                      Clear search
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className={styles.pagination}>
+              <Button
+                type="button"
+                disabled={page === 0}
+                onClick={() => {
+                  setCaseId('');
+                  setPage(page - 1);
+                }}
+              >
+                Previous
+              </Button>
+              <span className={styles.paginationCenter}>
+                <span>
+                  Page {page + 1} of {pageCount}
+                </span>
+                <Select
+                  aria-label="Jump to page"
+                  value={page}
+                  onChange={(event) => {
+                    setCaseId('');
+                    setPage(Number(event.target.value));
+                  }}
+                >
+                  {Array.from({ length: pageCount }, (_, index) => (
+                    <option key={index} value={index}>
+                      Page {index + 1}
+                    </option>
+                  ))}
+                </Select>
+              </span>
+              <Button
+                type="button"
+                disabled={!queue || (page + 1) * queue.limit >= queue.total}
+                onClick={() => {
+                  setCaseId('');
+                  setPage(page + 1);
+                }}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </aside>
 
@@ -1727,7 +1756,7 @@ export function ReviewPage() {
                   </Notice>
                 )}
 
-              {albumView === 'tracks' && plan.can_apply_ready && (
+              {albumView === 'tracks' && albumReady && (
                 <Notice tone="info" className={styles.albumNotice} role="status">
                   <span>All decisions are planned. This album is ready to apply.</span>
                   <Button type="button" onClick={() => setAlbumView('plan')}>
@@ -1742,6 +1771,314 @@ export function ReviewPage() {
                   role="tabpanel"
                   aria-labelledby={`review-tab-${albumView}`}
                 >
+                  {albumView === 'plan' && albumReady && (
+                    <section className={styles.albumApplyAll} aria-label="Apply album changes">
+                      <div>
+                        <strong>
+                          Plan ready to apply · {plan.ready} action{plan.ready === 1 ? '' : 's'}
+                        </strong>
+                        <p>
+                          All required decisions are planned and saved. Apply now or leave this
+                          album for the next ready batch.
+                        </p>
+                      </div>
+                      {readyActionControls}
+                      <div className={styles.readyChanges}>
+                        <h4>Planned changes</h4>
+                        <p>Choose a field to inspect the affected tracks and exact values.</p>
+                        {readySummaryList}
+                        {active &&
+                          activeDecision?.risk === 'ready' &&
+                          !activeAssignment &&
+                          selectedActionDetail}
+                      </div>
+                    </section>
+                  )}
+
+                  {albumView === 'plan' &&
+                    !albumReady &&
+                    (reviewCase.album_plan || decisions.length > 0) && (
+                      <section className={styles.decisionBoard} aria-label="Album decisions">
+                        <div className={styles.sectionHeading}>
+                          <div>
+                            <div className={styles.eyebrow}>Album review</div>
+                            <h3>
+                              {reviewDecisions.length
+                                ? `${reviewDecisions.length} choice${reviewDecisions.length === 1 ? '' : 's'} need${reviewDecisions.length === 1 ? 's' : ''} your input`
+                                : 'Decisions complete'}
+                            </h3>
+                            <p>
+                              {releaseChoicePending
+                                ? 'Choose the release first. Track and numbering proposals will be recalculated for that edition.'
+                                : 'Resolve these choices before applying the album. Inspect affected tracks to compare exact values.'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className={styles.decisionGrid}>
+                          {reviewDecisions.map((decision, decisionIndex) => {
+                            const instruction = decisionInstruction(
+                              decision,
+                              reviewCase.album_plan?.numbering_mode,
+                              releaseHasMultipleDiscs,
+                            );
+                            const hasGroupActions = [
+                              'numbering',
+                              'title_conventions',
+                              'metadata',
+                            ].includes(decision.category);
+                            const selected = active
+                              ? decision.finding_ids.includes(active.id)
+                              : false;
+                            return (
+                              <Fragment key={decision.id}>
+                                <article
+                                  data-risk={decision.risk}
+                                  data-state={
+                                    releaseChoicePending &&
+                                    decision.category !== 'release_conflicts'
+                                      ? 'pending'
+                                      : 'needs-review'
+                                  }
+                                  data-selected={selected || undefined}
+                                >
+                                  <Button
+                                    type="button"
+                                    className={styles.decisionSelect}
+                                    onClick={() => {
+                                      if (hasGroupActions) {
+                                        showTrackList(`decision:${decision.id}`);
+                                      } else if (decision.category === 'release_conflicts') {
+                                        setAlbumView('release');
+                                      } else {
+                                        openDecision(decision);
+                                      }
+                                    }}
+                                  >
+                                    <span className={styles.decisionStep} aria-hidden="true">
+                                      {decisionIndex + 1}
+                                    </span>
+                                    <span>
+                                      <small>{decisionCategoryLabel(decision.category)}</small>
+                                      <strong>{instruction}</strong>
+                                      {decision.summary && decision.summary !== instruction && (
+                                        <small>{decision.summary}</small>
+                                      )}
+                                      {hasGroupActions && <small>Inspect affected tracks →</small>}
+                                    </span>
+                                    {reviewDecisions.length > 1 && (
+                                      <b>
+                                        {decision.action_count} action
+                                        {decision.action_count === 1 ? '' : 's'}
+                                        {' →'}
+                                      </b>
+                                    )}
+                                  </Button>
+                                  {hasGroupActions && (
+                                    <div className={styles.decisionActions}>
+                                      <Button
+                                        type="button"
+                                        disabled={
+                                          busy ||
+                                          applyBusy ||
+                                          releaseChoicePending ||
+                                          reviewCase.refresh?.state === 'running'
+                                        }
+                                        variant="primary"
+                                        onClick={() => void actGroup(decision, 'fix')}
+                                      >
+                                        {busyDecision === decision.category
+                                          ? `Saving ${decision.action_count} choices…`
+                                          : decision.category === 'numbering'
+                                            ? !releaseHasMultipleDiscs
+                                              ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                              : reviewCase.album_plan?.numbering_mode === 'digital'
+                                                ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                                : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                            : decision.category === 'title_conventions'
+                                              ? 'Use proposed title conventions'
+                                              : decision.label === 'Confirm album artist'
+                                                ? 'Use proposed album artist'
+                                                : `Use ${decision.action_count} proposed changes`}
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        disabled={
+                                          busy ||
+                                          applyBusy ||
+                                          releaseChoicePending ||
+                                          reviewCase.refresh?.state === 'running'
+                                        }
+                                        onClick={() => void actGroup(decision, 'dismiss')}
+                                      >
+                                        {decision.category === 'numbering'
+                                          ? 'Keep current numbering'
+                                          : decision.label === 'Confirm album artist'
+                                            ? 'Keep current album artist'
+                                            : 'Keep current values'}
+                                      </Button>
+                                    </div>
+                                  )}
+                                  {busyDecision === decision.category && (
+                                    <p className={styles.decisionProgress} role="status">
+                                      <span className={styles.loadingSpinner} aria-hidden="true" />
+                                      Saving your choices in the album plan…
+                                    </p>
+                                  )}
+                                  {decision.category === 'album_completeness' &&
+                                    (() => {
+                                      const intent = reviewCase.items.find(
+                                        (item) =>
+                                          item.finding_type === 'reconciliation_intent' &&
+                                          decision.finding_ids.includes(item.id),
+                                      );
+                                      return intent ? (
+                                        <CompletenessChoice
+                                          key={intent.id}
+                                          finding={intent}
+                                          busy={mutationBusy}
+                                          onChoose={(choice) => void act(intent, 'fix', choice)}
+                                        />
+                                      ) : (
+                                        <div className={styles.decisionActions}>
+                                          <Button
+                                            type="button"
+                                            disabled={
+                                              applyBusy ||
+                                              busy ||
+                                              reviewCase.refresh?.state === 'running'
+                                            }
+                                            onClick={() =>
+                                              void requestAllMissing(decision.action_count)
+                                            }
+                                          >
+                                            Request{' '}
+                                            {decision.action_count === 1
+                                              ? 'the missing track'
+                                              : `all ${decision.action_count} missing tracks`}
+                                          </Button>
+                                          <Button
+                                            onClick={() => {
+                                              showTrackList('missing');
+                                            }}
+                                          >
+                                            Choose individual tracks →
+                                          </Button>
+                                          <small>
+                                            Each requested track is added to the wishlist for the
+                                            selected release.
+                                          </small>
+                                        </div>
+                                      );
+                                    })()}
+                                </article>
+                                {selected &&
+                                  !activeAssignment &&
+                                  active?.finding_type !== 'reconciliation_intent' &&
+                                  active?.finding_type !== 'reconciliation_release' &&
+                                  !['numbering', 'title_conventions', 'metadata'].includes(
+                                    decision.category,
+                                  ) &&
+                                  selectedActionDetail}
+                                {selected && active?.finding_type === 'reconciliation_release' && (
+                                  <div className={styles.releaseStepLink}>
+                                    <p>
+                                      Compare the available editions before choosing this album's
+                                      track list.
+                                    </p>
+                                    <Button
+                                      type="button"
+                                      className={styles.secondaryButton}
+                                      onClick={() => setAlbumView('release')}
+                                    >
+                                      Compare releases →
+                                    </Button>
+                                  </div>
+                                )}
+                              </Fragment>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
+                  {albumView === 'plan' &&
+                    plan.status !== 'ready' &&
+                    plan.ready > 0 &&
+                    !readyIncludedInGroup && (
+                      <section
+                        className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
+                        data-state="supporting"
+                        aria-label="Independent safe changes"
+                      >
+                        <div className={styles.planSummary}>
+                          <div>
+                            <div className={styles.eyebrow}>Safe changes</div>
+                            <strong>
+                              {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'}{' '}
+                              ready
+                            </strong>
+                            <p>
+                              These edits are supported. Resolve the remaining album decisions
+                              before applying the plan.
+                            </p>
+                          </div>
+                          <div className={styles.planBadges}>
+                            <StatusChip tone="good" icon="check">
+                              {plan.ready} ready
+                            </StatusChip>
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          className={styles.secondaryButton}
+                          onClick={() => {
+                            showTrackList('change');
+                          }}
+                        >
+                          Inspect proposed track edits →
+                        </Button>
+
+                        {active &&
+                          activeDecision?.risk === 'ready' &&
+                          !activeAssignment &&
+                          selectedActionDetail}
+                      </section>
+                    )}
+
+                  {albumView === 'plan' &&
+                    reviewDecisions.length === 0 &&
+                    pendingDecisions.length === 0 &&
+                    plan.ready === 0 && (
+                      <div className={styles.empty}>No album-level action is pending.</div>
+                    )}
+
+                  {albumView === 'plan' && pendingDecisions.length > 0 && (
+                    <section
+                      className={styles.pendingFulfillment}
+                      aria-label="Missing tracks being acquired"
+                    >
+                      <StatusChip tone="info" icon="info">
+                        {wishlistedCount} requested
+                      </StatusChip>
+                      <div>
+                        <strong>Waiting for missing tracks</strong>
+                        <p>
+                          {wishlistedCount === 1
+                            ? 'The missing track is'
+                            : 'These missing tracks are'}{' '}
+                          already requested. Published downloads are checked automatically; the
+                          album stays here until those files are assigned.
+                        </p>
+                        <a
+                          className={styles.secondaryButton}
+                          href={`/wishlist?q=${encodeURIComponent(reviewCase?.album || '')}`}
+                        >
+                          View album in Wishlist →
+                        </a>
+                      </div>
+                    </section>
+                  )}
+
                   {albumView === 'plan' &&
                     reviewCase.items.some((item) => item.details?.planned_choice) && (
                       <details className={styles.editPlan}>
@@ -1775,389 +2112,6 @@ export function ReviewPage() {
                           ))}
                         </div>
                       </details>
-                    )}
-
-                  {albumView === 'plan' && plan.can_apply_ready && (
-                    <section className={styles.albumApplyAll} aria-label="Apply album changes">
-                      <div>
-                        <strong>
-                          Plan ready to apply · {plan.ready} action{plan.ready === 1 ? '' : 's'}
-                        </strong>
-                        <p>
-                          Your choices are saved automatically. Apply this album now, or include it
-                          in the next ready batch.
-                        </p>
-                      </div>
-                      {readyActionControls}
-                    </section>
-                  )}
-
-                  {albumView === 'plan' && (reviewCase.album_plan || decisions.length > 0) && (
-                    <section className={styles.decisionBoard} aria-label="Album decisions">
-                      <div className={styles.sectionHeading}>
-                        <div>
-                          <div className={styles.eyebrow}>Album review</div>
-                          <h3>
-                            {reviewDecisions.length
-                              ? `${reviewDecisions.length} choice${reviewDecisions.length === 1 ? '' : 's'} need${reviewDecisions.length === 1 ? 's' : ''} your input`
-                              : 'Decisions complete'}
-                          </h3>
-                          <p>Earlier choices update the proposals that follow.</p>
-                        </div>
-                      </div>
-                      <div className={styles.decisionGrid}>
-                        {reviewDecisions.map((decision, decisionIndex) => {
-                          const selected = active
-                            ? decision.finding_ids.includes(active.id)
-                            : false;
-                          return (
-                            <Fragment key={decision.id}>
-                              <article
-                                data-risk={decision.risk}
-                                data-state={
-                                  releaseChoicePending && decision.category !== 'release_conflicts'
-                                    ? 'pending'
-                                    : 'needs-review'
-                                }
-                                data-selected={selected || undefined}
-                              >
-                                <Button
-                                  type="button"
-                                  className={styles.decisionSelect}
-                                  onClick={() => openDecision(decision)}
-                                >
-                                  <span className={styles.decisionStep} aria-hidden="true">
-                                    {decisionIndex + 1}
-                                  </span>
-                                  <span>
-                                    <small>{decisionCategoryLabel(decision.category)}</small>
-                                    <strong>
-                                      {decisionInstruction(
-                                        decision,
-                                        reviewCase.album_plan?.numbering_mode,
-                                        releaseHasMultipleDiscs,
-                                      )}
-                                    </strong>
-                                    {decision.summary && <small>{decision.summary}</small>}
-                                  </span>
-                                  {reviewDecisions.length > 1 && (
-                                    <b>
-                                      {decision.action_count} action
-                                      {decision.action_count === 1 ? '' : 's'}
-                                      {' →'}
-                                    </b>
-                                  )}
-                                </Button>
-                                {['numbering', 'title_conventions', 'metadata'].includes(
-                                  decision.category,
-                                ) && (
-                                  <div className={styles.decisionActions}>
-                                    <Button
-                                      type="button"
-                                      disabled={
-                                        busy ||
-                                        applyBusy ||
-                                        releaseChoicePending ||
-                                        reviewCase.refresh?.state === 'running'
-                                      }
-                                      variant="primary"
-                                      onClick={() => void actGroup(decision, 'fix')}
-                                    >
-                                      {busyDecision === decision.category
-                                        ? `Saving ${decision.action_count} choices…`
-                                        : decision.category === 'numbering'
-                                          ? !releaseHasMultipleDiscs
-                                            ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                            : reviewCase.album_plan?.numbering_mode === 'digital'
-                                              ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                              : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                          : decision.category === 'title_conventions'
-                                            ? 'Use proposed title conventions'
-                                            : decision.label === 'Confirm album artist'
-                                              ? 'Use proposed album artist'
-                                              : `Use ${decision.action_count} proposed changes`}
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      disabled={
-                                        busy ||
-                                        applyBusy ||
-                                        releaseChoicePending ||
-                                        reviewCase.refresh?.state === 'running'
-                                      }
-                                      onClick={() => void actGroup(decision, 'dismiss')}
-                                    >
-                                      {decision.category === 'numbering'
-                                        ? 'Keep current numbering'
-                                        : decision.label === 'Confirm album artist'
-                                          ? 'Keep current album artist'
-                                          : 'Keep current values'}
-                                    </Button>
-                                  </div>
-                                )}
-                                {busyDecision === decision.category && (
-                                  <p className={styles.decisionProgress} role="status">
-                                    <span className={styles.loadingSpinner} aria-hidden="true" />
-                                    Saving your choices in the album plan…
-                                  </p>
-                                )}
-                                {decision.category === 'album_completeness' &&
-                                  (() => {
-                                    const intent = reviewCase.items.find(
-                                      (item) =>
-                                        item.finding_type === 'reconciliation_intent' &&
-                                        decision.finding_ids.includes(item.id),
-                                    );
-                                    return intent ? (
-                                      <CompletenessChoice
-                                        key={intent.id}
-                                        finding={intent}
-                                        busy={mutationBusy}
-                                        onChoose={(choice) => void act(intent, 'fix', choice)}
-                                      />
-                                    ) : (
-                                      <div className={styles.decisionActions}>
-                                        <Button
-                                          type="button"
-                                          disabled={
-                                            applyBusy ||
-                                            busy ||
-                                            reviewCase.refresh?.state === 'running'
-                                          }
-                                          onClick={() =>
-                                            void requestAllMissing(decision.action_count)
-                                          }
-                                        >
-                                          Request{' '}
-                                          {decision.action_count === 1
-                                            ? 'the missing track'
-                                            : `all ${decision.action_count} missing tracks`}
-                                        </Button>
-                                        <Button
-                                          onClick={() => {
-                                            showTrackList('missing');
-                                          }}
-                                        >
-                                          Choose individual tracks →
-                                        </Button>
-                                        <small>
-                                          Each requested track is added to the wishlist for the
-                                          selected release.
-                                        </small>
-                                      </div>
-                                    );
-                                  })()}
-                              </article>
-                              {selected &&
-                                !activeAssignment &&
-                                active?.finding_type !== 'reconciliation_intent' &&
-                                active?.finding_type !== 'reconciliation_release' &&
-                                !['numbering', 'title_conventions', 'metadata'].includes(
-                                  decision.category,
-                                ) &&
-                                selectedActionDetail}
-                              {selected && active?.finding_type === 'reconciliation_release' && (
-                                <div className={styles.releaseStepLink}>
-                                  <p>
-                                    Compare the available editions before choosing this album's
-                                    track list.
-                                  </p>
-                                  <Button
-                                    type="button"
-                                    className={styles.secondaryButton}
-                                    onClick={() => setAlbumView('release')}
-                                  >
-                                    Compare releases →
-                                  </Button>
-                                </div>
-                              )}
-                            </Fragment>
-                          );
-                        })}
-                        {!releaseChoicePending && reviewCase.album_plan && (
-                          <article data-state="complete">
-                            <Button
-                              className={styles.decisionSelect}
-                              type="button"
-                              onClick={() => setAlbumView('release')}
-                            >
-                              <span className={styles.decisionStep} aria-hidden="true">
-                                ✓
-                              </span>
-                              <span>
-                                <small>Release</small>
-                                <strong>
-                                  Release selected · {mappedSlots}/{totalSlots} assigned
-                                </strong>
-                                <small>
-                                  {reviewCase.album_plan.counts.missing
-                                    ? `${reviewCase.album_plan.counts.missing} release tracks are absent · compare editions →`
-                                    : 'Compare editions →'}
-                                </small>
-                              </span>
-                            </Button>
-                          </article>
-                        )}
-                        {!releaseChoicePending &&
-                          !reviewDecisions.some((step) => step.category === 'numbering') && (
-                            <article data-state="complete">
-                              <div className={styles.decisionSelect}>
-                                <span className={styles.decisionStep} aria-hidden="true">
-                                  ✓
-                                </span>
-                                <span>
-                                  <small>Numbering</small>
-                                  <strong>
-                                    {numberingSchemeLabel(
-                                      releaseHasMultipleDiscs,
-                                      reviewCase.album_plan?.numbering_mode,
-                                    )}
-                                  </strong>
-                                </span>
-                              </div>
-                            </article>
-                          )}
-                        {!releaseChoicePending &&
-                          !reviewDecisions.some((step) =>
-                            [
-                              'audio_conflicts',
-                              'duplicates',
-                              'extra_files',
-                              'title_issues',
-                            ].includes(step.category),
-                          ) && (
-                            <article data-state="complete">
-                              <Button
-                                className={styles.decisionSelect}
-                                type="button"
-                                onClick={() => showTrackList()}
-                              >
-                                <span className={styles.decisionStep} aria-hidden="true">
-                                  ✓
-                                </span>
-                                <span>
-                                  <small>Track assignments</small>
-                                  <strong>No assignment decisions remain</strong>
-                                  <small>Inspect all local files and release tracks →</small>
-                                </span>
-                              </Button>
-                            </article>
-                          )}
-                        {albumView === 'plan' && pendingDecisions.length > 0 && (
-                          <section
-                            className={styles.pendingFulfillment}
-                            aria-label="Missing tracks being acquired"
-                          >
-                            <StatusChip tone="info" icon="info">
-                              {wishlistedCount} requested
-                            </StatusChip>
-                            <div>
-                              <strong>Waiting for missing tracks</strong>
-                              <p>
-                                {wishlistedCount === 1
-                                  ? 'The missing track is'
-                                  : 'These missing tracks are'}{' '}
-                                already requested. Published downloads are checked automatically;
-                                the album stays here until those files are assigned.
-                              </p>
-                              <a
-                                className={styles.secondaryButton}
-                                href={`/wishlist?q=${encodeURIComponent(reviewCase?.album || '')}`}
-                              >
-                                View album in Wishlist →
-                              </a>
-                            </div>
-                          </section>
-                        )}
-
-                        {albumView === 'plan' && plan.status === 'ready' && (
-                          <section
-                            className={styles.albumPlan}
-                            data-state="ready"
-                            aria-label="Album reconciliation plan"
-                          >
-                            <div className={styles.planSummary}>
-                              <div>
-                                <div className={styles.eyebrow}>Ready to apply</div>
-                                <strong>
-                                  {readyChangeGroups.length === 1
-                                    ? readyChangeGroups[0].valueSummary ||
-                                      `${readyChangeGroups[0].label} on ${readyChangeGroups[0].count} tracks`
-                                    : `${readyChangeGroups.length} supported updates across ${plan.ready} track${plan.ready === 1 ? '' : 's'}`}
-                                </strong>
-                                <p>
-                                  All required decisions are complete. Review the proposed edits
-                                  before applying this album plan.
-                                </p>
-                              </div>
-                              <div className={styles.planBadges}>
-                                <StatusChip tone="good" icon="check">
-                                  {plan.ready} ready
-                                </StatusChip>
-                              </div>
-                            </div>
-                            {readySummaryList}
-
-                            {active &&
-                              activeDecision?.risk === 'ready' &&
-                              !activeAssignment &&
-                              selectedActionDetail}
-                          </section>
-                        )}
-                      </div>
-                    </section>
-                  )}
-
-                  {albumView === 'plan' &&
-                    plan.status !== 'ready' &&
-                    plan.ready > 0 &&
-                    !readyIncludedInGroup && (
-                      <section
-                        className={`${styles.albumPlan} ${styles.safeChangesPanel}`}
-                        data-state="supporting"
-                        aria-label="Independent safe changes"
-                      >
-                        <div className={styles.planSummary}>
-                          <div>
-                            <div className={styles.eyebrow}>Safe changes</div>
-                            <strong>
-                              {plan.ready} independent change{plan.ready === 1 ? ' is' : 's are'}{' '}
-                              ready
-                            </strong>
-                            <p>
-                              These edits are supported. Resolve the remaining album decisions
-                              before applying the plan.
-                            </p>
-                          </div>
-                          <div className={styles.planBadges}>
-                            <StatusChip tone="good" icon="check">
-                              {plan.ready} ready
-                            </StatusChip>
-                          </div>
-                        </div>
-                        {readySummaryList}
-                        <Button
-                          type="button"
-                          className={styles.secondaryButton}
-                          onClick={() => {
-                            showTrackList('change');
-                          }}
-                        >
-                          Inspect proposed track edits →
-                        </Button>
-
-                        {active &&
-                          activeDecision?.risk === 'ready' &&
-                          !activeAssignment &&
-                          selectedActionDetail}
-                      </section>
-                    )}
-
-                  {albumView === 'plan' &&
-                    reviewDecisions.length === 0 &&
-                    pendingDecisions.length === 0 &&
-                    plan.ready === 0 && (
-                      <div className={styles.empty}>No album-level action is pending.</div>
                     )}
 
                   {albumView === 'tracks' && assignments.length > 0 && (
@@ -2654,7 +2608,14 @@ export function ReviewPage() {
                           <div>
                             <dt>Selected release</dt>
                             <dd>
-                              {primaryCandidate?.release_title || reviewCase.album}
+                              {primaryCandidate?.release_title || 'Release title unavailable'}
+                              {primaryCandidate && (
+                                <ReleaseBadges
+                                  format={primaryCandidate.format}
+                                  country={primaryCandidate.country}
+                                  disambiguation={primaryCandidate.disambiguation}
+                                />
+                              )}
                               <details className={styles.releaseReference}>
                                 <summary>Source and release ID</summary>
                                 <ProviderReleaseId
@@ -2677,7 +2638,7 @@ export function ReviewPage() {
                                 (hasIntentDecision
                                   ? 'Choice pending'
                                   : reviewCase.album_plan.counts.missing
-                                    ? plan.can_apply_ready
+                                    ? albumReady
                                       ? 'Missing tracks have planned resolutions'
                                       : 'Resolve track assignments first'
                                     : 'Full release coverage')}
@@ -2748,7 +2709,7 @@ export function ReviewPage() {
                       </section>
                     )}
 
-                    {albumView === 'plan' && proposedChangeGroups.length > 0 && (
+                    {albumView === 'plan' && !albumReady && proposedChangeGroups.length > 0 && (
                       <section
                         className={styles.planContext}
                         aria-label="Proposed metadata by field"

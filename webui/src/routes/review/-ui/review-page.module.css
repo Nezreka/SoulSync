@@ -2,7 +2,7 @@
   width: auto;
   max-width: none;
   margin: 12px;
-  padding: 28px clamp(16px, 2vw, 36px) 64px;
+  padding: 20px clamp(12px, 1.5vw, 24px) 64px;
   color: var(--text-1);
 }
 
@@ -30,7 +30,8 @@
   display: grid;
   gap: 2px;
   padding: 0 8px 0 0;
-  white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
 }
 .headerCount span {
   color: var(--text-2);
@@ -42,11 +43,19 @@
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+}
+.headerTools button {
+  white-space: normal;
+}
+.queueToggle {
+  display: none;
 }
 .workspace {
   display: grid;
-  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
+  gap: 16px;
   align-items: start;
 }
 .sidebar,
@@ -237,7 +246,7 @@
   cursor: default;
 }
 .review {
-  padding: clamp(20px, 2vw, 36px);
+  padding: clamp(16px, 1.5vw, 24px);
   min-height: 65vh;
 }
 
@@ -931,7 +940,7 @@
 .albumHeader {
   flex-wrap: wrap;
   border-bottom: 1px solid var(--line-strong);
-  padding-bottom: 20px;
+  padding-bottom: 14px;
   align-items: flex-start;
 }
 .albumIdentity {
@@ -958,10 +967,6 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-lg);
   background: var(--surface-1);
-}
-.albumPlan[data-state='ready'] {
-  border-color: rgba(var(--success-rgb), 0.45);
-  background: rgba(var(--success-rgb), 0.08);
 }
 .safeChangesPanel {
   border-color: rgba(var(--success-rgb), 0.08);
@@ -1027,7 +1032,8 @@
   white-space: nowrap;
 }
 .albumApplyAll {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   border: 1px solid rgba(var(--info-rgb), 0.45);
@@ -1037,13 +1043,7 @@
 .albumApplyAll p {
   margin: 5px 0 0;
 }
-.albumApplyAll button {
-  padding: 9px 12px;
-  border: 1px solid var(--info);
-  border-radius: var(--radius-md);
-  background: rgba(var(--info-rgb), 0.45);
-  color: var(--text-1);
-  cursor: pointer;
+.albumApplyAll > .actions button {
   white-space: nowrap;
 }
 .planContext {
@@ -1113,9 +1113,26 @@
   border-radius: var(--radius-xl);
 }
 .review h3 {
-  font-size: clamp(22px, 2vw, 30px);
+  font-size: clamp(22px, 1.5vw, 26px);
   line-height: 1.25;
   margin: 13px 0 9px;
+}
+.review .findingDetail h3 {
+  font-size: 20px;
+  line-height: 1.3;
+  margin: 12px 0 6px;
+}
+.readyChanges {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border-top: 1px solid var(--line-strong);
+  padding-top: 14px;
+}
+.readyChanges h4 {
+  margin: 0;
+}
+.readyChanges .readySummaryList {
+  margin-bottom: 0;
 }
 .description {
   line-height: 1.5;
@@ -1362,13 +1379,15 @@
 }
 .factList {
   display: grid;
-  gap: 8px;
+  gap: 3px;
   margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 .factList div {
   display: grid;
-  grid-template-columns: minmax(100px, 28%) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(72px, 25%) minmax(0, 1fr);
+  gap: 8px;
   padding: 5px 7px;
   border-radius: var(--radius-sm);
 }
@@ -1462,6 +1481,13 @@
   border-color: rgba(var(--warning-rgb), 0.45);
   background: rgba(var(--warning-rgb), 0.08);
 }
+.problemCard {
+  font-size: 14px;
+  line-height: 1.45;
+}
+.problemCard > * + * {
+  margin-top: 8px;
+}
 .problemCard ol,
 .problemCard ul {
   margin: 12px 0 0;
@@ -1547,10 +1573,6 @@
   color: var(--text-1);
   text-align: left;
   cursor: pointer;
-}
-.candidateCard > button:first-child[data-selected='true'] {
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.08);
 }
 .candidateCard > button:first-child > span:nth-child(3) {
   display: grid;
@@ -1897,6 +1919,26 @@
   }
   .sidebar {
     position: static;
+    padding: 10px;
+  }
+  .page .queueToggle {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    width: 100%;
+    min-height: 44px;
+    text-align: left;
+  }
+  .queueToggle > span:last-child {
+    font-weight: 400;
+    color: var(--text-2);
+  }
+  .queueBrowser {
+    margin-top: 14px;
+  }
+  .queueBrowser[data-expanded='false'] {
+    display: none;
   }
   .queueModes {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1919,6 +1961,24 @@
   }
 }
 
+@media (max-width: 700px) {
+  .headerTools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .headerCount,
+  .headerTools > .inlineActions {
+    grid-column: 1 / -1;
+  }
+  .headerTools > .inlineActions {
+    justify-content: flex-start;
+  }
+  .headerTools button {
+    min-height: 44px;
+  }
+}
+
 @container album-review (max-width: 900px) {
   .tabWorkspace {
     grid-template-columns: minmax(0, 1fr);
@@ -1938,6 +1998,7 @@
     max-height: none;
     overflow: visible;
     background: var(--surface-overlay);
+    scroll-margin-top: 70px;
   }
   .trackInspector:not([data-open]) {
     display: none;
@@ -1982,8 +2043,8 @@
   background: var(--surface-2);
 }
 .candidateCard[data-selected='true'] {
-  border-color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.08);
+  border-color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--text-1);
 }
 .candidateCard > button:first-child {
   border: 0;
@@ -2098,24 +2159,6 @@
   padding-left: 14px;
   margin-left: 0;
 }
-.decisionGrid article[data-state='complete'] {
-  border-color: rgba(var(--success-rgb), 0.45);
-  background: rgba(var(--success-rgb), 0.08);
-}
-.decisionGrid article[data-state='complete'] .decisionStep {
-  border-color: var(--success);
-  color: var(--success);
-  background: rgba(var(--success-rgb), 0.08);
-}
-.decisionGrid article[data-state='ready'] {
-  border-color: rgba(var(--info-rgb), 0.45);
-  background: rgba(var(--info-rgb), 0.08);
-}
-.decisionGrid article[data-state='ready'] .decisionStep {
-  border-color: var(--info);
-  color: var(--info);
-  background: rgba(var(--info-rgb), 0.08);
-}
 .decisionGrid article[data-state='pending'] {
   border-color: var(--line-strong);
   background: var(--surface-1);
@@ -2160,14 +2203,6 @@
 .tabMain > :first-child {
   margin-top: 0;
 }
-.competingFileNotice {
-  padding: 10px 12px;
-  border: 1px solid rgba(var(--warning-rgb), 0.45);
-  border-radius: var(--radius-md);
-  background: rgba(var(--warning-rgb), 0.08);
-  color: var(--warning);
-  overflow-wrap: anywhere;
-}
 
 /* Selection and keyboard focus are shared by every assignment state. */
 @container review-queue (max-width: 310px) {
@@ -2192,7 +2227,7 @@
 }
 @container review-main (max-width: 480px) {
   .albumApplyAll {
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
   .albumApplyAll button {
@@ -2487,7 +2522,7 @@
   box-shadow: inset 3px 0 rgba(var(--info-rgb), 0.45);
 }
 .matrixRow[data-selected='true'] {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--text-1);
   outline-offset: -2px;
 }
 .albumApplyAll {
@@ -2575,8 +2610,8 @@
   font-weight: 400;
 }
 .page button.selectedCase[data-slot='control'] {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 3px 0 var(--accent);
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 var(--text-1);
 }
 .page button.caseButton[data-slot='control']:hover {
   background: var(--surface-2);
@@ -2795,6 +2830,21 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-block: 12px;
+}
+
+@container (max-width: 400px) {
+  .decisionNavigation {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .decisionNavigation button {
+    padding: 8px;
+    white-space: normal;
+  }
+  .findingDetail .problemCard,
+  .findingDetail .changesCard {
+    padding: 12px;
+  }
 }
 .decisionNavigation button[data-slot='control'] {
   font-size: 12px;

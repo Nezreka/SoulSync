@@ -7,7 +7,7 @@ import type { FindingTypeInfo } from '../../tools/-tools.groups';
 
 import { findingTypeLabel } from '../../tools/-tools.core';
 import { CompletenessChoice } from './completeness-choice';
-import { ReconciliationEvidence } from './reconciliation-evidence';
+import { ReconciliationEvidence, type ReleaseEvidence } from './reconciliation-evidence';
 import { ReviewAudio } from './review-audio';
 import styles from './review-page.module.css';
 import { formatTrackPosition } from './review-position';
@@ -27,6 +27,7 @@ export function SelectedActionDetail({
   comparisonDurationMs,
   compact = false,
   numberingPreview = false,
+  release,
 }: {
   finding: ReviewFinding;
   itemIndex: number;
@@ -41,6 +42,7 @@ export function SelectedActionDetail({
   comparisonDurationMs?: number;
   compact?: boolean;
   numberingPreview?: boolean;
+  release?: ReleaseEvidence;
 }) {
   const canApply =
     Boolean(typeInfo?.fixable) && finding.finding_type !== 'suspect_album_tag' && !numberingPreview;
@@ -124,12 +126,6 @@ export function SelectedActionDetail({
           Next decision →
         </Button>
       </nav>
-      {Array.isArray(details.competing_copies) && details.competing_copies.length > 0 && (
-        <p className={styles.competingFileNotice}>
-          Other local file{details.competing_copies.length === 1 ? '' : 's'} fitting this slot:{' '}
-          {details.competing_copies.map((path) => textValue(path).split('/').pop()).join(', ')}
-        </p>
-      )}
       {wrongAudio && Boolean(details.acoustid_title) && (
         <div className={styles.identityWarning}>
           <strong>
@@ -194,6 +190,7 @@ export function SelectedActionDetail({
       )}
       <ReconciliationEvidence
         finding={finding}
+        release={release}
         busy={busy}
         prominent={
           finding.finding_type === 'reconciliation_unresolved' || wrongAudio || versionConflict
