@@ -127,11 +127,6 @@
         justify-content: center;
     }
 
-    .enh-compact-item.artist-card {
-        width: calc(50% - 8px);
-        height: 200px;
-    }
-
     .sidebar-header {
         text-align: right;
         /* The header is already `position: sticky; z-index: 1`, which should put
@@ -225,7 +220,6 @@
     .page {
         /* Bottom padding clears the fixed floating search bar / FAB buttons
            (~50px band) so the last row of content stays visible & tappable. */
-        padding: 70px 20px 72px 20px;
         height: auto;
         min-height: 0;
         overflow: visible;
@@ -375,10 +369,6 @@
     .search-bar-container button {
         width: 100%;
         min-height: 44px;
-    }
-
-    .filter-group {
-        flex-wrap: wrap;
     }
 
     .sort-order-btn {
@@ -1730,7 +1720,6 @@
 
     /* --- Media player compact --- */
     .media-player {
-        margin: 8px 10px;
         padding: 14px;
         border-radius: var(--radius-lg);
         min-height: 100px;
@@ -1781,9 +1770,6 @@
 
     /* --- Toast container mobile adjustment --- */
     .toast-container {
-        bottom: 16px;
-        left: 16px;
-        right: 16px;
         transform: none;
         width: auto;
         z-index: 10003;
@@ -2148,24 +2134,13 @@
     .enhanced-meta-field.wide {
         grid-column: span 1;
     }
-    .enhanced-track-table .col-path,
-    .enhanced-track-table .col-bpm,
-    .enhanced-track-table .col-format,
-    .enhanced-track-table .col-match,
-    .enhanced-track-table .col-disc {
-        display: none;
-    }
     .enhanced-manual-match-modal {
         width: 95vw;
-    }
-    .enhanced-album-meta-row {
-        grid-template-columns: 1fr 1fr;
     }
     .enhanced-bulk-bar {
         left: 10px;
         right: 10px;
         padding: 8px 12px;
-        flex-wrap: wrap;
     }
     /* above the full-width mobile player (bottom:62px, 110px tall) */
     .enhanced-bulk-bar.visible {
@@ -2328,7 +2303,6 @@
     }
     .enhanced-track-table th,
     .enhanced-track-table td {
-        padding: 6px 4px;
         font-size: 12px;
     }
     .enhanced-track-table .col-num {
@@ -2336,38 +2310,6 @@
     }
     .enhanced-track-table .col-title {
         white-space: normal;
-        word-break: break-word;
-    }
-    .enhanced-track-table .col-duration {
-        width: 42px;
-        font-size: 11px;
-    }
-    .enhanced-track-table .col-bitrate {
-        display: none;
-    }
-    .enhanced-track-table .col-play {
-        width: 26px;
-    }
-    /* Hide less essential columns on mobile */
-    .enhanced-track-table .col-path,
-    .enhanced-track-table .col-bpm,
-    .enhanced-track-table .col-format,
-    .enhanced-track-table .col-match,
-    .enhanced-track-table .col-disc {
-        display: none;
-    }
-
-    /* Collapse queue/actions/report into the single ⋯ actions column on mobile */
-    .enhanced-track-table .col-queue,
-    .enhanced-track-table .col-delete,
-    .enhanced-track-table .col-track-actions,
-    .enhanced-track-table .col-report {
-        display: none;
-    }
-    .enhanced-track-table .col-mobile-actions {
-        display: table-cell;
-        width: 36px;
-        text-align: center;
     }
 
     /* Mobile actions popover */
@@ -2459,15 +2401,8 @@
     }
     .np-body {
         flex-direction: column;
-        padding: 48px 24px 24px;
-        gap: 24px;
         overflow-y: auto;
         max-height: 100vh;
-    }
-    .np-album-art-container {
-        width: 220px;
-        height: 220px;
-        margin: 0 auto;
     }
     .np-track-info {
         width: 100%;
@@ -2537,7 +2472,6 @@
 
     .automations-stats {
         flex-wrap: wrap;
-        gap: 8px;
     }
 
     /* Builder view */
@@ -2566,16 +2500,9 @@
         padding: 8px;
     }
 
-    .builder-content {
-        flex-direction: column;
-    }
-
     .builder-sidebar {
-        width: 100%;
-        max-height: 200px;
         border-right: none;
         border-bottom: 1px solid var(--white-a06);
-        overflow-y: auto;
     }
 
     .builder-canvas {
@@ -3842,7 +3769,6 @@ html.download-modal-open body {
 
     .mix-modal-colhead {
         margin: 0 8px;
-        padding: 8px;
     }
     .mix-modal-body {
         padding: 4px 8px 16px;
