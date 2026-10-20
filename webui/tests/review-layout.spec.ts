@@ -73,6 +73,17 @@ test('compact queue retains filters and paging when browsing is closed', async (
     album: `Album ${i}`,
   }));
   await installShell(page, [
+    http.get('*/api/repair/review-queue/summary', () =>
+      HttpResponse.json({
+        all: cases.length,
+        review: cases.length,
+        ready: 0,
+        files: 0,
+        waiting: 0,
+        ready_total: 0,
+        ready_albums_total: 0,
+      }),
+    ),
     http.get('*/api/repair/review-queue', ({ request }) => {
       const url = new URL(request.url);
       const pageIndex = Number(url.searchParams.get('page') || 0);

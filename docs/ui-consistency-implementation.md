@@ -31,7 +31,7 @@ inventory, saved-choice authority, readiness, and signed-apply behavior.
 - [x] T7. Selected-release evidence uses the exact matching source/release ID,
   title and edition metadata. Local identity stays local. Missing catalogue
   metadata is honestly absent, never borrowed from a different candidate.
-- [ ] T8. Maintain durable Review visual fixtures and behavioral/layout checks,
+- [x] T8. Maintain durable Review visual fixtures and behavioral/layout checks,
   compare identical data before/after at desktop/tablet/phone widths, inspect
   screenshots, run affected tests/check/build, deploy and inspect the live UI.
   No live repairs are applied merely for testing.
@@ -84,6 +84,32 @@ Repeated numbering summaries and green candidate-selection backgrounds were
 also caught in visual inspection and removed. Settled/saved assignments do not
 revive an old ambiguity as a new review warning. Matcher, persistence and signed
 apply code remain unchanged.
+
+### Final deployment verification
+
+- Application commits: `b5166befaca2` and `1283b55b6502`. Deployed
+  `localhost/soulsync:test-1283b55b6502`; the maintained deployment script confirms
+  1/1 ready and available. Flux remains suspended for this authorized feature
+  review. No active transfers or repair jobs preceded the rollout.
+- Final browser coverage also checks that selecting an album from the compact
+  browser returns focus to its toggle, while Previous/Next album navigation
+  retains its own focus. The paging fixture has an explicit summary response,
+  avoiding an unrelated case handler swallowing that request.
+- All eleven pinned-container screenshot comparisons passed without updating
+  their baselines. The fourteen workflow/layout checks passed; the paging check
+  passed again after the test-only fixture correction.
+- Live inspection covered Plan and track details for Stone Sour, Split Chain,
+  Joep Beving, Queen, Jeff Buckley and Bastille; Stone Sour's release candidates;
+  and three phone cases. No browser exceptions, overflowing phone header tools,
+  or clipped comparison tables were observed. Available catalogue artwork loaded;
+  unavailable covers retained their fallback. The browser allowed the read-only
+  organization preview but prohibited repair/apply requests.
+- Before/after API snapshots for those six albums, covering 193 assignment rows,
+  had no changes to album identity, folder, full matching plan, decisions, saved
+  album plan, findings or plan signature. No live repair was applied.
+- Stage 2 is complete within this acceptance scope. The checks establish the
+  preserved behavior of these fixtures and live cases, not an exhaustive claim
+  about every library recording or future catalogue response.
 
 ## Recovery assessment and Stage 1 — 2026-10-20
 
