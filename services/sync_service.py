@@ -907,6 +907,17 @@ class PlaylistSyncService:
                         {'playlist_id': server_playlist_id}
                         if server_type == 'navidrome' else {}
                     )
+                    # what each source track matched, so append can drop an
+                    # old wrong match the right track replaced (#1801)
+                    _append_kw = (
+                        {'source_hints': [
+                            (getattr(r.spotify_track, 'name', ''),
+                             [_artist_name(a) for a in
+                              (getattr(r.spotify_track, 'artists', None) or [])],
+                             str(getattr(r.plex_track, 'ratingKey', '') or ''))
+                            for r in matched_tracks if r.plex_track is not None]}
+                        if server_type == 'navidrome' else {}
+                    )
                     def _dispatch_write():
                         # The guard's drop record is read back in this same
                         # thread, under the write lock, so a concurrent
@@ -915,7 +926,8 @@ class PlaylistSyncService:
                         with _playlist_write_lock(server_type):
                             if sync_mode == 'append':
                                 ok = media_client.append_to_playlist(
-                                    playlist.name, plex_tracks, **_navidrome_id_kw)
+                                    playlist.name, plex_tracks, **_navidrome_id_kw,
+                                    **_append_kw)
                             elif sync_mode == 'reconcile':
                                 ok = self._reconcile_or_replace(
                                     media_client, playlist.name, plex_tracks,
