@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { EmptyState, Spinner } from '@/components/primitives';
+
 import type { AudiobookBlockedRelease, AudiobookRecycledBook } from '../-audiobooks.types';
 
 import {
@@ -156,19 +158,20 @@ export function AudiobookReviewModal({
         <div className={styles.modalBody}>
           {loading ? (
             <div className={styles.modalLoading}>
-              <span className={styles.spinner} aria-hidden="true" />
+              <Spinner size={18} />
               Loading…
             </div>
           ) : pane === 'recycle' ? (
             bin.length === 0 ? (
-              <div className={styles.emptyState}>
-                <h3>The bin is empty</h3>
-                <p>
-                  {keepDays > 0
+              <EmptyState
+                className={styles.emptyState}
+                title="The bin is empty"
+                description={
+                  keepDays > 0
                     ? `Deleted books wait here for ${keepDays} days before being erased, so a mis-click can be undone.`
-                    : 'Recycling is turned off, so deleting a book erases it immediately.'}
-                </p>
-              </div>
+                    : 'Recycling is turned off, so deleting a book erases it immediately.'
+                }
+              />
             ) : (
               <>
                 <p className={styles.blocklistNote}>
@@ -228,13 +231,16 @@ export function AudiobookReviewModal({
               </>
             )
           ) : blocked.length === 0 ? (
-            <div className={styles.emptyState}>
-              <h3>Nothing is blocked</h3>
-              <p>
-                A release lands here when its download fails, so the wishlist stops finding the same
-                broken copy. You can also block one by hand from the releases list.
-              </p>
-            </div>
+            <EmptyState
+              className={styles.emptyState}
+              title="Nothing is blocked"
+              description={
+                <>
+                  A release lands here when its download fails, so the wishlist stops finding the
+                  same broken copy. You can also block one by hand from the releases list.
+                </>
+              }
+            />
           ) : (
             <>
               <p className={styles.blocklistNote}>

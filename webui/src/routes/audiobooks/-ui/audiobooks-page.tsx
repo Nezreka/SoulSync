@@ -1,6 +1,8 @@
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useCallback, useEffect, useState } from 'react';
 
+import { EmptyState, Skeleton } from '@/components/primitives';
+
 import type {
   AudiobookCategory,
   AudiobookHome,
@@ -272,8 +274,9 @@ export function AudiobooksBrowsePage() {
             <SkeletonGrid />
           ) : results.length === 0 ? (
             <EmptyState
+              className={styles.emptyState}
               title="Nothing matched"
-              body={
+              description={
                 searchType === 'narrator'
                   ? 'Narrator search only covers the Audible catalogue. Try the narrator’s full name.'
                   : 'Try a different spelling, or switch the search mode above.'
@@ -296,8 +299,9 @@ export function AudiobooksBrowsePage() {
             <SkeletonGrid />
           ) : genre.bestsellers.length === 0 && genre.newest.length === 0 ? (
             <EmptyState
+              className={styles.emptyState}
               title="This shelf is empty"
-              body="Audible returned nothing for this genre right now."
+              description="Audible returned nothing for this genre right now."
             />
           ) : (
             <>
@@ -312,7 +316,7 @@ export function AudiobooksBrowsePage() {
         <>
           {homeLoading ? (
             <>
-              <div className={styles.heroSkeleton} />
+              <Skeleton className={styles.heroSkeleton} />
               <SkeletonGrid />
             </>
           ) : (
@@ -328,8 +332,9 @@ export function AudiobooksBrowsePage() {
               ))}
               {!home.hero && home.shelves.every((shelf) => shelf.results.length === 0) && (
                 <EmptyState
+                  className={styles.emptyState}
                   title="Couldn’t reach the catalogue"
-                  body="The Audible catalogue didn’t answer. Check the server’s network access and reload."
+                  description="The Audible catalogue didn’t answer. Check the server’s network access and reload."
                 />
               )}
             </>
@@ -344,17 +349,8 @@ function SkeletonGrid() {
   return (
     <div className={styles.grid} aria-hidden="true">
       {Array.from({ length: 12 }).map((_, index) => (
-        <div className={styles.cardSkeleton} key={index} />
+        <Skeleton className={styles.cardSkeleton} key={index} />
       ))}
-    </div>
-  );
-}
-
-function EmptyState({ title, body }: { title: string; body: string }) {
-  return (
-    <div className={styles.emptyState}>
-      <h3>{title}</h3>
-      <p>{body}</p>
     </div>
   );
 }

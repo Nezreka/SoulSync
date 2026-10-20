@@ -1,5 +1,10 @@
 import clsx from 'clsx';
-import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from 'react';
+import {
+  forwardRef,
+  type ComponentPropsWithoutRef,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 
 import styles from './primitives.module.css';
 
@@ -66,5 +71,100 @@ export const Notice = forwardRef<HTMLDivElement, NoticeProps>(function Notice(
       role={role}
       {...props}
     />
+  );
+});
+
+export type SpinnerTone = 'accent' | 'soft' | 'tinted' | 'light';
+
+export type SpinnerProps = Omit<ComponentPropsWithoutRef<'span'>, 'children' | 'className'> & {
+  className?: string;
+  /** Accessible name. Without one the spinner is decorative (aria-hidden). */
+  label?: string;
+  /** Diameter in px. The ring is 3px from 28px up, 2px below. */
+  size?: number;
+  tone?: SpinnerTone;
+};
+
+export const Spinner = forwardRef<HTMLSpanElement, SpinnerProps>(function Spinner(
+  { className, label, size = 16, style, tone = 'accent', ...props },
+  ref,
+) {
+  return (
+    <span
+      ref={ref}
+      className={clsx(styles.spinner, className)}
+      data-slot="spinner"
+      data-tone={tone}
+      {...(label ? { role: 'status', 'aria-label': label } : { 'aria-hidden': true })}
+      style={
+        {
+          '--spinner-size': `${size}px`,
+          '--spinner-ring': `${size >= 28 ? 3 : 2}px`,
+          ...style,
+        } as CSSProperties
+      }
+      {...props}
+    />
+  );
+});
+
+export type SkeletonProps = Omit<ComponentPropsWithoutRef<'div'>, 'children' | 'className'> & {
+  className?: string;
+};
+
+/** A shimmering placeholder. Size and shape come from `className`. */
+export const Skeleton = forwardRef<HTMLDivElement, SkeletonProps>(function Skeleton(
+  { className, ...props },
+  ref,
+) {
+  return (
+    <div
+      ref={ref}
+      className={clsx(styles.skeleton, className)}
+      data-slot="skeleton"
+      aria-hidden="true"
+      {...props}
+    />
+  );
+});
+
+export type EmptyStateProps = Omit<ComponentPropsWithoutRef<'div'>, 'className' | 'title'> & {
+  className?: string;
+  /** Decorative glyph above the title, e.g. an emoji. */
+  icon?: ReactNode;
+  title?: ReactNode;
+  /** One line (or paragraph) under the title. */
+  description?: ReactNode;
+};
+
+/** The "nothing here" block: icon, title, description, then any children (actions). */
+export const EmptyState = forwardRef<HTMLDivElement, EmptyStateProps>(function EmptyState(
+  { children, className, description, icon, title, ...props },
+  ref,
+) {
+  return (
+    <div
+      ref={ref}
+      className={clsx(styles.emptyState, className)}
+      data-slot="empty-state"
+      {...props}
+    >
+      {icon ? (
+        <div className={styles.emptyStateIcon} data-slot="empty-state-icon" aria-hidden="true">
+          {icon}
+        </div>
+      ) : null}
+      {title ? (
+        <h3 className={styles.emptyStateTitle} data-slot="empty-state-title">
+          {title}
+        </h3>
+      ) : null}
+      {description ? (
+        <p className={styles.emptyStateDescription} data-slot="empty-state-description">
+          {description}
+        </p>
+      ) : null}
+      {children}
+    </div>
   );
 });

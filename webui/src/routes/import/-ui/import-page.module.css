@@ -140,13 +140,7 @@
 }
 
 .iconButton[aria-busy='true'] svg {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: global(spin) 0.9s linear infinite;
 }
 
 /* ── toolbar: filter pills + bulk actions ─────────────────────── */

@@ -56,15 +56,6 @@
   }
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
-}
-
 /* Shown ABOVE results that have already arrived, so the list stays readable
    while the slower sources are still answering. The full-height loader is only
    for an empty list. */
@@ -122,12 +113,14 @@
   border-radius: 18px;
   background: var(--white-a03);
   border: 1px solid var(--white-a07);
+  color: inherit;
 }
 
 .emptyState h3 {
   margin: 0 0 8px;
   font-size: 18px;
   font-weight: 650;
+  color: inherit;
 }
 
 .emptyState p {
@@ -667,9 +660,6 @@
 .heroSkeleton {
   height: 360px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Rails ──────────────────────────────────────────────────────────────── */
@@ -950,9 +940,6 @@
 .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: 13px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Works (person pages) ───────────────────────────────────────────────── */
@@ -1486,9 +1473,6 @@
 .detailSkeleton {
   height: 420px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── People row (search results) ────────────────────────────────────────── */
@@ -2182,21 +2166,6 @@
   color: var(--white-a60);
 }
 
-.spinner {
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-circle);
-  border: 2px solid var(--white-a15);
-  border-top-color: rgba(var(--accent-rgb), 1);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .releaseList {
   list-style: none;
   margin: 0;
@@ -2708,11 +2677,6 @@
   .card,
   .hero,
   .detailTop {
-    animation: none;
-  }
-  .cardSkeleton,
-  .heroSkeleton,
-  .detailSkeleton {
     animation: none;
   }
   .card:hover .cardCoverLink {

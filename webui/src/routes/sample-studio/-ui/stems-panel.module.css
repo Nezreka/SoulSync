@@ -81,18 +81,9 @@
 
 .spinner {
   flex: none;
-  width: 16px;
-  height: 16px;
-  border: 2px solid #2c2a25;
+  border-color: #2c2a25;
   border-top-color: #f5b942;
-  border-radius: var(--radius-circle);
-  animation: stemsSpin 0.9s linear infinite;
-}
-
-@keyframes stemsSpin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation-duration: 0.9s;
 }
 
 .error {

@@ -949,41 +949,25 @@
 }
 
 /* Skeleton Loading */
-@keyframes skeletonShimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
-}
 
 .showCardSkeleton {
   pointer-events: none;
 }
 
+/* The art box doubles as a <Skeleton> while shows load. .showArtWrapper sets
+   its own background, so put the shimmer back on top of it. */
 .skeletonPulse {
-  background: linear-gradient(
-    90deg,
-    var(--white-a03) 25%,
-    var(--white-a08) 50%,
-    var(--white-a03) 75%
-  );
+  --skeleton-base: var(--white-a03);
+  --skeleton-highlight: var(--white-a08);
+  background: var(--skeleton-shimmer);
   background-size: 200% 100%;
-  animation: skeletonShimmer 1.8s infinite;
 }
 
 .skeletonLine {
   height: 12px;
   border-radius: var(--radius-xs);
-  background: linear-gradient(
-    90deg,
-    var(--white-a03) 25%,
-    var(--white-a08) 50%,
-    var(--white-a03) 75%
-  );
-  background-size: 200% 100%;
-  animation: skeletonShimmer 1.8s infinite;
+  --skeleton-base: var(--white-a03);
+  --skeleton-highlight: var(--white-a08);
 }
 
 .skeletonTitleLine {
@@ -1913,21 +1897,6 @@
   text-align: center;
 }
 
-.spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid rgba(var(--accent-rgb), 0.2);
-  border-top-color: rgb(var(--accent-rgb));
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* ── Spotlight Carousel Controls ────────────────────────────────────────── */
 
 .spotlightCarouselControls {
@@ -2373,16 +2342,6 @@
 
 .showNotesHtmlContent li {
   margin-bottom: 6px;
-}
-
-.smallSpinner {
-  display: inline-block;
-  width: 13px;
-  height: 13px;
-  border: 2px solid var(--white-a30);
-  border-top-color: #ffffff;
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
 }
 
 /* ── Category Explorer Modal ────────────────────────────────────────────── */

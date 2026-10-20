@@ -34,22 +34,6 @@
   }
 }
 
-.searchNowSpinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--white-a30);
-  border-top-color: #fff;
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 .notice {
   margin: 0;
   padding: 12px 18px;
@@ -137,19 +121,9 @@
 .skeleton {
   height: 320px;
   border-radius: 18px;
-  background: linear-gradient(90deg, var(--white-a03), var(--white-a08), var(--white-a03));
-  background-size: 800px 100%;
-  animation: abShimmer 1.4s linear infinite;
   border: 1px solid var(--white-a06);
-}
-
-@keyframes abShimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
+  --skeleton-base: var(--white-a03);
+  --skeleton-highlight: var(--white-a08);
 }
 
 /* ── Gallery Poster Grid ─────────────────────────────────────────────────── */

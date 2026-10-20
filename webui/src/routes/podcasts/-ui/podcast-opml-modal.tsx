@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import {
   parseOpmlFile,
   subscribeOpmlFeeds,
@@ -207,10 +209,7 @@ export function PodcastOpmlModal({
                   />
                   <div className={styles.opmlDropzoneIcon}>
                     {isParsing ? (
-                      <div
-                        className={styles.spinner}
-                        style={{ width: 28, height: 28, borderWidth: 3 }}
-                      />
+                      <Spinner size={28} tone="tinted" />
                     ) : (
                       <svg
                         width="36"

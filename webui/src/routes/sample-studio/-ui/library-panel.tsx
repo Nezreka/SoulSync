@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 
+import { Skeleton } from '@/components/primitives';
+
 import type { StudioFilters, StudioTrack, TrackId } from '../-sample-studio.types';
 
 import { QUALITY_TIER_LABEL, qualityTier, tempoBucket } from '../-sample-studio.helpers';
@@ -156,9 +158,9 @@ export function LibraryPanel({
       <div className={styles.scroll}>
         {isLoading ? (
           <>
-            <div className={styles.shimmer} />
-            <div className={styles.shimmer} />
-            <div className={styles.shimmer} />
+            <Skeleton className={styles.shimmer} />
+            <Skeleton className={styles.shimmer} />
+            <Skeleton className={styles.shimmer} />
           </>
         ) : searchError && !isLoading ? (
           <div className={styles.emptyHint}>

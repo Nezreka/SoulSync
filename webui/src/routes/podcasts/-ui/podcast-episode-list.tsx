@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import type { PodcastDownloadItem, PodcastEpisodeItem } from '../-podcasts.types';
 
 import styles from './podcasts-page.module.css';
@@ -247,10 +249,7 @@ export function PodcastEpisodeList({
                       </>
                     ) : isDownloading ? (
                       <>
-                        <div
-                          className={styles.spinner}
-                          style={{ width: 12, height: 12, borderWidth: 2 }}
-                        />
+                        <Spinner size={12} tone="tinted" />
                         <span>{dlRecord?.percent ? `${dlRecord.percent}%` : 'Saving…'}</span>
                       </>
                     ) : (
