@@ -74,7 +74,7 @@
 /* ── GALLERY ─────────────────────────────────────────────────────────────── */
 .voe-gallery { flex: 1; overflow-y: auto; }
 .voe-gallery-inner { max-width: 1120px; margin: 0 auto; padding: 56px 32px 64px; }
-.voe-gallery-head { margin-bottom: 40px; text-align: center; }
+.voe-gallery-head { text-align: center; }
 .voe-gallery-kick {
     font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase;
     color: rgb(var(--a)); display: inline-flex; align-items: center; gap: 8px;
@@ -101,7 +101,7 @@
  * auto-fill 1fr, which stranded a couple of cards at the left with empty stretch
  * columns to the right). */
 .voe-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, 236px); justify-content: center; gap: 24px;
+    grid-template-columns: repeat(auto-fill, 236px); justify-content: center; gap: 24px;
 }
 .voe-card {
     position: relative; border-radius: var(--radius-xl); overflow: hidden; cursor: pointer;
@@ -382,7 +382,6 @@
 .voe-insp-chev svg { width: 13px; height: 13px; stroke: currentColor; }
 .voe-sec-collapsed .voe-insp-sec-h { margin-bottom: 0; }
 .voe-sec-collapsed .voe-insp-chev { transform: rotate(-90deg); }
-.voe-sec-collapsed .voe-insp-body { display: none; }
 .voe-field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .voe-field:last-child { margin-bottom: 0; }
 .voe-field-l { flex: 0 0 62px; font-size: 12px; color: var(--white-a55); }
