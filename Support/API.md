@@ -210,7 +210,7 @@ List library artists with search, letter filtering, and pagination.
   "data": {
     "artists": [
       {
-        "id": 42,
+        "id": "42",
         "name": "Radiohead",
         "thumb_url": null,
         "banner_url": null,
@@ -248,7 +248,7 @@ List library artists with search, letter filtering, and pagination.
 }
 ```
 
-> **Note:** The list endpoint returns a subset of metadata fields. Some fields like `summary`, `style`, `mood`, `label`, `banner_url`, and all `*_match_status` / `*_last_attempted` timestamps may be `null` in list view. Use the detail endpoint below for the complete record.
+> **Note:** The list endpoint returns a subset of metadata fields. Some fields like `summary`, `style`, `mood`, `label`, `banner_url`, and most `*_match_status` / `*_last_attempted` timestamps may be `null` in list view (the Discogs, Amazon, and JioSaavn statuses and timestamps are included). Use the detail endpoint below for the complete record.
 
 #### `GET /api/v1/library/artists/<artist_id>`
 
@@ -258,7 +258,7 @@ Get a single artist by ID with **all metadata** and their album list.
 {
   "data": {
     "artist": {
-      "id": 42,
+      "id": "42",
       "name": "Radiohead",
       "thumb_url": "https://i.scdn.co/image/abc123...",
       "banner_url": "https://www.theaudiodb.com/images/media/artist/fanart/...",
@@ -288,8 +288,8 @@ Get a single artist by ID with **all metadata** and their album list.
     },
     "albums": [
       {
-        "id": 87,
-        "artist_id": 42,
+        "id": "87",
+        "artist_id": "42",
         "title": "OK Computer",
         "year": 1997,
         "...": "..."
@@ -303,7 +303,7 @@ Get a single artist by ID with **all metadata** and their album list.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Internal database ID |
+| `id` | string | Internal database ID (text; usually numeric, standalone libraries may use opaque IDs containing `::soulsync`) |
 | `name` | string | Artist name |
 | `thumb_url` | string? | Artist thumbnail/profile image URL |
 | `banner_url` | string? | Artist banner/fanart image URL (from AudioDB) |
@@ -330,6 +330,23 @@ Get a single artist by ID with **all metadata** and their album list.
 | `itunes_last_attempted` | string? | ISO 8601 timestamp of last iTunes lookup |
 | `audiodb_last_attempted` | string? | ISO 8601 timestamp of last AudioDB lookup |
 | `deezer_last_attempted` | string? | ISO 8601 timestamp of last Deezer lookup |
+| `soul_id` | string? | Cross-install identity used by the MetaSync network |
+| `soul_id_path` | string? | How the `soul_id` was derived (`canonical`, `album`, or `name`) |
+| `aliases` | string[] | Alternate artist names (from MusicBrainz) |
+| `discogs_id` | string? | Discogs artist ID |
+| `discogs_bio` | string? | Artist biography (from Discogs) |
+| `discogs_members` | string[] | Band member names (from Discogs) |
+| `discogs_urls` | string[] | External links (from Discogs) |
+| `discogs_match_status` | string? | Discogs enrichment status |
+| `discogs_last_attempted` | string? | ISO 8601 timestamp of last Discogs lookup |
+| `amazon_id` | string? | Amazon artist ID |
+| `amazon_match_status` | string? | Amazon enrichment status |
+| `amazon_last_attempted` | string? | ISO 8601 timestamp of last Amazon lookup |
+| `jiosaavn_id` | string? | JioSaavn artist ID |
+| `jiosaavn_match_status` | string? | JioSaavn enrichment status |
+| `jiosaavn_last_attempted` | string? | ISO 8601 timestamp of last JioSaavn lookup |
+| `art_locked` | bool? | Custom artwork lock: scans keep the current artwork |
+| `genres_locked` | bool? | Genre lock: scans keep the current genres |
 
 > Fields marked `?` may be `null` if the data hasn't been enriched from that provider yet.
 
@@ -348,7 +365,7 @@ List/search all albums with pagination and optional filters.
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
 | `search` | string | | Filter by album title |
-| `artist_id` | int | | Filter by artist ID |
+| `artist_id` | string | | Filter by artist ID (text; may be opaque). An empty value means no filter |
 | `year` | int | | Filter by release year |
 | `page` | int | 1 | Page number |
 | `limit` | int | 50 | Items per page (max 200) |
@@ -362,8 +379,8 @@ Get a single album by ID with **all metadata** and embedded track list.
 {
   "data": {
     "album": {
-      "id": 87,
-      "artist_id": 42,
+      "id": "87",
+      "artist_id": "42",
       "title": "OK Computer",
       "year": 1997,
       "thumb_url": "https://i.scdn.co/image/...",
@@ -396,7 +413,7 @@ Get a single album by ID with **all metadata** and embedded track list.
     },
     "tracks": [
       {
-        "id": 510,
+        "id": "510",
         "title": "Airbag",
         "track_number": 1,
         "...": "..."
@@ -410,8 +427,8 @@ Get a single album by ID with **all metadata** and embedded track list.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Internal database ID |
-| `artist_id` | int | Parent artist ID |
+| `id` | string | Internal database ID (text; may be opaque) |
+| `artist_id` | string | Parent artist ID |
 | `title` | string | Album title |
 | `year` | int? | Release year |
 | `thumb_url` | string? | Album cover art URL |
@@ -441,6 +458,40 @@ Get a single album by ID with **all metadata** and embedded track list.
 | `itunes_last_attempted` | string? | ISO 8601 timestamp |
 | `audiodb_last_attempted` | string? | ISO 8601 timestamp |
 | `deezer_last_attempted` | string? | ISO 8601 timestamp |
+| `release_date` | string? | Full release date when known (alongside the extracted `year`) |
+| `soul_id` | string? | Cross-install identity used by the MetaSync network |
+| `discogs_id` | string? | Discogs release ID |
+| `discogs_genres` | string[] | Genres (from Discogs) |
+| `discogs_styles` | string[] | Styles (from Discogs) |
+| `discogs_label` | string? | Label (from Discogs) |
+| `discogs_catno` | string? | Catalog number (from Discogs) |
+| `discogs_country` | string? | Release country (from Discogs) |
+| `discogs_rating` | float? | Community rating (from Discogs) |
+| `discogs_rating_count` | int? | Number of community ratings (from Discogs) |
+| `discogs_match_status` | string? | Discogs enrichment status |
+| `discogs_last_attempted` | string? | ISO 8601 timestamp |
+| `amazon_id` | string? | Amazon album ID |
+| `amazon_match_status` | string? | Amazon enrichment status |
+| `amazon_last_attempted` | string? | ISO 8601 timestamp |
+| `jiosaavn_id` | string? | JioSaavn album ID |
+| `jiosaavn_match_status` | string? | JioSaavn enrichment status |
+| `jiosaavn_last_attempted` | string? | ISO 8601 timestamp |
+| `bandcamp_id` | string? | Bandcamp release ID |
+| `bandcamp_url` | string? | Bandcamp release URL |
+| `bandcamp_tags` | string[] | Tags (from Bandcamp) |
+| `bandcamp_label` | string? | Label (from Bandcamp) |
+| `bandcamp_match_status` | string? | Bandcamp enrichment status |
+| `bandcamp_last_attempted` | string? | ISO 8601 timestamp |
+| `api_track_count` | int? | Track count of the canonical release, when resolved |
+| `canonical_track_count` | int? | Track count fetched for the selected canonical release |
+| `canonical_source` | string? | Provider that supplied the canonical release |
+| `canonical_album_id` | string? | Provider ID of the canonical release |
+| `canonical_score` | float? | Confidence score of the canonical match |
+| `canonical_resolved_at` | string? | ISO 8601 timestamp of canonical resolution |
+| `canonical_locked` | bool? | Canonical selection was locked by hand |
+| `art_locked` | bool? | Custom artwork lock: scans keep the current artwork |
+| `genres_locked` | bool? | Genre lock: scans keep the current genres |
+| `metadata_locked` | bool? | Metadata lock: the row was hand-tagged and scans keep it |
 
 #### `GET /api/v1/library/albums/<album_id>/tracks`
 
@@ -458,9 +509,9 @@ Get a single track by ID with **all metadata**.
 {
   "data": {
     "track": {
-      "id": 512,
-      "album_id": 87,
-      "artist_id": 42,
+      "id": "512",
+      "album_id": "87",
+      "artist_id": "42",
       "title": "Paranoid Android",
       "artist_name": "Radiohead",
       "album_title": "OK Computer",
@@ -501,15 +552,15 @@ Get a single track by ID with **all metadata**.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Internal database ID |
-| `album_id` | int | Parent album ID |
-| `artist_id` | int | Parent artist ID |
+| `id` | string | Internal database ID (text; may be opaque) |
+| `album_id` | string | Parent album ID |
+| `artist_id` | string | Parent artist ID |
 | `title` | string | Track title |
 | `artist_name` | string? | Artist name (joined from artists table) |
 | `album_title` | string? | Album title (joined from albums table) |
 | `track_number` | int? | Track number on the album |
 | `duration` | int? | Duration in milliseconds |
-| `file_path` | string? | File path on the media server |
+| `file_path` | string? | SoulSync's local file path for the track |
 | `bitrate` | int? | Audio bitrate in kbps |
 | `bpm` | float? | Beats per minute |
 | `explicit` | bool? | Whether track contains explicit content |
@@ -535,6 +586,27 @@ Get a single track by ID with **all metadata**.
 | `itunes_last_attempted` | string? | ISO 8601 timestamp |
 | `audiodb_last_attempted` | string? | ISO 8601 timestamp |
 | `deezer_last_attempted` | string? | ISO 8601 timestamp |
+| `disc_number` | int? | Disc number for multi-disc releases |
+| `year` | int? | Per-track release year from file tags |
+| `track_artist` | string? | Track performer credit (e.g. on compilations) |
+| `recording_disambiguation` | string? | MusicBrainz recording comment distinguishing versions (e.g. live, acoustic) |
+| `server_path` | string? | File path as reported by the media server |
+| `file_size` | int? | File size in bytes |
+| `soul_id` | string? | Cross-install song identity used by the MetaSync network |
+| `album_soul_id` | string? | Cross-install identity of this track's specific release |
+| `amazon_id` | string? | Amazon track ID |
+| `amazon_match_status` | string? | Amazon enrichment status |
+| `amazon_last_attempted` | string? | ISO 8601 timestamp |
+| `jiosaavn_id` | string? | JioSaavn track ID |
+| `jiosaavn_match_status` | string? | JioSaavn enrichment status |
+| `jiosaavn_last_attempted` | string? | ISO 8601 timestamp |
+| `bandcamp_id` | string? | Bandcamp track ID |
+| `bandcamp_url` | string? | Bandcamp track URL |
+| `bandcamp_tags` | string[] | Tags (from Bandcamp) |
+| `bandcamp_label` | string? | Label (from Bandcamp) |
+| `bandcamp_match_status` | string? | Bandcamp enrichment status |
+| `bandcamp_last_attempted` | string? | ISO 8601 timestamp |
+| `metadata_locked` | bool? | Metadata lock: the row was hand-tagged and scans keep it |
 
 #### `GET /api/v1/library/tracks`
 
@@ -593,8 +665,8 @@ Get recently added content, ordered by creation date.
   "data": {
     "items": [
       {
-        "id": 4831,
-        "artist_id": 42,
+        "id": "4831",
+        "artist_id": "42",
         "title": "A Moon Shaped Pool",
         "year": 2016,
         "thumb_url": "https://...",
@@ -613,14 +685,16 @@ Get recently added content, ordered by creation date.
 
 #### `GET /api/v1/library/lookup`
 
-Look up a library entity by its external provider ID. Useful for cross-referencing with Spotify, MusicBrainz, iTunes, Deezer, or AudioDB.
+Look up a library entity by its external provider ID. Useful for cross-referencing with Spotify, MusicBrainz, iTunes, Deezer, AudioDB, Tidal, Qobuz, Genius, Discogs, Amazon, JioSaavn, or Bandcamp.
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | string | Yes | `artist`, `album`, or `track` |
-| `provider` | string | Yes | `spotify`, `musicbrainz`, `itunes`, `deezer`, or `audiodb` |
+| `provider` | string | Yes | `spotify`, `musicbrainz`, `itunes`, `deezer`, `audiodb`, `tidal`, `qobuz`, `genius`, `discogs`, `amazon`, `jiosaavn`, or `bandcamp` |
 | `id` | string | Yes | The external ID value |
 | `fields` | string | No | Comma-separated field list |
+
+Not every provider applies to every type: Genius IDs are not stored for albums, Bandcamp IDs are not stored for artists, and Discogs IDs are not stored for tracks. Those combinations return `400 BAD_REQUEST`.
 
 **Example — find an artist by Spotify ID:**
 
@@ -632,7 +706,7 @@ GET /api/v1/library/lookup?type=artist&provider=spotify&id=4Z8W4fKeB5YxbusRsdQVP
 {
   "data": {
     "artist": {
-      "id": 42,
+      "id": "42",
       "name": "Radiohead",
       "spotify_artist_id": "4Z8W4fKeB5YxbusRsdQVPb",
       "...": "..."
