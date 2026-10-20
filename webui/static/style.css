@@ -33369,10 +33369,6 @@ div.artist-hero-badge {
     color: var(--white-a75);
 }
 
-.hero-popularity .meta-icon {
-    font-size: 16px;
-}
-
 .hero-popularity .meta-value {
     font-weight: 700;
 }
@@ -33729,10 +33725,6 @@ div.artist-hero-badge {
     border-color: var(--white-a30);
 }
 
-.discover-hero-watch-all .watch-all-icon {
-    font-size: 14px;
-}
-
 .discover-hero-watch-all.all-watched {
     background: rgba(var(--accent-rgb), 0.15);
     border-color: rgba(var(--accent-rgb), 0.4);
@@ -33774,12 +33766,6 @@ div.artist-hero-badge {
     border: 1px solid var(--white-a06);
     cursor: pointer;
     transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-/* Recommended card placed inside a horizontal Discover carousel */
-.recommended-card--carousel {
-    flex: 0 0 160px;
-    width: 160px;
 }
 
 .recommended-artist-card:hover {
@@ -33911,13 +33897,6 @@ div.artist-hero-badge {
     cursor: default;
 }
 
-.recommended-add-all-btn.all-added {
-    background: rgba(var(--accent-rgb), 0.08);
-    border-color: rgba(var(--accent-rgb), 0.2);
-    opacity: 0.7;
-    cursor: default;
-}
-
 .recommended-search-input {
     width: 100%;
     padding: 10px 16px;
@@ -33936,13 +33915,6 @@ div.artist-hero-badge {
 
 .recommended-search-input::placeholder {
     color: var(--white-a30);
-}
-
-.recommended-empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: var(--white-a40);
-    font-size: 15px;
 }
 
 .recommended-loading {
@@ -34142,13 +34114,6 @@ div.artist-hero-badge {
     background: #666;
 }
 
-/* Playlist Grid */
-.discover-playlists-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 20px;
-}
-
 /* Loading State */
 .discover-loading {
     display: flex;
@@ -34234,19 +34199,6 @@ div.artist-hero-badge {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-.discover-card-image {
-    width: 100%;
-    height: 200px;
-    overflow: hidden;
-    position: relative;
-}
-
-.discover-card-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
 .discover-card-info {
     padding: 12px;
 }
@@ -34259,21 +34211,6 @@ div.artist-hero-badge {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.discover-card-subtitle {
-    font-size: 12px;
-    color: #999;
-    margin: 0 0 4px 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.discover-card-meta {
-    font-size: 11px;
-    color: #666;
-    margin: 0;
 }
 
 /* ── Your Artists Cards ── */
@@ -34484,12 +34421,6 @@ div.artist-hero-badge {
     background: linear-gradient(135deg, rgba(var(--accent-rgb),0.42), rgba(var(--accent-rgb),0.10));
     display: flex; align-items: center; justify-content: center;
 }
-.mix-card-decade {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 4px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.4);
-}
-.mix-card-decade-icon { font-size: 34px; line-height: 1; }
-.mix-card-decade-label { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
 /* The mix modal: opened from a mix card, holds the track list + per-mix actions.
    the station preview and the search playlist preview share this shell.
    header = art + eyebrow + title + one filled action, then a column head that
@@ -34687,32 +34618,8 @@ div.artist-hero-badge {
 .discover-grid::-webkit-scrollbar-thumb { background: var(--white-a14); border-radius: 3px; }
 .discover-grid::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.45); }
 .discover-grid .ya-card { width: 100%; }
-/* Two same-card sections side by side (#discover redesign) — halves the scroll. The inner
-   .discover-grid auto-fits fewer columns at half width, so cards stay full-size. Collapses to a
-   single column on narrower screens. min-width:0 lets each column shrink instead of overflowing. */
-.discover-row-2col {
-    display: grid;
-    /* One column on purpose: the 2-col packing halved a page of TALL grids;
-       rails are short, and two cramped side-by-side rails read worse than a
-       clean full-width stack. The markup keeps emitting pairs — this is now
-       purely a stacking container. */
-    grid-template-columns: 1fr;
-    gap: 0;
-    align-items: start;
-}
-.discover-row-2col > .discover-section { min-width: 0; }
-@media (max-width: 1100px) {
-    .discover-row-2col { grid-template-columns: 1fr; gap: 0; }
-}
 /* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
 .discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
-/* Genre cards: no cover art — square gradient tile with the genre emoji centered. */
-.discover-grid .discover-genre-card.ya-card { aspect-ratio: 1; }
-.discover-genre-card .genre-card-art {
-    display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.38), rgba(var(--accent-rgb),0.07));
-}
-.discover-genre-card .genre-icon-large { font-size: 46px; line-height: 1; }
 /* Secondary line under the title (album → artist). */
 .ya-card-sub {
     font-size: 11px; font-weight: 500;
@@ -35631,12 +35538,6 @@ div.artist-hero-badge {
 .artmap-genre-sidebar-item.active .artmap-genre-sidebar-name { color: rgba(138,43,226,0.9); font-weight: 600; }
 .artmap-genre-sidebar-count { font-size: 10px; color: var(--white-a15); flex-shrink: 0; }
 
-.artmap-genre-change {
-    color: rgba(138,43,226,0.7); cursor: pointer; font-weight: 600;
-    transition: color 0.15s; text-transform: capitalize;
-}
-.artmap-genre-change:hover { color: rgba(138,43,226,1); }
-
 /* Center: search */
 .artmap-nav-center { flex: 1; display: flex; justify-content: center; max-width: 320px; margin: 0 auto; }
 .artmap-search-wrap {
@@ -35855,39 +35756,6 @@ div.artist-hero-badge {
 }
 .artmap-explore-result:hover .artmap-explore-result-go { opacity: 1; }
 .artmap-explore-empty { padding: 18px; text-align: center; color: var(--white-a35); font-size: 13px; }
-
-/* Genre picker modal */
-.artmap-genre-picker-modal {
-    background: linear-gradient(165deg, #1e1e32 0%, #181828 100%);
-    border-radius: var(--radius-xl); width: 420px; max-width: 90vw; max-height: 75vh; max-height: 75dvh;
-    display: flex; flex-direction: column;
-    box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px var(--white-a06);
-}
-.artmap-genre-picker-header {
-    display: flex; align-items: center; gap: 14px; padding: 24px 24px 16px;
-    color: rgba(138,43,226,0.7); border-bottom: 1px solid var(--white-a05);
-}
-.artmap-genre-picker-header h3 { font-size: 17px; font-weight: 700; color: #fff; margin: 0; }
-.artmap-genre-picker-header p { font-size: 12px; color: var(--white-a35); margin: 3px 0 0; }
-.artmap-genre-picker-search {
-    margin: 12px 20px 0; padding: 10px 14px; border-radius: 10px; font-size: 13px;
-    background: var(--white-a04); border: 1px solid var(--white-a07);
-    color: #fff; outline: none; box-sizing: border-box;
-}
-.artmap-genre-picker-search::placeholder { color: var(--white-a20); }
-.artmap-genre-picker-search:focus { border-color: rgba(138,43,226,0.4); }
-.artmap-genre-picker-list {
-    flex: 1; overflow-y: auto; padding: 8px 12px 16px;
-    scrollbar-width: thin; scrollbar-color: var(--white-a08) transparent;
-}
-.artmap-genre-picker-item {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 14px; border-radius: 10px; cursor: pointer;
-    transition: background 0.15s;
-}
-.artmap-genre-picker-item:hover { background: rgba(138,43,226,0.08); }
-.artmap-genre-picker-name { font-size: 14px; font-weight: 600; color: var(--white-a80); text-transform: capitalize; }
-.artmap-genre-picker-count { font-size: 11px; color: var(--white-a25); }
 
 /* Loading state */
 .ya-loading {
@@ -36538,23 +36406,6 @@ div.artist-hero-badge {
     color: #fff;
 }
 
-/* In Library badge on discover cards */
-.discover-card-lib-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(var(--accent-rgb), 0.85);
-    color: #fff;
-    padding: 3px 7px;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
 @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -36562,46 +36413,6 @@ div.artist-hero-badge {
 
 /* Discover Empty State */
 /* ── Spotify Library Section ────────────────────────── */
-
-.spotify-library-header-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    margin-left: auto;
-    flex-shrink: 0;
-}
-
-.spotify-library-action-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    border: none;
-    transition: all 0.2s ease;
-}
-
-.spotify-library-refresh-btn {
-    background: var(--white-a08);
-    color: #b3b3b3;
-}
-
-.spotify-library-refresh-btn:hover {
-    background: var(--white-a14);
-    color: #fff;
-}
-
-.spotify-library-download-btn {
-    background: rgba(var(--accent-rgb), 0.15);
-    color: rgb(var(--accent-rgb));
-}
-
-.spotify-library-download-btn:hover {
-    background: rgba(var(--accent-rgb), 0.25);
-}
 
 .spotify-library-filters {
     display: flex;
@@ -36675,45 +36486,6 @@ div.artist-hero-badge {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
-.spotify-library-card-img {
-    width: 100%;
-    aspect-ratio: 1;
-    overflow: hidden;
-    position: relative;
-}
-
-.spotify-library-card-img img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.spotify-library-card-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 28px;
-    height: 28px;
-    border-radius: var(--radius-circle);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-}
-
-.spotify-library-card-badge.owned {
-    background: rgba(var(--success-rgb), 0.85);
-    color: #fff;
-}
-
-.spotify-library-card-badge.missing {
-    background: var(--white-a15);
-    color: var(--white-a70);
-}
-
 .spotify-library-card-info {
     padding: 12px;
 }
@@ -36735,12 +36507,6 @@ div.artist-hero-badge {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
-
-.spotify-library-card-meta {
-    font-size: 11px;
-    color: var(--white-a35);
-    margin: 0;
 }
 
 .spotify-library-pagination {
@@ -36795,10 +36561,6 @@ div.artist-hero-badge {
         gap: 12px;
     }
 
-    .spotify-library-header-actions {
-        flex-wrap: wrap;
-    }
-
     .spotify-library-filters {
         flex-direction: column;
     }
@@ -36815,45 +36577,10 @@ div.artist-hero-badge {
     color: #999;
 }
 
-/* Discover Playlist Tracks */
-.discover-playlist-tracks {
-    background: #1a1a1a;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-}
-
-.discover-playlist-track {
-    display: grid;
-    grid-template-columns: 40px 50px 1fr 2fr 80px;
-    gap: 16px;
-    align-items: center;
-    padding: 12px 16px;
-    border-bottom: 1px solid #2a2a2a;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-}
-
-.discover-playlist-track:hover {
-    background-color: #2a2a2a;
-}
-
 .playlist-track-number {
     font-size: 14px;
     color: #999;
     text-align: center;
-}
-
-.playlist-track-image {
-    width: 50px;
-    height: 50px;
-    border-radius: var(--radius-xs);
-    overflow: hidden;
-}
-
-.playlist-track-image img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
 }
 
 .playlist-track-info {
@@ -36865,22 +36592,6 @@ div.artist-hero-badge {
     font-weight: 500;
     color: #fff;
     margin-bottom: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.playlist-track-artist {
-    font-size: 12px;
-    color: #999;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.playlist-track-album {
-    font-size: 12px;
-    color: #999;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -37335,83 +37046,6 @@ div.artist-hero-badge {
     padding: 12px 24px 20px;
 }
 
-/* Discover Playlist Cards */
-.discover-playlist-card {
-    background: #1a1a1a;
-    border-radius: var(--radius-md);
-    overflow: hidden;
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.discover-playlist-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-
-.discover-playlist-cover {
-    position: relative;
-    width: 100%;
-    padding-bottom: 100%;
-    overflow: hidden;
-}
-
-.discover-playlist-cover img {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.playlist-play-overlay {
-    position: absolute;
-    bottom: 12px;
-    right: 12px;
-    width: 48px;
-    height: 48px;
-    background-color: rgb(var(--accent-rgb));
-    border-radius: var(--radius-circle);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
-    color: #fff;
-    opacity: 0;
-    transform: translateY(8px);
-    transition: all 0.2s ease;
-}
-
-.discover-playlist-card:hover .playlist-play-overlay {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-.discover-playlist-info {
-    padding: 16px;
-}
-
-.discover-playlist-name {
-    font-size: 16px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0 0 8px 0;
-}
-
-.discover-playlist-description {
-    font-size: 13px;
-    color: #999;
-    margin: 0 0 8px 0;
-    line-height: 1.4;
-}
-
-.discover-playlist-count {
-    font-size: 12px;
-    color: #666;
-    margin: 0;
-}
-
 /* ===============================
    DISCOVER DOWNLOAD BAR
    =============================== */
@@ -37804,13 +37438,6 @@ div.artist-hero-badge {
     flex-shrink: 0;
 }
 
-.build-playlist-no-results {
-    padding: 20px 16px;
-    text-align: center;
-    color: #777;
-    font-size: 13px;
-}
-
 /* -- Selected Artists -- */
 .build-playlist-selected-section {
     margin-bottom: 20px;
@@ -38080,50 +37707,6 @@ div.artist-hero-badge {
     transform: scale(1.1) rotate(5deg);
 }
 
-/* =======================
-   Genre Browser Cards
-   ======================= */
-
-.genre-card-modern {
-    /* Inherits from .discover-card */
-}
-
-.genre-card-image {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-    overflow: hidden;
-}
-
-.genre-card-image::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.12) 0%,
-            rgba(var(--accent-rgb), 0.04) 100%);
-    opacity: 1;
-    transition: opacity 0.3s ease;
-}
-
-.genre-card-modern:hover .genre-card-image::before {
-    opacity: 0.3;
-}
-
-.genre-icon-large {
-    font-size: 96px;
-    line-height: 1;
-    position: relative;
-    z-index: 1;
-    transition: transform 0.3s ease;
-}
-
-.genre-card-modern:hover .genre-icon-large {
-    transform: scale(1.1) rotate(5deg);
-}
-
 /* ===============================
    TIME MACHINE (DECADE TABS)
    =============================== */
@@ -38205,6 +37788,9 @@ div.artist-hero-badge {
     margin-bottom: 20px;
 }
 
+/* Nothing renders .discover-section-subsection, but these stay: they are the
+   only place .listenbrainz-tab-content (radio-sections.tsx) is declared, and
+   artefact-parity.test.ts reads the stylesheets to learn the known classes. */
 .listenbrainz-tab-content .discover-section-subsection {
     margin-bottom: 40px;
 }
@@ -38223,78 +37809,7 @@ div.artist-hero-badge {
 /* SEARCH SOURCE PICKER (replaces Enhanced/Basic toggle) */
 /* ========================================= */
 
-.search-source-picker-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0;
-}
-
-.search-source-picker-label {
-    color: var(--white-a70);
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-}
-
-.search-source-picker-wrapper {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-}
-
-.search-source-picker-select {
-    appearance: none;
-    -webkit-appearance: none;
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(64, 64, 64, 0.4);
-    border-radius: 10px;
-    color: #ffffff;
-    padding: 10px 40px 10px 16px;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    min-width: 220px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.search-source-picker-select:hover {
-    border-color: rgba(138, 43, 226, 0.6);
-}
-
-.search-source-picker-select:focus {
-    outline: none;
-    border-color: rgba(138, 43, 226, 0.9);
-    box-shadow: 0 2px 10px rgba(138, 43, 226, 0.35);
-}
-
-.search-source-picker-select option {
-    background: #1e1e1e;
-    color: #ffffff;
-}
-
-.search-source-picker-caret {
-    position: absolute;
-    right: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-    color: var(--white-a60);
-    font-size: 12px;
-}
-
 /* Legacy toggle (kept for any other references, but unused by the Search page) */
-.search-mode-toggle-container {
-    display: flex;
-    justify-content: center;
-    margin: 20px 0;
-}
-
 .search-mode-toggle {
     position: relative;
     background: rgba(30, 30, 30, 0.8);
@@ -38304,41 +37819,6 @@ div.artist-hero-badge {
     gap: 4px;
     border: 1px solid rgba(64, 64, 64, 0.4);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.search-mode-btn {
-    position: relative;
-    z-index: 2;
-    background: transparent;
-    border: none;
-    padding: 10px 24px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-family: 'Segoe UI', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--white-a60);
-}
-
-.search-mode-btn:hover {
-    color: var(--white-a90);
-}
-
-.search-mode-btn.active {
-    color: #ffffff;
-}
-
-.mode-icon {
-    font-size: 16px;
-    transition: transform 0.3s ease;
-}
-
-.search-mode-btn.active .mode-icon {
-    transform: scale(1.1);
 }
 
 .search-mode-toggle .toggle-slider {
@@ -38382,11 +37862,6 @@ div.artist-hero-badge {
     display: none !important;
 }
 
-.enhanced-search-input-wrapper {
-    position: relative;
-    margin-bottom: 0;
-}
-
 /* Enhanced Search Bar — the hero pill. One confident rounded field, the way
    Spotify/Apple lead their search surfaces; the id-lookup row hangs beneath it
    as a quiet utility line instead of a second boxed input. */
@@ -38395,22 +37870,6 @@ div.artist-hero-badge {
     display: flex; flex-direction: column; gap: 6px; align-items: stretch;
 }
 .enhanced-search-bar-container:focus-within { border-color: transparent; background: transparent; }
-.enhanced-search-wrapper {
-    position: relative; display: flex; align-items: center;
-    background: #202024; border-radius: var(--radius-pill);
-    border: 1px solid var(--white-a09);
-    padding: 0 10px 0 22px; min-height: 54px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 var(--white-a05);
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-}
-.enhanced-search-wrapper:hover { background: #26262b; border-color: var(--white-a14); }
-.enhanced-search-wrapper:focus-within {
-    background: #26262b; border-color: rgba(var(--accent-rgb), 0.55);
-    box-shadow: 0 6px 28px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(var(--accent-rgb), 0.14),
-        inset 0 1px 0 var(--white-a05);
-}
-.enhanced-search-icon { font-size: 18px; margin-right: 12px; opacity: 0.55; animation: none; transition: opacity 0.2s ease; }
-.enhanced-search-wrapper:focus-within .enhanced-search-icon { opacity: 0.9; }
 @keyframes sparkle {
     0%, 100% { opacity: 1; transform: scale(1); }
     50% { opacity: 0.7; transform: scale(1.1); }
@@ -38429,39 +37888,6 @@ div.artist-hero-badge {
 }
 .enhanced-cancel-btn:hover { background: var(--white-a16); color: #fff; }
 
-/* Link / ID lookup row (#775) — a quiet utility line under the hero pill, NOT
-   a second boxed input. But fully transparent with a 28%-white placeholder it
-   read as a caption: "it took a long time to realize this is input" (#1210).
-   Just enough edge to say "type here", still quieter than the pill above. */
-.enh-id-lookup {
-    display: flex; align-items: center; gap: 8px; margin-top: 2px;
-    background: rgba(255, 255, 255, 0.028);
-    border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    padding: 0 8px 0 14px;
-    cursor: text;
-    transition: background 0.2s ease, border-color 0.2s ease;
-}
-.enh-id-lookup:hover { background: rgba(255, 255, 255, 0.045); }
-.enh-id-lookup:focus-within {
-    background: var(--white-a06);
-    border-color: rgba(var(--accent-rgb), 0.35);
-}
-.enh-id-lookup-icon { font-size: 13px; opacity: 0.4; }
-.enh-id-input {
-    flex-grow: 1; background: transparent; border: none; outline: none;
-    font-family: 'Segoe UI', sans-serif; font-size: 12.5px;
-    color: var(--white-a75); padding: 8px 0;
-}
-.enh-id-input::placeholder { color: rgba(255, 255, 255, 0.42); }
-.enh-id-btn {
-    flex-shrink: 0; background: rgba(var(--accent-rgb), 0.14);
-    border: 1px solid rgba(var(--accent-rgb), 0.25); border-radius: var(--radius-pill);
-    padding: 5px 14px; color: rgb(var(--accent-light-rgb)); cursor: pointer;
-    font-size: 12px; font-weight: 600; transition: all 0.2s ease;
-}
-.enh-id-btn:hover { background: rgba(var(--accent-rgb), 0.26); }
-
 /* Enhanced Search Status */
 .enhanced-search-status {
     display: flex;
@@ -38474,104 +37900,11 @@ div.artist-hero-badge {
     border-left: 3px solid rgba(138, 43, 226, 0.8);
 }
 
-.enhanced-status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    background: rgba(138, 43, 226, 0.8);
-    animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-
-    0%,
-    100% {
-        box-shadow: 0 0 4px rgba(138, 43, 226, 0.6);
-    }
-
-    50% {
-        box-shadow: 0 0 12px rgba(138, 43, 226, 0.9);
-    }
-}
-
 #enhanced-search-status-text {
     font-family: 'Segoe UI', sans-serif;
     font-size: 13px;
     color: var(--white-a80);
     margin: 0;
-}
-
-/* Enhanced Search Results */
-.enhanced-search-results-container {
-    background: rgba(20, 20, 20, 0.3);
-    border-radius: var(--radius-xl);
-    border: 2px solid rgba(138, 43, 226, 0.2);
-    padding: 20px;
-    margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    overflow: hidden;
-}
-
-.enhanced-results-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(138, 43, 226, 0.2);
-}
-
-.enhanced-results-header h3 {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 16px;
-    font-weight: 600;
-    margin: 0;
-}
-
-.results-count-badge {
-    background: linear-gradient(135deg, rgba(138, 43, 226, 0.3), rgba(123, 31, 162, 0.3));
-    border: 1px solid rgba(138, 43, 226, 0.5);
-    border-radius: 20px;
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a90);
-}
-
-.enhanced-results-scroll-area {
-    overflow-y: auto;
-    flex-grow: 1;
-    padding-right: 8px;
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar {
-    width: 8px;
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-track {
-    background: rgba(20, 20, 20, 0.3);
-    border-radius: var(--radius-xs);
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-thumb {
-    background: linear-gradient(to bottom, rgba(138, 43, 226, 0.6), rgba(123, 31, 162, 0.6));
-    border-radius: var(--radius-xs);
-}
-
-.enhanced-results-scroll-area::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(to bottom, rgba(138, 43, 226, 0.8), rgba(123, 31, 162, 0.8));
-}
-
-/* Enhanced Results Placeholder */
-.enhanced-results-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 60px 20px;
-    text-align: center;
 }
 
 .placeholder-icon {
@@ -38620,48 +37953,8 @@ div.artist-hero-badge {
     to { opacity: 1; transform: translateY(0); }
 }
 
-.enhanced-dropdown-content {
-    max-height: none;
-    overflow-y: visible;
-    padding: 0;
-}
-
-/* Close button inside dropdown - hidden on desktop, shown on mobile */
-.enhanced-dropdown-close {
-    display: none;
-}
-
 /* Responsive: mobile adjustments */
 @media (max-width: 700px) {
-    .enhanced-dropdown-close {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        width: 100%;
-        padding: 8px 16px;
-        margin-bottom: 12px;
-        background: var(--white-a06);
-        border: 1px solid var(--white-a08);
-        border-radius: var(--radius-md);
-        color: var(--white-a50);
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.2s ease;
-    }
-
-    .enhanced-dropdown-close:hover,
-    .enhanced-dropdown-close:active {
-        background: var(--white-a10);
-        color: var(--white-a80);
-    }
-
-    .enhanced-dropdown-close span {
-        font-size: 14px;
-        line-height: 1;
-    }
-
     .enhanced-search-bar-container {
         flex-direction: column;
         padding: 8px;
@@ -38674,18 +37967,9 @@ div.artist-hero-badge {
 }
 
 @media (max-width: 480px) {
-    .enhanced-search-wrapper {
-        padding: 0 10px;
-    }
-
     #enhanced-search-input {
         font-size: 13px;
         padding: 10px 0;
-    }
-
-    .enhanced-search-icon {
-        font-size: 16px;
-        margin-right: 6px;
     }
 
     /* Better album/track results on mobile */
@@ -38731,17 +38015,6 @@ div.artist-hero-badge {
         font-size: 8px;
     }
 
-    .track-item .action-btn {
-        width: 28px;
-        height: 28px;
-        font-size: 11px;
-    }
-
-    /* Search results area */
-    .enhanced-search-results-container {
-        padding: 12px;
-    }
-
     .search-results-scroll-area {
         padding-right: 3px;
     }
@@ -38750,23 +38023,6 @@ div.artist-hero-badge {
         padding: 12px;
         border-radius: 14px;
     }
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar {
-    width: 6px;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-thumb {
-    background: var(--white-a20);
-    border-radius: 3px;
-}
-
-.enhanced-dropdown-content::-webkit-scrollbar-thumb:hover {
-    background: var(--white-a30);
 }
 
 /* Loading and Empty States */
@@ -38793,58 +38049,6 @@ div.artist-hero-badge {
     margin-bottom: 12px;
     opacity: 0.5;
 }
-
-/* Dropdown Sections - Enhanced with Premium Design */
-/* Source tabs for multi-source search */
-.enh-source-tabs {
-    display: flex;
-    gap: 4px;
-    padding: 0;
-    margin-bottom: 20px;
-    border: none;
-}
-
-.enh-source-tab {
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    border: none;
-    background: var(--white-a05);
-    color: var(--white-a50);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-    letter-spacing: 0.02em;
-}
-
-.enh-source-tab:hover {
-    background: var(--white-a10);
-    color: var(--white-a85);
-}
-
-.enh-source-tab.active {
-    background: var(--white-a12);
-    color: #fff;
-    font-weight: 700;
-}
-
-.enh-source-tab .enh-tab-count {
-    margin-left: 4px;
-    opacity: 0.5;
-    font-weight: 400;
-}
-
-.enh-source-tab.enh-tab-spotify.active { background: rgba(29, 185, 84, 0.2); color: #1db954; }
-.enh-source-tab.enh-tab-itunes.active { background: rgba(252, 60, 68, 0.2); color: #fc3c44; }
-.enh-source-tab.enh-tab-deezer.active { background: rgba(162, 56, 255, 0.2); color: #a238ff; }
-.enh-source-tab.enh-tab-discogs.active { background: rgba(212, 165, 116, 0.2); color: #D4A574; }
-.enh-source-tab.enh-tab-hydrabase.active { background: rgba(0, 180, 216, 0.2); color: #00b4d8; }
-.enh-source-tab.enh-tab-amazon.active { background: rgba(255, 153, 0, 0.2); color: #FF9900; }
-.enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
-.enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
-.enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
-.enh-source-tab.enh-tab-bandcamp.active { background: rgba(29, 160, 195, 0.2); color: #1da0c3; }
 
 /* ── Source picker — a boxless rail of brand pills; the pills carry the
    color, the way Spotify's filter chips sit bare on the page. ── */
@@ -39187,13 +38391,6 @@ div.artist-hero-badge {
     background: rgba(220, 50, 50, 0.85);
     color: #fff;
     cursor: pointer;
-}
-
-.enh-empty-state {
-    text-align: center;
-    padding: 40px 20px;
-    color: var(--white-a30);
-    font-size: 14px;
 }
 
 @media (max-width: 600px) {
@@ -40080,91 +39277,9 @@ div.artist-hero-badge {
     }
 }
 
-.enh-dropdown-section {
-    margin-bottom: 24px;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    padding: 0;
-    backdrop-filter: none;
-    box-shadow: none;
-    position: relative;
-}
-
-.enh-dropdown-section::before {
-    display: none;
-}
-
-.enh-dropdown-section:last-child {
-    margin-bottom: 0;
-}
-
-.enh-section-header {
-    display: flex; align-items: baseline; gap: 10px; padding: 0;
-    margin-bottom: 16px; border-bottom: none; position: relative;
-}
-.enh-section-header::after { display: none; }
-.enh-section-icon { display: none; }
-.enh-section-title {
-    flex-grow: 1; font-size: 21px; font-weight: 800; color: #ffffff; margin: 0;
-    text-transform: none; letter-spacing: -0.02em;
-}
-.enh-section-count {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 22px; height: 22px; padding: 0 8px;
-    background: var(--white-a07); border: none; border-radius: 11px;
-    font-size: 11.5px; font-weight: 700; color: var(--white-a50);
-    box-shadow: none; font-variant-numeric: tabular-nums;
-}
-
 /* ========================================= */
 /* ARTIST CARDS - Clean Spotify Style       */
 /* ========================================= */
-
-.enh-artists-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    margin-bottom: 24px;
-}
-
-.enh-artist-section {
-    margin-bottom: 0 !important;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    backdrop-filter: none;
-    box-shadow: none;
-    position: relative;
-    overflow: visible;
-}
-
-.enh-artist-section::before {
-    display: none;
-}
-
-.enh-artist-section .enh-section-header {
-    border-bottom: none;
-}
-
-.enh-artist-section .enh-section-header::after {
-    display: none;
-}
-
-/* Artist grid — flexbox wrap with fixed-size cards */
-.enh-compact-list.enh-artists-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    padding-bottom: 4px;
-}
-
-@media (max-width: 600px) {
-    .enh-compact-list.enh-artists-grid {
-        gap: 10px;
-    }
-}
 
 /* Artist cards — Spotify-style circle tiles: a quiet tile that raises on
    hover, a circular portrait with its own shadow, name + meta beneath. */
@@ -40227,71 +39342,8 @@ div.artist-hero-badge {
 }
 .enh-compact-item.artist-card .enh-item-badge { display: none; }
 
-/* In Library badge on search results */
-.enh-item-lib-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(var(--accent-rgb), 0.85);
-    color: #fff;
-    padding: 3px 7px;
-    z-index: 5;
-    animation: libBadgeFadeIn 0.3s ease;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-/* Track items need relative positioning for the badge */
-@keyframes libBadgeFadeIn {
-    from { opacity: 0; transform: scale(0.8); }
-    to { opacity: 1; transform: scale(1); }
-}
-
-.enh-compact-item.track-item .enh-item-lib-badge {
-    position: static;
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 9px;
-}
-
-.enh-item-wishlist-badge {
-    position: absolute;
-    top: 6px;
-    left: 6px;
-    font-size: 8px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    background: rgba(251, 191, 36, 0.85);
-    color: #1a1a2e;
-    padding: 3px 7px;
-    z-index: 5;
-    animation: libBadgeFadeIn 0.3s ease;
-    border-radius: var(--radius-sm);
-    backdrop-filter: blur(4px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-}
-
-.enh-compact-item.track-item .enh-item-wishlist-badge {
-    position: static;
-    flex-shrink: 0;
-    margin-left: auto;
-    font-size: 9px;
-}
-
 /* Hydrabase badge (dev mode) */
 .enh-badge-hydrabase {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
-    border: 1px solid rgba(99, 102, 241, 0.5);
-    color: rgba(139, 92, 246, 1);
-}
-
-.enh-sr-artist-badge-hydrabase {
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(139, 92, 246, 0.3));
     border: 1px solid rgba(99, 102, 241, 0.5);
     color: rgba(139, 92, 246, 1);
@@ -40301,36 +39353,6 @@ div.artist-hero-badge {
 /* ========================================= */
 /* ALBUM CARDS - LARGE Spotify Browse Style */
 /* ========================================= */
-
-/* Album grid — discover-style cards */
-.enh-compact-list.enh-albums-grid {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding-bottom: 12px;
-    scroll-behavior: smooth;
-}
-
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar {
-    height: 6px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-track {
-    background: var(--white-a03);
-    border-radius: 3px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-thumb {
-    background: var(--white-a12);
-    border-radius: 3px;
-}
-.enh-compact-list.enh-albums-grid::-webkit-scrollbar-thumb:hover {
-    background: var(--white-a20);
-}
-
-@media (max-width: 900px) {
-    .enh-compact-list.enh-albums-grid {
-        gap: 12px;
-    }
-}
 
 /* Album cards — Spotify browse tiles: padded panel, rounded cover with its
    own shadow, title + meta BELOW the art instead of stamped over it. */
@@ -40391,46 +39413,10 @@ div.artist-hero-badge {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     line-height: 1.3; margin: 0; text-shadow: none; z-index: 1;
 }
-/* Ownership badge sits on the ART's corner, inside the tile padding. */
-.enh-compact-item.album-card .enh-item-lib-badge,
-.enh-compact-item.album-card .enh-item-wishlist-badge { top: 22px; left: 22px; }
-
-/* Floating Play affordance on album & playlist covers — Spotify signature hover */
-.enh-card-floating-play {
-    position: absolute;
-    right: 22px;
-    top: 122px;
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb));
-    color: #ffffff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    font-weight: 700;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5), 0 0 14px rgba(var(--accent-rgb), 0.35);
-    opacity: 0;
-    transform: translateY(8px);
-    transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
-    z-index: 10;
-    pointer-events: none;
-}
-.enh-compact-item.album-card:hover .enh-card-floating-play {
-    opacity: 1;
-    transform: translateY(0);
-}
 
 /* ========================================= */
 /* TRACK ITEMS                              */
 /* ========================================= */
-
-.enh-compact-list.enh-tracks-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
 
 .enh-compact-item.track-item {
     display: flex; align-items: center; gap: 14px; padding: 9px 14px;
@@ -40518,26 +39504,6 @@ div.artist-hero-badge {
     color: var(--white-a90);
     margin: 0;
     letter-spacing: -0.01em;
-}
-.enh-loading-subtext {
-    display: block;
-    font-size: 13px;
-    color: var(--white-a45);
-    margin-top: 6px;
-}
-.enh-empty-subtitle {
-    font-size: 14px;
-    color: var(--white-a55);
-    margin: 8px 0 16px;
-}
-.enh-empty-tips {
-    display: inline-block;
-    padding: 8px 18px;
-    border-radius: var(--radius-pill);
-    background: var(--white-a04);
-    border: 1px solid var(--white-a08);
-    font-size: 12.5px;
-    color: var(--white-a65);
 }
 
 /* Page header sized like a destination, scoped to the search page only. */
