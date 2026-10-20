@@ -88,7 +88,11 @@ export function QuickTilesGrid({
       )}
       {showSkeletons &&
         Array.from({ length: 6 - Math.max(0, tiles.length - 1) }).map((_, i) => (
-          <div key={`skel-${i}`} className="dsc-quick-tile dsc-quick-tile--skeleton" aria-hidden="true">
+          <div
+            key={`skel-${i}`}
+            className="dsc-quick-tile dsc-quick-tile--skeleton"
+            aria-hidden="true"
+          >
             <span className="dsc-quick-art" />
             <span className="dsc-quick-skeleton-bar" />
           </div>
