@@ -9958,19 +9958,10 @@ def write_tracks_tags_batch():
 
                 written_tracks = []  # Track dicts that were successfully written (for server sync)
 
-                # Pre-download cover art once per unique album URL
+                # cover art downloads once per unique url, but only when a track
+                # under it actually gets written. #1798: fetching up front pulled
+                # every cover even when the whole batch was then skipped.
                 cover_cache = {}  # url → (bytes, mime) or None
-                if embed_cover:
-                    unique_urls = set()
-                    for td in rows:
-                        thumb = td.get('album_thumb_url') or td.get('artist_thumb_url')
-                        if thumb and thumb.startswith('http'):
-                            unique_urls.add(thumb)
-                    if unique_urls:
-                        with _write_tags_batch_lock:
-                            _write_tags_batch_state['current_track'] = f'Downloading cover art ({len(unique_urls)} album{"s" if len(unique_urls) != 1 else ""})...'
-                        for url in unique_urls:
-                            cover_cache[url] = download_cover_art(url)
 
                 for track_data in rows:
                     file_path = track_data.get('file_path')
@@ -9998,13 +9989,6 @@ def write_tracks_tags_batch():
 
                     db_data = _build_library_tag_db_data(track_data, album_genres)
 
-                    # Get pre-downloaded cover art for this track's album
-                    art_data = None
-                    if embed_cover:
-                        thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
-                        if thumb and thumb.startswith('http'):
-                            art_data = cover_cache.get(thumb)
-
                     # #1052 — only touch files that actually differ. Uses the SAME
                     # build_tag_diff the preview does, so the write matches exactly
                     # what the "N will change / M unchanged" preview showed. A
@@ -10023,6 +10007,14 @@ def write_tracks_tags_batch():
                     except Exception:
                         logger.debug("tag diff pre-check failed for %s; writing anyway",
                                      resolved_path, exc_info=True)
+
+                    art_data = None
+                    if embed_cover:
+                        thumb = track_data.get('album_thumb_url') or track_data.get('artist_thumb_url')
+                        if thumb and thumb.startswith('http'):
+                            if thumb not in cover_cache:
+                                cover_cache[thumb] = download_cover_art(thumb)
+                            art_data = cover_cache[thumb]
 
                     file_lock = get_file_lock(resolved_path)
                     with file_lock:
