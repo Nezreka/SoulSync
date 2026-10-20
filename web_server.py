@@ -4363,7 +4363,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -23772,6 +23772,12 @@ def _start_music_video_request_download(data):
 from api.music_requests import configure as _cfg_mr, create_blueprint as _bp_mr
 _cfg_mr(get_database=get_database, start_music_video=_start_music_video_request_download)
 app.register_blueprint(_bp_mr())
+
+# lidarr compatible api: lidarr-only request apps (singarr, musicseerr 1.x)
+# can use soulsync as their lidarr (#1799)
+from api.lidarr_compat import configure as _cfg_lc, create_blueprint as _bp_lc
+_cfg_lc(get_database=get_database, config_manager=config_manager)
+app.register_blueprint(_bp_lc())
 
 # kids profiles: explicit music can't play and drops out of search/tracklists
 from api.content_guard import register as _reg_content_guard

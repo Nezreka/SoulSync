@@ -3406,6 +3406,9 @@ async function loadSettingsData() {
         document.getElementById('write-multi-artist').checked = settings.metadata_enhancement?.tags?.write_multi_artist || false;
         document.getElementById('feat-in-title').checked = settings.metadata_enhancement?.tags?.feat_in_title || false;
         document.getElementById('allow-duplicate-tracks').checked = settings.wishlist?.allow_duplicate_tracks !== false;
+        const _lcOn = document.getElementById('lidarr-compat-enabled');
+        if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
+        loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
         const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
@@ -6599,6 +6602,10 @@ async function saveSettings(quiet = false) {
                 sample_path: document.getElementById('template-sample-path').value
             }
         },
+        lidarr_compat: {
+            enabled: _cfgBool('lidarr-compat-enabled'),
+            profile_id: _cfgInt('lidarr-compat-profile', _lidarrCompatProfileId),
+        },
         wishlist: {
             allow_duplicate_tracks: document.getElementById('allow-duplicate-tracks').checked,
             ignore_ttl_days: Math.max(1, Math.min(365,
@@ -7011,6 +7018,29 @@ async function clearQuarantine() {
 }
 
 // ======================== API Key Management ========================
+
+// the saved profile, so a save before the list loads keeps it
+let _lidarrCompatProfileId = 1;
+
+async function loadLidarrCompatProfiles(selectedId) {
+    _lidarrCompatProfileId = parseInt(selectedId, 10) || 1;
+    const select = document.getElementById('lidarr-compat-profile');
+    if (!select) return;
+    try {
+        const response = await fetch('/api/profiles');
+        const data = await response.json();
+        const profiles = data.profiles || [];
+        if (!profiles.length) return;
+        select.innerHTML = profiles.map(p => {
+            const note = p.can_download === false ? ' (needs approval)' : '';
+            return `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.name || 'Profile ' + p.id)}${note}</option>`;
+        }).join('');
+        select.value = String(_lidarrCompatProfileId);
+        if (select.value !== String(_lidarrCompatProfileId)) select.value = '1';
+    } catch (e) {
+        console.debug('lidarr profile list failed', e);
+    }
+}
 
 async function loadApiKeys() {
     const container = document.getElementById('api-keys-list');

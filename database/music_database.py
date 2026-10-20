@@ -1952,6 +1952,12 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            # artists and albums added through the lidarr compatible api
+            try:
+                from core.lidarr_compat.store import ensure_schema as _ensure_lidarr_compat
+                _ensure_lidarr_compat(cursor)
+            except Exception as e:
+                logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)

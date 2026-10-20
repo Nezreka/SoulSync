@@ -659,6 +659,12 @@ class ConfigManager:
                     "copyright": True,
                 }
             },
+            # soulsync answering as lidarr for request apps (#1799). off by
+            # default, requests land on profile_id's wishlist
+            "lidarr_compat": {
+                "enabled": False,
+                "profile_id": 1,
+            },
             "lidarr_download": {
                 "url": "",
                 "api_key": "",

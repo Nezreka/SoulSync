@@ -10103,6 +10103,37 @@
                                                     the Automation Hub.
                                                 </div>
                                             </div>
+
+                                            <!-- Lidarr compatible API (#1799) -->
+                                            <div class="api-service-frame" style="margin-top: 16px;">
+                                                <h4 class="service-title" style="color: #64ffda;">Lidarr Compatible
+                                                    API</h4>
+                                                <div class="setting-help-text"
+                                                    style="margin-bottom: 10px; color: #888; font-size: 12px;">
+                                                    Lets request apps that only talk to Lidarr (Singarr, MusicSeerr
+                                                    1.x) use SoulSync instead. In the app, set the Lidarr URL to
+                                                    <code>http://&lt;host&gt;:8008/lidarr</code> and paste an
+                                                    <strong>Admin</strong> API key from above. Albums it asks for
+                                                    go on the wishlist of the profile below.
+                                                </div>
+                                                <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="lidarr-compat-enabled">
+                                                        Answer as Lidarr at /lidarr
+                                                    </label>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Requests go to profile:</label>
+                                                    <select id="lidarr-compat-profile">
+                                                        <option value="1">Loading...</option>
+                                                    </select>
+                                                    <div class="setting-help-text"
+                                                        style="margin-top: 4px; color: #888; font-size: 12px;">
+                                                        Pick a profile without download rights and every request
+                                                        waits for approval on the Requests page first.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div><!-- end SoulSync API body -->
 
