@@ -10201,13 +10201,20 @@ class MusicDatabase:
                 # Find duplicate artist groups (same name + server_source + library
                 # owner, different IDs). two profiles' own copies of one artist are
                 # two rows on purpose (#1199), never a duplicate to merge.
-                cursor.execute("""
-                    SELECT name, server_source, GROUP_CONCAT(id) as ids, COUNT(*) as cnt
-                    FROM artists
-                    GROUP BY name, server_source, owner_profile_id
-                    HAVING cnt > 1
-                """)
-                duplicate_groups = cursor.fetchall()
+                # #1797: names compare with dashes folded, so alt-J spelled with
+                # a U+2010 hyphen groups with the ascii one. grouped in python,
+                # sqlite can't fold them.
+                from core.text.normalize import fold_dashes
+                cursor.execute("SELECT id, name, server_source, owner_profile_id FROM artists")
+                groups = {}
+                for r in cursor.fetchall():
+                    key = (fold_dashes(r['name']), r['server_source'], r['owner_profile_id'])
+                    groups.setdefault(key, []).append(r)
+                duplicate_groups = [
+                    {'name': members[0]['name'], 'server_source': members[0]['server_source'],
+                     'ids': [m['id'] for m in members]}
+                    for members in groups.values() if len(members) > 1
+                ]
 
                 if not duplicate_groups:
                     logger.debug("No duplicate artists found")
@@ -10225,11 +10232,14 @@ class MusicDatabase:
                     'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
                     'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                 ]
+                provider_id_cols = ['musicbrainz_id', 'spotify_artist_id', 'itunes_artist_id',
+                                    'audiodb_id', 'deezer_id', 'jiosaavn_id', 'genius_id',
+                                    'tidal_id', 'qobuz_id', 'discogs_id', 'amazon_id']
 
                 for group in duplicate_groups:
                     artist_name = group['name']
                     server_source = group['server_source']
-                    ids = group['ids'].split(',')
+                    ids = group['ids']
 
                     logger.info(f"Merging duplicate artist '{artist_name}' ({server_source}): IDs {ids}")
 
@@ -10251,6 +10261,9 @@ class MusicDatabase:
                                 best_score = score
                                 best_id = aid
 
+                    cursor.execute("SELECT * FROM artists WHERE id = ?", (best_id,))
+                    keeper = cursor.fetchone()
+
                     # Merge enrichment data from all duplicates into the keeper
                     for aid in ids:
                         if aid == best_id:
@@ -10259,6 +10272,17 @@ class MusicDatabase:
                         donor = cursor.fetchone()
                         if not donor:
                             continue
+
+                        # a different spelling only merges when no provider id
+                        # disagrees: two artists can share a folded name
+                        if keeper and donor['name'] != keeper['name']:
+                            clash = next((col for col in provider_id_cols
+                                          if _row_value(donor, col) and _row_value(keeper, col)
+                                          and str(_row_value(donor, col)) != str(_row_value(keeper, col))), None)
+                            if clash:
+                                logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
+                                            f"'{keeper['name']}' {best_id}: {clash} differs")
+                                continue
 
                         # Fill NULL enrichment columns on keeper from this duplicate
                         set_parts = []

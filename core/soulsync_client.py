@@ -13,6 +13,7 @@ import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from core.text.normalize import fold_dashes
 from utils.logging_config import get_logger
 
 logger = get_logger("soulsync_client")
@@ -392,7 +393,9 @@ class SoulSyncClient(MediaServerBase):
                 else:
                     album_name = tags['title'] or 'Unknown Album'
 
-            a_key = artist_name.lower().strip()
+            # #1797: alt-J with a U+2010 hyphen and with ascii is one artist; the first
+            # spelling seen stays the display name
+            a_key = fold_dashes(artist_name).lower().strip()
             al_key = album_name.lower().strip()
 
             if a_key not in artist_map:
