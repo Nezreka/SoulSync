@@ -1,4 +1,5 @@
 import sqlite3
+import pytest
 from unittest.mock import patch
 from core.automation.album_completion_verify import filter_still_missing
 
@@ -131,3 +132,43 @@ def test_malformed_related_album_groups_are_rejected():
             filter_still_missing(
                 DB(), 42, [], 1, group
             )
+
+
+@pytest.mark.parametrize("protected_album", [42, 43, 44])
+@pytest.mark.parametrize("decision", ["pending", "partial", "complete"])
+def test_completion_respects_review_choices_on_every_related_album(tmp_path, protected_album, decision):
+    from core.library.reconciliation_choices import ensure_schema
+
+    path = tmp_path / "library.db"
+    with sqlite3.connect(path) as conn:
+        ensure_schema(conn)
+        conn.executescript("""
+            CREATE TABLE albums (id INTEGER PRIMARY KEY, owner_profile_id INTEGER);
+            INSERT INTO albums VALUES (42, NULL), (43, NULL), (44, NULL);
+            CREATE TABLE tracks (id TEXT, album_id INTEGER, disc_number INTEGER,
+                track_number INTEGER, owner_profile_id INTEGER, file_path TEXT);
+            CREATE TABLE reconcile_album_plans (case_id TEXT, album_id TEXT, album_folder TEXT);
+            CREATE TABLE repair_findings (id INTEGER, job_id TEXT, review_case_key TEXT,
+                status TEXT, file_path TEXT, entity_id TEXT, user_action TEXT, details_json TEXT);
+            CREATE TABLE reconcile_album_intent (album_id TEXT, scope TEXT);
+        """)
+        conn.execute("INSERT INTO reconcile_album_plans VALUES ('review', ?, '/album')", (str(protected_album),))
+        if decision == "pending":
+            conn.execute("INSERT INTO repair_findings VALUES (1, 'library_reconciliation', 'review', 'pending', NULL, NULL, NULL, '{}')")
+        else:
+            conn.execute("INSERT INTO reconcile_album_intent VALUES (?, ?)", (str(protected_album), decision))
+
+    class DB:
+        def _get_connection(self):
+            return sqlite3.connect(path)
+
+        def _owner_scope_sql(self, scope, column):
+            return ("owner_profile_id IS NULL", [])
+
+    missing = [{"disc_number": 1, "track_number": 2}]
+    with patch("core.automation.album_completion_verify.library_scope_for_profile", return_value="shared"):
+        if protected_album in (42, 43):
+            with pytest.raises(ValueError, match="Review this album plan"):
+                filter_still_missing(DB(), 42, missing, 1, [42, 43])
+        else:
+            assert filter_still_missing(DB(), 42, missing, 1, [42, 43]) == missing

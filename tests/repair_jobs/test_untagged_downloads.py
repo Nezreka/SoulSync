@@ -9,6 +9,7 @@ the tags back from the download record.
 from __future__ import annotations
 
 import sqlite3
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -132,6 +133,45 @@ def test_fix_keeps_tags_fixed_by_hand_since_the_scan(tmp_path):
     f = FLAC(str(path))
     assert f["title"] == ["Hand Fixed"]
     assert f["album"] == ["B"]
+
+
+@pytest.mark.parametrize("field", ["title", "artist", "album", "track_number"])
+@pytest.mark.parametrize("compatible", [False, True])
+def test_fix_respects_reviewed_values_before_writing(tmp_path, field, compatible):
+    from core.library.reconciliation_choices import ensure_schema
+
+    path = _flac(tmp_path / "01 - Song.flac")
+    before = path.read_bytes()
+    db = _db(tmp_path, [])
+    expected = {"title": "Song", "artist": "Artist", "album": "Album", "track_number": 1}
+    reviewed = expected[field] if compatible else "A different reviewed value"
+    with db._get_connection() as conn:
+        ensure_schema(conn)
+        conn.executescript("""
+            CREATE TABLE tracks (id TEXT, album_id TEXT, file_path TEXT);
+            CREATE TABLE reconcile_album_plans (case_id TEXT, album_id TEXT, album_folder TEXT);
+            CREATE TABLE repair_findings (id INTEGER, job_id TEXT, review_case_key TEXT,
+                file_path TEXT, entity_id TEXT, status TEXT, user_action TEXT, details_json TEXT);
+        """)
+        conn.execute("INSERT INTO tracks VALUES ('track', 'album', ?)", (str(path),))
+        conn.execute("INSERT INTO reconcile_album_plans VALUES ('case', 'album', ?)", (str(tmp_path),))
+        conn.execute(
+            "INSERT INTO repair_findings VALUES (1, 'library_reconciliation', 'case', ?, 'track', 'resolved', 'retagged', ?)",
+            (str(path), json.dumps({"changes": {field: {"old": "", "new": reviewed}}})),
+        )
+    worker = RepairWorker(database=db)
+    result = worker._execute_fix("untagged_download", "file", "1", str(path), {
+        "track_title": "Song", "artist": "Artist", "album_title": "Album", "track_number": 1,
+    })
+    if compatible:
+        assert result["success"] is True
+        tags = FLAC(str(path))
+        assert tags["title"] == ["Song"] and tags["artist"] == ["Artist"]
+        assert tags["album"] == ["Album"] and tags["tracknumber"] == ["1"]
+    else:
+        assert result["review_conflict"] is True
+        assert result["review_case_key"] == "case"
+        assert path.read_bytes() == before
 
 
 def test_fix_marks_a_vanished_file_stale(tmp_path):

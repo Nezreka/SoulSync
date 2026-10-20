@@ -4629,6 +4629,11 @@ class RepairWorker:
             data['track_number'] = details['track_number']
         if not data:
             return {'success': False, 'error': 'The download record has nothing to write'}
+        from core.library.reconciliation_authority import conflict
+        blocked = conflict(self.db, 'library_retag', file_path=resolved,
+                           details={'db_data': data})
+        if blocked:
+            return blocked
         result = write_tags_to_file(resolved, data, embed_cover=False)
         if not result.get('success'):
             return {'success': False, 'error': result.get('error') or 'Could not write tags'}

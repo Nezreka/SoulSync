@@ -1,6 +1,7 @@
 """Read-only, profile-scoped verification of missing album tracks."""
 
 from core.library_scope import library_scope_for_profile
+from core.library.reconciliation_authority import conflict
 
 
 def filter_still_missing(
@@ -51,6 +52,14 @@ def filter_still_missing(
             or any(row[1] is not None for row in album_rows)
         ):
             raise ValueError("Related albums must all belong to the shared library")
+
+        # Check every fragment: a partial-album choice or an unresolved plan
+        # must not be bypassed by the independent completion automation.
+        for related_id in ids:
+            blocked = conflict(db, 'incomplete_album', entity_type='album',
+                               entity_id=related_id, connection=conn)
+            if blocked:
+                raise ValueError(blocked['error'])
 
         scope_sql, scope_params = db._owner_scope_sql(scope, "owner_profile_id")
         rows = cursor.execute(

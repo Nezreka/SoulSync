@@ -10,6 +10,7 @@ import os
 
 ALIASES = {
     'library_title': 'title', 'library_track_artist': 'artist', 'track_artist': 'artist',
+    'artist_name': 'artist',
     'library_track_number': 'track_number', 'library_disc_number': 'disc_number',
     'library_recording_mbid': 'musicbrainz_recording_id',
     'library_album_title': 'album', 'album_title': 'album',
@@ -73,15 +74,19 @@ def _proposed(kind, details):
     return _canonical(values)
 
 
-def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, details=None):
-    """Return a review link and reason, or None for a compatible legacy action."""
+def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, details=None, connection=None):
+    """Return a review link and reason, or None for a compatible legacy action.
+
+    A supplied connection stays open and shares the caller's read transaction.
+    """
     if kind not in FIELDS or db is None or not callable(getattr(db, '_get_connection', None)):
         return None
     details = details or {}
     if kind == 'library_retag' and details.get('tracks'):
         for row in details['tracks']:
             blocked = conflict(db, kind, entity_type='track', entity_id=row.get('track_id') or row.get('id'),
-                               file_path=row.get('file_path'), details={**{k: v for k, v in details.items() if k != 'tracks'}, **row})
+                               file_path=row.get('file_path'), details={**{k: v for k, v in details.items() if k != 'tracks'}, **row},
+                               connection=connection)
             if blocked:
                 return blocked
         return None
@@ -91,7 +96,7 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
         touched = touched.intersection(proposed)
     if not touched:
         return None
-    conn = db._get_connection()
+    conn = connection if connection is not None else db._get_connection()
     try:
         if not _table(conn, 'reconcile_album_plans'):
             return None
@@ -188,7 +193,8 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                         return blocked(f'This action conflicts with the accepted {field.replace("_", " ")} decision.')
         return None
     finally:
-        conn.close()
+        if connection is None:
+            conn.close()
 
 
 def enrichment_tag_guard(db, file_path):

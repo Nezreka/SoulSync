@@ -77,6 +77,18 @@ def test_retag_compares_each_track_fields_without_blocking_independent_enrichmen
     assert conflict(db, 'library_retag', details={'album_id': 'album', 'tracks': tracks})['review_conflict']
 
 
+def test_review_guard_preserves_callers_connection(tmp_path):
+    db = Database(tmp_path / 'db')
+    with db._get_connection() as conn:
+        blocked = conflict(db, 'incomplete_album', entity_type='album',
+                           entity_id='album', connection=conn)
+        assert blocked['review_case_key'] == 'case'
+        assert conn.execute('SELECT COUNT(*) FROM reconcile_album_plans').fetchone()[0] == 1
+        assert conflict(db, 'incomplete_album', entity_type='album',
+                        entity_id='other', connection=conn) is None
+        assert conn.execute('SELECT COUNT(*) FROM tracks').fetchone()[0] == 1
+
+
 def test_track_decision_does_not_govern_other_tracks(tmp_path):
     db = Database(tmp_path / 'db')
     with db._get_connection() as c:
