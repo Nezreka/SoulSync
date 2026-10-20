@@ -159,3 +159,49 @@ def test_fix_remove_still_deletes_the_row_of_a_dead_file(worker, tmp_path):
 
     assert result["success"] is True
     assert worker.db._conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 0
+
+
+# --- through the real _run_job seam ------------------------------------------
+
+
+def _run_cleaner(tmp_path, result):
+    """a dead_file finding for a track row that no longer exists, then one
+    cleaner run through _run_job. returns the finding's status after."""
+    from database.music_database import MusicDatabase
+
+    w = RepairWorker(database=MusicDatabase(str(tmp_path / 'music.db')))
+    w._config_manager = None
+    w.transfer_folder = str(tmp_path)
+
+    class _Cleaner:
+        job_id = 'dead_file_cleaner'
+        display_name = 'Dead File Cleaner'
+        auto_fix = False
+        writes_library_files = False
+
+        def scan(self, context):
+            return result
+
+    w._jobs = {'dead_file_cleaner': _Cleaner()}
+    w.get_job_config = lambda jid: {'settings': {}}
+    with w.db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO repair_findings (job_id, finding_type, severity, status, entity_type, "
+            "entity_id, file_path, title) VALUES ('dead_file_cleaner', 'dead_file', 'warning', "
+            "'pending', 'track', 'gone-row', '/music/gone.mp3', 'Missing file: Gone')")
+        conn.commit()
+    w._run_job('dead_file_cleaner', forced=True)
+    with w.db._get_connection() as conn:
+        return tuple(conn.execute(
+            "SELECT status, user_action FROM repair_findings WHERE entity_id = 'gone-row'").fetchone())
+
+
+def test_a_completed_cleaner_run_retires_the_stale_finding(tmp_path):
+    from core.repair_jobs.base import JobResult
+    assert _run_cleaner(tmp_path, JobResult(scanned=10)) == ('resolved', 'obsolete')
+
+
+def test_a_cleaner_run_that_stopped_early_retires_nothing(tmp_path):
+    # a partial run is not evidence, same rule as the other sweeps
+    from core.repair_jobs.base import JobResult
+    assert _run_cleaner(tmp_path, JobResult(scanned=3, stopped_early='quit')) == ('pending', None)
