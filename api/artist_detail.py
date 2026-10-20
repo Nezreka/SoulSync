@@ -2125,7 +2125,7 @@ def get_track_db_record(track_id):
         row = cursor.fetchone()
         if row is None:
             return jsonify({'success': False, 'error': 'Track not found in library'}), 404
-        record = dict(zip((col[0] for col in cursor.description), row))
+        record = dict(zip((col[0] for col in cursor.description), row, strict=True))
         for key, value in record.items():
             if isinstance(value, str) and value.strip().startswith(('[', '{')):
                 try:

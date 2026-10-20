@@ -132,8 +132,8 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
         plans = conn.execute('SELECT case_id, album_id, album_folder FROM reconcile_album_plans WHERE '
                              'album_id IN (SELECT value FROM json_each(?)) OR album_folder IN (SELECT value FROM json_each(?))',
                              (json.dumps(list(album_ids)), json.dumps([os.path.dirname(p) for p in paths]))).fetchall()
-        for case_id, album_id, folder in plans:
-            def blocked(reason):
+        for case_id, album_id, _folder in plans:
+            def blocked(reason, case_id=case_id):
                 return {'success': False, 'review_conflict': True, 'review_case_key': case_id,
                         'error': reason + ' Review this album plan before changing that decision.'}
             # Active plans own file membership until their work is resolved.
