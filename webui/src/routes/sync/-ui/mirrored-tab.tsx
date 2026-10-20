@@ -949,6 +949,16 @@ export function MirroredTab({
     async (row: MirroredPlaylistRow) => {
       try {
         const next = !row.auto_remove_fulfilled;
+        // turning it on deletes songs from the real spotify playlist, so ask first
+        if (next) {
+          const ok = await window.showConfirmDialog?.({
+            title: 'Remove fulfilled tracks from Spotify?',
+            message: `Once a track from "${row.name}" is in your library, SoulSync deletes it from the playlist on Spotify itself. A wrong match deletes the wrong song.`,
+            confirmText: 'Turn on',
+            destructive: true,
+          });
+          if (!ok) return;
+        }
         await patchRequestListSettings(row.id, next);
         reload();
         window.showToast?.(

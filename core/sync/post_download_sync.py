@@ -41,16 +41,22 @@ def register_completed_playlist_batch(
     Returns the list of newly registered or existing mirrored_playlist_ids.
     """
     registered_ids: List[int] = []
+    # a playlist batch's tracks all carry the same provenance, so each ref is
+    # looked up once, not once per track
+    seen: set = set()
 
     def _resolve_and_record(ref: Any, name: Optional[str], profile_id: int):
+        seen_key = (str(ref), str(name), int(profile_id))
+        if seen_key in seen:
+            return
+        seen.add(seen_key)
         target_pk: Optional[int] = None
         target_name: str = str(name or "Playlist").strip()
 
-        # If already an integer PK
-        if isinstance(ref, int) and ref > 0:
+        # only a real int is a mirrored_playlists pk. a digit string is an
+        # upstream id (deezer ids are all digits), so it goes through resolve
+        if isinstance(ref, int) and not isinstance(ref, bool) and ref > 0:
             target_pk = ref
-        elif isinstance(ref, str) and ref.isdigit():
-            target_pk = int(ref)
 
         db = database
         if db is None:

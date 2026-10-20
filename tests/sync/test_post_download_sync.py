@@ -205,3 +205,50 @@ def test_sync_pending_downloaded_playlists_handles_errors():
         assert res['status'] == 'error'
         assert len(res['errors']) == 1
         assert 'Sync error' in res['errors'][0]
+
+
+class CountingDatabase(FakeDatabase):
+    def __init__(self, assignments=None):
+        super().__init__(assignments)
+        self.calls = 0
+
+    def resolve_mirrored_playlist_assignment(self, *a, **kw):
+        self.calls += 1
+        return super().resolve_mirrored_playlist_assignment(*a, **kw)
+
+
+def test_a_digit_string_ref_is_an_upstream_id_not_a_mirror_pk():
+    """deezer playlist ids are all digits. a digit string has to be resolved,
+    not taken as a mirrored_playlists pk."""
+    db = CountingDatabase({('908622995', 'Deezer Mix', 1): {'id': 7, 'name': 'Deezer Mix'}})
+    batch = {
+        'is_playlist_batch': True,
+        'source_playlist_name': 'Deezer Mix',
+        'source_playlist_id': '908622995',
+        'profile_id': 1,
+    }
+    assert register_completed_playlist_batch(batch, database=db) == [7]
+    assert db.calls == 1
+    assert [p['mirrored_playlist_id'] for p in drain_pending_playlist_syncs()] == [7]
+
+
+def test_an_unresolved_digit_string_registers_nothing():
+    batch = {
+        'is_playlist_batch': True,
+        'source_playlist_name': 'Gone',
+        'source_playlist_id': '908622995',
+        'profile_id': 1,
+    }
+    assert register_completed_playlist_batch(batch, database=FakeDatabase()) == []
+    assert get_pending_playlist_syncs_count() == 0
+
+
+def test_a_playlist_batch_looks_its_playlist_up_once():
+    db = CountingDatabase({('sp-big', 'Big', 1): {'id': 5, 'name': 'Big'}})
+    tasks = {
+        f't{i}': {'status': 'completed', 'track_info': {
+            'source_info': {'playlist_id': 'sp-big', 'playlist_name': 'Big'}}}
+        for i in range(50)
+    }
+    assert register_completed_playlist_batch({'profile_id': 1}, tasks_snapshot=tasks, database=db) == [5]
+    assert db.calls == 1

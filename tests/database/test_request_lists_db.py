@@ -38,7 +38,8 @@ def test_request_list_db_operations(tmp_path):
     copy_pl = db.get_mirrored_playlist(copy_id)
     assert copy_pl["name"] == "Copied Request List"
     assert copy_pl["is_request_list"] is True
-    assert copy_pl["auto_remove_fulfilled"] is True
+    # a copy never deletes from the user's spotify playlist until they opt in
+    assert copy_pl["auto_remove_fulfilled"] is False
     assert copy_pl["upstream_playlist_id"] == "sp_playlist_123"
 
     # Test filtering in get_mirrored_playlists
@@ -58,6 +59,9 @@ def test_request_list_db_operations(tmp_path):
     assert copy_tracks[1]["track_name"] == "Song B"
 
     # Toggle auto_remove_fulfilled
+    db.set_mirrored_playlist_auto_remove(copy_id, auto_remove_fulfilled=True)
+    copy_pl = db.get_mirrored_playlist(copy_id)
+    assert copy_pl["auto_remove_fulfilled"] is True
     db.set_mirrored_playlist_auto_remove(copy_id, auto_remove_fulfilled=False)
     copy_pl = db.get_mirrored_playlist(copy_id)
     assert copy_pl["auto_remove_fulfilled"] is False

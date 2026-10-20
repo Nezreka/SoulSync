@@ -219,14 +219,16 @@ def test_the_status_writer_keeps_the_mode():
 
 # ── a re-sync from history keeps the mirror's own mode ───────────────────────
 
-def _start(monkeypatch, db, payload, global_mode="reconcile"):
+def _start(monkeypatch, db, payload, global_mode="reconcile", submitted_kwargs=None):
     import api.source_playlists as sp
 
     submitted = []
 
     class _Exec:
-        def submit(self, fn, *args):
+        def submit(self, fn, *args, **kwargs):
             submitted.append(args)
+            if submitted_kwargs is not None:
+                submitted_kwargs.append(kwargs)
             return MagicMock(done=lambda: True)
 
     cm = MagicMock()
@@ -260,3 +262,27 @@ def test_history_resync_uses_the_mirrors_mode(mdb, monkeypatch):
 def test_a_non_mirror_sync_uses_the_global_mode(mdb, monkeypatch):
     payload = {"playlist_id": "spotify_xyz", "playlist_name": "Mix", "tracks": [{"name": "a"}]}
     assert _start(monkeypatch, mdb, payload, global_mode="replace") == "replace"
+
+
+def test_history_resync_of_a_request_list_stays_a_request_list(mdb, monkeypatch):
+    """a request list re-synced from history or the dashboard band goes through
+    /api/sync/start, which used to drop the flag and build a server playlist."""
+    pk = mdb.mirror_playlist(
+        source="spotify", source_playlist_id="p1_req_ab12", name="Requests",
+        tracks=[{"track_name": "Song", "artist_name": "Artist", "source_track_id": "sp1"}],
+        profile_id=1, is_request_list=1, auto_remove_fulfilled=1,
+    )
+    kw = []
+    payload = {"playlist_id": f"auto_mirror_{pk}", "playlist_name": "Requests", "tracks": [{"name": "a"}]}
+    _start(monkeypatch, mdb, payload, submitted_kwargs=kw)
+    assert kw[0]["is_request_list"] is True
+    assert kw[0]["auto_remove_fulfilled"] is True
+
+
+def test_history_resync_of_a_plain_mirror_is_not_a_request_list(mdb, monkeypatch):
+    pk = _mirror(mdb)
+    kw = []
+    payload = {"playlist_id": f"auto_mirror_{pk}", "playlist_name": "Mix", "tracks": [{"name": "a"}]}
+    _start(monkeypatch, mdb, payload, submitted_kwargs=kw)
+    assert kw[0]["is_request_list"] is False
+    assert kw[0]["auto_remove_fulfilled"] is False

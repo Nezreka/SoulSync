@@ -25541,7 +25541,9 @@ class MusicDatabase:
             image_url=mirror.get('image_url'),
             quality_profile_id=mirror.get('quality_profile_id'),
             is_request_list=1,
-            auto_remove_fulfilled=1 if original_source in ('spotify', 'spotify_public') else 0,
+            # off until the user turns it on: it deletes tracks from their real
+            # spotify playlist, and a fuzzy match can be the wrong song
+            auto_remove_fulfilled=0,
             upstream_playlist_id=upstream_id,
         )
 

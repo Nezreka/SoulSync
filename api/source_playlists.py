@@ -5302,19 +5302,24 @@ def _build_sync_deps():
     )
 
 
-def _mirror_own_sync_mode(playlist_id):
-    """The stored sync mode of the mirror behind an auto_mirror_<id> sync id,
-    or None (not a mirror, no mode of its own, or the lookup failed)."""
+def _mirror_behind_sync_id(playlist_id):
+    """The mirror row behind an auto_mirror_<id> sync id, or None (not a
+    mirror, or the lookup failed)."""
     m = re.fullmatch(r'auto_mirror_(\d+)', str(playlist_id or ''))
     if not m:
         return None
     try:
         from database.music_database import get_database
-        mirror = get_database().get_mirrored_playlist(int(m.group(1)))
+        return get_database().get_mirrored_playlist(int(m.group(1)))
     except Exception as e:
-        logger.debug("mirror sync mode lookup for %s: %s", playlist_id, e)
+        logger.debug("mirror lookup for %s: %s", playlist_id, e)
         return None
-    return (mirror or {}).get('sync_mode')
+
+
+def _mirror_own_sync_mode(playlist_id):
+    """The stored sync mode of the mirror behind an auto_mirror_<id> sync id,
+    or None (not a mirror, no mode of its own, or the lookup failed)."""
+    return (_mirror_behind_sync_id(playlist_id) or {}).get('sync_mode')
 
 
 def _run_sync_task(
@@ -5444,7 +5449,15 @@ def start_playlist_sync_from_payload(data):
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url, sync_mode)
+        # a request list re-synced from history or the dashboard is still a
+        # request list: no server playlist, same auto-remove setting
+        _mirror = _mirror_behind_sync_id(playlist_id) or {}
+        future = sync_executor.submit(
+            _run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id,
+            playlist_image_url, sync_mode,
+            is_request_list=bool(_mirror.get('is_request_list')),
+            auto_remove_fulfilled=bool(_mirror.get('auto_remove_fulfilled')),
+        )
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         logger.info(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")

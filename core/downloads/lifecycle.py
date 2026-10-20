@@ -869,20 +869,14 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                 'duration_ms': ti.get('duration_ms', 0),
             })
 
-    if successful_downloads > 0:
-        try:
-            from core.sync.post_download_sync import register_completed_playlist_batch
-            register_completed_playlist_batch(batch, tasks_snapshot=tasks_snapshot, database=MusicDatabase())
-        except Exception as reg_err:
-            logger.debug("register_completed_playlist_batch failed: %s", reg_err)
-
     if is_music_batch(batch_id, batch):
         # Mark that wishlist processing is starting (prevents premature cleanup)
         batch['wishlist_processing_started'] = True
     else:
         batch['wishlist_processing_complete'] = True
 
-    return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot}
+    return {'m3u_tracks': m3u_tracks, 'tasks_snapshot': tasks_snapshot,
+            'successful_downloads': successful_downloads}
 
 
 def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: LifecycleDeps,
@@ -905,6 +899,16 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         _cleanup_private_album_bundle_staging(batch_id, batch)
     except Exception as _stage_err:  # noqa: BLE001 — best-effort, batch is already complete
         logger.warning(f"{tag} Album-bundle staging cleanup failed (non-fatal): {_stage_err}")
+
+    # post-download playlist sync: note which playlists this batch fed. db
+    # lookups, so it lives out here and not under tasks_lock
+    if outcome.get('successful_downloads', 0) > 0:
+        try:
+            from core.sync.post_download_sync import register_completed_playlist_batch
+            from database.music_database import MusicDatabase
+            register_completed_playlist_batch(batch, tasks_snapshot=tasks_snapshot, database=MusicDatabase())
+        except Exception as reg_err:  # noqa: BLE001 - best-effort, batch is already complete
+            logger.debug("register_completed_playlist_batch failed: %s", reg_err)
 
     # M3U REGENERATION: Regenerate M3U with real library paths now that
     # all post-processing (tagging, moving, DB writes) is complete.
