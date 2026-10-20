@@ -469,25 +469,25 @@
 
 .spotlightWatchlistBtnActive {
   background: rgba(34, 197, 94, 0.22) !important;
-  border-color: rgba(74, 222, 128, 0.55) !important;
-  color: #4ade80 !important;
+  border-color: rgba(var(--success-rgb), 0.55) !important;
+  color: var(--success) !important;
   box-shadow:
-    0 0 20px rgba(74, 222, 128, 0.25),
+    0 0 20px rgba(var(--success-rgb), 0.25),
     0 4px 14px rgba(0, 0, 0, 0.35) !important;
 }
 
 .spotlightWatchlistBtnActive:hover {
   background: rgba(34, 197, 94, 0.34) !important;
-  border-color: rgba(74, 222, 128, 0.8) !important;
+  border-color: rgba(var(--success-rgb), 0.8) !important;
   color: #ffffff !important;
   transform: translateY(-2px);
-  box-shadow: 0 0 26px rgba(74, 222, 128, 0.45) !important;
+  box-shadow: 0 0 26px rgba(var(--success-rgb), 0.45) !important;
 }
 
 .spotlightWatchlistCheck {
   font-size: 11px;
   font-weight: 800;
-  background: rgba(74, 222, 128, 0.25);
+  background: rgba(var(--success-rgb), 0.25);
   border-radius: var(--radius-circle);
   width: 16px;
   height: 16px;
@@ -791,21 +791,21 @@
 
 .cardWatchlistEyeBtnActive {
   background: rgba(34, 197, 94, 0.28) !important;
-  border-color: rgba(74, 222, 128, 0.65) !important;
-  color: #4ade80 !important;
+  border-color: rgba(var(--success-rgb), 0.65) !important;
+  color: var(--success) !important;
   box-shadow:
-    0 0 18px rgba(74, 222, 128, 0.38),
+    0 0 18px rgba(var(--success-rgb), 0.38),
     0 4px 12px rgba(0, 0, 0, 0.45) !important;
   opacity: 1 !important;
 }
 
 .cardWatchlistEyeBtnActive:hover {
   background: rgba(34, 197, 94, 0.42) !important;
-  border-color: rgba(74, 222, 128, 0.85) !important;
+  border-color: rgba(var(--success-rgb), 0.85) !important;
   color: #ffffff !important;
   transform: scale(1.15);
   box-shadow:
-    0 0 24px rgba(74, 222, 128, 0.55),
+    0 0 24px rgba(var(--success-rgb), 0.55),
     0 6px 18px rgba(0, 0, 0, 0.5) !important;
 }
 
@@ -1285,14 +1285,22 @@
 /* 3. Visit Site: Electric Sky Blue / Cyan (matches .library-artist-enhance-btn) */
 .siteActionBtn {
   color: rgb(129, 212, 250);
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0.06) 100%);
-  border-color: rgba(56, 189, 248, 0.32);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--info-rgb), 0.16) 0%,
+    rgba(var(--info-rgb), 0.06) 100%
+  );
+  border-color: rgba(var(--info-rgb), 0.32);
 }
 
 .siteActionBtn:hover:not(:disabled) {
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0.12) 100%);
-  border-color: rgba(56, 189, 248, 0.52);
-  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.25);
+  background: linear-gradient(
+    135deg,
+    rgba(var(--info-rgb), 0.26) 0%,
+    rgba(var(--info-rgb), 0.12) 100%
+  );
+  border-color: rgba(var(--info-rgb), 0.52);
+  box-shadow: 0 4px 16px rgba(var(--info-rgb), 0.25);
 }
 
 /* Legacy button classes kept for backwards compatibility */
@@ -1798,7 +1806,7 @@
 .downloadBtnCompleted {
   background: rgba(34, 197, 94, 0.14) !important;
   border-color: rgba(34, 197, 94, 0.35) !important;
-  color: #4ade80 !important;
+  color: var(--success) !important;
   cursor: default;
 }
 
@@ -2105,7 +2113,7 @@
 .showNotesOverlay {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(14px);
   display: flex;
@@ -3513,7 +3521,7 @@
 
 .inputError {
   font-size: 12px;
-  color: #f87171;
+  color: var(--danger-light);
 }
 
 .modalActions {
@@ -3779,8 +3787,8 @@
   margin-top: 12px;
   padding: 10px 14px;
   border-radius: var(--radius-md);
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(var(--danger-rgb), 0.12);
+  border: 1px solid rgba(var(--danger-rgb), 0.3);
   color: #fca5a5;
   font-size: 13px;
 }

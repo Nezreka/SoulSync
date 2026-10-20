@@ -455,14 +455,14 @@
 }
 
 .statsCardDelta_up {
-  background: rgba(74, 222, 128, 0.12);
-  color: #4ade80;
-  border: 1px solid rgba(74, 222, 128, 0.25);
+  background: rgba(var(--success-rgb), 0.12);
+  color: var(--success);
+  border: 1px solid rgba(var(--success-rgb), 0.25);
 }
 
 .statsCardDelta_down {
   background: rgba(248, 113, 113, 0.12);
-  color: #f87171;
+  color: var(--danger-light);
   border: 1px solid rgba(248, 113, 113, 0.25);
 }
 
@@ -838,9 +838,9 @@
 
 /* Gold, silver, bronze ranks */
 .statsRankedItem:nth-child(1) .statsRankedNum {
-  background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
+  background: linear-gradient(135deg, var(--warning) 0%, #d97706 100%);
   color: #000;
-  box-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 10px rgba(var(--warning-rgb), 0.4);
 }
 
 .statsRankedItem:nth-child(2) .statsRankedNum {
@@ -1022,11 +1022,11 @@
 }
 
 .statsOwnPlayGapUp {
-  color: #4ade80;
+  color: var(--success);
 }
 
 .statsOwnPlayGapDown {
-  color: #f87171;
+  color: var(--danger-light);
 }
 
 .statsOwnPlayLegend {

@@ -53,7 +53,7 @@
 }
 
 .issuesStatResolved {
-  border-left: 3px solid #4ade80;
+  border-left: 3px solid var(--success);
 }
 
 .issuesStatDismissed {
