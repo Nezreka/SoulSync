@@ -128,6 +128,47 @@ async function openAcceptance(
   return { errors, missing };
 }
 
+for (const width of [1800, 1280, 390]) {
+  test(`ready plan with organization ${width}px`, async ({ page }) => {
+    const api = acceptanceApi('supported');
+    const { errors, missing } = await openAcceptance(page, width, api, [
+      http.post('*/api/library/album/:id/reorganize/preview', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [
+            {
+              file_exists: true,
+              matched: true,
+              current_path: '/music/Acceptance Artist/Northbound/01 - Home.flac',
+              new_path: '/music/Acceptance Artist/[2001] Northbound/01 - Home.flac',
+            },
+          ],
+        }),
+      ),
+    ]);
+    const apply = page.getByLabel('Apply album changes', { exact: true });
+    await expect(
+      apply.getByRole('button', {
+        name: 'Apply ready edits, then organize folder',
+        exact: true,
+      }),
+    ).toBeVisible();
+    const description = apply.locator(':scope > div').first();
+    const controls = apply.locator(':scope > div').nth(1);
+    const card = await apply.boundingBox();
+    const text = await description.boundingBox();
+    // Buttons must not steal nearly all the width of the primary explanation.
+    expect(text!.width).toBeGreaterThanOrEqual(Math.min(240, card!.width - 42));
+    await expectSeparated(description, controls);
+    await apply.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+    await settle(page);
+    expect(errors).toEqual([]);
+    expect(missing).toEqual([]);
+    expect(api.unexpected).toEqual([]);
+    await expect(apply).toHaveScreenshot(['review-acceptance', `organize-${width}.png`]);
+  });
+}
+
 for (const width of [1800, 390, 320]) {
   for (const scenario of scenarios) {
     // These three panels exposed collisions; also protect the narrowest phone

@@ -57,9 +57,11 @@ Interaction tests check exact request bodies, cancellation before submission,
 saved choices, relocation redirects, stale apply and selective acquisition.
 Unexpected repair requests fail the test.
 
-There are 19 captured states, 41 reviewed screenshots and six interaction tests
-(three workflows on desktop and phone). Screenshot comparisons never update
-their baselines during a normal run.
+There are 19 captured states, 44 reviewed screenshots and six interaction tests
+(three workflows on desktop and phone). Three screenshots additionally exercise
+the organization-preview response at 1800/1280/390px: the optional second apply
+button must not squeeze the explanation into a narrow column. Screenshot
+comparisons never update their baselines during a normal run.
 
 Run from the repository root, using the project's Python environment:
 

@@ -32,7 +32,7 @@ not another redesign or matching-policy expansion. Preserve Stage 1 and 2.
 
 Completion requires semantic assertions as well as rendered comparisons. Fixture
 updates must be explicit; test runs must not silently bless new recommendations.
-All mutations used for verification operate on disposable files/databases.
+All repair mutations used for verification operate on disposable files/databases.
 
 ### Acceptance evidence
 
@@ -52,7 +52,7 @@ identity and queue projection are production code.
 | A7 | Every physical local file appears exactly once, including intentional and unmatched lossy companions. Duplicate keeper selection leaves file bytes unchanged; Plan and apply confirmation name the same keeper and quarantine paths. |
 | A8 | Partial intent selects Open Water and excludes Afterglow. Wishlist contains only the requested recording and exact release. Cancelling the request retains partial scope, wanted status and the uncollected slot. Browser tests check exact request bodies and cancellation before submission. |
 | A9 | Saved decisions survive unchanged rescans and a real directory move; the old case resolves to the new case. Material tag changes reopen review and reject old evidence tokens and signed apply. Browser navigation and refresh follow these states on desktop and phone. |
-| A10 | Nineteen generated JSON states feed 41 inspected screenshots at 1800/390px, plus 320px collision checks. Six browser workflows cover save/move/stale apply, selective request/cancellation, and staged duplicate choices on desktop and phone. |
+| A10 | Nineteen generated JSON states feed 38 desktop/phone screenshots at 1800/390px; three more protect 320px collisions. Three organization-preview screenshots at 1800/1280/390px bring the total to 44. Six browser workflows cover save/move/stale apply, selective request/cancellation, and staged duplicate choices on desktop and phone. |
 
 Snapshots normalize only temporary paths, timestamps and opaque tokens; semantic
 expectations run before an explicit update. Raw token changes and stale rejection
@@ -78,6 +78,11 @@ the pinned Playwright image. Commands and update rules are documented in
   explanations and Wishlist links remain separated. The mobile completion
   banner clears the fixed shell navigation control. Singular evidence and
   version-conflict labels were corrected.
+- Live inspection after the organization preview arrived exposed a second apply
+  button squeezing the ready-plan explanation into a narrow column. The action
+  column now takes at most half the card's available width; controls wrap while
+  the explanation remains readable. Three dedicated visual checks protect this
+  state, which was absent from the original no-moves preview fixture.
 
 These fixes do not change matcher thresholds, readiness policy, saved-choice
 authority or file-writing policy.
@@ -91,7 +96,7 @@ authority or file-writing policy.
 - **95 focused UI tests passed** across Review, metadata comparison and fetch
   deduplication. `npm run check`: **zero errors / 485 existing warnings**;
   production build, affected Python lint and whitespace checks passed.
-- **58 pinned-browser checks passed without updating baselines**: 47 new
+- **61 pinned-browser checks passed without updating baselines**: 50 new
   acceptance checks and all 11 existing Review/Library visual comparisons.
   Every new screenshot was visually inspected, including the final corrected
   phone layouts. Existing baselines were unchanged.
@@ -99,7 +104,7 @@ authority or file-writing policy.
   paging, focus, identity-edit visibility and acquisition status. A missing local
   browser path was corrected in the temporary runner; no app change was needed.
 
-Deployment verification will be recorded after the committed source is rolled
+Deployment verification will be recorded after the final correction is rolled
 out. No live plan, wishlist request or music file is used as mutation test data.
 
 ### Coverage boundaries
