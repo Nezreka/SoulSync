@@ -178,6 +178,49 @@ Live follow-up and correction:
   evidence-neutral readiness text, with no browser exceptions. The narrow
   phone inspector and repeated ready summaries remain Stage 2 work.
 
+Final deployed verification:
+
+- Corrected code commit/image: **`6f42d601ba6e`** /
+  **`localhost/soulsync:test-6f42d601ba6e`**. The maintained rollout script reports
+  **1/1 Ready**; Flux remains suspended for the existing feature test.
+- All four targeted refreshes completed without errors or incomplete catalogue
+  evidence. Their **108 local files** retained the same inventory and embedded
+  tags in the before/after API snapshots. No live repair plans were applied.
+
+  | Album | Before: extra / missing | Final: extra / missing |
+  | --- | --- | --- |
+  | The Essential Britney Spears | 0 / 0 | 0 / 0 |
+  | Fallen (20th anniversary) | 1 / 1 | 1 / 1 |
+  | Grace (Legacy Edition) | 1 / 2 | 0 / 0 |
+  | Hopes and Fears (Deluxe Edition) | 5 / 9 | 3 / 7 |
+
+- Six targeted recordings (the original five plus Keane's Mill St Brewery
+  performance) are assigned with no proposed title rewrite. Newly recovered
+  Keane Forum/Airwaves and Jeff Buckley “The Other Woman” assignments remain
+  uncertain/likely as their evidence warrants; compatibility does not promote
+  them to automatic acceptance. All four albums remain ineligible for whole-
+  album apply because decisions remain open.
+- Fallen's leading candidate changes from two-disc vinyl to digital: both now
+  have 20 assigned / 18 clear, so the existing digital-numbering preference
+  breaks the tie. The seven disc-number previews remain gated on release
+  selection. The inherited AOL-session version question remains unresolved.
+  Grace's leading candidate now covers 22/22 instead of 21/23. These release
+  ranking changes are recorded, rather than presenting identical queue counts
+  as the success criterion.
+- A final audit using the **deployed Python runtime and matching module**
+  compared **12,697 paired rows**, with zero missing cached recordings and
+  **zero newly incompatible comparisons** against the pre-Stage-1 policy.
+- Final browser inspection on this image repeated desktop/mobile identity-edit
+  and readiness checks and inspected the restored Evanescence/Keane rows.
+  No browser exceptions occurred. Screenshots and exact API snapshots remain
+  under `/tmp/soulsync-stage1-*`.
+- Additional Stage 2 evidence-presentation finding: `AssignmentEvidence`
+  populates the release-track album label from `album.album`. When a candidate
+  differs from the local edition, that label can show local edition wording
+  beside the selected candidate's ID (observed with Fallen's Target-exclusive
+  wording). Stage 2 should distinguish current album identity from selected
+  release metadata; this was recorded without expanding Stage 1.
+
 **Stage 2 is still open.** The desktop inspector still stacks comparisons too
 early, the plan repeats summaries, mobile/header space remains inefficient, and
 selection/success hierarchy and broader decision ordering still need the
