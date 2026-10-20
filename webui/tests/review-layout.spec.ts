@@ -96,6 +96,9 @@ test('compact queue retains filters and paging when browsing is closed', async (
   await expect(browser.getByText('Page 2 of 2')).toBeVisible();
   await browser.getByRole('button', { name: /Album 31 Artist/ }).click();
   await expect(page.getByRole('heading', { name: 'Album 31', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Previous album/ }).click();
+  await expect(page.getByRole('heading', { name: 'Album 30', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Browse albums/ })).not.toBeFocused();
   await page.getByRole('button', { name: /Browse albums/ }).click();
   await expect(browser.getByText('Page 2 of 2')).toBeVisible();
   await page.getByLabel('Find album or track').fill('Album 3');

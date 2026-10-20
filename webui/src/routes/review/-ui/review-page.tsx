@@ -565,7 +565,11 @@ export function ReviewPage() {
   const selectCase = (next: string) => {
     setQueueExpanded(false);
     // Keep focus on a visible control when the compact browser closes.
-    if (queueToggleRef.current?.offsetParent) queueToggleRef.current.focus();
+    if (
+      caseListRef.current?.contains(document.activeElement) &&
+      queueToggleRef.current?.offsetParent
+    )
+      queueToggleRef.current.focus();
     setNotice('');
     setInspectorOpen(false);
     setAlbumView('plan');
