@@ -149,7 +149,12 @@ Accent color, theme, visualizer effects, and interface controls. Changes apply i
 
 ## REST API keys
 
-Generate API keys for external integrations. Keys are **not** scoped — every key carries full admin rights, so guard them like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
+Generate API keys for external integrations. A key is either **admin** (full rights, the default) or **read** (can look, can't change anything). Guard admin keys like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
+
+The same section has two switches, both off by default:
+
+- **MCP for AI Clients** answers at \`/mcp\`, so Claude and other AI apps can drive SoulSync with one of these keys. See [MCP for AI clients](#api-mcp).
+- **Lidarr Compatible API** answers at \`/lidarr\`, so request apps that only speak Lidarr can use SoulSync. Pick which profile's wishlist their requests land on. See [Lidarr compatible API](#api-lidarr).
 
 ## Log level
 
