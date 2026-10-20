@@ -519,8 +519,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
+        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
@@ -2953,6 +2953,7 @@ async function loadSettingsData() {
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
         loadNavidromePlaylistLogin();
+        loadMediaServerNames();
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
@@ -4025,19 +4026,36 @@ async function clearPlexConfiguration() {
     }
 }
 
-function toggleServer(serverType) {
-    // Update toggle buttons
-    document.getElementById('plex-toggle').classList.remove('active');
-    document.getElementById('jellyfin-toggle').classList.remove('active');
-    document.getElementById('navidrome-toggle').classList.remove('active');
-    document.getElementById('soulsync-toggle')?.classList.remove('active');
-    document.getElementById(`${serverType}-toggle`)?.classList.add('active');
+// The media server names, in UI order. Refreshed from GET /api/media-servers
+// (the per-server descriptor) when the settings page loads; this list is
+// what the page knew before the endpoint existed and stays the fallback.
+let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'soulsync'];
 
-    // Show/hide server containers
-    document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
-    document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
-    document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
-    document.getElementById('soulsync-container')?.classList.toggle('hidden', serverType !== 'soulsync');
+async function loadMediaServerNames() {
+    try {
+        const res = await fetch('/api/media-servers');
+        if (!res.ok) return;
+        const names = ((await res.json())?.servers || []).map(s => s?.name).filter(Boolean);
+        if (names.length) _mediaServerNames = names;
+    } catch (e) {
+        // fallback list stays
+    }
+}
+
+// The server whose toggle is active, else the first one.
+function activeServerFromToggles() {
+    const hit = _mediaServerNames.find(name => document.getElementById(`${name}-toggle`)?.classList.contains('active'));
+    return hit || _mediaServerNames[0];
+}
+
+function toggleServer(serverType) {
+    // Update toggle buttons and show the matching config container. A
+    // server without a toggle or a container on this page (the standalone
+    // library on the video side) is simply skipped.
+    for (const name of _mediaServerNames) {
+        document.getElementById(`${name}-toggle`)?.classList.toggle('active', name === serverType);
+        document.getElementById(`${name}-container`)?.classList.toggle('hidden', name !== serverType);
+    }
 
     // Show Plex setup when Plex is selected; otherwise hide both Plex panels
     const plexConfig = document.getElementById('plex-configuration');
@@ -6266,14 +6284,7 @@ async function saveSettings(quiet = false) {
     }
 
     // Determine active server from toggle buttons
-    let activeServer = 'plex';
-    if (document.getElementById('jellyfin-toggle').classList.contains('active')) {
-        activeServer = 'jellyfin';
-    } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
-        activeServer = 'navidrome';
-    } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
-        activeServer = 'soulsync';
-    }
+    let activeServer = activeServerFromToggles();
     // ISOLATION: this page is reused on the video side. Connection details (Plex/
     // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
     // change the MUSIC active server. So when saving from the video side, keep

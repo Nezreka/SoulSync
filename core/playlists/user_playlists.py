@@ -221,7 +221,7 @@ def _write(
         raise RuntimeError('could not save the playlist')
 
 
-def create_playlist(db: Any, profile_id: int, name: Any) -> int:
+def create_playlist(db: Any, profile_id: int, name: Any, is_request_list: bool = False) -> int:
     cleaned = clean_name(name)
     playlist_id = db.mirror_playlist(
         source=USER_PLAYLIST_SOURCE,
@@ -229,10 +229,12 @@ def create_playlist(db: Any, profile_id: int, name: Any) -> int:
         name=cleaned,
         tracks=[],
         profile_id=int(profile_id),
+        is_request_list=1 if is_request_list else 0,
     )
     if playlist_id is None:
         raise RuntimeError('could not create the playlist')
-    logger.info("created user playlist '%s' (%s) for profile %s", cleaned, playlist_id, profile_id)
+    kind = 'request list' if is_request_list else 'user playlist'
+    logger.info("created %s '%s' (%s) for profile %s", kind, cleaned, playlist_id, profile_id)
     return int(playlist_id)
 
 

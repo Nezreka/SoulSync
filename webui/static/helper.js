@@ -3460,6 +3460,19 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.5.8': [
+        { date: 'October 2026 · 3.5.8' },
+        { title: 'Request Lists', desc: 'A new Sync page tab for playlists that only download. Copy any playlist there, or start an empty one, and syncing it wishlists what is missing without building a playlist on your media server.', page: 'sync' },
+        { title: 'Spotify auto-remove', desc: 'A Spotify request list can remove tracks you now own from the Spotify playlist. It asks first, uses your own Spotify login, and only removes tracks the library holds under the same Spotify id.', page: 'sync' },
+        { title: 'Playlists sync after their downloads', desc: 'When a playlist\'s wishlist batch finishes and the database update runs, the playlist re-syncs so the new tracks reach your server playlist. The Sync Playlist automation can also sync every mirrored playlist.', page: 'automations' },
+        { title: 'Discover mixes on the dashboard', desc: 'The Listen band shows your Discover quick mixes. Click one to preview it, or press play to start it.', page: 'dashboard' },
+        { title: 'Chat uploads', desc: 'Uploads open a preview with a caption and progress bar, shared files get inline players and an image lightbox, and Movie Night is now Watch Together.' },
+        { title: 'Audiobook automations', desc: 'Audiobooks fire automation triggers now, including Import Complete, grabs, failed downloads, wishlist, follows and scans (thanks @SimpleSimonLA) (#1774).', page: 'automations' },
+        { title: 'No more first-visit bans', desc: 'A normal page load stopped sending the burst of refused calls CrowdSec and fail2ban read as a scanner, and deleting a profile no longer strands its browsers (thanks @PapaBearDoes) (#1763, #1786).' },
+        { title: 'Import and download fixes', desc: 'Artist letter folders follow the album artist (thanks @QT3496) (#1785), singles reuse a folder that differs only by case (#1788), No track picked imports from the file\'s own tags (thanks @edy80) (#1772), and Review no longer freezes on a big queue (thanks @QT3496) (#1775).', page: 'import' },
+        { title: 'Lost tracks come back', desc: 'A track your server no longer has gets wishlisted and stays wishlisted until it downloads, and re-identified tracks from a bad album import one by one (thanks @kevin2xk) (#1754, #1567).', page: 'sync' },
+        { title: 'Earlier versions', desc: '3.5.7 turned Beatport charts into playlists, added a second pass for missed tracks and brought automatic album completion.' },
+    ],
     '3.5.7': [
         { date: 'October 2026 · 3.5.7' },
         { title: 'Beatport charts are playlists', desc: 'Every chart opens to be identified, synced and downloaded instead of landing as a fake Various Artists compilation. Tracks match by ISRC, mirrored charts refresh and can join the pipeline, and Save snapshot keeps a dated copy of a chart.', page: 'sync' },
@@ -3472,16 +3485,6 @@ const WHATS_NEW = {
         { title: 'Video stats API', desc: 'GET /api/v1/video/stats returns library, database and download counts, and video downloads take a status filter (thanks @hilburn) (#1723).', page: 'settings' },
         { title: 'Imports you already own', desc: 'Albums you already have no longer fail every track on auto-import: they count as already in library (thanks SeadogsBooty on discord). Plex paths resolve when a folder differs only by case.', page: 'import' },
         { title: 'Earlier versions', desc: '3.5.6 fixed playlist sync matching, made reorganize resumable and taught auto-import to skip what you own.' },
-    ],
-    '3.5.6': [
-        { date: 'October 2026 · 3.5.6' },
-        { title: 'Playlist sync lands the right songs', desc: 'The album fallback needs the artist to match, so a same-titled song on a same-named album stops standing in for the real one. One song your server no longer has stops blocking the whole playlist: it is skipped and the rest are written (thanks @kevin2xk) (#1715).', page: 'sync' },
-        { title: 'Reorganize resumes where it stopped', desc: 'Library reorganize saves the last album it finished and picks up right after it, queues moves as it goes so a stopped run keeps what it planned, and goes back to the top after a full pass (thanks @QT3496) (#1716).', page: 'tools' },
-        { title: 'Auto-import skips what you own', desc: 'Staging drops run the same library check as the import page. Each import in history says what it did with a per-track list, and an opt-in Clear finished folders switch removes a folder once every track is in.', page: 'import' },
-        { title: 'Album modal knows what you own', desc: 'A release opened from a discography shows found and missing per track as soon as it opens, instead of waiting for Begin Analysis.' },
-        { title: 'Run Now refreshes discovery', desc: 'Run Now on the Update Discovery automation always refreshes, so changed settings apply right away. Scheduled runs keep the 6 hour cooldown (thanks @mikedaf) (#1719).', page: 'automations' },
-        { title: 'YouTube imports on NFS', desc: 'A share that refuses file metadata (errno 524) no longer fails a YouTube import after the file landed (thanks @hilburn) (#1713).' },
-        { title: 'Earlier versions', desc: '3.5.5 brought playable and likeable playlists, per-playlist sync mode, Deezer previews and a big speed pass.' },
     ],
 };
 
@@ -3511,6 +3514,25 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.5.8: request lists, playlists that sync after downloads, and a round of fixes',
+        description: 'Request Lists download what a playlist is missing without building a server playlist, playlists re-sync once their downloads land, Discover mixes come to the dashboard, chat gets a new upload flow, and members stop getting banned by CrowdSec on their first visit.',
+        features: [
+            'Request Lists: copy a playlist to download what is missing without a server playlist, with opt-in Spotify auto-remove that only trusts Spotify ids.',
+            'Playlists re-sync after their wishlist downloads land, and Sync Playlist can sync every mirrored playlist.',
+            'Discover quick mixes on the dashboard, and chat uploads with previews, captions and inline players.',
+            'Audiobook automation triggers, including Import Complete (thanks @SimpleSimonLA) (#1774).',
+            'No more first-visit CrowdSec bans, and deleting a profile clears its sessions (thanks @PapaBearDoes) (#1763, #1786).',
+            'Artist letter folders, case-split singles, No track picked imports and a frozen Review page fixed (thanks @QT3496, @edy80) (#1785, #1788, #1772, #1775).',
+            'Lost tracks come back and re-identify fixes (thanks @kevin2xk) (#1754, #1567).',
+            'Under the hood: one descriptor per media server (thanks @splitsec2), about 12,000 lines of dead CSS gone (thanks @Thundernerd) and the replaced vanilla pages retired (thanks @AnonymousMorris).',
+        ],
+    },
+    {
+        title: 'Earlier in 3.5.7',
+        description: 'Beatport charts as playlists, a second pass for missed tracks, automatic album completion and video wishlist fixes.',
+        features: [],
+    },
+    {
         title: '3.5.7: beatport playlists, a second pass for missed tracks and album completion',
         description: 'Beatport charts become real playlists and an enrichment source, playlist sync gets a second pass for tracks it could not match, albums can complete themselves, spoken-word artists can route to the audiobook library, and video wishlist episodes find their releases.',
         features: [
@@ -3521,22 +3543,6 @@ const VERSION_MODAL_SECTIONS = [
             'Route spoken-word artists to the audiobook library (thanks @SimpleSimonLA) (#1714).',
             'Video: TVDB scene numbering, show-year fixes, live dashboard tiles, and a video stats API (thanks @hilburn) (#1723).',
             'Albums you already own no longer fail auto-import, and Plex paths resolve across folder case changes.',
-        ],
-    },
-    {
-        title: 'Earlier in 3.5.6',
-        description: 'Playlist sync matching fixes, resumable reorganize, auto-import that skips what you own, and Run Now that refreshes discovery.',
-        features: [],
-    },
-    {
-        title: '3.5.6: playlist sync fixes, reorganize resume and smarter auto-import',
-        description: 'A follow-up to 3.5.5. Playlist sync stops matching the wrong song and stops letting one missing song block a whole playlist, reorganize picks up where it stopped, auto-import skips what you already own, and Run Now on Update Discovery actually runs.',
-        features: [
-            'Playlist sync: the album fallback needs the artist to match, and one song your server no longer has is skipped instead of blocking the playlist (thanks @kevin2xk) (#1715).',
-            'Library reorganize resumes after the last album it finished and keeps the moves a stopped run planned (thanks @QT3496) (#1716).',
-            'Auto-import runs the library check, says what each import did, and can clear finished staging folders.',
-            'The album modal shows found and missing tracks as soon as it opens.',
-            'Run Now on Update Discovery skips the 6 hour cooldown (thanks @mikedaf) (#1719), and YouTube imports survive NFS shares that refuse file metadata (thanks @hilburn) (#1713).',
         ],
     },
 ];

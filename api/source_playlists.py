@@ -1870,10 +1870,19 @@ def _join_artist_names(artists):
     """Join artist names from a list that may contain dicts or strings."""
     return ', '.join(_extract_artist_names(artists))
 
+def _get_matching_engine():
+    engine = _matching_engine() if callable(_matching_engine) else _matching_engine
+    if engine is None:
+        from core.matching_engine import MusicMatchingEngine
+        return MusicMatchingEngine()
+    return engine
+
+
 def _get_discovery_cache_key(title, artist):
     """Normalize title/artist for discovery cache lookup using _matching_engine()."""
-    norm_title = _matching_engine().clean_title(title)
-    norm_artist = _matching_engine().clean_artist(_extract_artist_name(artist))
+    engine = _get_matching_engine()
+    norm_title = engine.clean_title(title)
+    norm_artist = engine.clean_artist(_extract_artist_name(artist))
     return (norm_title, norm_artist)
 
 
@@ -1881,7 +1890,8 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
     """Check if a cached discovery match has a valid artist. Returns False if the
     cached result's artist doesn't match the source artist (stale/wrong cache entry)."""
     min_artist_similarity = 0.5
-    source_artist_cleaned = _matching_engine().clean_artist(source_artist)
+    engine = _get_matching_engine()
+    source_artist_cleaned = engine.clean_artist(source_artist)
     if not source_artist_cleaned:
         return True  # No source artist to validate against
 
@@ -1898,11 +1908,11 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
             cand_artist = cand_artist.get('name', '')
             if not cand_artist:
                 continue
-        cand_normalized = _matching_engine().normalize_string(cand_artist)
+        cand_normalized = engine.normalize_string(cand_artist)
         if source_artist_cleaned in cand_normalized:
             return True
-        cand_cleaned = _matching_engine().clean_artist(cand_artist)
-        sim = _matching_engine().similarity_score(source_artist_cleaned, cand_cleaned)
+        cand_cleaned = engine.clean_artist(cand_artist)
+        sim = engine.similarity_score(source_artist_cleaned, cand_cleaned)
         if sim > best_sim:
             best_sim = sim
 
@@ -5292,19 +5302,24 @@ def _build_sync_deps():
     )
 
 
-def _mirror_own_sync_mode(playlist_id):
-    """The stored sync mode of the mirror behind an auto_mirror_<id> sync id,
-    or None (not a mirror, no mode of its own, or the lookup failed)."""
+def _mirror_behind_sync_id(playlist_id):
+    """The mirror row behind an auto_mirror_<id> sync id, or None (not a
+    mirror, or the lookup failed)."""
     m = re.fullmatch(r'auto_mirror_(\d+)', str(playlist_id or ''))
     if not m:
         return None
     try:
         from database.music_database import get_database
-        mirror = get_database().get_mirrored_playlist(int(m.group(1)))
+        return get_database().get_mirrored_playlist(int(m.group(1)))
     except Exception as e:
-        logger.debug("mirror sync mode lookup for %s: %s", playlist_id, e)
+        logger.debug("mirror lookup for %s: %s", playlist_id, e)
         return None
-    return (mirror or {}).get('sync_mode')
+
+
+def _mirror_own_sync_mode(playlist_id):
+    """The stored sync mode of the mirror behind an auto_mirror_<id> sync id,
+    or None (not a mirror, no mode of its own, or the lookup failed)."""
+    return (_mirror_behind_sync_id(playlist_id) or {}).get('sync_mode')
 
 
 def _run_sync_task(
@@ -5318,6 +5333,9 @@ def _run_sync_task(
     skip_wishlist_add=False,
     organize_by_playlist=False,
     user_initiated=False,
+    is_request_list=False,
+    auto_remove_fulfilled=False,
+    **kwargs,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5343,6 +5361,8 @@ def _run_sync_task(
         skip_wishlist_add=skip_wishlist_add,
         organize_by_playlist=organize_by_playlist,
         user_initiated=user_initiated,
+        is_request_list=is_request_list,
+        auto_remove_fulfilled=auto_remove_fulfilled,
     )
 
 
@@ -5429,7 +5449,15 @@ def start_playlist_sync_from_payload(data):
         # Submit the task to the thread pool (capture profile_id while still in request context)
         _sync_profile_id = get_current_profile_id()
         thread_submit_time = time.time()
-        future = sync_executor.submit(_run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id, playlist_image_url, sync_mode)
+        # a request list re-synced from history or the dashboard is still a
+        # request list: no server playlist, same auto-remove setting
+        _mirror = _mirror_behind_sync_id(playlist_id) or {}
+        future = sync_executor.submit(
+            _run_sync_task, playlist_id, playlist_name, tracks_json, None, _sync_profile_id,
+            playlist_image_url, sync_mode,
+            is_request_list=bool(_mirror.get('is_request_list')),
+            auto_remove_fulfilled=bool(_mirror.get('auto_remove_fulfilled')),
+        )
         active_sync_workers[playlist_id] = future
         thread_submit_duration = (time.time() - thread_submit_time) * 1000
         logger.info(f"⏱️ [TIMING] Thread submitted at {time.strftime('%H:%M:%S')} (took {thread_submit_duration:.1f}ms)")
@@ -5445,6 +5473,12 @@ def get_sync_status(playlist_id):
     with sync_lock:
         state = sync_states.get(playlist_id)
         if not state:
+            # a page-load probe asking "is anything running?" gets a 200. idle
+            # is the normal answer, and a burst of 404s on every load trips
+            # crowdsec / fail2ban probing rules (#1763). pollers keep the 404,
+            # they give up on it.
+            if request.args.get('probe') == '1':
+                return jsonify({"status": "idle"})
             return jsonify({"status": "not_found"}), 404
 
         # If the task is finished but the state hasn't been updated, check the future

@@ -17,10 +17,6 @@ const STATS_AUTOMATIONS = readFileSync(
   resolve(process.cwd(), 'static/stats-automations.js'),
   'utf8',
 );
-const SYNC_LISTENBRAINZ = readFileSync(
-  resolve(process.cwd(), 'static/sync-listenbrainz.js'),
-  'utf8',
-);
 
 describe('endpoint families', () => {
   it('the hyphen/underscore update-phase drift is exactly beatport + listenbrainz', () => {
@@ -216,16 +212,30 @@ describe('the endpoint table is anchored to the live vanilla', () => {
         api.syncStatus('X'),
         api.updatePhase('X'),
         api.state?.('X'),
-        api.playlistsStates,
       ].filter(Boolean) as string[];
       for (const p of paths) {
         // Strip the id segment; the vanilla builds these with a template.
         const stem = p.replace(/\/X$/, '/');
-        expect(SYNC_SERVICES + SYNC_SPOTIFY + STATS_AUTOMATIONS + SYNC_LISTENBRAINZ).toContain(
-          stem,
-        );
+        expect(SYNC_SERVICES + SYNC_SPOTIFY + STATS_AUTOMATIONS).toContain(stem);
       }
     }
+  });
+
+  it('pins saved-state list endpoints independently of retired account loaders', () => {
+    expect(
+      Object.fromEntries(SOURCE_IDS.map((id) => [id, SYNC_SOURCES[id].api.playlistsStates])),
+    ).toEqual({
+      tidal: '/api/tidal/playlists/states',
+      qobuz: '/api/qobuz/playlists/states',
+      deezer: '/api/deezer/playlists/states',
+      youtube: null,
+      ytmusic: '/api/ytmusic/playlists/states',
+      beatport: '/api/beatport/charts',
+      spotify_public: '/api/spotify-public/playlists/states',
+      itunes_link: '/api/itunes-link/playlists/states',
+      listenbrainz: '/api/listenbrainz/playlists',
+      mirrored: '/api/mirrored-playlists/discovery-states',
+    });
   });
 
   it('BOTH mismatched hash/vpid pairs are real, and spelled differently', () => {

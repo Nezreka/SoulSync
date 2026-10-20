@@ -89,6 +89,9 @@ def client(monkeypatch):
     import beatport_unified_scraper as bus
     scraper = _scraper()
     monkeypatch.setattr(bus, 'BeatportUnifiedScraper', lambda: scraper)
+    # api.beatport imported the class by name, patch that one too or its
+    # html fallback scrapes live beatport
+    monkeypatch.setattr(beatport_api, 'BeatportUnifiedScraper', lambda: scraper)
     monkeypatch.setattr(browse, 'fetch_next_data',
                         lambda url, s=None, use_cache=True: bp_fetch.fetch_next_data(url, scraper, use_cache))
     beatport_api.configure(activity_item=lambda *a, **k: None,
@@ -121,6 +124,7 @@ def test_a_route_falls_back_to_html_without_json(client, monkeypatch):
     monkeypatch.setattr(browse, 'hype_picks', lambda *a, **k: None)
     import beatport_unified_scraper as bus
     monkeypatch.setattr(bus, 'BeatportUnifiedScraper', lambda: FakeScraper({}))
+    monkeypatch.setattr(beatport_api, 'BeatportUnifiedScraper', lambda: FakeScraper({}))
     data = client.get('/api/beatport/hype-picks').get_json()
     assert data['success'] is False
     assert 'homepage' in data['error'].lower()

@@ -65,10 +65,11 @@ describe('the tab table matches the markup it was transcribed from', () => {
   const SHELL = readFileSync(resolve(__dirname, '__fixtures__/-vanilla-sync-markup.html'), 'utf8');
 
   /**
-   * drop items not in the vanilla JS code: ytmusic, and my-playlists, which
-   * is new (the vanilla never let you make a playlist)
+   * drop items not in the vanilla JS code: ytmusic, my-playlists, and request-lists
    */
-  const TRANSCRIBED_TABS = SYNC_TABS.filter((t) => t.id !== 'ytmusic' && t.id !== 'my-playlists');
+  const TRANSCRIBED_TABS = SYNC_TABS.filter(
+    (t) => t.id !== 'ytmusic' && t.id !== 'my-playlists' && t.id !== 'request-lists',
+  );
 
   it('has the same fifteen ids, in the same order', () => {
     const inMarkup = [
@@ -142,13 +143,14 @@ describe('the header actions', () => {
 });
 
 describe('the strip (syncStripTabs)', () => {
-  it('shows four permanent chips, not sixteen', () => {
+  it('shows five permanent chips, not sixteen', () => {
     // Six of the fifteen were duplicates of each other; the four paste-a-URL
     // tabs differed at the input step not at all. They are reached through Add
-    // playlist now. my playlists is permanent: it has no link to route from.
+    // playlist now. my playlists and request lists are permanent.
     expect(syncStripTabs('mirrored').map((t) => t.id)).toEqual([
       'mirrored',
       'my-playlists',
+      'request-lists',
       'server',
       'beatport',
     ]);
@@ -163,19 +165,32 @@ describe('the strip (syncStripTabs)', () => {
     // A panel with no chip is a room with no door: the strip would highlight
     // nothing and the user could not leave.
     const ids = syncStripTabs('spotify-public').map((t) => t.id);
-    expect(ids).toEqual(['mirrored', 'my-playlists', 'server', 'beatport', 'spotify-public']);
+    expect(ids).toEqual([
+      'mirrored',
+      'my-playlists',
+      'request-lists',
+      'server',
+      'beatport',
+      'spotify-public',
+    ]);
   });
 
-  it('appends the routed chip, so the permanent four never move', () => {
+  it('appends the routed chip, so the permanent five never move', () => {
     for (const routed of ['deezer-link', 'youtube', 'tidal', 'import-file']) {
       const ids = syncStripTabs(routed).map((t) => t.id);
-      expect(ids.slice(0, 4)).toEqual(['mirrored', 'my-playlists', 'server', 'beatport']);
-      expect(ids[4]).toBe(routed);
+      expect(ids.slice(0, 5)).toEqual([
+        'mirrored',
+        'my-playlists',
+        'request-lists',
+        'server',
+        'beatport',
+      ]);
+      expect(ids[5]).toBe(routed);
     }
   });
 
   it('drops the routed chip again once a permanent tab is active', () => {
-    expect(syncStripTabs('server').map((t) => t.id)).toHaveLength(4);
+    expect(syncStripTabs('server').map((t) => t.id)).toHaveLength(5);
   });
 
   it('never renders a chip twice when a permanent tab is active', () => {
@@ -224,7 +239,14 @@ describe('remembered routed tabs (the sticky Spotify Link chip)', () => {
 
   it('the strip shows every opened routed tab, not just the active one', () => {
     const tabs = syncStripTabs('mirrored', ['spotify-public']).map((t) => t.id);
-    expect(tabs).toEqual(['mirrored', 'my-playlists', 'server', 'beatport', 'spotify-public']);
+    expect(tabs).toEqual([
+      'mirrored',
+      'my-playlists',
+      'request-lists',
+      'server',
+      'beatport',
+      'spotify-public',
+    ]);
   });
 });
 

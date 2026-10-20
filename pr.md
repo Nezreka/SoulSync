@@ -1,55 +1,58 @@
-# soulsync 3.5.7: `dev` → `main`
+# soulsync 3.5.8: `dev` → `main`
 
-beatport charts become real playlists, playlist sync gets a second pass for tracks it couldn't match, albums can complete themselves, spoken-word artists can route to the audiobook library, and video wishlist episodes finally find their releases. scope: everything on dev since 3.5.6.
+request lists, playlists that sync themselves once their downloads land, discover mixes on the dashboard, a new chat upload flow, audiobook automations, and a stack of fixes for crowdsec bans, a frozen review page and scattered artist folders. scope: everything on dev since 3.5.7.
 
-## beatport
+## playlists
 
-- every chart opens as a playlist to identify. the top 10s, top 100s, genre lists and dj charts all went straight to the download modal as a "Various Artists" compilation named after the chart, never matched to a metadata source. that's where the "Hype Top 10" albums came from (thanks maV on discord). now every list opens through beatport discovery: identify, sync, download.
-- beatport tracks are identified by isrc first, and chart tracks get real ids. old positional matches are purged.
-- mirrored beatport lists refresh and join the pipeline. a mirror was keyed by a random hash, so refresh skipped it and a mirrored chart froze the day it was made. now new tracks come in, dropped ones go out, and live lists can go on the auto-sync board.
-- save a dated snapshot of a chart. "save snapshot" keeps today's list as its own mirror ("Hype Top 10 · 2026-10-16") that never refreshes but still syncs and downloads.
-- beatport as an enrichment source. a new last step in tagging looks the track up by isrc and writes the label's own bpm, key, label and catalog number. only for tracks that look electronic unless "look up every track" is on.
-- four browse sections were empty. they read the page json now.
+- request lists. a new tab on the sync page for playlists that only download. copy any playlist there (or start an empty one) and syncing it wishlists what's missing without building a playlist on your media server. the original keeps syncing like before.
+- spotify auto-remove for request lists. opt in per list and spotify tracks you now own come off the spotify playlist. it asks before turning on, uses your own spotify login, and only removes a track the library holds under the same spotify id, so a fuzzy match can never delete the wrong song.
+- playlists sync themselves after their downloads land. when a wishlist batch from a playlist finishes and the database update runs, that playlist re-syncs so the new tracks reach the server playlist without waiting for the next schedule. it's a new system automation, "Auto-Sync Playlists After Database Update".
+- the sync playlist automation can sync every mirrored playlist in one go.
+- a track your server lost actually comes back. the sync wishlisted it, but its library row stayed behind and the auto-wishlist sweep saw it as owned and pulled it straight back off. the dead row is dropped now, and review's delete drops the row for the file it removes (thanks @kevin2xk) (#1754, #1756).
 
-## playlist sync
+## dashboard
 
-- a stale cached match can no longer pin the wrong song. the wrong song drops off on the next sync, no manual fix needed (thanks @kevin2xk) (#1721, #1722).
-- a spotify track the primary source misses gets a second pass. tracks deezer couldn't match on a spotify playlist used to become wing it. now they're looked up by their own spotify id first, so they download and land on the playlist like the rest (thanks @kevin2xk) (#1721).
-- every track of a mirrored playlist says where it stands. the playlist card shows "N need a match" and the playlist view shows the state of each track (#1721).
-- scheduled auto-sync regenerates discovery shuffle mirrors instead of rechecking the saved one, so new tracks actually download and reach the remote playlist (thanks @Bloopser) (#1724, #1725).
-- a refused navidrome playlist write no longer reads as 0% synced, a failed sync drops the smart-skip fingerprint so the next run retries, and personalized pipelines report failed syncs too (thanks @zikasak) (#1726).
-- mirrored playlists stop hanging on load. the count query scanned several id columns at once on big libraries; it runs one query per provider now (thanks @zikasak) (#1698).
+- the listen band shows your discover quick mixes instead of a static tile. click a mix to preview it, hit play to start it.
 
-## automatic album completion
+## chat
 
-- new automation that finishes incomplete albums in your library, with cooldowns and retries so the same album isn't hammered (thanks @kiwijar) (#1711).
-- follow-up: albums that kept failing sat in cooldown and took every slot each run. max albums now caps what gets queued, and the cooldown claim runs off the downloads lock.
+- uploading a file opens a preview first, with a caption and a progress bar. shared files get inline audio and video players, images open in a lightbox and start small with an expand toggle, and the emoji picker opens in one click. movie night is now watch together.
 
-## audiobooks
+## automations
 
-- route chosen artists to the audiobook library. children's audio plays and other spoken word only show up in the music search and landed in the music library. an opt-in per-artist route sends their downloads to the audiobook folder, with a web ui to add, remove and move existing albums (thanks @SimpleSimonLA) (#1714).
+- audiobooks fire automation triggers now: import complete, grabs, failed downloads, wishlist, follows, new releases and scans. so an "import complete" ntfy works for books too (thanks @SimpleSimonLA) (#1774, #1753).
+- system automations are split into operations (wishlist, watchlist, scans, syncs) and maintenance (tools, cleanups, repair jobs, backups) in the sidebar.
 
-## video
+## imports and library
 
-- releases named by the scene's episode numbering match. the wishlist numbers episodes the tmdb way and scene releases use tvdb's, and for many shows they disagree (60 Minutes S59E25 is tvdb S58E48), so every release read as the wrong episode. episodes are now mapped to their tvdb number by air date.
-- wished episodes stop throwing away the releases they find. an episode's "year" was its air year, so "Dark.Matter.2024.S02E08" was "wrong year (2024, wanted 2026)". it's the show's year now, and year-titled shows like Big Brother (2023) stop failing the title check.
-- video stats api: `GET /api/v1/video/stats` for library, database and download counts, plus a status filter on video downloads (thanks @hilburn) (#1723).
-- dashboard download tiles read the live queue instead of a table nothing writes, and the episodes tile counts files you have, not missing rows.
+- artist letter folders stopped scattering. `$artistletter` took the track artist, so a song with a guest landed under the guest's letter and one artist's albums spread across several letters. it follows the album artist now, and there's a new `$albumartistletter` (thanks @QT3496) (#1785).
+- singles reuse an artist folder that differs only by case instead of making a second one, same as albums already did (thanks irishcal on discord) (#1788).
+- a manual import with "no track picked" imports from the file's own tags instead of rematching to an unrelated itunes track (thanks @edy80) (#1772, #1773).
+- re-identify fixes: tracks re-identified out of one bad album import one by one instead of sitting in the inbox, the kept library file can't be deleted as the "old" track, and a poisoned album finding opens the album instead of a track search (thanks @kevin2xk) (#1567).
+- albums routed to the audiobook library count as owned in discographies, and audiobook search filters routed audio plays too (thanks @SimpleSimonLA) (#1748, #1749).
 
-## imports
+## downloads
 
-- an album you already own no longer fails every track. the library check can't always prove a track is the same one, so it lets it through, and the import found your copy already in place and kept it. auto-import then called that a failure, so whole albums landed in needs attention. those tracks now count as already in library, and the manual import page stops calling them imported (thanks SeadogsBooty on discord).
-- the auto-import scan log says how many staging folders are already handled, so it no longer reads like the same folders are re-imported every minute.
+- downloads > review stopped freezing the browser. a big quarantine was loaded and drawn all at once, with a library check per entry. the list is paginated on the server and in the page now, so a big queue can actually be worked down (thanks @QT3496) (#1775, #1777).
+- picking candidates for not-found tracks no longer dies with "task not found". finished batches were dropped 5 minutes after completion even with the modal open; the clock now runs from the last time anyone looked.
+- a torrent waiting in qbittorrent's own queue isn't a stall. soulsync gave up on it after 10 minutes (music) or 30 (video), and forcing it in qbit finished a download nothing imported.
 
-## library
+## security and profiles
 
-- plex paths resolve when a folder differs only by case. after "Bring Me the Horizon" became "Bring Me The Horizon", every exact check missed on a case-sensitive mount.
+- members stop getting banned by crowdsec and fail2ban on their first visit. a normal page load sent a burst of calls the server refused (admin-only settings, video calls for a music-only profile, idle sync probes, a mix route that never existed). the page now asks only for what the profile can have, idle probes answer 200, and failed image cache serves redirect instead of 404 (thanks @PapaBearDoes) (#1763).
+- deleting a profile no longer strands its signed-in browsers on a blank app in login mode. the whole session is cleared and the sign-in screen comes back (thanks @PapaBearDoes) (#1786).
+- watchlist "view discography" opens the right artist when it was added from a source artist page, and its photo comes from that source (thanks @splitsec2) (#1761, #1762).
+
+## api
+
+- `/api/v1` library responses carry the enriched metadata (discogs, bandcamp, amazon, jiosaavn ids and data, aliases, release dates, canonical release picks, locks, server paths), ids can be opaque text, and lookup takes discogs, amazon, jiosaavn and bandcamp ids (#1789).
 
 ## under the hood
 
-- the auto sync, now playing and settings css generations are folded into one (thanks @Thundernerd) (#1702).
-- issues page filter navigation is deduplicated (thanks @AnonymousMorris) (#1728).
+- media servers are described in one place: a descriptor per server read by settings, detection and the wizard, shared capabilities and hooks, one item model and one per-profile client resolver (thanks @splitsec2) (#1750, #1751, #1752, #1757, #1758, #1759, #1760).
+- about 12,000 lines of dead css are gone, a stray brace in video-side.css that dropped its phone layout is fixed, and a test now checks every sheet for stray braces (thanks @Thundernerd) (#1747, #1766 to #1771, #1778 to #1784).
+- the vanilla code the react sync, beatport and dashboard pages replaced is retired, about 7,500 lines (thanks @AnonymousMorris) (#1730 to #1746).
 
 ## validation
 
-- every fix shipped with regression tests and green neighboring suites, and the import fix was negative-checked (break it, watch the tests fail).
+- every fix shipped with regression tests, the request list fixes and #1567 were negative-checked (break it, watch the tests fail), and the css cleanup was checked against today's dev with the class checker, a postcss cascade diff and the full webui suite.

@@ -12,16 +12,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import threading
-from typing import Any, Dict
+import time
+from typing import Any, Dict, List, Optional
 
 from core.automation.deps import AutomationDeps
 
+logger = logging.getLogger(__name__)
+
 
 def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
-    """Sync a mirrored playlist to the active media server.
+    """Sync a mirrored playlist (or all mirrored playlists) to the active media server.
 
     Behavior:
+    - If ``all: True``: iterates through all mirrored playlists sequentially
+      in a background thread, tracking aggregate progress across all playlists.
+    - Otherwise syncs the single playlist indicated by ``playlist_id``.
     - Tracks with discovered metadata (extra_data.discovered + matched_data)
       are routed via the official metadata.
     - Tracks with a Spotify hint (real Spotify ID from the embed
@@ -34,13 +41,223 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     - Otherwise spawns a daemon thread running ``run_sync_task`` and
       returns ``status: started`` with ``_manages_own_progress: True``.
     """
-    auto_id = config.get('_automation_id')
+    if config.get('all'):
+        return _auto_sync_all_playlists(config, deps)
+
     playlist_id = config.get('playlist_id')
     if not playlist_id:
         return {'status': 'error', 'reason': 'No playlist specified'}
 
+    return _sync_single_mirrored_playlist(config, deps)
+
+
+def _auto_sync_all_playlists(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str, Any]:
+    """Sync all mirrored playlists to the active media server."""
     db = deps.get_database()
-    pl = db.get_mirrored_playlist(int(playlist_id))
+    from core.profile_context import get_background_profile
+
+    owner = config.get('profile_id') or get_background_profile()
+    playlists = db.get_mirrored_playlists(int(owner)) if owner else db.get_mirrored_playlists()
+
+    if not playlists:
+        return {'status': 'error', 'reason': 'No playlists found'}
+
+    threading.Thread(
+        target=_run_all_playlists_sync_worker,
+        args=(playlists, config, deps),
+        daemon=True,
+        name='auto-sync-all-playlists',
+    ).start()
+
+    names = ', '.join(p.get('name', '?') for p in playlists[:3])
+    if len(playlists) > 3:
+        names += f' (+{len(playlists) - 3} more)'
+
+    return {
+        'status': 'started',
+        'playlist_count': str(len(playlists)),
+        'playlists': names,
+        '_manages_own_progress': True,
+    }
+
+
+def _run_all_playlists_sync_worker(
+    playlists: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    deps: AutomationDeps,
+) -> None:
+    auto_id = config.get('_automation_id')
+    total = len(playlists)
+    if auto_id and hasattr(deps, 'update_progress'):
+        deps.update_progress(
+            auto_id,
+            progress=5,
+            phase='Syncing playlists...',
+            log_line=f'Starting sync for {total} mirrored playlist(s)',
+            log_type='info',
+        )
+
+    total_synced = 0
+    total_skipped = 0
+    total_matched_tracks = 0
+    errors: List[str] = []
+    _SYNC_TIMEOUT = 600
+
+    for idx, pl in enumerate(playlists):
+        pl_id = pl.get('id')
+        if not pl_id:
+            continue
+        pl_name = pl.get('name') or f'Playlist {pl_id}'
+
+        sub_config = dict(config)
+        sub_config['playlist_id'] = str(pl_id)
+        sub_config['all'] = False
+        sub_config['_automation_id'] = None
+
+        if auto_id and hasattr(deps, 'update_progress'):
+            pct = int(5 + (idx / total) * 90)
+            deps.update_progress(
+                auto_id,
+                progress=pct,
+                phase=f'Syncing ({idx + 1}/{total}): "{pl_name}"',
+                log_line=f'Syncing playlist {idx + 1}/{total}: "{pl_name}"',
+                log_type='info',
+            )
+
+        done_event = threading.Event()
+        try:
+            res = _sync_single_mirrored_playlist(sub_config, deps, pl=pl, done_event=done_event)
+            status = res.get('status')
+            if status == 'skipped':
+                total_skipped += 1
+                if auto_id and hasattr(deps, 'update_progress'):
+                    deps.update_progress(
+                        auto_id,
+                        log_line=f'Skipped "{pl_name}": {res.get("reason", "unchanged")}',
+                        log_type='skip',
+                    )
+            elif status == 'error':
+                err_msg = res.get('reason') or 'unknown error'
+                errors.append(f'"{pl_name}": {err_msg}')
+                if auto_id and hasattr(deps, 'update_progress'):
+                    deps.update_progress(
+                        auto_id,
+                        log_line=f'Error syncing "{pl_name}": {err_msg}',
+                        log_type='error',
+                    )
+            elif status == 'started':
+                start_t = time.time()
+                timed_out = False
+                while not done_event.wait(timeout=2):
+                    elapsed = int(time.time() - start_t)
+                    if elapsed >= _SYNC_TIMEOUT:
+                        timed_out = True
+                        break
+                    if auto_id and hasattr(deps, 'update_progress'):
+                        pl_pct = min(elapsed // 3, 80)
+                        pct = int(5 + ((idx + pl_pct / 100) / total) * 90)
+                        deps.update_progress(
+                            auto_id,
+                            progress=pct,
+                            phase=f'Syncing ({idx + 1}/{total}): "{pl_name}" ({elapsed}s)',
+                        )
+
+                sync_id = f"auto_mirror_{pl_id}"
+                sync_states = (
+                    deps.get_sync_states()
+                    if hasattr(deps, 'get_sync_states')
+                    else getattr(deps, 'sync_states', {})
+                )
+                ss = (sync_states or {}).get(sync_id, {})
+                if timed_out:
+                    errors.append(f'"{pl_name}": timed out')
+                    if auto_id and hasattr(deps, 'update_progress'):
+                        deps.update_progress(
+                            auto_id,
+                            log_line=f'Sync timed out for "{pl_name}" after {_SYNC_TIMEOUT}s',
+                            log_type='error',
+                        )
+                elif ss.get('status') in ('error', 'failed'):
+                    err_reason = ss.get('error') or ss.get('reason') or 'sync failed'
+                    errors.append(f'"{pl_name}": {err_reason}')
+                    if auto_id and hasattr(deps, 'update_progress'):
+                        deps.update_progress(
+                            auto_id,
+                            log_line=f'Sync error for "{pl_name}": {err_reason}',
+                            log_type='error',
+                        )
+                else:
+                    total_synced += 1
+                    ss_result = ss.get('result', ss.get('progress', {}))
+                    matched = ss_result.get('matched_tracks', 0) if isinstance(ss_result, dict) else 0
+                    total_matched_tracks += int(matched or 0)
+                    if auto_id and hasattr(deps, 'update_progress'):
+                        deps.update_progress(
+                            auto_id,
+                            log_line=f'Synced "{pl_name}": {matched} tracks in library',
+                            log_type='success',
+                        )
+        except Exception as exc:
+            logger.exception("Sync all playlist %s error: %s", pl_id, exc)
+            errors.append(f'"{pl_name}": {exc}')
+            if auto_id and hasattr(deps, 'update_progress'):
+                deps.update_progress(
+                    auto_id,
+                    log_line=f'Exception syncing "{pl_name}": {exc}',
+                    log_type='error',
+                )
+
+    organize_playlists = [p for p in playlists if p.get('organize_by_playlist')]
+    if organize_playlists and hasattr(deps, 'run_playlist_organize_download'):
+        for org_pl in organize_playlists:
+            org_id = org_pl.get('id')
+            if not org_id:
+                continue
+            org_name = org_pl.get('name') or f'Playlist {org_id}'
+            try:
+                org_res = deps.run_playlist_organize_download(
+                    mirrored_playlist_id=int(org_id),
+                    automation_id=auto_id,
+                )
+                if auto_id and hasattr(deps, 'update_progress'):
+                    if org_res.get('status') == 'started':
+                        deps.update_progress(
+                            auto_id,
+                            log_line=f'Organize download started for "{org_name}"',
+                            log_type='success',
+                        )
+            except Exception as org_err:
+                logger.debug("Organize download dispatch failed for %s: %s", org_id, org_err)
+
+    if auto_id and hasattr(deps, 'update_progress'):
+        summary = f'Sync all finished: {total_synced}/{total} playlists synced ({total_matched_tracks} matched)'
+        if total_skipped:
+            summary += f', {total_skipped} skipped'
+        if errors:
+            summary += f', {len(errors)} error(s)'
+        deps.update_progress(
+            auto_id,
+            status='finished',
+            progress=100,
+            phase='Sync complete',
+            log_line=summary,
+            log_type='success' if not errors else 'warning',
+        )
+
+
+def _sync_single_mirrored_playlist(
+    config: Dict[str, Any],
+    deps: AutomationDeps,
+    *,
+    pl: Optional[Dict[str, Any]] = None,
+    done_event: Optional[threading.Event] = None,
+) -> Dict[str, Any]:
+    auto_id = config.get('_automation_id')
+    playlist_id = config.get('playlist_id')
+
+    db = deps.get_database()
+    if pl is None:
+        pl = db.get_mirrored_playlist(int(playlist_id))
     if not pl:
         return {'status': 'error', 'reason': 'Playlist not found'}
 
@@ -191,7 +408,7 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
         tracks_added = int(event_data.get('added') or 0)
     except (TypeError, ValueError):
         tracks_added = 0
-    force_sync = tracks_added > 0 or skipped_count > 0
+    force_sync = bool(config.get('force_sync')) or tracks_added > 0 or skipped_count > 0
 
     try:
         sync_statuses = deps.load_sync_status_file()
@@ -329,12 +546,45 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     # ("turn it off and syncs skip the wishlist step").
     organize_by_playlist = bool(pl.get('organize_by_playlist'))
     skip_add = config.get('skip_wishlist_add')
+    if skip_add is None and pl.get('is_request_list'):
+        # wishlisting what's missing is the whole job of a request list, so
+        # the global "skip the wishlist step" toggle doesn't switch it off.
+        # an explicit skip (the post-download re-sync) still wins
+        skip_add = False
     if skip_add is None:
         _cm_get = getattr(getattr(deps, 'config_manager', None), 'get', None)
         skip_add = callable(_cm_get) and not _cm_get('playlist_sync.wishlist_missing_tracks', True)
     skip_wishlist_add = organize_by_playlist or bool(skip_add)
+    def _safe_run_sync_task(*args, **kwargs):
+        try:
+            deps.run_sync_task(*args, **kwargs)
+        except Exception as exc:
+            import logging
+            logging.getLogger("soulsync.automation").exception("Background sync task %s failed", sync_id)
+            sync_states = getattr(deps, 'sync_states', None)
+            if sync_states is None and hasattr(deps, 'get_sync_states'):
+                sync_states = deps.get_sync_states()
+            if isinstance(sync_states, dict):
+                sync_states[sync_id] = {
+                    'status': 'error',
+                    'playlist_name': sync_name,
+                    'error': str(exc),
+                }
+            if auto_id and hasattr(deps, 'update_progress'):
+                deps.update_progress(
+                    auto_id,
+                    status='error',
+                    progress=100,
+                    phase='Sync error',
+                    log_line=f'Sync error: {exc}',
+                    log_type='error',
+                )
+        finally:
+            if done_event is not None:
+                done_event.set()
+
     threading.Thread(
-        target=deps.run_sync_task,
+        target=_safe_run_sync_task,
         args=(
             sync_id, sync_name, tracks_json, auto_id,
             int(pl.get('profile_id') or 1), pl.get('image_url', ''),
@@ -348,6 +598,8 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
             # a playlist's own Sync & download click, not a schedule (#1603)
             'user_initiated': bool(config.get('user_initiated')),
             'sync_mode': own_sync_mode,
+            'is_request_list': bool(pl.get('is_request_list')),
+            'auto_remove_fulfilled': bool(pl.get('auto_remove_fulfilled')),
         },
         daemon=True,
         name=f'auto-sync-{playlist_id}',

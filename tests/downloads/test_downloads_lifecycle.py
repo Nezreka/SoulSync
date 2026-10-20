@@ -339,6 +339,7 @@ def test_batch_completion_emits_batch_complete_when_all_done():
         'max_concurrent': 2, 'permanently_failed_tracks': [],
         'cancelled_tracks': set(),
         'playlist_name': 'PL',
+        'artist_context': {'name': 'Bobby & Max'},
     }
     auto = _FakeAutoEngine()
     monitor = _FakeMonitor()
@@ -346,7 +347,7 @@ def test_batch_completion_emits_batch_complete_when_all_done():
     # Final task completes
     lc.on_download_completed('b1', 't2', True, deps)
     assert download_batches['b1']['phase'] == 'complete'
-    assert ('batch_complete', {'playlist_name': 'PL', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
+    assert ('batch_complete', {'playlist_name': 'PL', 'artist': 'Bobby & Max', 'total_tracks': '2', 'completed_tracks': '2', 'failed_tracks': '0', 'more_batches_pending': 'false'}) in auto.events
     assert 'b1' in monitor.stopped
 
 
@@ -1013,6 +1014,9 @@ def _completion_recorder(monkeypatch, rec):
     import core.playlists.materialize_service as ms
     monkeypatch.setattr(ms, 'reconcile_batch_playlists',
                         lambda db, batch, tasks, cfg, **kw: (rec.append(('materialize', dict(tasks), _held())) or [('p', _Mat())]))
+    import core.sync.post_download_sync as pds
+    monkeypatch.setattr(pds, 'register_completed_playlist_batch',
+                        lambda batch, tasks_snapshot=None, database=None: rec.append(('register', dict(tasks_snapshot or {}), _held())) or [])
     import core.album_consistency as ac
     monkeypatch.setattr(ac, 'run_album_consistency',
                         lambda **kw: (rec.append(('consistency', kw['file_infos'], _held())) or {'success': True, 'tags_written': 2, 'total_files': 2, 'release_mbid': 'x'}))
@@ -1076,6 +1080,9 @@ def test_the_slow_half_runs_with_the_lock_released(monkeypatch, path):
     assert by_kind['history'][2] is True, "history is bookkeeping, it stays under the lock"
     assert by_kind['consistency'][2] is False, f"{path}: album consistency ran under tasks_lock"
     assert by_kind['materialize'][2] is False, f"{path}: playlist materialize ran under tasks_lock"
+    # the post-download playlist sync lookup is db work too
+    assert by_kind['register'][2] is False, f"{path}: playlist sync registration ran under tasks_lock"
+    assert set(by_kind['register'][1]) == {'t1', 't2'}
     assert by_kind['consistency'][1] == [{'path': '/a/1.flac'}, {'path': '/a/2.flac'}]
     # the materialize reads a snapshot of this batch's tasks, not the live dict
     assert set(by_kind['materialize'][1]) == {'t1', 't2'}

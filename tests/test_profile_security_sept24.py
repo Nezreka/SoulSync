@@ -235,6 +235,93 @@ def test_login_mode_profile_logout_ends_the_login(member, monkeypatch):
         assert 'login_authenticated' not in s
 
 
+def test_deleted_profile_in_login_mode_returns_to_login_screen(monkeypatch):
+    """#1786: Deleting a profile in login mode must drop login_authenticated and
+    return login_required: True on /api/profiles/current so the sign-in screen appears."""
+    _config(monkeypatch, **{'security.require_login': True})
+    db = web_server.get_database()
+    pid = db.create_profile(name=f'del_{uuid4().hex[:8]}')
+    c = _client_as(pid, login_authenticated=True, device_id='dev1', device_owner=pid, profile_epoch=1, launch_pin_verified=True)
+    db.delete_profile(pid)
+
+    r = c.get('/api/profiles/current')
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data.get('login_required') is True
+    assert data.get('success') is False
+    with c.session_transaction() as s:
+        assert 'login_authenticated' not in s
+        assert 'profile_id' not in s
+        assert 'device_id' not in s
+        assert 'device_owner' not in s
+        assert 'launch_pin_verified' not in s
+
+    # Subsequent recheck still tells the browser to show the sign-in screen
+    r2 = c.get('/api/profiles/current')
+    assert r2.status_code == 200
+    assert r2.get_json().get('login_required') is True
+
+
+def test_deleted_profile_request_to_root_clears_login_authenticated(monkeypatch):
+    """#1786: When a stranded browser reloads GET /, the root request clears the
+    dead session so the subsequent /api/profiles/current call returns login_required."""
+    _config(monkeypatch, **{'security.require_login': True})
+    db = web_server.get_database()
+    pid = db.create_profile(name=f'del_root_{uuid4().hex[:8]}')
+    c = _client_as(pid, login_authenticated=True, device_id='dev_root', device_owner=pid, profile_epoch=1)
+    db.delete_profile(pid)
+
+    # Browser reloads /
+    r = c.get('/')
+    assert r.status_code == 200
+    with c.session_transaction() as s:
+        assert 'login_authenticated' not in s
+        assert 'profile_id' not in s
+        assert 'device_owner' not in s
+
+    # Frontend then calls /api/profiles/current
+    r_curr = c.get('/api/profiles/current')
+    assert r_curr.status_code == 200
+    assert r_curr.get_json().get('login_required') is True
+
+
+def test_disabled_profile_in_login_mode_returns_to_login_screen(monkeypatch):
+    """#1786: A disabled profile in login mode clears the session and returns login_required."""
+    _config(monkeypatch, **{'security.require_login': True})
+    db = web_server.get_database()
+    pid = db.create_profile(name=f'dis_{uuid4().hex[:8]}')
+    c = _client_as(pid, login_authenticated=True, device_id='dev_dis', device_owner=pid, profile_epoch=1)
+    db.update_profile(pid, disabled=1)
+
+    r = c.get('/api/profiles/current')
+    assert r.status_code == 200
+    assert r.get_json().get('login_required') is True
+    with c.session_transaction() as s:
+        assert 'login_authenticated' not in s
+        assert 'profile_id' not in s
+        assert 'device_owner' not in s
+    db.delete_profile(pid)
+
+
+def test_deleted_profile_in_non_login_mode_clears_session(monkeypatch):
+    """In non-login mode, deleting a profile clears the dead session and returns
+    Profile not found on /api/profiles/current so init.js can show the profile picker."""
+    _config(monkeypatch, **{'security.require_login': False})
+    db = web_server.get_database()
+    pid = db.create_profile(name=f'del_nl_{uuid4().hex[:8]}')
+    c = _client_as(pid, device_id='dev_nl', device_owner=pid, profile_epoch=1)
+    db.delete_profile(pid)
+
+    r = c.get('/api/profiles/current')
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data.get('success') is False
+    assert data.get('login_required') is not True
+    with c.session_transaction() as s:
+        assert 'profile_id' not in s
+        assert 'device_owner' not in s
+
+
 def test_single_profile_wrong_pin_does_not_open_the_launch_lock(admin_pin, monkeypatch):
     """select skipped the pin check with one profile, then set
     launch_pin_verified for ANY pin on profile 1."""

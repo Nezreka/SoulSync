@@ -298,8 +298,6 @@ body.pf-modal-open .toast-container { z-index: 150000; }
 .pf-btn--primary:hover { background: rgb(36, 205, 96); }
 .pf-btn--quiet { background: transparent; color: var(--pf-text-2); }
 .pf-btn--quiet:hover { background: var(--white-a06); color: var(--pf-text); }
-.pf-btn--danger { background: rgba(255, 93, 93, 0.14); color: #ff8a8a; }
-.pf-btn--danger:hover { background: rgba(255, 93, 93, 0.22); }
 .pf-btn svg { width: 16px; height: 16px; }
 
 /* ── form bits ───────────────────────────────────────────── */

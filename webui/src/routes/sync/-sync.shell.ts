@@ -21,7 +21,8 @@ export type SyncTabId =
   | 'soulsync-discovery-sync'
   | 'import-file'
   | 'mirrored'
-  | 'my-playlists';
+  | 'my-playlists'
+  | 'request-lists';
 
 export interface SyncTab {
   id: SyncTabId;
@@ -72,6 +73,7 @@ export const SYNC_TABS: readonly SyncTab[] = [
   // the playlists people make here. last in this table so the fifteen
   // source tabs keep their order; the strip order comes from the primary list.
   { id: 'my-playlists', label: 'My Playlists', icon: 'my-playlists-icon' },
+  { id: 'request-lists', label: 'Request Lists', icon: 'requests-icon' },
 ];
 
 /**
@@ -103,6 +105,7 @@ export const SYNC_DEFAULT_TAB: SyncTabId = 'mirrored';
 export const SYNC_PRIMARY_TAB_IDS: readonly SyncTabId[] = [
   'mirrored',
   'my-playlists',
+  'request-lists',
   'server',
   'beatport',
 ];

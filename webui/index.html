@@ -138,6 +138,8 @@
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled | tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects | tojson }};
         window._maxPerfActive = {{ initial_max_performance | tojson }};
+        // what profile-api-gate.js holds before a profile is picked (#1763)
+        window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
@@ -7362,7 +7364,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$album</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
                                                         <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
@@ -7436,7 +7439,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$title</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$title</code>,
                                                         <code>$track</code> (01), <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$year</code>,
                                                         <code>$quality</code> (filename only). Use <code>${var}</code>
@@ -11152,11 +11156,62 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- movie night picker: nominate a movie or an episode for
+                            <!-- upload preview & staging modal: preview file with live thumbnail, waveform, and optional comment before sharing -->
+                            <div class="chat-peer-backdrop chat-upload-backdrop" data-chat-upload-backdrop hidden></div>
+                            <div class="chat-upload-modal-overlay" data-chat-upload-modal hidden>
+                                <div class="chat-upload-modal">
+                                    <div class="chat-upload-modal-head">
+                                        <div class="chat-upload-modal-title">
+                                            <span class="chat-upload-modal-icon">📁</span>
+                                            <div>
+                                                <h3 class="chat-upload-modal-heading">Upload &amp; Share File</h3>
+                                                <p class="chat-upload-modal-sub" data-chat-upload-target>Share a file via filepost.dev</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-upload-close title="Cancel (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-upload-modal-body">
+                                        <div class="chat-upload-preview-chassis" data-chat-upload-preview-slot></div>
+                                        <div class="chat-upload-meta-strip">
+                                            <div class="chat-upload-meta-info">
+                                                <span class="chat-upload-filename" data-chat-upload-name>filename.ext</span>
+                                                <span class="chat-upload-filesize" data-chat-upload-size>0 KB</span>
+                                            </div>
+                                            <span class="chat-upload-type-badge" data-chat-upload-badge>FILE</span>
+                                        </div>
+                                        <div class="chat-upload-caption-wrap">
+                                            <label class="chat-upload-caption-label" for="chat-upload-caption-input">Add a comment (optional):</label>
+                                            <textarea id="chat-upload-caption-input" class="chat-upload-caption" data-chat-upload-caption placeholder="Add an optional comment or note to accompany this file in chat…" rows="2" maxlength="300"></textarea>
+                                        </div>
+                                        <div class="chat-upload-progress-wrap" data-chat-upload-progress-wrap hidden>
+                                            <div class="chat-upload-progress-bar">
+                                                <div class="chat-upload-progress-fill" data-chat-upload-progress-fill></div>
+                                            </div>
+                                            <div class="chat-upload-progress-text" data-chat-upload-progress-text>Uploading… 0%</div>
+                                        </div>
+                                        <div class="chat-upload-error" data-chat-upload-error hidden></div>
+                                    </div>
+                                    <div class="chat-upload-modal-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-upload-cancel>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary chat-upload-send-btn" data-chat-upload-send>
+                                            <span>⚡ Upload &amp; Share</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- image lightbox / theater modal for viewing shared images in high resolution -->
+                            <div class="chat-lightbox-backdrop" data-chat-lightbox-backdrop hidden>
+                                <div class="chat-lightbox-content" data-chat-lightbox-content>
+                                    <button type="button" class="chat-lightbox-close" data-chat-lightbox-close title="Close (Esc)">&times;</button>
+                                    <img class="chat-lightbox-img" data-chat-lightbox-img src="" alt="Image preview">
+                                    <div class="chat-lightbox-caption" data-chat-lightbox-caption></div>
+                                </div>
+                            </div>
+                            <!-- watch together picker: nominate a movie or an episode for
                                  the room's ballot (TMDB search via the video side) -->
                             <div class="chat-settings-overlay" data-chat-watch-modal hidden>
                                 <div class="chat-settings-modal chat-watch-modal">
-                                    <h3 class="chat-settings-title">🎬 Nominate for movie night</h3>
+                                    <h3 class="chat-settings-title">🎬 Nominate for Watch Together</h3>
                                     <form class="chat-jbx-searchform" data-chat-watch-searchform>
                                         <input class="chat-input" data-chat-watch-searchinput type="text"
                                             maxlength="200"
@@ -11425,7 +11480,7 @@
                                         <span class="chat-toolbar-hint">**bold** · *italic* · `code` ·
                                             ||spoiler||</span>
                                     </div>
-                                    <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
+                                    <div class="chat-emoji-pop chat-emoji-picker" data-chat-emoji-pop hidden></div>
                                     <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
                                         <div class="chat-attach-tabs">
                                             <button type="button" class="chat-fmt-btn"
@@ -12562,6 +12617,10 @@
     <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
          so all frameworks share one wire request per identical GET burst. -->
     <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
+    <!-- profile-api-gate: answers api calls this profile can't have with a local
+         403, so a member's page load doesn't send a burst of 4xx (#1763). after
+         fetch-dedupe so refused calls never reach it. -->
+    <script src="{{ url_for('static', filename='profile-api-gate.js', v=static_v) }}"></script>
     <!-- scrollbar-fade: toggles .is-scrolling on whatever element is scrolling
          so scrollbars.css section 4 can brighten/fade thumbs. Standalone,
          dependency-free, safe to load before every other module. -->
@@ -12588,9 +12647,6 @@
          the vanilla discover page, is long gone.) -->
     <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->

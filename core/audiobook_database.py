@@ -438,6 +438,10 @@ class AudiobookDatabase:
                 STATUS_WANTED, narrator_mode, _now(),
             ))
             conn.commit()
+            from core.audiobook_events import announce, first_author, series_title
+
+            announce("audiobook_wishlist_item_added", title=title, author=first_author(book),
+                     series=series_title(book), asin=asin)
             return True
         except sqlite3.IntegrityError:
             return False
@@ -838,6 +842,9 @@ class AudiobookDatabase:
             """, (name, int(profile_id), str(role or "author"),
                   str(cover_url or ""), since_date, str(series_asin or ""), _now()))
             conn.commit()
+            from core.audiobook_events import announce
+
+            announce("audiobook_author_followed", name=name, role=role or "author")
             return True
         except sqlite3.IntegrityError:
             return False
@@ -855,6 +862,11 @@ class AudiobookDatabase:
                 (str(name or "").strip(), str(role or "author"), int(profile_id)),
             )
             conn.commit()
+            if cursor.rowcount > 0:
+                from core.audiobook_events import announce
+
+                announce("audiobook_author_unfollowed", name=str(name or "").strip(),
+                         role=role or "author")
             return cursor.rowcount > 0
         except sqlite3.Error as exc:
             logger.warning("Could not unfollow %s: %s", name, exc)

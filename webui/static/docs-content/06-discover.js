@@ -177,9 +177,9 @@ Open **Chat** in the sidebar — "Soulseek rooms & private messages". Everything
 - **Guild rail** (left edge) — every Soulseek room you've joined is an icon button. The community room uses the SoulSync logo; other rooms show two-letter initials with the room name as tooltip. Click to switch rooms. Below a divider: the **✉ Direct Messages** puck with an unread-count badge (caps at "99+"), and a **+** button ("Browse Soulseek rooms").
 - **Sidebar** — the current room name with a ⌄ caret, the channel list, three social buttons (**⭐ Friends**, **🚫 Blocklist**, **📚 Bookmarks**, each with a count badge), the **Direct Messages** conversation list, and your user panel at the bottom (avatar, name, "Online" or "Read-only").
 - **Main area** — the room head, message list, and composer.
-- **Right rail** — the ♫ Jukebox panel card, the 🎬 Movie night card, and the user list with a "Find a user…" filter.
+- **Right rail** — the ♫ Jukebox panel card, the 🎬 Watch Together card, and the user list with a "Find a user…" filter.
 
-The room head shows, in order: **#channel-or-room** title, the room topic as subtitle, **✎** topic edit, **🔍** history search, **📌** pins (with pinned count), **♫ Jukebox**, **🎬 Movie night**, a **SoulSync only / All messages** filter toggle, and **⚙ Chat settings** (admin only).
+The room head shows, in order: **#channel-or-room** title, the room topic as subtitle, **✎** topic edit, **🔍** history search, **📌** pins (with pinned count), **♫ Jukebox**, **🎬 Watch Together**, a **SoulSync only / All messages** filter toggle, and **⚙ Chat settings** (admin only).
 
 ## Browsing and joining rooms
 

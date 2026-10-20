@@ -1,0 +1,55 @@
+/* Status pills and priority dots, shared by the issues list and the issue
+   detail modal. */
+
+.issueStatusBadge {
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.issueStatusOpen {
+  background: rgba(255, 165, 0, 0.15);
+  color: #ffa500;
+  border: 1px solid rgba(255, 165, 0, 0.25);
+}
+
+.issueStatusProgress {
+  background: rgba(77, 166, 255, 0.15);
+  color: #4da6ff;
+  border: 1px solid rgba(77, 166, 255, 0.25);
+}
+
+.issueStatusResolved {
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.issueStatusDismissed {
+  background: rgba(136, 136, 136, 0.15);
+  color: #888;
+  border: 1px solid rgba(136, 136, 136, 0.25);
+}
+
+.issuePriorityDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+  display: inline-block;
+}
+
+.issuePriorityLow {
+  background: #666;
+}
+
+.issuePriorityNormal {
+  background: #4da6ff;
+}
+
+.issuePriorityHigh {
+  background: #ff4d4d;
+  box-shadow: 0 0 6px rgba(255, 77, 77, 0.4);
+}

@@ -105,12 +105,8 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 5px;
-    padding: 12px 20px 11px;
     min-width: 118px;
     border-radius: 14px;
-    border: 1px solid var(--white-a07);
-    background: rgba(0, 0, 0, 0.32);
-    box-shadow: 0 1px 0 var(--white-a05) inset;
 }
 #dashboard-page .dash-hero-number + .dash-hero-number::before {
     content: none;
@@ -147,12 +143,7 @@
     align-items: center;
     flex-wrap: nowrap;
     gap: 12px;
-    padding: 10px 10px 10px 18px;
     border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a09);
-    background: rgba(0, 0, 0, 0.42);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35) inset;
-    max-width: 640px;
 }
 #dashboard-page .dash-hero-library .library-status-info {
     order: 1;
@@ -406,16 +397,17 @@
 
 #dashboard-page .listen-band {
     display: grid;
-    grid-template-columns: 1.55fr 1fr;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
     gap: 14px;
+    align-items: stretch;
 }
 /* Radio hero: the station deck. */
 #dashboard-page .listen-hero {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 22px;
-    padding: 22px 26px;
+    gap: 18px;
+    padding: 18px 22px;
     border-radius: 20px;
     border: 1px solid var(--white-a09);
     background:
@@ -425,6 +417,7 @@
     overflow: hidden;
     text-align: left;
     cursor: pointer;
+    min-width: 0;
     transition: border-color 0.2s ease, transform 0.2s ease;
 }
 #dashboard-page .listen-hero:hover {
@@ -435,8 +428,8 @@
 #dashboard-page .listen-vinyl {
     position: relative;
     flex: none;
-    width: 78px;
-    height: 78px;
+    width: 66px;
+    height: 66px;
     border-radius: var(--radius-circle);
     background:
         radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb)) 0 15%, #0a0c0a 15.5% 21%, transparent 21.5%),
@@ -507,32 +500,40 @@
     min-width: 0;
 }
 #dashboard-page .listen-hero-text strong {
-    font-size: 23px;
+    font-size: 20px;
     font-weight: 800;
     letter-spacing: -0.02em;
     color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 #dashboard-page .listen-hero-text > span:last-child {
-    font-size: 12.5px;
+    font-size: 12px;
     color: rgba(244, 245, 247, 0.6);
-    max-width: 46ch;
-    margin-top: 4px;
+    line-height: 1.35;
+    margin-top: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 /* Transport button: glowing, with a sonar ping. */
 #dashboard-page .listen-hero-play {
     position: relative;
     flex: none;
-    width: 66px;
-    height: 66px;
+    width: 54px;
+    height: 54px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
-    padding-left: 4px;
+    font-size: 18px;
+    padding-left: 3px;
     border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     color: #06130b;
-    box-shadow: 0 0 30px rgba(var(--accent-rgb), 0.35);
+    box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.35);
     transition: transform 0.18s ease, background 0.18s ease;
 }
 #dashboard-page .listen-hero:hover .listen-hero-play {
@@ -627,6 +628,154 @@
     border-color: rgba(var(--accent-rgb), 0.45);
     color: #fff;
 }
+
+/* ── 3b. DISCOVER MIXES IN DASHBOARD ───────────────────────────────── */
+#dashboard-page .listen-mixes-wrap {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+#dashboard-page .listen-mixes-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+}
+
+#dashboard-page .listen-mixes-grid .dsc-quick-tile {
+    height: 64px;
+}
+
+#dashboard-page .listen-mixes-grid .dsc-quick-tile--flow {
+    grid-column: span 2;
+}
+
+/* Skeletons while mixes are loading */
+.dsc-quick-tile--skeleton {
+    background: rgba(255, 255, 255, 0.04);
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.dsc-quick-tile--skeleton .dsc-quick-art {
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: none;
+    animation: dash-pulse-fade 1.6s ease-in-out infinite alternate;
+}
+.dsc-quick-skeleton-bar {
+    width: 55%;
+    height: 12px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07);
+    animation: dash-pulse-fade 1.6s ease-in-out infinite alternate;
+}
+@keyframes dash-pulse-fade {
+    0% { opacity: 0.4; }
+    100% { opacity: 0.85; }
+}
+
+@media (max-width: 1350px) and (min-width: 1025px) {
+    #dashboard-page .listen-band {
+        grid-template-columns: 310px minmax(0, 1fr);
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid {
+        gap: 8px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.84rem;
+    }
+    #dashboard-page .listen-hero {
+        padding: 16px 18px;
+        gap: 14px;
+    }
+    #dashboard-page .listen-vinyl {
+        width: 58px;
+        height: 58px;
+    }
+    #dashboard-page .listen-hero-play {
+        width: 48px;
+        height: 48px;
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 1024px) {
+    #dashboard-page .listen-band {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+    #dashboard-page .listen-mixes-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    #dashboard-page .listen-mixes-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile {
+        height: 56px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-art {
+        flex: 0 0 56px;
+        width: 56px;
+        height: 56px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.82rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-open {
+        padding-right: 8px;
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile:not(.dsc-quick-tile--flow) .dsc-quick-play {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    #dashboard-page .listen-mixes-grid {
+        gap: 6px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile {
+        height: 52px;
+        border-radius: var(--radius-sm, 8px);
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-art {
+        flex: 0 0 52px;
+        width: 52px;
+        height: 52px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-name {
+        font-size: 0.78rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow {
+        padding: 0 50px 0 10px;
+        gap: 10px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-flow-orb {
+        flex: 0 0 32px;
+        width: 32px;
+        height: 32px;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-name {
+        font-size: 0.86rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-sub {
+        font-size: 0.72rem;
+    }
+    #dashboard-page .listen-mixes-grid .dsc-quick-tile--flow .dsc-quick-play {
+        width: 32px;
+        height: 32px;
+        right: 8px;
+    }
+}
+
 /* Motion kill switch for the station deck. */
 body.reduce-effects #dashboard-page .listen-vinyl,
 body.max-performance #dashboard-page .listen-vinyl,
@@ -890,8 +1039,6 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 #dashboard-page .dash-side-card {
     padding: 22px 22px 20px;
     border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a08);
-    background: rgba(0, 0, 0, 0.32);
 }
 #dashboard-page .dash-side-head {
     margin-bottom: 16px;

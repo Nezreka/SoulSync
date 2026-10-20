@@ -1086,6 +1086,17 @@ class AutoImportWorker:
           behavior — so single-album staging with parallel disc folders
           (the user's Mr. Morale layout) keeps working unchanged.
         """
+        # a re-identify copy is always its own single, whatever its tags say.
+        # its hint names the release, and the hint is only read on a
+        # one-file candidate (#1567)
+        from core.imports.rematch_apply import is_reidentify_copy
+        for f in [f for f in loose_files if is_reidentify_copy(f)]:
+            candidates.append(FolderCandidate(
+                path=f, name=os.path.basename(f), audio_files=[f],
+                folder_hash=_compute_folder_hash([f]), is_single=True,
+            ))
+        loose_files = [f for f in loose_files if not is_reidentify_copy(f)]
+
         # Group by normalised album tag
         groups: Dict[str, List[str]] = {}
         untagged: List[str] = []
@@ -2202,6 +2213,10 @@ class AutoImportWorker:
                 gate = {'decision': 'uncertain', 'reason': 'library check failed — imported'}
             match['import_reason'] = gate.get('reason')
             if gate.get('decision') == DECISION_SKIP_OWNED:
+                # same as a kept copy below: for a re-identify this is where
+                # it landed, or replace deletes it as the old track (#1567)
+                if gate.get('library_path'):
+                    reid_final_paths.append(gate['library_path'])
                 match['import_status'] = 'skipped_owned'
                 skipped += 1
                 logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
@@ -2362,6 +2377,11 @@ class AutoImportWorker:
                 # that copy. that's "already in library", not a failure: it
                 # used to fail every track of an album you already own.
                 if kept_existing_library_file(context):
+                    # a re-identify counts this as where it landed. without it
+                    # the replace cleanup can't see the kept file and deletes
+                    # it as the old track when it's the same file (#1567)
+                    if final_path:
+                        reid_final_paths.append(final_path)
                     match['import_status'] = 'skipped_owned'
                     match['import_reason'] = 'already in library at the same spot, kept the library copy'
                     skipped += 1
@@ -2421,6 +2441,7 @@ class AutoImportWorker:
                 })
                 self._automation_engine.emit('batch_complete', {
                     'playlist_name': f'Import: {album_name}',
+                    'artist': artist_name,
                     'total_tracks': str(len(match_result.get('matches', []))),
                     'completed_tracks': str(processed),
                     'failed_tracks': str(len(errors)),

@@ -9,7 +9,7 @@
 #settings-page .settings-content {
     display: block !important;
     width: 100%;
-    max-width: 1240px !important;
+    max-width: var(--settings-max-width) !important;
     margin: 0 auto;
     padding: 24px 32px 72px !important;
     box-sizing: border-box;
@@ -50,9 +50,7 @@
 #settings-page .stg-detail-pane { width: 100%; min-width: 0; }
 #settings-page .settings-nav-row {
     display: flex !important; flex-direction: row !important; align-items: center; justify-content: space-between;
-    gap: 24px; margin-bottom: 24px; padding: 0 !important;
-    background: transparent !important; border: 0 !important; box-shadow: none !important;
-    position: static !important;
+    gap: 24px; margin-bottom: 24px; border: 0 !important; box-shadow: none !important;
 }
 #settings-page .stg-active-section-title { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 #settings-page .stg-active-title-text { font-size: 20px; font-weight: 650; letter-spacing: -.02em; }
@@ -66,7 +64,7 @@
 #settings-page .save-button:disabled { opacity: .5; cursor: wait; }
 #settings-page .settings-columns {
     display: flex !important; flex-direction: column !important; gap: 18px !important;
-    width: 100%; max-width: none !important; margin: 0; padding: 0;
+    width: 100%; margin: 0; padding: 0;
 }
 #settings-page .settings-left-column,
 #settings-page .settings-right-column,

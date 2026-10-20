@@ -82,6 +82,12 @@ export interface MirroredPlaylistRow {
     phase?: string;
     error?: string;
   } | null;
+  /** Whether this playlist is a request list (downloads tracks without creating server playlist). */
+  is_request_list?: boolean;
+  /** Whether fulfilled tracks are automatically removed from Spotify upstream playlist. */
+  auto_remove_fulfilled?: boolean;
+  /** Upstream playlist ID or reference (e.g. for Spotify back-sync). */
+  upstream_playlist_id?: string | null;
 }
 
 /** Per-source card icon (571-572); anything unlisted gets the clipboard. */

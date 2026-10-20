@@ -44,7 +44,6 @@ const EXPECTED_EDGES = [
   'editMirroredCustomName <- stats-automations.js [auto-sync.js]',
   'editMirroredSourceRef <- stats-automations.js [auto-sync.js]',
   'exportPlaylistAsM3U <- downloads.js,shared-helpers.js [sync-spotify.js]',
-  'formatDuration <- downloads.js,shared-helpers.js,stats-automations.js,wishlist-tools.js [sync-services.js]',
   'generateDiscoveryActionButton <- wishlist-tools.js [sync-services.js]',
   'generateDownloadModalHeroSection <- downloads.js,shared-helpers.js [sync-spotify.js]',
   'getActionButtonText <- downloads.js [sync-spotify.js]',
@@ -59,9 +58,7 @@ const EXPECTED_EDGES = [
   // looked up sync markup that no longer exists.
   'openDownloadMissingModal <- shared-helpers.js [sync-spotify.js]',
   'openYouTubeDiscoveryModal <- core.js,stats-automations.js [sync-services.js]',
-  'pollMirroredPipelineStatus <- stats-automations.js [auto-sync.js]',
   'rehydrateModal <- api-monitor.js,core.js,downloads.js,init.js,wishlist-tools.js [sync-spotify.js]',
-  'runMirroredPlaylistPipeline <- stats-automations.js [auto-sync.js]',
   'startListenBrainzDiscoveryPolling <- core.js [sync-services.js]',
   'startListenBrainzSyncPolling <- downloads.js [sync-services.js]',
   'startYouTubeDiscoveryPolling <- stats-automations.js [sync-services.js]',
@@ -212,6 +209,16 @@ describe('calls that cross out of the files the sync port deletes', () => {
         'ReferenceError the first time a user touches that control.',
     ).toEqual([]);
   });
+
+  it.each(['sync-listenbrainz.js', 'sync-lastfm.js', 'sync-soulsync-discovery.js'])(
+    'keeps retired %s out of the page and source tree',
+    (file) => {
+      expect(readdirSync(resolve(process.cwd(), 'static'))).not.toContain(file);
+      const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+      expect(html).not.toContain(`filename='${file}'`);
+      expect(html).not.toContain(`filename="${file}"`);
+    },
+  );
 
   it('core.js page-leave no longer calls the deleted Beatport sliders', () => {
     // beatport-ui.js defined them and is gone. a call left in core.js would

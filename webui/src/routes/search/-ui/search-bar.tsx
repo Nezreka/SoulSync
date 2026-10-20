@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import styles from './search.module.css';
 
 /** Marker the native listener stamps on an event it has already reported. */
@@ -89,7 +91,7 @@ export function SearchBar({
           }
         }}
       />
-      {searching ? <span className={styles.spinner} role="status" aria-label="Searching" /> : null}
+      {searching ? <Spinner className={styles.spinner} label="Searching" /> : null}
       {query ? (
         <button
           className={styles.clear}

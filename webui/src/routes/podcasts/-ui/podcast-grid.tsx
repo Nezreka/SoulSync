@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 
+import { Skeleton } from '@/components/primitives';
+
 import type { PodcastShowSummary } from '../-podcasts.types';
 
 import { usePodcastContext } from './podcast-context';
@@ -42,10 +44,10 @@ export function PodcastGrid({ title, shows, isLoading, onSelectShow }: PodcastGr
         <div className={styles.showsGrid}>
           {Array.from({ length: 12 }).map((_, i) => (
             <div key={`skel-${i}`} className={`${styles.showCard} ${styles.showCardSkeleton}`}>
-              <div className={`${styles.showArtWrapper} ${styles.skeletonPulse}`} />
+              <Skeleton className={`${styles.showArtWrapper} ${styles.skeletonPulse}`} />
               <div className={styles.showCardInfo}>
-                <div className={`${styles.skeletonLine} ${styles.skeletonTitleLine}`} />
-                <div className={`${styles.skeletonLine} ${styles.skeletonSubLine}`} />
+                <Skeleton className={`${styles.skeletonLine} ${styles.skeletonTitleLine}`} />
+                <Skeleton className={`${styles.skeletonLine} ${styles.skeletonSubLine}`} />
               </div>
             </div>
           ))}

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { Spinner } from '@/components/primitives';
+
 import type { PodcastEpisodeItem, PodcastShowDetail } from '../-podcasts.types';
 
 import { fetchPodcastShow } from '../-podcasts.api';
@@ -107,7 +109,7 @@ export function PodcastDetailPage({ podcastId }: PodcastDetailPageProps) {
   if (isLoading) {
     return (
       <div className={styles.loadingContainer}>
-        <div className={styles.spinner} />
+        <Spinner size={32} tone="tinted" />
         <p>Loading show and episodes…</p>
       </div>
     );

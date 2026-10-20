@@ -402,6 +402,8 @@ def run_sync_task(
     skip_wishlist_add: bool = False,
     organize_by_playlist: bool = False,
     user_initiated: bool = False,
+    is_request_list: bool = False,
+    auto_remove_fulfilled: bool = False,
 ):
     """The actual sync function that runs in the background thread."""
     sync_states = deps.sync_states
@@ -669,9 +671,17 @@ def run_sync_task(
                 return
 
         # Run the sync (this is a blocking call within this thread)
-        result = deps.run_async(sync_service.sync_playlist(
-            playlist, download_missing=False, profile_id=profile_id, sync_mode=sync_mode,
-            user_initiated=user_initiated))
+        sync_kwargs = {
+            'download_missing': False,
+            'profile_id': profile_id,
+            'sync_mode': sync_mode,
+            'user_initiated': user_initiated,
+        }
+        if is_request_list:
+            sync_kwargs['is_request_list'] = is_request_list
+        if auto_remove_fulfilled:
+            sync_kwargs['auto_remove_fulfilled'] = auto_remove_fulfilled
+        result = deps.run_async(sync_service.sync_playlist(playlist, **sync_kwargs))
 
         # Clear progress callback immediately to prevent race condition where a
         # late-firing progress callback overwrites the "finished" state below

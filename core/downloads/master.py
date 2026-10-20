@@ -1158,6 +1158,23 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                 kwargs['expected_duration_seconds'] = _duration
             return kwargs or None
 
+        def _stamp_terminal_bundle_failure():
+            """A terminal bundle failure ends the batch with no per-track
+            tasks, so the failed-track wishlist step never stamps these
+            tracks. Without a stamp the retry backoff never starts and the
+            same dead release is fetched again every cycle."""
+            try:
+                from core.wishlist.processing import record_failed_attempts_for_tracks
+                from core.wishlist_service import get_wishlist_service
+                with tasks_lock:
+                    _row = download_batches.get(batch_id) or {}
+                    _reason = _row.get('album_bundle_error') or _row.get('error') or 'Album bundle failed'
+                    _profile = _row.get('profile_id', batch_profile_id) or 1
+                record_failed_attempts_for_tracks(
+                    get_wishlist_service(), tracks_json, _reason, _profile)
+            except Exception:
+                logger.debug("[Album Bundle] could not stamp failed attempt", exc_info=True)
+
         def _dispatch_bundle_sources(sources):
             """Try an ordered segment. Return True only for a terminal result."""
             nonlocal _album_bundle_staged
@@ -1180,6 +1197,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     source_override=source,
                     plugin_kwargs=_bundle_plugin_kwargs(),
                 ):
+                    _stamp_terminal_bundle_failure()
                     return True
 
                 with tasks_lock:
@@ -1435,6 +1453,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     ),
                 } or None,
             ):
+                _stamp_terminal_bundle_failure()
                 return
 
             with tasks_lock:

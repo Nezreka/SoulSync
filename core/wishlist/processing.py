@@ -314,6 +314,39 @@ def _run_wishlist_cycle(
             for batch_name, batch_tracks in batch_groups:
                 batch_id = _alloc_id()
                 batch_count = len(batch_tracks)
+                is_playlist_batch = batch_name not in (
+                    f"Wishlist (Auto - {cycle.capitalize()})",
+                    "Wishlist (Residual)",
+                )
+                batch_extra = dict(extra_fields or {})
+                if is_playlist_batch:
+                    source_playlist_id = None
+                    for _tr in batch_tracks:
+                        _si = _tr.get('source_info') or {}
+                        if isinstance(_si, dict) and _si.get('playlist_id'):
+                            source_playlist_id = _si['playlist_id']
+                            break
+                    mirrored_playlist_id = None
+                    try:
+                        _music_db = getattr(runtime, 'get_music_database', None)
+                        if callable(_music_db):
+                            _mdb = _music_db()
+                            _resolved = _mdb.resolve_mirrored_playlist_assignment(
+                                playlist_ref=source_playlist_id,
+                                playlist_name=batch_name,
+                                profile_id=owner_profile_id,
+                            )
+                            if _resolved and _resolved.get('id'):
+                                mirrored_playlist_id = _resolved['id']
+                    except Exception as res_err:
+                        logger.debug("Could not resolve mirrored playlist for wishlist batch: %s", res_err)
+                    batch_extra.update({
+                        'is_playlist_batch': True,
+                        'source_playlist_name': batch_name,
+                        'source_playlist_id': source_playlist_id,
+                        'mirrored_playlist_id': mirrored_playlist_id,
+                    })
+
                 with runtime.tasks_lock:
                     runtime.download_batches[batch_id] = make_wishlist_batch_row(
                         playlist_id=playlist_id,
@@ -323,7 +356,7 @@ def _run_wishlist_cycle(
                         profile_id=owner_profile_id,
                         phase='queued',
                         run_id=run_id,
-                        extra_fields=extra_fields,
+                        extra_fields=batch_extra,
                     )
                 submitted.append(batch_id)
                 residual_total += batch_count
@@ -333,10 +366,6 @@ def _run_wishlist_cycle(
                 )
                 # #1548: playlist-named batches get their own log; the generic
                 # residual keeps the old message so existing tests pass.
-                is_playlist_batch = batch_name not in (
-                    f"Wishlist (Auto - {cycle.capitalize()})",
-                    "Wishlist (Residual)",
-                )
                 if auto_initiated:
                     if is_playlist_batch:
                         logger.info(
@@ -451,6 +480,36 @@ def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_
     except Exception as e:
         logger.debug("wishlist attempt stamp failed for %s: %s", sp_id, e)
         return False
+
+
+def record_failed_attempts_for_tracks(wishlist_service, tracks, failure_reason, profile_id,
+                                      *, logger=logger) -> int:
+    """Stamp one failed attempt on every track of a batch that failed as a whole.
+
+    A terminal album-bundle failure (e.g. a Usenet release SABnzbd aborts)
+    ends the batch before any per-track task exists, so
+    ``add_failed_tracks_to_wishlist`` never sees these tracks and never calls
+    ``record_failed_attempt``. They keep ``retry_count = 0`` and
+    ``last_attempted = NULL``, which the retry backoff reads as "never tried":
+    the same dead release is fetched again on every wishlist cycle.
+
+    Tracks that are not on the wishlist update no row, so this is safe for
+    any batch. Best-effort, returns the number of tracks it stamped.
+    """
+    stamped = 0
+    for track in tracks or []:
+        if not isinstance(track, dict):
+            continue
+        sp_id = track.get('id') or track.get('spotify_track_id')
+        if not sp_id:
+            continue
+        try:
+            if record_failed_attempt(
+                    wishlist_service, {**track, 'id': sp_id}, failure_reason, profile_id):
+                stamped += 1
+        except Exception:
+            logger.debug("attempt stamp failed for %s", sp_id, exc_info=True)
+    return stamped
 
 
 def recover_uncaptured_failed_tracks(

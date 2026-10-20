@@ -56,15 +56,6 @@
   }
 }
 
-@keyframes shimmer {
-  0% {
-    background-position: -400px 0;
-  }
-  100% {
-    background-position: 400px 0;
-  }
-}
-
 /* Shown ABOVE results that have already arrived, so the list stays readable
    while the slower sources are still answering. The full-height loader is only
    for an empty list. */
@@ -122,12 +113,14 @@
   border-radius: 18px;
   background: var(--white-a03);
   border: 1px solid var(--white-a07);
+  color: inherit;
 }
 
 .emptyState h3 {
   margin: 0 0 8px;
   font-size: 18px;
   font-weight: 650;
+  color: inherit;
 }
 
 .emptyState p {
@@ -136,165 +129,6 @@
   font-size: 14px;
   line-height: 1.6;
   color: var(--white-a60);
-}
-
-/* ── Player bar ─────────────────────────────────────────────────────────── */
-
-.playerBar {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
-  width: min(880px, calc(100% - 64px));
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
-  border-radius: var(--radius-xl);
-  background: rgba(18, 18, 22, 0.86);
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  border: 1px solid var(--white-a10);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
-  animation: fadeUp 0.22s ease both;
-}
-
-.playerCover {
-  width: 46px;
-  height: 46px;
-  border-radius: 9px;
-  object-fit: cover;
-  flex-shrink: 0;
-}
-
-.playerToggle,
-.playerClose {
-  display: grid;
-  place-items: center;
-  border: none;
-  cursor: pointer;
-  color: #fff;
-  flex-shrink: 0;
-}
-
-.playerToggle {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-circle);
-  background: rgba(var(--accent-rgb), 0.92);
-  transition:
-    transform 0.15s ease,
-    background 0.15s ease;
-}
-
-.playerToggle:hover {
-  transform: scale(1.06);
-}
-.playerToggle svg {
-  width: 20px;
-  height: 20px;
-}
-
-.playerClose {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-circle);
-  background: var(--white-a08);
-  color: var(--white-a65);
-}
-
-.playerClose:hover {
-  background: var(--white-a15);
-  color: #fff;
-}
-.playerClose svg {
-  width: 15px;
-  height: 15px;
-}
-
-.playerMeta {
-  min-width: 0;
-  flex: 0 1 260px;
-}
-
-.playerTitleRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.playerLabel {
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: rgba(var(--accent-rgb), 0.2);
-  color: rgba(var(--accent-rgb), 1);
-  flex-shrink: 0;
-}
-
-.playerTitle {
-  font-size: 13.5px;
-  font-weight: 620;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.playerSub {
-  margin-top: 2px;
-  font-size: 11.5px;
-  color: var(--white-a50);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.playerScrubWrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1 1 auto;
-  min-width: 120px;
-}
-
-.playerTime {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: var(--white-a45);
-  flex-shrink: 0;
-}
-
-.playerScrub {
-  position: relative;
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--white-a14);
-  cursor: pointer;
-}
-
-.playerScrub::after {
-  /* Widen the hit area without making the bar itself thick. */
-  content: '';
-  position: absolute;
-  inset: -8px 0;
-}
-
-.playerScrubFill {
-  height: 100%;
-  border-radius: 2px;
-  background: rgba(var(--accent-rgb), 1);
-}
-
-.playerError {
-  font-size: 11.5px;
-  color: #ff9b9b;
-  white-space: nowrap;
 }
 
 /* ── Search ─────────────────────────────────────────────────────────────── */
@@ -826,9 +660,6 @@
 .heroSkeleton {
   height: 360px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Rails ──────────────────────────────────────────────────────────────── */
@@ -1109,9 +940,6 @@
 .cardSkeleton {
   aspect-ratio: 1 / 1;
   border-radius: 13px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── Works (person pages) ───────────────────────────────────────────────── */
@@ -1645,9 +1473,6 @@
 .detailSkeleton {
   height: 420px;
   border-radius: 22px;
-  background: linear-gradient(90deg, var(--white-a04), var(--white-a09), var(--white-a04));
-  background-size: 800px 100%;
-  animation: shimmer 1.4s linear infinite;
 }
 
 /* ── People row (search results) ────────────────────────────────────────── */
@@ -2241,204 +2066,6 @@
   cursor: default;
 }
 
-/* ── Wishlist page ──────────────────────────────────────────────────────── */
-
-.wishlistHeader {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 26px;
-  flex-wrap: wrap;
-}
-
-.wishlistHeadings {
-  min-width: 0;
-  max-width: 720px;
-}
-
-.wishlistBlurb {
-  margin: 14px 0 0;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--white-a50);
-}
-
-.wishlistActions {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.wishlistLastRun {
-  font-size: 11.5px;
-  color: var(--white-a40);
-}
-
-.wishlistRows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.wishlistRow {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 12px 16px 12px 12px;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--white-a08);
-  border-top-color: rgba(255, 255, 255, 0.13);
-  background: linear-gradient(135deg, var(--white-a06) 0%, rgba(255, 255, 255, 0.025) 100%);
-  transition:
-    border-color 0.18s ease,
-    transform 0.18s ease;
-}
-
-.wishlistRow:hover {
-  border-color: var(--white-a18);
-  transform: translateY(-2px);
-}
-
-.wishlistCoverLink {
-  flex-shrink: 0;
-  display: block;
-}
-
-.wishlistCover {
-  width: 62px;
-  height: 62px;
-  border-radius: 11px;
-  object-fit: cover;
-  display: block;
-  border: 1px solid var(--white-a12);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
-}
-
-.wishlistMeta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.wishlistTitle {
-  font-size: 14.5px;
-  font-weight: 640;
-  color: #ffffff;
-  text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wishlistTitle:hover {
-  color: rgba(var(--accent-rgb), 1);
-}
-
-.wishlistAuthors {
-  font-size: 12.5px;
-  color: var(--white-a55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wishlistSeries {
-  font-size: 11.5px;
-  color: rgba(var(--accent-rgb), 0.85);
-}
-
-.wishlistTrail {
-  margin-top: 3px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.34);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.wishlistStatus {
-  flex-shrink: 0;
-  padding: 5px 12px;
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--white-a12);
-  background: var(--white-a05);
-  font-size: 11px;
-  font-weight: 620;
-  letter-spacing: 0.02em;
-  color: var(--white-a70);
-  white-space: nowrap;
-}
-
-.wishlistStatusActive {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(var(--accent-rgb), 0.16);
-  color: #ffffff;
-}
-
-.wishlistStatusDone {
-  border-color: rgba(80, 200, 130, 0.45);
-  background: rgba(80, 200, 130, 0.15);
-  color: #9ff0c2;
-}
-
-.wishlistRowActions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.wishlistAction {
-  padding: 7px 13px;
-  border-radius: 9px;
-  border: 1px solid var(--white-a10);
-  background: var(--white-a05);
-  color: var(--white-a75);
-  font-size: 12px;
-  font-weight: 560;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease;
-}
-
-.wishlistAction:hover {
-  background: var(--white-a12);
-  color: #ffffff;
-}
-
-.downloadRow {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 13px 16px;
-  border-radius: 14px;
-  border: 1px solid rgba(var(--accent-rgb), 0.28);
-  background: rgba(var(--accent-rgb), 0.08);
-}
-
-.downloadTrack {
-  margin-top: 8px;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--white-a12);
-  overflow: hidden;
-}
-
-.downloadFill {
-  height: 100%;
-  border-radius: 3px;
-  background: rgba(var(--accent-rgb), 1);
-  transition: width 0.4s ease;
-}
-
 /* ── Releases modal ─────────────────────────────────────────────────────── */
 
 .modalBackdrop {
@@ -2537,21 +2164,6 @@
   padding: 52px 0;
   font-size: 13.5px;
   color: var(--white-a60);
-}
-
-.spinner {
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-circle);
-  border: 2px solid var(--white-a15);
-  border-top-color: rgba(var(--accent-rgb), 1);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .releaseList {
@@ -2870,28 +2482,6 @@
   background: rgba(248, 113, 113, 0.2);
 }
 
-.librarySize {
-  font-weight: 500;
-  color: var(--white-a45);
-}
-
-.libraryFilter {
-  width: 100%;
-  height: 38px;
-  margin-bottom: 14px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid var(--white-a10);
-  background: rgba(0, 0, 0, 0.28);
-  color: #ffffff;
-  font-size: 13px;
-  font-family: inherit;
-}
-
-.libraryFilter::placeholder {
-  color: var(--white-a35);
-}
-
 .libraryDelete {
   flex-shrink: 0;
   height: 34px;
@@ -3034,12 +2624,6 @@
     left: -18px;
     right: -18px;
   }
-  .playerBar {
-    width: calc(100% - 36px);
-  }
-  .playerScrubWrap {
-    display: none;
-  }
   .genreNavWrap {
     margin-inline: -18px;
     padding-inline: 18px;
@@ -3058,12 +2642,6 @@
   }
   .seriesTrack {
     grid-template-columns: 1fr;
-  }
-  .wishlistRow {
-    flex-wrap: wrap;
-  }
-  .wishlistRowActions {
-    width: 100%;
   }
   .releaseRow {
     flex-direction: column;
@@ -3098,13 +2676,7 @@
 @media (prefers-reduced-motion: reduce) {
   .card,
   .hero,
-  .detailTop,
-  .playerBar {
-    animation: none;
-  }
-  .cardSkeleton,
-  .heroSkeleton,
-  .detailSkeleton {
+  .detailTop {
     animation: none;
   }
   .card:hover .cardCoverLink {

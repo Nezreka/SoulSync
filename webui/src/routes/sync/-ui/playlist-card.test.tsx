@@ -86,12 +86,6 @@ describe('the meta line', () => {
     ).toBe('140 tracks · synced 3h ago');
   });
 
-  it('says what is in the library only when it differs', () => {
-    expect(playlistCardMeta(row({ total_count: 86, discovered_count: 62 }), 'x')).toBe(
-      '86 tracks · 24 not found',
-    );
-  });
-
   it('reports a failure and a run in flight in the user’s words', () => {
     expect(playlistCardMeta(row({ pipeline_state: { status: 'error' } }), 'x')).toContain(
       'last run failed',

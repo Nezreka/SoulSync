@@ -409,7 +409,17 @@ async function bootstrapServerAppearanceSettings() {
     }
 }
 
-bootstrapServerAppearanceSettings();
+// runs from setCurrentProfile, admins only. /api/settings is admin-only, so a
+// member's boot fetch was a guaranteed 403, and those 4xx bursts get members
+// banned by crowdsec / fail2ban (#1763). members lose nothing: the page
+// template already injects the same appearance values.
+let _serverAppearanceBootstrapped = false;
+function bootstrapServerAppearanceForAdmin(profile) {
+    if (_serverAppearanceBootstrapped || !profile) return;
+    if (!(profile.is_admin || profile.id === 1)) return;
+    _serverAppearanceBootstrapped = true;
+    bootstrapServerAppearanceSettings();
+}
 
 // ── Password-manager autofill suppression ──────────────────────────────
 // Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
@@ -510,6 +520,8 @@ function setCurrentProfile(profile) {
     // mirrored (the window._socketConnected pattern). The dashboard's
     // hello strip greets by it.
     window._currentProfileName = (profile && profile.name) || '';
+    window.SoulSyncProfileGate?.setProfile(profile);
+    bootstrapServerAppearanceForAdmin(profile);
     updateProfileIndicator();
     notifyProfileContextChanged();
 }
@@ -4068,6 +4080,9 @@ document.addEventListener('DOMContentLoaded', async function () {
         window._onSetupWizardComplete = function () {
             _continueAppInit();
         };
+        // the wizard runs before any profile is picked, let its calls through
+        window.SoulSyncProfileGate?.setProfile(null);
+        window.SoulSyncProfileGate?.open();
         openSetupWizard();
         return; // Defer init until wizard closes
     }
@@ -4087,6 +4102,8 @@ async function _continueAppInit() {
 }
 
 function initApp() {
+    // a profile is picked and unlocked: calls held at boot go out now
+    window.SoulSyncProfileGate?.open();
     // Unlocked / authenticated — reveal the app (the lock screens hide it via
     // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
     // component init below measures real layout, not a display:none container.

@@ -14,7 +14,6 @@ import { useProfile } from '@/platform/shell/route-controllers';
 import type { VdlDownload, VdlFilter, VdlMeta, VdlYtMeta } from '../-vdl.types';
 
 import {
-  vdlBlockSxe,
   vdlCanBlock,
   vdlCardTitle,
   vdlFmtAge,
@@ -25,11 +24,9 @@ import {
   vdlFmtSpeed,
   vdlFmtViews,
   vdlGroupKey,
-  vdlGroupWorthy,
   vdlIsActive,
   vdlIsFail,
   vdlIsPackRow,
-  vdlIsRetryable,
   vdlKindIcon,
   vdlMatchesFilter,
   vdlPad2,
@@ -897,7 +894,6 @@ export interface VdlListProps {
   collapsedGroups: ReadonlySet<string>;
   metaFor: (d: VdlDownload) => VdlMeta | VdlYtMeta | null | undefined;
   ensureMeta: (d: VdlDownload) => void;
-  onToggleExpanded: (id: number) => void;
   onToggleGroup: (key: string) => void;
   cardActions: VdlCardActions;
   onCancelGroup: (ids: number[]) => void;
@@ -928,7 +924,6 @@ export function VdlList({
   collapsedGroups,
   metaFor,
   ensureMeta,
-  onToggleExpanded,
   onToggleGroup,
   cardActions,
   onCancelGroup,

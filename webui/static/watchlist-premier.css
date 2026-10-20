@@ -1312,13 +1312,6 @@
   transition: all 0.2s ease !important;
 }
 
-.watchlist-artist-detail-overlay .watchlist-detail-discography-btn {
-  background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.7)) !important;
-  color: #ffffff !important;
-  border: 1px solid var(--white-a20) !important;
-  box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.35) !important;
-}
-
 .watchlist-artist-detail-overlay .watchlist-detail-settings-btn {
   background: var(--white-a06) !important;
   color: #ffffff !important;

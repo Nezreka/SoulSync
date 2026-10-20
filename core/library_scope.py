@@ -57,8 +57,10 @@ def invalidate_library_scope_cache() -> None:
 
 
 def own_library_supported() -> bool:
+    from core.media_server import specs
     from core.settings import config_manager
-    return config_manager.get_active_media_server() in ('plex', 'jellyfin')
+    descriptor = specs.describe(config_manager.get_active_media_server())
+    return bool(descriptor and descriptor.supports_own_libraries)
 
 
 def library_scope_for_profile(profile_id: Optional[int]) -> Scope:

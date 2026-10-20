@@ -97,7 +97,6 @@ export function VideoDownloadsView() {
               collapsedGroups={dl.collapsedGroups}
               metaFor={dl.metaFor}
               ensureMeta={dl.ensureMeta}
-              onToggleExpanded={dl.toggleExpanded}
               onToggleGroup={dl.toggleGroup}
               cardActions={cardActions}
               onCancelGroup={onCancelGroup}

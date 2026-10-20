@@ -1066,7 +1066,7 @@
             ] }),
             _ddE('GET', '/library/lookup', 'Resolve an artist/album/track by external provider ID', { q: [
                 ['type', 'string', 1, '"artist", "album", or "track"'],
-                ['provider', 'string', 1, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", or "genius" (genius + type=album is a 400)'],
+                ['provider', 'string', 1, '"spotify", "musicbrainz", "itunes", "deezer", "audiodb", "tidal", "qobuz", "genius", "discogs", "amazon", "jiosaavn", or "bandcamp" (genius + type=album, bandcamp + type=artist, and discogs + type=track are 400s)'],
                 ['id', 'string', 1, 'The external ID value'],
                 ['fields', 'string', 0, 'Comma-separated field names'],
             ] }),

@@ -1313,6 +1313,54 @@ class SpotifyClient:
             return {"success": False, "error": msg}
 
     @rate_limited
+    def remove_playlist_tracks(self, playlist_id: str, track_ids: List[str]) -> Dict[str, Any]:
+        """Remove specific tracks from a Spotify playlist by track IDs or URIs.
+
+        Requires playlist-modify-public or playlist-modify-private scope and ownership
+        or collaborative access to the playlist.
+        Returns {success, removed_count, error}.
+        """
+        if not self.is_spotify_authenticated():
+            return {"success": False, "removed_count": 0, "error": "Spotify is not connected"}
+        if not playlist_id:
+            return {"success": False, "removed_count": 0, "error": "No playlist ID provided"}
+
+        uris = []
+        for t in (track_ids or []):
+            if not t:
+                continue
+            t_str = str(t).strip()
+            if not t_str:
+                continue
+            if t_str.startswith("spotify:track:"):
+                uris.append(t_str)
+            else:
+                uris.append(f"spotify:track:{t_str}")
+
+        if not uris:
+            return {"success": True, "removed_count": 0}
+
+        try:
+            removed = 0
+            for i in range(0, len(uris), 100):
+                batch = uris[i:i + 100]
+                self.sp.playlist_remove_all_occurrences_of_items(playlist_id, batch)
+                removed += len(batch)
+            logger.info(f"Removed {removed} tracks from Spotify playlist {playlist_id}")
+            return {"success": True, "removed_count": removed}
+        except Exception as e:
+            msg = str(e)
+            logger.warning(f"Error removing tracks from Spotify playlist {playlist_id}: {msg}")
+            if "403" in msg:
+                return {
+                    "success": False,
+                    "removed_count": 0,
+                    "error": "Spotify playlist cannot be modified. Make sure the playlist is Collaborative or owned by your connected Spotify account."
+                }
+            _detect_and_set_rate_limit(e, "remove_playlist_tracks")
+            return {"success": False, "removed_count": 0, "error": msg}
+
+    @rate_limited
     def get_saved_tracks_count(self) -> int:
         """Get the total count of user's saved/liked songs without fetching all tracks"""
         if not self.is_spotify_authenticated():
@@ -1528,18 +1576,24 @@ class SpotifyClient:
         if not self.is_spotify_authenticated():
             return None
 
+        clean_id = re.sub(r'_req_[a-f0-9]+$', '', str(playlist_id or ''))
+
         # "Liked Songs" is virtual — no playlist URI exists for it, so the
         # playlist endpoint 400s ("Unsupported URL / URI"). Serve it from the
         # saved-tracks endpoint instead, so mirrored playlists / anything that
         # re-resolves by stored id can refresh it like a normal playlist.
-        if playlist_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs'):
+        if (
+            clean_id in (LIKED_SONGS_PLAYLIST_ID, 'liked-songs')
+            or clean_id.startswith(f"{LIKED_SONGS_PLAYLIST_ID}")
+            or clean_id.startswith("liked-songs")
+        ):
             return self._liked_songs_as_playlist()
 
         try:
-            playlist_data = self.sp.playlist(playlist_id)
+            playlist_data = self.sp.playlist(clean_id)
             # A failed track fetch must not come back as an empty playlist: a
             # mirror refresh would store it, deleting every track it had.
-            tracks = self._get_playlist_tracks(playlist_id, raise_errors=True)
+            tracks = self._get_playlist_tracks(clean_id, raise_errors=True)
             return Playlist.from_spotify_playlist(playlist_data, tracks)
 
         except Exception as e:

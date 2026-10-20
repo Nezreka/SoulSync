@@ -577,73 +577,7 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
 
-            <div class="download-missing-modal-body">
-                <div class="download-progress-section">
-                    <div class="progress-item">
-                        <div class="progress-label">
-                            🔍 Library Analysis
-                            <span id="analysis-progress-text-${virtualPlaylistId}">Ready to start</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill analysis" id="analysis-progress-fill-${virtualPlaylistId}"></div>
-                        </div>
-                    </div>
-                    <div class="progress-item">
-                        <div class="progress-label">
-                            ⏬ Downloads
-                            <span id="download-progress-text-${virtualPlaylistId}">Waiting for analysis</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill download" id="download-progress-fill-${virtualPlaylistId}"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="download-tracks-section">
-                    <div class="download-tracks-header">
-                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
-                        <span class="track-selection-count" id="track-selection-count-${virtualPlaylistId}">${spotifyTracks.length} / ${spotifyTracks.length} tracks selected</span>
-                    </div>
-                    <div class="download-tracks-table-container">
-                        <table class="download-tracks-table">
-                            <thead>
-                                <tr>
-                                    <th class="track-select-header">
-                                        <input type="checkbox" class="track-select-all"
-                                               id="select-all-${virtualPlaylistId}" checked
-                                               onchange="toggleAllTrackSelections('${virtualPlaylistId}', this.checked)">
-                                    </th>
-                                    <th>#</th>
-                                    <th>Track</th>
-                                    <th>Artist</th>
-                                    <th>Duration</th>
-                                    <th>Library Match</th>
-                                    <th>Download Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="download-tracks-tbody-${virtualPlaylistId}">
-                                ${spotifyTracks.map((track, index) => `
-                                    <tr data-track-index="${index}">
-                                        <td class="track-select-cell">
-                                            <input type="checkbox" class="track-select-cb"
-                                                   data-track-index="${index}" checked
-                                                   onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
-                                        </td>
-                                        <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${renderModalTrackPlaylistButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
-                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
-                                        <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
-                                        <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
-                                        <td class="track-actions" id="actions-${virtualPlaylistId}-${index}">-</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+            ${renderDownloadModalBody(virtualPlaylistId, spotifyTracks)}
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
@@ -2117,6 +2051,78 @@ function getModalTrackAlbumTitle(track, process = null) {
     return '';
 }
 
+// Shared analysis/progress body. Each opener retains its own hero, footer and job lifecycle.
+function renderDownloadModalBody(playlistId, tracks, labels = ['Track', 'Artist', 'Library Match']) {
+    return `
+            <div class="download-missing-modal-body">
+                <div class="download-progress-section">
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            🔍 Library Analysis
+                            <span id="analysis-progress-text-${playlistId}">Ready to start</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill analysis" id="analysis-progress-fill-${playlistId}"></div>
+                        </div>
+                    </div>
+                    <div class="progress-item">
+                        <div class="progress-label">
+                            ⏬ Downloads
+                            <span id="download-progress-text-${playlistId}">Waiting for analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill download" id="download-progress-fill-${playlistId}"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="download-tracks-section">
+                    <div class="download-tracks-header">
+                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
+                        <span class="track-selection-count" id="track-selection-count-${playlistId}">${tracks.length} / ${tracks.length} tracks selected</span>
+                    </div>
+                    <div class="download-tracks-table-container">
+                        <table class="download-tracks-table">
+                            <thead>
+                                <tr>
+                                    <th class="track-select-header">
+                                        <input type="checkbox" class="track-select-all"
+                                               id="select-all-${playlistId}" checked
+                                               onchange="toggleAllTrackSelections('${playlistId}', this.checked)">
+                                    </th>
+                                    <th>#</th>
+                                    <th>${escapeHtml(labels[0])}</th>
+                                    <th>${escapeHtml(labels[1])}</th>
+                                    <th>Duration</th>
+                                    <th>${escapeHtml(labels[2])}</th>
+                                    <th>Download Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="download-tracks-tbody-${playlistId}">
+                                ${tracks.map((track, index) => `
+                                    <tr data-track-index="${index}">
+                                        <td class="track-select-cell">
+                                            <input type="checkbox" class="track-select-cb"
+                                                   data-track-index="${index}" checked
+                                                   onchange="updateTrackSelectionCount('${playlistId}')">
+                                        </td>
+                                        <td class="track-number">${index + 1}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
+                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
+                                        <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
+                                        <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
+                                        <td class="track-actions" id="actions-${playlistId}-${index}">-</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+    `;
+}
+
 function renderModalTrackPlayButton(playlistId, trackIndex) {
     return `<button class="modal-track-play-btn" onclick="event.stopPropagation(); playDownloadModalTrack('${escapeForInlineJs(playlistId)}', ${trackIndex})" title="Play track">&#9654;</button>`;
 }
@@ -2223,6 +2229,42 @@ let globalDownloadStatusPoller = null;
 let globalPollingFailureCount = 0; // Track consecutive failures for exponential backoff
 let globalPollingBaseInterval = 2000; // Base polling interval in ms - MATCHES sync.py exactly
 
+// open modals ride along as watching=, so the server keeps a finished batch
+// alive while someone is still picking candidates for its not-found rows.
+function _modalIsOpen(modal) {
+    return !!(modal && modal.isConnected && modal.style.display !== 'none');
+}
+
+function _batchStatusQuery(batchIds, batchToPlaylistMap) {
+    const parts = batchIds.map(id => `batch_ids=${encodeURIComponent(id)}`);
+    batchIds.forEach((id) => {
+        if (_modalIsOpen(activeDownloadProcesses[batchToPlaylistMap[id]]?.modalElement)) {
+            parts.push(`watching=${encodeURIComponent(id)}`);
+        }
+    });
+    return parts.join('&');
+}
+
+// a backgrounded tab skips the status poll, so its open modals send a small
+// keepalive instead. once a minute is well inside the server's 5 minute grace,
+// and browsers throttle hidden-tab timers to about that anyway.
+const _HIDDEN_KEEPALIVE_MS = 60000;
+let _lastHiddenKeepalive = 0;
+
+function _keepWatchedBatchesAlive(now = Date.now()) {
+    if (now - _lastHiddenKeepalive < _HIDDEN_KEEPALIVE_MS) return;
+    const batchIds = Object.values(activeDownloadProcesses)
+        .filter(p => p.batchId && !p.batchGone && _modalIsOpen(p.modalElement))
+        .map(p => p.batchId);
+    if (batchIds.length === 0) return;
+    _lastHiddenKeepalive = now;
+    fetch('/api/download_status/watch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batch_ids: batchIds }),
+    }).catch(() => {});
+}
+
 function startGlobalDownloadPolling() {
     // Always run HTTP polling as a fallback — WebSocket connections can silently
     // stop delivering messages (room subscription lost, server emit error, proxy
@@ -2236,7 +2278,7 @@ function startGlobalDownloadPolling() {
     console.log('🔄 [Global Polling] Starting batched download status polling');
 
     globalDownloadStatusPoller = setInterval(async () => {
-        if (document.hidden) return; // Skip polling when tab is not visible
+        if (document.hidden) { _keepWatchedBatchesAlive(); return; } // no full poll while hidden
         // Get all active processes that need polling
         const activeBatchIds = [];
         const batchToPlaylistMap = {};
@@ -2284,7 +2326,7 @@ function startGlobalDownloadPolling() {
 
         try {
             // Single batched API call for all active processes
-            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const queryParams = _batchStatusQuery(activeBatchIds, batchToPlaylistMap);
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
 
             if (!response.ok) {
@@ -2399,7 +2441,7 @@ function startGlobalDownloadPollingWithInterval(interval) {
         }
 
         try {
-            const queryParams = activeBatchIds.map(id => `batch_ids=${id}`).join('&');
+            const queryParams = _batchStatusQuery(activeBatchIds, batchToPlaylistMap);
             const response = await fetch(`/api/download_status/batch?${queryParams}`);
 
             if (!response.ok) {

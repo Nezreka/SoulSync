@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { DialogBody, DialogFooter, DialogFrame, DialogHeader } from '@/components/dialog';
 import { Button } from '@/components/form';
-import { Show } from '@/components/primitives';
+import { EmptyState, Show, Spinner } from '@/components/primitives';
 import { useProfile } from '@/platform/shell/route-controllers';
 import {
   launchAlbumDownloadWorkflow,
@@ -51,6 +51,7 @@ import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { requestFindingsFocus } from '../../tools/-tools.findings-focus';
 import styles from './issue-detail-modal.module.css';
+import statusStyles from './issue-status.module.css';
 
 /** a fix tool opened from the issue; the issue dialog steps aside while it's up */
 type OpenTool =
@@ -488,7 +489,7 @@ export function IssueDetailModal({
     if (queryLoading) {
       return (
         <div className={styles.issuesLoading}>
-          <div className={styles.issuesSpinner} />
+          <Spinner size={20} tone="soft" />
           Loading issue details...
         </div>
       );
@@ -496,12 +497,10 @@ export function IssueDetailModal({
 
     if (queryError) {
       return (
-        <div className={styles.issuesEmpty}>
-          <div className={styles.issuesEmptyTitle}>Failed to load issue</div>
-          <div className={styles.issuesEmptyText}>
-            {queryError instanceof Error ? queryError.message : 'Unknown error'}
-          </div>
-        </div>
+        <EmptyState
+          title="Failed to load issue"
+          description={queryError instanceof Error ? queryError.message : 'Unknown error'}
+        />
       );
     }
 
@@ -565,13 +564,15 @@ export function IssueDetailModal({
             </div>
           </div>
           <div className={styles.threadHeroSide}>
-            <span className={`${styles.issueStatusBadge} ${getStatusClassName(issue.status)}`}>
+            <span
+              className={`${statusStyles.issueStatusBadge} ${getStatusClassName(issue.status)}`}
+            >
               {formatStatusLabel(issue.status)}
             </span>
             <Show when={priority !== 'normal'}>
               <span className={styles.threadPriority}>
                 <span
-                  className={`${styles.issuePriorityDot} ${getPriorityDotClassName(priority)}`}
+                  className={`${statusStyles.issuePriorityDot} ${getPriorityDotClassName(priority)}`}
                 />
                 {priority} priority
               </span>
@@ -1046,9 +1047,9 @@ function renderTrackListing(trackRows: IssueTrackRow[]) {
 }
 
 function getPriorityDotClassName(priority: string) {
-  if (priority === 'high') return styles.issuePriorityHigh;
-  if (priority === 'low') return styles.issuePriorityLow;
-  return styles.issuePriorityNormal;
+  if (priority === 'high') return statusStyles.issuePriorityHigh;
+  if (priority === 'low') return statusStyles.issuePriorityLow;
+  return statusStyles.issuePriorityNormal;
 }
 
 function getTrackFormatClassName(format: string) {
@@ -1067,10 +1068,10 @@ function getTrackBitrateClassName(bitrate: number, format: string) {
 }
 
 function getStatusClassName(status: string) {
-  if (status === 'in_progress') return styles.issueStatusProgress;
-  if (status === 'resolved') return styles.issueStatusResolved;
-  if (status === 'dismissed') return styles.issueStatusDismissed;
-  return styles.issueStatusOpen;
+  if (status === 'in_progress') return statusStyles.issueStatusProgress;
+  if (status === 'resolved') return statusStyles.issueStatusResolved;
+  if (status === 'dismissed') return statusStyles.issueStatusDismissed;
+  return statusStyles.issueStatusOpen;
 }
 
 function formatDuration(value: unknown): string {

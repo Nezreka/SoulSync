@@ -1,12 +1,4 @@
-/**
- * The Auto-Sync pipeline core, run DIFFERENTIALLY against the real auto-sync.js
- * bodies.
- *
- * Both of the vanilla's two interesting functions are liftable: apply writes
- * into a `youtubePlaylistStates` object the harness supplies, and parse takes a
- * Response-shaped object. So neither side is a hand-copied expectation — the
- * comparison is against the code being replaced.
- */
+/** Pipeline contracts and parity with the remaining classic card-state adapter. */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -53,27 +45,6 @@ function loadApply(seed: Record<string, Record<string, unknown>> = {}): VanillaA
     return { applyMirroredPipelineState, youtubePlaylistStates, painted };
   `)() as VanillaApply;
 }
-
-interface VanillaParse {
-  parseMirroredPipelineResponse: (
-    res: { ok: boolean; status: number; text: () => Promise<string> },
-    fallback: string,
-  ) => Promise<unknown>;
-}
-
-function loadParse(): VanillaParse {
-  // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  return new Function(`
-    ${extractFunction('parseMirroredPipelineResponse', AUTOSYNC)}
-    return { parseMirroredPipelineResponse };
-  `)() as VanillaParse;
-}
-
-const fakeRes = (ok: boolean, status: number, text: string) => ({
-  ok,
-  status,
-  text: async () => text,
-});
 
 describe('pipelinePhaseForStatus (2445-2449)', () => {
   it('maps the four known statuses and leaves everything else alone', () => {
@@ -192,31 +163,19 @@ describe('pipelineTickOutcome (2500-2519)', () => {
   });
 });
 
-describe('pipelineResponseError — differential against parseMirroredPipelineResponse', () => {
-  const CASES: [boolean, number, string, string][] = [
-    [true, 200, '', PIPELINE_RUN_FAILED],
-    [true, 200, '{"status":"running"}', PIPELINE_RUN_FAILED],
-    [true, 200, '{"error":"busy"}', PIPELINE_RUN_FAILED],
-    [false, 500, '{"error":"boom"}', PIPELINE_RUN_FAILED],
-    [false, 500, '{}', PIPELINE_STATUS_FAILED],
-    [false, 500, '', PIPELINE_STATUS_FAILED],
-    [false, 404, '<!doctype html>', PIPELINE_RUN_FAILED],
-    [true, 404, 'not json', PIPELINE_STATUS_FAILED],
-    [false, 502, '<html>bad gateway</html>', PIPELINE_STATUS_FAILED],
-  ];
-
-  it('throws exactly what the vanilla throws, and passes exactly when it passes', async () => {
-    const V = loadParse();
-    for (const [ok, status, text, fallback] of CASES) {
-      const ours = pipelineResponseError(ok, status, text, fallback);
-      let theirs: string | null = null;
-      try {
-        await V.parseMirroredPipelineResponse(fakeRes(ok, status, text), fallback);
-      } catch (err) {
-        theirs = (err as Error).message;
-      }
-      expect(ours).toBe(theirs);
-    }
+describe('pipelineResponseError', () => {
+  it.each<[boolean, number, string, string, string | null]>([
+    [true, 200, '', PIPELINE_RUN_FAILED, null],
+    [true, 200, '{"status":"running"}', PIPELINE_RUN_FAILED, null],
+    [true, 200, '{"error":"busy"}', PIPELINE_RUN_FAILED, 'busy'],
+    [false, 500, '{"error":"boom"}', PIPELINE_RUN_FAILED, 'boom'],
+    [false, 500, '{}', PIPELINE_STATUS_FAILED, PIPELINE_STATUS_FAILED],
+    [false, 500, '', PIPELINE_STATUS_FAILED, PIPELINE_STATUS_FAILED],
+    [false, 404, '<!doctype html>', PIPELINE_RUN_FAILED, PIPELINE_ROUTES_MISSING],
+    [true, 404, 'not json', PIPELINE_STATUS_FAILED, PIPELINE_ROUTES_MISSING],
+    [false, 502, '<html>bad gateway</html>', PIPELINE_STATUS_FAILED, PIPELINE_STATUS_FAILED],
+  ])('classifies ok=%s status=%s body=%s', (ok, status, text, fallback, expected) => {
+    expect(pipelineResponseError(ok, status, text, fallback)).toBe(expected);
   });
 
   it('an EMPTY body is not an error — it parses to {} and passes both guards', () => {
@@ -227,7 +186,7 @@ describe('pipelineResponseError — differential against parseMirroredPipelineRe
     expect(pipelineResponseError(false, 404, 'nope', PIPELINE_RUN_FAILED)).toBe(
       PIPELINE_ROUTES_MISSING,
     );
-    expect(AUTOSYNC).toContain(
+    expect(PIPELINE_ROUTES_MISSING).toBe(
       'Auto-Sync endpoint not found. Restart the SoulSync server so the new backend routes load.',
     );
   });
@@ -270,25 +229,19 @@ describe('constants and toasts', () => {
       progress: 0,
       phase: 'Starting pipeline...',
     });
-    expect(AUTOSYNC).toContain("{ status: 'running', progress: 0, phase: 'Starting pipeline...' }");
   });
 
   it('polls every 2.5s', () => {
     expect(PIPELINE_POLL_MS).toBe(2500);
-    expect(AUTOSYNC).toContain('setInterval(tick, 2500)');
   });
 
   it('names the playlist in both toasts', () => {
     expect(pipelineStartedToast('Road Trip')).toBe('Auto-Sync started for Road Trip');
     expect(pipelineStatusErrorToast('boom')).toBe('Pipeline status error: boom');
-    expect(AUTOSYNC).toContain('Auto-Sync started for ');
-    expect(AUTOSYNC).toContain('Pipeline status error: ');
   });
 
   it('the two fallback messages are the vanilla call-site strings', () => {
     expect(PIPELINE_RUN_FAILED).toBe('Failed to start Auto-Sync');
     expect(PIPELINE_STATUS_FAILED).toBe('Failed to read Auto-Sync status');
-    expect(AUTOSYNC).toContain("'Failed to start Auto-Sync'");
-    expect(AUTOSYNC).toContain("'Failed to read Auto-Sync status'");
   });
 });

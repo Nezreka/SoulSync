@@ -37,3 +37,7 @@ export function removedSelectors(
   afterSheets: Sheet[],
   refs: Refs,
 ): { gone: string[]; live: string[] };
+export function stripJsComments(text: string): string;
+export function stripPyComments(text: string): string;
+export function stripHtmlComments(text: string): string;
+export function stripComments(path: string, text: string): string;

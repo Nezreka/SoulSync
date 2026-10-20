@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+// node scripts/css-class-refs.mjs
 /**
  * Which legacy CSS classes does the app still reference?
  *
@@ -20,11 +20,14 @@
  *   webui/src/**.{ts,tsx}, templates/, and every .py file in the repo outside
  *   tests/ (web_server.py, core/, api/, services/, …), since the server
  *   renders markup and sends status strings the JS turns into classes.
+ *   Comments are blanked first (// and /* *\/ in JS/TS, # in Python, <!-- -->
+ *   in HTML plus JS comments in its <script>s), so a class that only an old
+ *   comment mentions doesn't stay live.
  *
  * WHEN A CLASS COUNTS AS LIVE (the heuristics lean towards "live": a false
  * "live" keeps a dead rule, a false "dead" deletes a live one)
  *   1. Token. Its exact name appears anywhere in the scanned code, in a
- *      string, an identifier or a comment. This covers literal classes,
+ *      string or an identifier. This covers literal classes,
  *      lookup tables ({ ok: 'badge-ok' }) and server-sent values that are
  *      literals in the Python.
  *   2. Prefix. It starts with a fragment the code completes at runtime:
@@ -171,6 +174,171 @@ function expressionText(text, start) {
   return text.slice(start, i);
 }
 
+// Comments name classes that code no longer uses (`// 'dashboard-'` read as a
+// prefix), so they're blanked before scanning. Each stripper walks the text
+// as its language tokenises it, so a '//' or '#' inside a string, a URL or a
+// regex literal stays. A comment becomes one space plus the newlines it had,
+// keeping line-based reads and line counts as they were.
+const blank = (comment) => ` ${comment.replace(/[^\n]/g, '')}`;
+
+// After these, a '/' starts a regex literal; after anything else it divides.
+const REGEX_AFTER_WORD = new Set(
+  'return typeof instanceof in of new delete void throw case do else yield await'.split(' '),
+);
+
+/** JS/TS with // and /* *\/ comments blanked (JSX's {/* … *\/} too). */
+export function stripJsComments(text) {
+  let out = '';
+  let i = 0;
+  // What the last significant token was, to tell a regex from a division.
+  let prev = '';
+  // Brace depth of each open `${`, so its '}' resumes the template literal.
+  const templates = [];
+  let depth = 0;
+  const template = (from) => {
+    // Scan a template literal's text from `from` up to its end or a `${`.
+    let j = from;
+    for (; j < text.length; j++) {
+      if (text[j] === '\\') j++;
+      else if (text[j] === '`') return { end: j + 1, open: false };
+      else if (text[j] === '$' && text[j + 1] === '{') return { end: j + 2, open: true };
+    }
+    return { end: text.length, open: false };
+  };
+  while (i < text.length) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === '/' && next === '/' && !/\w:$/.test(text.slice(Math.max(0, i - 2), i))) {
+      // A line comment, unless it's a URL's scheme (https:// in JSX text).
+      const end = text.indexOf('\n', i);
+      const stop = end === -1 ? text.length : end;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (ch === '/' && next === '*') {
+      const end = text.indexOf('*/', i + 2);
+      const stop = end === -1 ? text.length : end + 2;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (ch === '/' && regexCanStart(prev)) {
+      let j = i + 1;
+      let inClass = false;
+      for (; j < text.length && text[j] !== '\n'; j++) {
+        if (text[j] === '\\') j++;
+        else if (text[j] === '[') inClass = true;
+        else if (text[j] === ']') inClass = false;
+        else if (text[j] === '/' && !inClass) break;
+      }
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      prev = 'regex';
+    } else if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      for (; j < text.length && text[j] !== ch && text[j] !== '\n'; j++) if (text[j] === '\\') j++;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      prev = 'string';
+    } else if (ch === '`' || (ch === '}' && templates.at(-1) === depth)) {
+      if (ch === '}') (templates.pop(), depth--);
+      const { end, open } = template(i + 1);
+      if (open) templates.push(++depth);
+      out += text.slice(i, end);
+      i = end;
+      prev = open ? '(' : 'string';
+    } else {
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      if (/[\w$]/.test(ch)) {
+        const word = text.slice(i).match(/^[\w$]+/)[0];
+        out += word;
+        i += word.length;
+        prev = word;
+        continue;
+      }
+      if (!/\s/.test(ch)) prev = ch;
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
+function regexCanStart(prev) {
+  if (!prev) return true;
+  if (prev === 'string' || prev === 'regex') return false;
+  if (/^[\w$]/.test(prev)) return REGEX_AFTER_WORD.has(prev);
+  return !')]}'.includes(prev);
+}
+
+/** Python with # comments blanked; strings (triple-quoted, prefixed) stay. */
+export function stripPyComments(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '#') {
+      const end = text.indexOf('\n', i);
+      const stop = end === -1 ? text.length : end;
+      out += blank(text.slice(i, stop));
+      i = stop;
+    } else if (ch === '"' || ch === "'") {
+      const q = text.startsWith(ch.repeat(3), i) ? ch.repeat(3) : ch;
+      let j = i + q.length;
+      for (; j < text.length; j++) {
+        if (text[j] === '\\') j++;
+        else if (text.startsWith(q, j)) break;
+        else if (text[j] === '\n' && q.length === 1) break;
+      }
+      const stop = Math.min(text.length, j + q.length);
+      out += text.slice(i, stop);
+      i = stop;
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
+/** HTML with <!-- --> blanked, and JS comments blanked inside <script>. */
+export function stripHtmlComments(text) {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith('<!--', i)) {
+      const end = text.indexOf('-->', i + 4);
+      const stop = end === -1 ? text.length : end + 3;
+      out += blank(text.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    const script = text.slice(i).match(/^<script\b[^>]*>/i);
+    if (script) {
+      const bodyStart = i + script[0].length;
+      const close = text.slice(bodyStart).search(/<\/script\s*>/i);
+      const bodyEnd = close === -1 ? text.length : bodyStart + close;
+      out += script[0] + stripJsComments(text.slice(bodyStart, bodyEnd));
+      i = bodyEnd;
+      if (close !== -1) {
+        const tag = text.slice(i).match(/^<\/script\s*>/i)[0];
+        out += tag;
+        i += tag.length;
+      }
+      continue;
+    }
+    out += text[i];
+    i++;
+  }
+  return out;
+}
+
+/** `text` with the comments of its language (by file extension) blanked. */
+export function stripComments(path, text) {
+  if (/\.(?:[cm]?js|tsx?)$/.test(path)) return stripJsComments(text);
+  if (path.endsWith('.py')) return stripPyComments(text);
+  if (path.endsWith('.html')) return stripHtmlComments(text);
+  return text;
+}
+
 /** The value of a class="…" attribute that opens just before `start`. */
 function attrText(text, start, quote) {
   const end = text.indexOf(quote, start);
@@ -193,7 +361,8 @@ export function refsFromTexts(sources) {
     for (const m of text.matchAll(re)) set.add(f(m));
   };
   for (const source of sources) {
-    const { path = '', text } = typeof source === 'string' ? { text: source } : source;
+    const { path = '', text: raw } = typeof source === 'string' ? { text: source } : source;
+    const text = stripComments(path, raw);
     add(tokens, new RegExp(NAME, 'g'), text, (m) => m[0]);
 
     // 'foo-' + x, const P = 'foo_', `foo-${x}`, f"foo-{x}", "foo-%s". A bare

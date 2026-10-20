@@ -12,8 +12,9 @@ sites is genuinely different — but they reach the per-server CLIENT
 through ``engine.client(name)`` (which goes through this registry)
 instead of separate globals.
 
-Adding a new server (Subsonic / Emby) = one ``register`` call here +
-the new client class.
+Adding a new server (Subsonic / Emby) = one descriptor in
+``core/media_server/specs.py``, its factory in ``build_default_registry``,
+and the new client class.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
+from core.media_server import specs
 from core.media_server.contract import MediaServerClient
 
 # Eager imports for the same import-order reason the download plugin
@@ -47,6 +49,18 @@ class ServerSpec:
     factory: Callable[[], MediaServerClient]
     display_name: str
     aliases: Tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def descriptor(self) -> Optional[specs.ServerDescriptor]:
+        """The static descriptor (config shape, detection, brand) for
+        this server, None for a spec registered outside ``specs``."""
+        return specs.describe(self.name)
+
+    @classmethod
+    def from_descriptor(cls, descriptor: specs.ServerDescriptor,
+                        factory: Callable[[], MediaServerClient]) -> 'ServerSpec':
+        return cls(name=descriptor.name, factory=factory,
+                   display_name=descriptor.display_name, aliases=descriptor.aliases)
 
 
 class MediaServerRegistry:
@@ -134,9 +148,13 @@ def build_default_registry() -> MediaServerRegistry:
     """
     registry = MediaServerRegistry()
 
-    registry.register(ServerSpec(name='plex',      factory=PlexClient,      display_name='Plex'))
-    registry.register(ServerSpec(name='jellyfin',  factory=JellyfinClient,  display_name='Jellyfin'))
-    registry.register(ServerSpec(name='navidrome', factory=NavidromeClient, display_name='Navidrome'))
-    registry.register(ServerSpec(name='soulsync',  factory=SoulSyncClient,  display_name='SoulSync Library'))
+    factories = {
+        'plex': PlexClient,
+        'jellyfin': JellyfinClient,
+        'navidrome': NavidromeClient,
+        'soulsync': SoulSyncClient,
+    }
+    for descriptor in specs.iter_descriptors():
+        registry.register(ServerSpec.from_descriptor(descriptor, factories[descriptor.name]))
 
     return registry

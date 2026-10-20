@@ -308,8 +308,9 @@ export function fetchSeasonalCurrent(): Promise<SeasonalResponse> {
 // by the CURRENT season, so its fetch waits until /seasonal/current answers.
 
 export const fetchReleaseRadar = () => section<Record<string, unknown>>('discover/release-radar');
-export const fetchDiscoveryWeekly = () =>
-  section<Record<string, unknown>>('discover/discovery-weekly');
+// the route is /weekly. /discovery-weekly never existed, so the archives mix
+// 404'd on every load (#1763)
+export const fetchDiscoveryWeekly = () => section<Record<string, unknown>>('discover/weekly');
 
 export function fetchSeasonalPlaylist(
   seasonKey: string,

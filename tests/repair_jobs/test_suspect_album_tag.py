@@ -752,5 +752,7 @@ def test_1567_r4_signal4_counts_track_artist_not_batch_artist_id():
     f = findings[0]
     assert f["entity_id"] == "700"
     assert f["details"]["album_title"] == "Music"
+    # the finding opens the album on its artist page, so it carries the id
+    assert f["details"]["artist_id"] == 2
     assert f["details"]["distinct_artists"] == 9
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])

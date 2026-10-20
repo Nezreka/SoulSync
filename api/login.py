@@ -202,6 +202,7 @@ def auth_logout():
         session.pop('profile_id', None)
         session.pop('profile_epoch', None)
         session.pop('device_id', None)
+        session.pop('device_owner', None)
         session.pop('launch_pin_verified', None)
         return jsonify({'success': True})
     except Exception as e:

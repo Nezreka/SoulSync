@@ -707,16 +707,22 @@ def tick(db: Any = None) -> Dict[str, int]:
                 )
             _forget_fallbacks(asin)
             logger.info("Audiobook imported: %s -> %s", row.get("title"), imported_path)
+            _announce_import(row, imported_path)
         elif patch.get("status") == "staged":
             # "importing" on the card, and deliberately NOT an error: the book is
             # waiting for the rest of itself, which is a normal state a torrent
             # passes through.
             summary["staged"] += 1
             held_msg = str(patch.get("completeness") or "Completeness check held import")
+            # told once, when the hold starts: the row stays staged for every
+            # later tick and a message per poll would be spam
+            if row.get("status") != "staged":
+                _announce_row("audiobook_import_needs_attention", row, reason=held_msg)
             mark_status(row["download_id"], "importing", held_reason=held_msg, release_title=release_title)
         elif patch.get("status") == "failed":
             mark_status(row["download_id"], "failed", error=str(patch.get("error") or ""), release_title=release_title)
             summary["failed"] += 1
+            _announce_row("audiobook_download_failed", row, error=str(patch.get("error") or ""))
             _return_to_wishlist(database, row, str(patch.get("error") or ""))
             if asin:
                 database.mark_wishlist_status(
@@ -725,6 +731,32 @@ def tick(db: Any = None) -> Dict[str, int]:
                 )
                 _try_next_release(database, asin)
     return summary
+
+
+def _announce_import(row: Dict[str, Any], imported_path: str) -> None:
+    """Tell the automation engine a book landed, as the music importers do.
+
+    ``import_completed`` is the trigger Settings offers for "an import
+    finished"; without this a finished audiobook never fired it.
+    """
+    from core.audiobook_events import announce, first_author
+
+    try:
+        book = _book_for(row)
+    except Exception as exc:                                # noqa: BLE001
+        logger.debug("Could not describe the imported book: %s", exc)
+        book = {}
+    announce("import_completed",
+             track_count=1,
+             album_name=book.get("title") or row.get("title") or "",
+             artist=first_author(book, row.get("author") or ""))
+
+
+def _announce_row(event_type: str, row: Dict[str, Any], **extra: Any) -> None:
+    """A download event for ``row``: its title and author plus ``extra``."""
+    from core.audiobook_events import announce
+
+    announce(event_type, title=row.get("title") or "", author=row.get("author") or "", **extra)
 
 
 def _fallback_limit() -> int:

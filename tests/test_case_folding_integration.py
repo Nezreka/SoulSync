@@ -55,6 +55,14 @@ def _build(create_dirs=False):
         create_dirs=create_dirs)[0]
 
 
+def _build_single(create_dirs=False, album_info=None):
+    ctx = _context()
+    info = album_info if album_info is not None else {'is_album': False}
+    return build_final_path_for_track(
+        ctx, ctx['spotify_artist'], info, '.flac',
+        create_dirs=create_dirs)[0]
+
+
 def test_a_track_lands_in_the_folder_that_already_exists(_transfer_dir):
     """The reported bug. A lower-cased folder on disk must capture the write
     rather than a second, differently-cased folder appearing beside it."""
@@ -102,3 +110,46 @@ def test_only_the_artist_folder_matching_still_reuses_it(_transfer_dir):
 
     assert path.startswith(str(_transfer_dir / 'pink floyd'))
     assert sorted(p.name for p in _transfer_dir.iterdir()) == ['pink floyd']
+
+
+# ── #1788 singles case folding ───────────────────────────────────────────────
+
+def test_single_lands_in_artist_folder_that_already_exists(_transfer_dir):
+    """#1788: A single whose artist already exists in another casing must
+    steer into that existing folder instead of creating a duplicate."""
+    (_transfer_dir / 'pink floyd').mkdir()
+
+    path = _build_single(create_dirs=True)
+
+    assert path.startswith(str(_transfer_dir / 'pink floyd'))
+    artist_dirs = sorted(p.name for p in _transfer_dir.iterdir() if p.is_dir())
+    assert artist_dirs == ['pink floyd'], f'duplicate artist folder created: {artist_dirs}'
+
+
+def test_single_folder_reused_when_single_already_exists(_transfer_dir):
+    """When the specific single folder also exists in lower-case, reuse both levels."""
+    existing_single = _transfer_dir / 'pink floyd' / 'pink floyd - another brick'
+    existing_single.mkdir(parents=True)
+
+    path = _build_single(create_dirs=True)
+
+    assert path.startswith(str(existing_single))
+
+
+def test_single_fallback_without_template_reuses_artist_casing(_transfer_dir, monkeypatch):
+    """When the template is bypassed, the fallback single path still reuses the existing artist folder."""
+    (_transfer_dir / 'pink floyd').mkdir()
+    monkeypatch.setattr('core.imports.paths.get_file_path_from_template', lambda c, t: (None, None))
+
+    path = _build_single(create_dirs=True)
+
+    assert path.startswith(str(_transfer_dir / 'pink floyd'))
+    artist_dirs = sorted(p.name for p in _transfer_dir.iterdir() if p.is_dir())
+    assert artist_dirs == ['pink floyd']
+
+
+def test_single_preview_does_not_create_anything(_transfer_dir):
+    """Dry run for singles does not leave empty directories behind."""
+    _build_single(create_dirs=False)
+
+    assert list(_transfer_dir.iterdir()) == []

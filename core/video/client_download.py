@@ -77,8 +77,16 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
             size = int(getattr(status, "size", 0) or 0)
             done = int(getattr(status, "downloaded", 0) or 0)
             eta = int((size - done) / speed) if (speed > 0 and size > done) else None
-        return {"status": "downloading", "progress": pct,
-                "speed_bps": speed, "eta_seconds": eta}
+        patch = {"status": "downloading", "progress": pct,
+                 "speed_bps": speed, "eta_seconds": eta}
+        # the torrent client is holding it back on purpose (its own queue, a
+        # recheck). that's not a stall, so the monitor keeps the clock off it.
+        # usenet's queued also covers grabbing/propagating, which can hang, so
+        # it stays on the clock
+        if str(dl.get("source") or "").lower() == "torrent" \
+                and str(getattr(status, "state", "") or "").lower() == "queued":
+            patch["_client_queued"] = True
+        return patch
     # Completed → locate THIS job's finished video file, then import. Prefer the client's
     # exact content_path (this torrent's own file/folder) — the reliable anti-cross-attribution
     # signal: the shared save_path DIR holds every concurrent grab, and the torrent NAME often

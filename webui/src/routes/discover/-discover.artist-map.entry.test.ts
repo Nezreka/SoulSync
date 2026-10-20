@@ -64,8 +64,6 @@ describe('the endpoints and copy still match discover.js', () => {
     expect(ARTMAP_SEARCH_LIMIT).toBe(8);
     expect(ARTMAP_SEARCH_DEBOUNCE_MS).toBe(300);
     expect(ARTMAP_PROMPT_DEBOUNCE_MS).toBe(350);
-    expect(SOURCE).toContain('artists.slice(0, 8)');
-    expect(SOURCE).toContain('if (q.length < 2)');
   });
 
   it('keeps the empty-watchlist copy', () => {
@@ -75,8 +73,6 @@ describe('the endpoints and copy still match discover.js', () => {
   it('keeps the genre-overlap tuning', () => {
     expect(ARTMAP_RELATED_GENRES).toBe(4);
     expect(ARTMAP_GENRE_OVERLAP).toBe(0.1);
-    expect(SOURCE).toContain('primarySet.size * 0.1');
-    expect(SOURCE).toContain('.slice(0, 4)');
   });
 
   it('keeps the three toolbar titles', () => {

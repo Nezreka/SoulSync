@@ -259,6 +259,15 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
         summary += f" | {removed_artists} artists, {removed_albums} albums removed"
     add_activity_item("", "Database Update Complete", summary, "Now")
 
+    # Invalidate sync match cache (track IDs may have changed) before emitting completion
+    try:
+        inv_db = get_database()
+        cleared = inv_db.invalidate_sync_match_cache()
+        if cleared:
+            logger.info(f"Cleared {cleared} sync match cache entries after database update")
+    except Exception as e:
+        logger.debug("sync match cache invalidation failed: %s", e)
+
     try:
         if automation_engine:
             automation_engine.emit('database_update_completed', {
@@ -268,15 +277,6 @@ def _db_update_finished_callback(total_artists, total_albums, total_tracks, succ
             })
     except Exception as e:
         logger.debug("library_updated automation emit failed: %s", e)
-
-    # Invalidate sync match cache (track IDs may have changed)
-    try:
-        inv_db = get_database()
-        cleared = inv_db.invalidate_sync_match_cache()
-        if cleared:
-            logger.info(f"Cleared {cleared} sync match cache entries after database update")
-    except Exception as e:
-        logger.debug("sync match cache invalidation failed: %s", e)
 
     # WISHLIST CLEANUP: Automatically clean up wishlist after database update
     try:
@@ -889,7 +889,9 @@ def _own_library_scan_clients(server_type):
     profiles = db.get_own_library_profiles()
     if not profiles:
         return []
-    if server_type not in ('plex', 'jellyfin'):
+    from core.media_server import specs
+    _descriptor = specs.describe(server_type)
+    if not (_descriptor and _descriptor.supports_own_libraries):
         logger.info(
             "[Own Library] Active media server '%s' does not support per-profile libraries; "
             "skipping own-library scans for %d profile(s)",

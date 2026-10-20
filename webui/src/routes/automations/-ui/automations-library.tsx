@@ -40,6 +40,8 @@ const COLLECTION_ICONS: Record<string, string> = {
   scheduled: '◷',
   events: '⚡',
   off: '○',
+  operations: '⚡',
+  maintenance: '🛠',
   system: '⚙',
   ungrouped: '◇',
   group: '📁',
@@ -99,6 +101,14 @@ function EmptyState({
     events: {
       title: 'No event-driven automations',
       text: 'Automations that listen for events will appear here.',
+    },
+    operations: {
+      title: 'No operational automations',
+      text: 'Core pipeline automations will appear here.',
+    },
+    maintenance: {
+      title: 'No maintenance automations',
+      text: 'Housekeeping, cleanup, and tool automations will appear here.',
     },
   };
   const groupName = collectionGroupName(def.key);

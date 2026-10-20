@@ -102,6 +102,15 @@ const SETTING_FULL_KEY_LABELS: Record<string, string> = {
   deep_audio_verify: 'Deep Audio Verify (ffmpeg decode — CPU heavy)',
 };
 
+/** Preserve structured setting values as JSON instead of "[object Object]". */
+export function repairSettingText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
+
 const SETTING_ACRONYMS: Record<string, string> = {
   eps: 'EPs',
   id: 'ID',
@@ -265,7 +274,10 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   suspect_album_tag: 'Re-identify',
 };
 
-export function findingFixLabel(findingType: string): string | null {
+export function findingFixLabel(findingType: string, entityType?: string | null): string | null {
+  // a poisoned album is fixed one track at a time, so its finding opens the
+  // album instead of the single-track re-identify (#1567)
+  if (findingType === 'suspect_album_tag' && entityType === 'album') return 'Open album';
   return FINDING_FIXABLE_TYPES[findingType] ?? null;
 }
 

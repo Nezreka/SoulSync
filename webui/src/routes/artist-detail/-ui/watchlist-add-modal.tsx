@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import { addToWatchlistRequest } from '../-artist-detail.watchlist-button';
 import { BodyPortal } from './portal';
 
 /**
@@ -101,14 +102,9 @@ export async function addArtistToWatchlist(
   artistId: unknown,
   artistName: string,
   settings: WatchlistAddSettings,
+  source?: string,
 ): Promise<string> {
-  const addResponse = await fetch('/api/watchlist/add', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist_id: artistId, artist_name: artistName }),
-  });
-  const addData = await addResponse.json();
-  if (!addData.success) throw new Error(addData.error || 'Failed to add to watchlist');
+  const message = await addToWatchlistRequest(artistId, artistName, source);
 
   const configResponse = await fetch(
     `/api/watchlist/artist/${encodeURIComponent(String(artistId))}/config`,
@@ -134,7 +130,7 @@ export async function addArtistToWatchlist(
     throw new Error(configData.error || 'Failed to save watchlist settings');
   }
   if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
-  return String(addData.message ?? '');
+  return message;
 }
 
 export function WatchlistAddModal({
@@ -144,7 +140,7 @@ export function WatchlistAddModal({
   onDownloadExisting,
 }: {
   /** imageUrl is the artist's photo (release art as fallback); '' shows the note tile. */
-  artist: { id: unknown; name: string; imageUrl?: string };
+  artist: { id: unknown; name: string; source?: string; imageUrl?: string };
   onClose: () => void;
   onWatched: () => void;
   onDownloadExisting: () => void;
@@ -162,7 +158,7 @@ export function WatchlistAddModal({
     setBusy(true);
     setError(null);
     try {
-      const message = await addArtistToWatchlist(artist.id, artist.name, settings);
+      const message = await addArtistToWatchlist(artist.id, artist.name, settings, artist.source);
       window.showToast?.(message || `Watching ${artist.name}`, 'success');
       onWatched();
       onClose();

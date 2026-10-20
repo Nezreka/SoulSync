@@ -217,18 +217,7 @@
 }
 
 .storySpinner {
-  width: 36px;
-  height: 36px;
-  border: 3px solid var(--white-a10);
   border-top-color: var(--accent-light);
-  border-radius: var(--radius-circle);
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Typography */
@@ -1211,18 +1200,6 @@
 .navButton:disabled {
   opacity: 0.3;
   cursor: default;
-}
-
-.navButtonPrimary {
-  background: rgba(var(--accent-light-rgb), 0.2);
-  border-color: rgba(var(--accent-light-rgb), 0.4);
-  color: #34d399;
-}
-
-.navButtonPrimary:hover:not(:disabled) {
-  background: var(--accent-light);
-  border-color: var(--accent-light);
-  color: #04160b;
 }
 
 .counter {
