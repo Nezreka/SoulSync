@@ -89,7 +89,11 @@ describe('ListenBand', () => {
     });
 
     expect(fetchFlow).toHaveBeenCalledTimes(1);
-    expect(playMixNow).toHaveBeenCalledWith([{ id: 1, title: 'Flow Track' }], 'Flow', expect.anything());
+    expect(playMixNow).toHaveBeenCalledWith(
+      [{ id: 1, title: 'Flow Track' }],
+      'Flow',
+      expect.anything(),
+    );
   });
 
   it('plays a mix when its play button is clicked', async () => {
@@ -100,11 +104,7 @@ describe('ListenBand', () => {
       fireEvent.click(playRepeatBtn);
     });
 
-    expect(playMixNow).toHaveBeenCalledWith(
-      mockMixes[0].tracks,
-      'On Repeat',
-      expect.anything(),
-    );
+    expect(playMixNow).toHaveBeenCalledWith(mockMixes[0].tracks, 'On Repeat', expect.anything());
   });
 
   it('opens the playlist preview modal when a mix tile card body is clicked and closes on close', () => {
