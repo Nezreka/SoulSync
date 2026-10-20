@@ -36,8 +36,10 @@ _MONTHS = {
 }
 _MONTH = '(?:' + '|'.join(_MONTHS) + r')\.?'
 _YEAR = r"(?:19|20)\d{2}|[’']?\d{2}"
+_DATE_SEPARATOR = r'[-‐‑‒–—/.]'
 _PERFORMANCE_DATES = tuple(re.compile(pattern, re.I) for pattern in (
-    r'\b(?P<year>(?:19|20)\d{2})[-/.](?P<month>\d{1,2})[-/.](?P<day>\d{1,2})(?!\d)',
+    rf'\b(?P<year>(?:19|20)\d{{2}}){_DATE_SEPARATOR}(?P<month>\d{{1,2}})'
+    rf'(?:{_DATE_SEPARATOR}(?P<day>\d{{1,2}}))?(?!\d)',
     rf'(?<!\d)(?P<day>\d{{1,2}})[/-](?P<month>\d{{1,2}})[/-](?P<year>{_YEAR})(?!\d)',
     rf'\b(?P<day>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<month>{_MONTH})\s*,?\s*(?P<year>{_YEAR})(?!\d)',
     rf'\b(?P<month>{_MONTH})\s+(?P<day>\d{{1,2}})(?:st|nd|rd|th)?(?:\s*,\s*|\s+)(?P<year>{_YEAR})(?!\d)',
@@ -306,14 +308,11 @@ def versions_compatible(file: dict, slot: dict, *, local_markers=None, remote_ma
     slot_disambiguation = str(slot.get('recording_disambiguation') or '').strip()
     slot_title = str(slot.get('title') or slot.get('name') or '')
     tags = file.get('tags') or {}
-    local_titles = [tags.get('title'), _local_filename_title(file), (file.get('db') or {}).get('title')]
-    remote_titles = [slot_title]
-    if file_disambiguation:
-        local_titles.append(f'({file_disambiguation})')
-    if slot_disambiguation:
-        remote_titles.append(f'({slot_disambiguation})')
-    if any(_named_version_conflicts(str(left or ''), right)
-           for left in local_titles for right in remote_titles):
+    # Compare corresponding fields. A title may name a broadcast/event while
+    # a recording comment names its venue; different words are not proof of a
+    # different performance. Version markers still combine all evidence layers.
+    if any(_named_version_conflicts(str(title or ''), slot_title) for title in (
+            tags.get('title'), _local_filename_title(file), (file.get('db') or {}).get('title'))):
         return False
     if (file_disambiguation and slot_disambiguation and
             _identity_text(file_disambiguation) != _identity_text(slot_disambiguation)):

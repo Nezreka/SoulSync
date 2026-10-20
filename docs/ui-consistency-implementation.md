@@ -92,9 +92,12 @@ marking any item complete. Stage 2 layout work remains deferred.
   Dates are excluded from numeric-title comparison only inside recognized
   qualifiers; main-title numbers remain material differences. Compatible
   performance-name detail can be a subset; distinct named remixes remain
-  protected. Tags, filenames, database titles, and recording comments all
-  participate. Sparse audio can still lower confidence: compatibility does not
-  manufacture independent verification.
+  protected. Local tags, filenames and database titles compare with the release
+  title; local recording comments compare with remote recording comments.
+  Version markers still combine all layers. Event titles and venue comments
+  are not interchangeable facts (see the live follow-up below). Sparse audio
+  can still lower confidence: compatibility does not manufacture independent
+  verification.
 - **S2:** Blank values no longer create album consistency conflicts. A coherent
   release ID is retained when a sibling lacks the tag. Missing MusicBrainz IDs
   can be filled when the selected identity agrees; an explicit pin still permits
@@ -120,7 +123,7 @@ marking any item complete. Stage 2 layout work remains deferred.
 
 Verification:
 
-- **615 Python tests passed** across reconciliation plan/end-to-end/authority/
+- **643 Python tests passed** across reconciliation plan/end-to-end/authority/
   cache/inventory/catalogue/fulfillment/Tools suites, review queue/inbox, finding
   lifecycle, and recording-ID repair. New cases include real temporary-file
   scan/apply checks, sparse tags, explicit pins, genuine conflicts and companion
@@ -143,6 +146,37 @@ Verification:
 - Local evidence logs/screenshots are under `/tmp/soulsync-stage1-*`; they are
   diagnostic artifacts, not committed application data. Findings, acceptance
   criteria, tests and these results are the durable record.
+
+Live follow-up and correction:
+
+- The first deployment (`7c60c9719eab`) refreshed Britney Spears, Evanescence,
+  Jeff Buckley and Keane without applying repairs. Two previously assigned
+  recordings became extra/missing. This failed acceptance despite the passing
+  local suite; the build was not treated as the completed Stage 1 result.
+- The cause was a new cross-comparison between title qualifiers and recording
+  comments. Catalogue comments can describe the venue while titles describe
+  the event, and can use different abbreviations/date precision. A read-only
+  comparison of **12,693 paired rows** against cached catalogue recordings
+  identified **17 additional newly incompatible comparisons** in existing plans.
+  Examples include Roadburn Redux versus its recording venue, Fox Theater
+  versus Theatre, and Unit 24 country wording. The already-unassigned two
+  refreshed tracks were separately reproduced with their exact evidence.
+- The correction restores comparison between corresponding fields, retaining
+  existing version-marker boundaries and independent title/filename/DB-title
+  conflict checks. Compatible recording comments can differ in detail; genuine
+  conflicts between them remain blocked. Unicode-hyphen ISO dates and
+  year/month precision have dedicated coverage. We did not add a venue alias
+  catalogue or treat unfamiliar event/venue wording as proof of wrong audio.
+- Repeating those **12,693 comparisons** with the correction found **zero newly
+  incompatible comparisons** and two compatible-detail improvements. This is
+  a compatibility audit of existing pairs, not a full solver replay or proof of
+  every candidate's correctness. New tests also exercise complete assignment
+  and cold/warm-cache paths for the two live failures and representative
+  event/venue cases. The wider backend suite was rerun: **643 passed**.
+- Desktop and phone checks against the running application confirmed visible
+  ID replacement effects before approval, amber manual-metadata rows and
+  evidence-neutral readiness text, with no browser exceptions. The narrow
+  phone inspector and repeated ready summaries remain Stage 2 work.
 
 **Stage 2 is still open.** The desktop inspector still stacks comparisons too
 early, the plan repeats summaries, mobile/header space remains inefficient, and

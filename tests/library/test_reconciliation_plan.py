@@ -249,6 +249,8 @@ def test_additional_detail_does_not_hide_an_independent_venue_conflict(conflicti
         file['db'] = {'recording_disambiguation': 'live at Paris'}
     slot = {'title': 'Home (live at Wembley, London)', 'artist': 'Artist',
             'recording_mbid': 'recording', 'duration_ms': 200000}
+    if conflicting_layer == 'disambiguation':
+        slot['recording_disambiguation'] = 'live at Wembley, London'
     assert not reconcile_folder([file], [slot])['pairs']
 
 
@@ -259,6 +261,74 @@ def test_recording_comments_allow_compatible_performance_details():
     slot = {'title': 'Home', 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000,
             'recording_disambiguation': 'live at Wembley, London, 1986-07-12'}
     assert reconcile_folder([file], [slot])['pairs'][0]['confidence'] == 'clear'
+
+
+@pytest.mark.parametrize(('local', 'remote', 'comment'), [
+    ('Bring Me to Life (live on Triple M’s Garage Session, Australia – June, 2020)',
+     'Bring Me to Life (live on Triple M’s Garage Session / 2020)',
+     'live, 2020‐06: Triple M’s Garage Session, Australia'),
+    ('This Is The Last Time - Live At Mill St Brewery, Toronto / 2004 / Acoustic',
+     'This Is the Last Time (acoustic, Mill St Brewery, Toronto 20/9/04)',
+     'live, 2004-09-20: Mill Street Brewery, Toronto, ON, Canada'),
+])
+@pytest.mark.parametrize('comment_layer', ['local', 'remote', 'both'])
+def test_live_catalogue_comments_preserve_compatible_assignments(local, remote, comment, comment_layer):
+    from core.library.reconciliation_plan import display_title_compatible
+    file = _file(local, f"/album/01 - {local.replace('/', '_')}.flac", 200000,
+                 {'mbid': 'recording', 'title': local, 'artist': 'Artist', 'score': .99})
+    file['tags'].update(artist='Artist', mbid='recording')
+    slot = {'title': remote, 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000}
+    if comment_layer in ('local', 'both'):
+        file['db'] = {'title': local, 'recording_disambiguation': comment}
+    if comment_layer in ('remote', 'both'):
+        slot['recording_disambiguation'] = comment
+    # Acoustic/live markers agree only when the recording comment supplies
+    # the local title's live context on the remote side.
+    if 'Acoustic' in local and comment_layer == 'local':
+        slot['title'] = remote.replace('(acoustic,', '(live acoustic,')
+    plan = reconcile_folder([file], [slot])
+    assert plan['pairs'][0]['confidence'] == 'clear'
+    assert not plan['extra_files'] and not plan['missing_slots']
+    assert display_title_compatible(local, slot)
+
+
+@pytest.mark.parametrize('comment', [
+    'live, 2020‐07: Triple M’s Garage Session, Australia',
+    'live, 2021‐06: Triple M’s Garage Session, Australia',
+    'live, 2020‐06: Another Garage Session, Australia',
+])
+def test_short_iso_recording_comments_still_protect_real_conflicts(comment):
+    local = 'Bring Me to Life (live on Triple M’s Garage Session, Australia – June, 2020)'
+    file = _file(local, f'/album/01 - {local}.flac', 200000,
+                 {'mbid': 'recording', 'title': local, 'artist': 'Artist', 'score': .99})
+    file['db'] = {'recording_disambiguation': 'live, June 2020: Triple M’s Garage Session, Australia'}
+    slot = {'title': local, 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000,
+            'recording_disambiguation': comment}
+    assert not reconcile_folder([file], [slot])['pairs']
+
+
+@pytest.mark.parametrize(('local', 'remote', 'comment'), [
+    ('Turn The Page - Live In Detroit/1975', 'Turn the Page',
+     'live, 1975-9-4/5: Cobo Hall, Detroit, MI, USA'),
+    ('I Want You to Want Me - Live at Nippon Budokan, Tokyo, JPN - April 1978',
+     'I Want You to Want Me (live)', 'live, 1978-04-27, 28 & 29: Nippon Budokan, Tokyo, Japan'),
+    ('Free Bird - Live At The Fox Theater/1976', 'Free Bird - Live At The Fox Theater/1976',
+     'live, 1976‐07‐08: Fox Theatre, Atlanta, GA, USA'),
+    ('Triassic (live at Roadburn Redux)', 'Triassic',
+     'live, 2021‐03‐27: Die Mühle, Gyhum, Germany'),
+    ('Flaws (Acoustic Version / Live From Unit 24, London, United Kingdom / 2012)',
+     'Flaws (Acoustic Version / Live From Unit 24, London, United Kingdom / 2012)',
+     'live, 2012: Unit 24, London, UK'),
+])
+def test_event_titles_are_not_cross_compared_with_recording_venue_comments(local, remote, comment):
+    file = _file(local, f"/album/01 - {local.replace('/', '_')}.flac", 200000,
+                 {'mbid': 'recording', 'title': local, 'artist': 'Artist', 'score': .99})
+    file['tags'].update(artist='Artist', mbid='recording')
+    slot = {'title': remote, 'artist': 'Artist', 'recording_mbid': 'recording', 'duration_ms': 200000,
+            'recording_disambiguation': comment}
+    plan = reconcile_folder([file], [slot])
+    assert plan['pairs'][0]['confidence'] == 'clear'
+    assert not plan['extra_files'] and not plan['missing_slots']
 
 
 def test_primary_artist_audio_supports_a_full_local_remixer_credit():
