@@ -71165,11 +71165,6 @@ button.chat-hidden-note:hover { color: var(--white-a65); }
 .chat-user-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
 
 /* rich chat (richchat P2): formatting, spoilers, toolbar, emoji picker */
-.chat-msg-text code.chat-code {
-    font-family: 'SF Mono', Consolas, monospace; font-size: 12.5px;
-    background: var(--white-a08); border: 1px solid var(--white-a10);
-    border-radius: 5px; padding: 1px 6px;
-}
 .chat-quote {
     display: inline-block; border-left: 3px solid rgba(var(--accent-rgb), 0.6);
     padding-left: 10px; color: var(--white-a60); font-style: italic;
