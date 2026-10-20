@@ -78,10 +78,12 @@ def test_default_sample_paths_docker(monkeypatch):
     assert settings_mod.default_sample_paths() == ["/app/samples"]
 
 
-def test_get_sample_folders_falls_back_when_unset(monkeypatch):
+@pytest.mark.parametrize("defaults", [["./samples"], ["/app/samples"]])
+def test_get_sample_folders_falls_back_when_unset(monkeypatch, defaults):
     monkeypatch.setattr(sample_folders, "_configured_paths", lambda: [])
+    monkeypatch.setattr("core.settings.default_sample_paths", lambda: defaults)
     folders = sample_folders.get_sample_folders()
-    assert folders == ["./samples"]  # native default in this env
+    assert folders == defaults
     assert sample_folders.default_sample_folder() == folders[0]
 
 

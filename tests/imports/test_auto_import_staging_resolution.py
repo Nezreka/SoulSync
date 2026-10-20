@@ -128,6 +128,8 @@ def test_a_path_that_exists_but_is_not_a_directory_says_which(tmp_path, worker, 
 def test_nothing_usable_anywhere_returns_none_and_explains(tmp_path, worker, monkeypatch, warnings):
     monkeypatch.chdir(tmp_path)  # no ./Staging here
     worker._config_manager = _Config({'import.staging_path': '/mnt/nas/music/staging'})
+    # The runtime image has /app/Staging; this case needs both fallbacks absent.
+    monkeypatch.setattr(aiw, 'docker_resolve_path', lambda path: str(tmp_path / 'missing-fallback'))
 
     assert worker._resolve_staging_path() is None
 

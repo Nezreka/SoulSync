@@ -14,8 +14,8 @@ import pytest
 from core.repair_jobs.unknown_artist_fixer import UnknownArtistFixerJob as UnknownArtistFixer
 
 
-def _make_db(owner_profile_id):
-    conn = sqlite3.connect(":memory:")
+def _make_db(owner_profile_id, path):
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT,
                     owner_profile_id INTEGER)""")
@@ -33,16 +33,18 @@ def _make_db(owner_profile_id):
                     VALUES (1, 'Song', '/own/song.mp3', 1, '1', '1', ?)""",
                  (owner_profile_id,))
     conn.commit()
-    return conn
+    conn.close()
 
 
 class _FakeDB:
-    def __init__(self, conn, profile_roots):
-        self._conn = conn
+    def __init__(self, path, profile_roots):
+        self._path = path
         self._roots = profile_roots
 
     def _get_connection(self):
-        return self._conn
+        conn = sqlite3.connect(self._path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
     def get_profile_library(self, profile_id):
         root = self._roots.get(int(profile_id))
@@ -78,8 +80,9 @@ def test_apply_fix_moves_into_owner_library_root():
         with open(src, 'wb') as f:
             f.write(b'\x00' * 100)
 
-        conn = _make_db(7)
-        db = _FakeDB(conn, {7: own_root})
+        db_path = os.path.join(tmp, 'library.db')
+        _make_db(7, db_path)
+        db = _FakeDB(db_path, {7: own_root})
         ctx = _Ctx(db, shared_root)
         fixer = UnknownArtistFixer()
 
@@ -90,11 +93,11 @@ def test_apply_fix_moves_into_owner_library_root():
         ok = fixer._apply_fix(ctx, track, corrected, src,
                               os.path.join('Real Artist', 'song.mp3'),
                               shared_root, fix_tags=False, reorganize_files=True)
-        conn.close()
-
         assert ok is True
         assert os.path.isfile(os.path.join(own_root, 'Real Artist', 'song.mp3'))
         assert not os.path.exists(os.path.join(shared_root, 'Real Artist', 'song.mp3'))
+        with db._get_connection() as conn:
+            assert conn.execute("SELECT file_path FROM tracks WHERE id=1").fetchone()[0] == os.path.join(own_root, 'Real Artist', 'song.mp3')
 
 
 def test_apply_fix_shared_track_uses_transfer_folder():
@@ -106,8 +109,9 @@ def test_apply_fix_shared_track_uses_transfer_folder():
         with open(src, 'wb') as f:
             f.write(b'\x00' * 100)
 
-        conn = _make_db(None)
-        db = _FakeDB(conn, {})
+        db_path = os.path.join(tmp, 'library.db')
+        _make_db(None, db_path)
+        db = _FakeDB(db_path, {})
         ctx = _Ctx(db, shared_root)
         fixer = UnknownArtistFixer()
 
@@ -118,10 +122,10 @@ def test_apply_fix_shared_track_uses_transfer_folder():
         ok = fixer._apply_fix(ctx, track, corrected, src,
                               os.path.join('Real Artist', 'song.mp3'),
                               shared_root, fix_tags=False, reorganize_files=True)
-        conn.close()
-
         assert ok is True
         assert os.path.isfile(os.path.join(shared_root, 'Real Artist', 'song.mp3'))
+        with db._get_connection() as conn:
+            assert conn.execute("SELECT file_path FROM tracks WHERE id=1").fetchone()[0] == os.path.join(shared_root, 'Real Artist', 'song.mp3')
 
 
 def test_apply_fix_stamps_owner_on_new_artist_and_album():
