@@ -78,6 +78,30 @@ jobs:
       - name: Run tests
         run: npm test
 
+  review-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.59.1-jammy
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: webui
+    steps:
+      - uses: actions/checkout@v6
+      - run: npm ci
+      # Python's normal pytest job verifies that these committed API fixtures
+      # still equal real scan/queue output. This job verifies their rendered
+      # meaning and interaction contracts; unlike broad visual checks it blocks.
+      - run: npm run test:review-acceptance
+      - name: Upload acceptance failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: review-acceptance-failures
+          path: webui/test-results
+          retention-days: 7
+
   webui-visual:
     runs-on: ubuntu-latest
     timeout-minutes: 20

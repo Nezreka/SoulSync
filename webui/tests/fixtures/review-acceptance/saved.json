@@ -1,0 +1,820 @@
+{
+  "case": {
+    "case_id": "album:10:acceptance",
+    "plan_signature": "saved:plan_signature:0",
+    "saved_for_later": false,
+    "album": "Northbound",
+    "artist": "Acceptance Artist",
+    "folder": "/music/Acceptance Artist/Northbound",
+    "items": [
+      {
+        "id": 1,
+        "job_id": "library_reconciliation",
+        "finding_type": "reconciliation_metadata",
+        "severity": "warning",
+        "status": "pending",
+        "entity_type": "track",
+        "entity_id": "1",
+        "file_path": "/music/Acceptance Artist/Northbound/01 - Home.flac",
+        "title": "Update metadata: Home",
+        "description": "Audio and release evidence support these metadata corrections.",
+        "details": {
+          "album_id": "10",
+          "album_title": "Northbound",
+          "library_album_title": "Northbound",
+          "artist_name": "Acceptance Artist",
+          "release_artist_names": [
+            "Acceptance Artist"
+          ],
+          "album_consistency": {
+            "album": [
+              {
+                "value": "Northbound",
+                "files": 1
+              },
+              {
+                "value": "Northbound (Deluxe)",
+                "files": 1
+              }
+            ],
+            "musicbrainz_release_id": [
+              {
+                "value": "11111111-1111-4111-8111-111111111111",
+                "files": 1
+              },
+              {
+                "value": "22222222-2222-4222-8222-222222222222",
+                "files": 1
+              }
+            ]
+          },
+          "release_disambiguation": "",
+          "profile_id": null,
+          "album_folder": "/music/Acceptance Artist/Northbound",
+          "album_folders": [
+            "/music/Acceptance Artist/Northbound"
+          ],
+          "source": "musicbrainz",
+          "release_id": "11111111-1111-4111-8111-111111111111",
+          "numbering_mode": "digital",
+          "exact_release_id": "11111111-1111-4111-8111-111111111111",
+          "release_track_count": 2,
+          "local_file_count": 2,
+          "companion_count": 0,
+          "release_disc_count": 1,
+          "folder_audio_path_digest": "saved:folder_audio_path_digest:1",
+          "evidence_signature": "saved:evidence_signature:2",
+          "playlist_tracks": [],
+          "track_id": "1",
+          "tool_checks": [],
+          "assignment_evidence": "audio",
+          "metadata_review_reason": "",
+          "recording_id_conflict": {},
+          "recording_identity": {
+            "mbid": "00000000-0000-4000-8000-000000000001",
+            "title": "Home",
+            "artist": "Acceptance Artist",
+            "score": 0.99
+          },
+          "expected_title": "Home",
+          "expected_artist": "Acceptance Artist",
+          "expected_duration_ms": 200000,
+          "recording_mbid": "00000000-0000-4000-8000-000000000001",
+          "expected_recording_disambiguation": "",
+          "current_recording_disambiguation": "",
+          "current_title": "Home",
+          "current_album": "Northbound",
+          "current_tags": {
+            "title": "Home",
+            "artist": "Acceptance Artist",
+            "album_artist": "Acceptance Artist",
+            "track_artist": "Acceptance Artist",
+            "album": "Northbound",
+            "track_number": 1,
+            "disc_number": 1,
+            "year": "",
+            "genres": [],
+            "isrc": "",
+            "mbid": "",
+            "duration_ms": 200000,
+            "spotify_track_id": "",
+            "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
+            "release_disambiguation": ""
+          },
+          "acoustid": {
+            "status": "ok",
+            "recordings": [
+              {
+                "mbid": "00000000-0000-4000-8000-000000000001",
+                "title": "Home",
+                "artist": "Acceptance Artist",
+                "score": 0.99
+              }
+            ],
+            "fingerprint_key": "saved:fingerprint_key:3"
+          },
+          "current_library_metadata": {
+            "title": "Home",
+            "track_number": 1,
+            "disc_number": 1,
+            "musicbrainz_recording_id": null,
+            "recording_disambiguation": null,
+            "track_artist": null,
+            "album_id": "10"
+          },
+          "fingerprint_key": "saved:fingerprint_key:3",
+          "size_bytes": 1284,
+          "mtime_ns": 1,
+          "match_reasons": [
+            "AcoustID recording ID matches release slot",
+            "embedded title agrees",
+            "filename agrees",
+            "duration differs by 0.00s"
+          ],
+          "confidence": "clear",
+          "title_difference_kind": "exact",
+          "assignment_options": [
+            {
+              "key": "id:00000000-0000-4000-8000-000000000001:1:1",
+              "title": "Home",
+              "disc_number": 1,
+              "track_number": 1,
+              "display_track_number": 1,
+              "duration_ms": 200000,
+              "preview_url": ""
+            },
+            {
+              "key": "id:00000000-0000-4000-8000-000000000002:1:2",
+              "title": "Open Water",
+              "disc_number": 1,
+              "track_number": 2,
+              "display_track_number": 2,
+              "duration_ms": 210000,
+              "preview_url": ""
+            }
+          ],
+          "saved_assignment": false,
+          "changes": {
+            "musicbrainz_recording_id": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000001"
+            },
+            "library_recording_mbid": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          "db_data": {
+            "musicbrainz_recording_id": "00000000-0000-4000-8000-000000000001"
+          },
+          "db_track_updates": {
+            "musicbrainz_recording_id": "00000000-0000-4000-8000-000000000001"
+          },
+          "db_album_title": "",
+          "target_path": "",
+          "planned_choice": {
+            "category": "metadata",
+            "action": "fix",
+            "fix_action": ""
+          },
+          "plan_approved": true
+        },
+        "user_action": null,
+        "created_at": "2025-01-13 10:00:00",
+        "updated_at": "2025-01-13 10:00:00",
+        "last_error": null,
+        "evidence_token": "saved:evidence_token:4",
+        "review_tier": "ready",
+        "review_reason": "Saved in the album plan; no file changes applied yet",
+        "category": "metadata"
+      },
+      {
+        "id": 2,
+        "job_id": "library_reconciliation",
+        "finding_type": "reconciliation_metadata",
+        "severity": "warning",
+        "status": "pending",
+        "entity_type": "track",
+        "entity_id": "2",
+        "file_path": "/music/Acceptance Artist/Northbound/02 - Open Water.flac",
+        "title": "Update metadata: Open Water",
+        "description": "Choose consistent embedded album metadata for this album",
+        "details": {
+          "album_id": "10",
+          "album_title": "Northbound",
+          "library_album_title": "Northbound",
+          "artist_name": "Acceptance Artist",
+          "release_artist_names": [
+            "Acceptance Artist"
+          ],
+          "album_consistency": {
+            "album": [
+              {
+                "value": "Northbound",
+                "files": 1
+              },
+              {
+                "value": "Northbound (Deluxe)",
+                "files": 1
+              }
+            ],
+            "musicbrainz_release_id": [
+              {
+                "value": "11111111-1111-4111-8111-111111111111",
+                "files": 1
+              },
+              {
+                "value": "22222222-2222-4222-8222-222222222222",
+                "files": 1
+              }
+            ]
+          },
+          "release_disambiguation": "",
+          "profile_id": null,
+          "album_folder": "/music/Acceptance Artist/Northbound",
+          "album_folders": [
+            "/music/Acceptance Artist/Northbound"
+          ],
+          "source": "musicbrainz",
+          "release_id": "11111111-1111-4111-8111-111111111111",
+          "numbering_mode": "digital",
+          "exact_release_id": "11111111-1111-4111-8111-111111111111",
+          "release_track_count": 2,
+          "local_file_count": 2,
+          "companion_count": 0,
+          "release_disc_count": 1,
+          "folder_audio_path_digest": "saved:folder_audio_path_digest:1",
+          "evidence_signature": "saved:evidence_signature:2",
+          "playlist_tracks": [],
+          "track_id": "2",
+          "tool_checks": [],
+          "assignment_evidence": "audio",
+          "metadata_review_reason": "Choose consistent embedded album metadata for this album",
+          "recording_id_conflict": {},
+          "recording_identity": {
+            "mbid": "00000000-0000-4000-8000-000000000002",
+            "title": "Open Water",
+            "artist": "Acceptance Artist",
+            "score": 0.99
+          },
+          "expected_title": "Open Water",
+          "expected_artist": "Acceptance Artist",
+          "expected_duration_ms": 210000,
+          "recording_mbid": "00000000-0000-4000-8000-000000000002",
+          "expected_recording_disambiguation": "",
+          "current_recording_disambiguation": "",
+          "current_title": "Open Water",
+          "current_album": "Northbound (Deluxe)",
+          "current_tags": {
+            "title": "Open Water",
+            "artist": "Acceptance Artist",
+            "album_artist": "Acceptance Artist",
+            "track_artist": "Acceptance Artist",
+            "album": "Northbound (Deluxe)",
+            "track_number": 2,
+            "disc_number": 1,
+            "year": "",
+            "genres": [],
+            "isrc": "",
+            "mbid": "",
+            "duration_ms": 210000,
+            "spotify_track_id": "",
+            "musicbrainz_release_id": "22222222-2222-4222-8222-222222222222",
+            "release_disambiguation": ""
+          },
+          "acoustid": {
+            "status": "ok",
+            "recordings": [
+              {
+                "mbid": "00000000-0000-4000-8000-000000000002",
+                "title": "Open Water",
+                "artist": "Acceptance Artist",
+                "score": 0.99
+              }
+            ],
+            "fingerprint_key": "saved:fingerprint_key:5"
+          },
+          "current_library_metadata": {
+            "title": "Open Water",
+            "track_number": 2,
+            "disc_number": 1,
+            "musicbrainz_recording_id": null,
+            "recording_disambiguation": null,
+            "track_artist": null,
+            "album_id": "10"
+          },
+          "fingerprint_key": "saved:fingerprint_key:5",
+          "size_bytes": 1299,
+          "mtime_ns": 1,
+          "match_reasons": [
+            "AcoustID recording ID matches release slot",
+            "embedded title agrees",
+            "filename agrees",
+            "duration differs by 0.00s"
+          ],
+          "confidence": "clear",
+          "title_difference_kind": "exact",
+          "assignment_options": [
+            {
+              "key": "id:00000000-0000-4000-8000-000000000001:1:1",
+              "title": "Home",
+              "disc_number": 1,
+              "track_number": 1,
+              "display_track_number": 1,
+              "duration_ms": 200000,
+              "preview_url": ""
+            },
+            {
+              "key": "id:00000000-0000-4000-8000-000000000002:1:2",
+              "title": "Open Water",
+              "disc_number": 1,
+              "track_number": 2,
+              "display_track_number": 2,
+              "duration_ms": 210000,
+              "preview_url": ""
+            }
+          ],
+          "saved_assignment": false,
+          "changes": {
+            "album": {
+              "old": "Northbound (Deluxe)",
+              "new": "Northbound"
+            },
+            "musicbrainz_recording_id": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000002"
+            },
+            "musicbrainz_release_id": {
+              "old": "22222222-2222-4222-8222-222222222222",
+              "new": "11111111-1111-4111-8111-111111111111"
+            },
+            "library_recording_mbid": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000002"
+            }
+          },
+          "db_data": {
+            "album_title": "Northbound",
+            "musicbrainz_recording_id": "00000000-0000-4000-8000-000000000002",
+            "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111"
+          },
+          "db_track_updates": {
+            "musicbrainz_recording_id": "00000000-0000-4000-8000-000000000002"
+          },
+          "db_album_title": "",
+          "target_path": "",
+          "planned_choice": {
+            "category": "metadata",
+            "action": "fix",
+            "fix_action": ""
+          },
+          "plan_approved": true
+        },
+        "user_action": null,
+        "created_at": "2025-01-13 10:00:00",
+        "updated_at": "2025-01-13 10:00:00",
+        "last_error": null,
+        "evidence_token": "saved:evidence_token:6",
+        "review_tier": "ready",
+        "review_reason": "Saved in the album plan; no file changes applied yet",
+        "category": "metadata"
+      }
+    ],
+    "count": 2,
+    "status": "pending",
+    "album_id": "10",
+    "album_thumb_url": null,
+    "plan": {
+      "ready": 2,
+      "manual": 0,
+      "destructive": 0,
+      "blocked": 0,
+      "total": 2,
+      "status": "ready",
+      "blocker_reasons": [],
+      "can_apply_ready": true,
+      "can_organize": true,
+      "decision_count": 1,
+      "categories": [
+        "metadata"
+      ],
+      "decisions": [
+        {
+          "id": "metadata",
+          "category": "metadata",
+          "label": "Metadata changes",
+          "risk": "ready",
+          "summary": "2 ready; 0 need review.",
+          "finding_ids": [
+            1,
+            2
+          ],
+          "action_count": 2
+        }
+      ]
+    },
+    "album_plan": {
+      "source": "musicbrainz",
+      "release_id": "11111111-1111-4111-8111-111111111111",
+      "state": "changes",
+      "intent_scope": "",
+      "numbering_mode": "digital",
+      "inventory": {
+        "version": 1,
+        "library_roots": [
+          "/music"
+        ],
+        "folders": [
+          "/music/Acceptance Artist/Northbound"
+        ],
+        "paths": [
+          "/music/Acceptance Artist/Northbound/01 - Home.flac",
+          "/music/Acceptance Artist/Northbound/02 - Open Water.flac"
+        ],
+        "album_ids": [
+          "10"
+        ],
+        "track_ids": [
+          "1",
+          "2"
+        ],
+        "stored_folders": [
+          "/music/Acceptance Artist/Northbound"
+        ],
+        "trusted_album_id": null,
+        "album_folder_counts": {
+          "10": 1
+        },
+        "directory_observations": {
+          "/music/Acceptance Artist": 1,
+          "/music/Acceptance Artist/Northbound": 1
+        }
+      },
+      "release_track_count": 2,
+      "local_file_count": 2,
+      "matched": 2,
+      "clear": 2,
+      "assignments": [
+        {
+          "status": "change",
+          "companion_of": "",
+          "assignment_evidence": "audio",
+          "tool_checks": [],
+          "file_path": "/music/Acceptance Artist/Northbound/01 - Home.flac",
+          "file": "01 - Home.flac",
+          "file_duration_ms": 200000,
+          "slot_title": "Home",
+          "slot_duration_ms": 200000,
+          "slot_preview_url": "",
+          "track_id": "1",
+          "current_title": "Home",
+          "current_track_number": 1,
+          "current_disc_number": 1,
+          "slot_artist": "Acceptance Artist",
+          "source_track_id": "00000000-0000-4000-8000-000000000001",
+          "slot_track_number": 1,
+          "slot_disc_number": 1,
+          "display_track_number": 1,
+          "title_difference": "exact",
+          "changes": {
+            "musicbrainz_recording_id": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000001"
+            },
+            "library_recording_mbid": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000001"
+            }
+          },
+          "current_tags": {
+            "title": "Home",
+            "artist": "Acceptance Artist",
+            "album_artist": "Acceptance Artist",
+            "track_artist": "Acceptance Artist",
+            "album": "Northbound",
+            "track_number": 1,
+            "disc_number": 1,
+            "year": "",
+            "genres": [],
+            "isrc": "",
+            "mbid": "",
+            "duration_ms": 200000,
+            "spotify_track_id": "",
+            "musicbrainz_release_id": "11111111-1111-4111-8111-111111111111",
+            "release_disambiguation": ""
+          },
+          "acoustid": {
+            "status": "ok",
+            "recordings": [
+              {
+                "mbid": "00000000-0000-4000-8000-000000000001",
+                "title": "Home",
+                "artist": "Acceptance Artist",
+                "score": 0.99
+              }
+            ],
+            "fingerprint_key": "saved:fingerprint_key:3"
+          },
+          "confidence": "clear",
+          "reasons": [
+            "AcoustID recording ID matches release slot",
+            "embedded title agrees",
+            "filename agrees",
+            "duration differs by 0.00s"
+          ],
+          "ambiguity_reasons": [],
+          "duration_delta_ms": 0,
+          "audio_title": "Home",
+          "audio_artist": "Acceptance Artist",
+          "audio_score": 0.99,
+          "audio_conflict": "",
+          "playlists": [],
+          "review_state": "pending",
+          "planned_choice": {
+            "category": "metadata",
+            "action": "fix",
+            "fix_action": ""
+          },
+          "finding_id": 1,
+          "review_tier": "ready",
+          "action_state": "ready"
+        },
+        {
+          "status": "change",
+          "companion_of": "",
+          "assignment_evidence": "audio",
+          "tool_checks": [],
+          "file_path": "/music/Acceptance Artist/Northbound/02 - Open Water.flac",
+          "file": "02 - Open Water.flac",
+          "file_duration_ms": 210000,
+          "slot_title": "Open Water",
+          "slot_duration_ms": 210000,
+          "slot_preview_url": "",
+          "track_id": "2",
+          "current_title": "Open Water",
+          "current_track_number": 2,
+          "current_disc_number": 1,
+          "slot_artist": "Acceptance Artist",
+          "source_track_id": "00000000-0000-4000-8000-000000000002",
+          "slot_track_number": 2,
+          "slot_disc_number": 1,
+          "display_track_number": 2,
+          "title_difference": "exact",
+          "changes": {
+            "album": {
+              "old": "Northbound (Deluxe)",
+              "new": "Northbound"
+            },
+            "musicbrainz_recording_id": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000002"
+            },
+            "musicbrainz_release_id": {
+              "old": "22222222-2222-4222-8222-222222222222",
+              "new": "11111111-1111-4111-8111-111111111111"
+            },
+            "library_recording_mbid": {
+              "old": "",
+              "new": "00000000-0000-4000-8000-000000000002"
+            }
+          },
+          "current_tags": {
+            "title": "Open Water",
+            "artist": "Acceptance Artist",
+            "album_artist": "Acceptance Artist",
+            "track_artist": "Acceptance Artist",
+            "album": "Northbound (Deluxe)",
+            "track_number": 2,
+            "disc_number": 1,
+            "year": "",
+            "genres": [],
+            "isrc": "",
+            "mbid": "",
+            "duration_ms": 210000,
+            "spotify_track_id": "",
+            "musicbrainz_release_id": "22222222-2222-4222-8222-222222222222",
+            "release_disambiguation": ""
+          },
+          "acoustid": {
+            "status": "ok",
+            "recordings": [
+              {
+                "mbid": "00000000-0000-4000-8000-000000000002",
+                "title": "Open Water",
+                "artist": "Acceptance Artist",
+                "score": 0.99
+              }
+            ],
+            "fingerprint_key": "saved:fingerprint_key:5"
+          },
+          "confidence": "clear",
+          "reasons": [
+            "AcoustID recording ID matches release slot",
+            "embedded title agrees",
+            "filename agrees",
+            "duration differs by 0.00s"
+          ],
+          "ambiguity_reasons": [],
+          "duration_delta_ms": 0,
+          "audio_title": "Open Water",
+          "audio_artist": "Acceptance Artist",
+          "audio_score": 0.99,
+          "audio_conflict": "",
+          "playlists": [],
+          "review_state": "pending",
+          "planned_choice": {
+            "category": "metadata",
+            "action": "fix",
+            "fix_action": ""
+          },
+          "finding_id": 2,
+          "review_tier": "ready",
+          "action_state": "ready"
+        }
+      ],
+      "categories": [
+        "metadata"
+      ],
+      "candidates": [
+        {
+          "source": "musicbrainz",
+          "release_id": "11111111-1111-4111-8111-111111111111",
+          "clear": 2,
+          "release_title": "Northbound",
+          "label_catalogs": [],
+          "label": "",
+          "catalog_number": "",
+          "barcode": "",
+          "disc_count": 1,
+          "country": "GB",
+          "date": "2001-01-01",
+          "disambiguation": "",
+          "format": "Digital Media",
+          "image_url": "https://coverartarchive.org/release/11111111-1111-4111-8111-111111111111/front-250",
+          "matched": 2,
+          "total_slots": 2,
+          "excluded_video_tracks": 0,
+          "missing": 0,
+          "extra": 0,
+          "continuous_numbering": true,
+          "pairs": [
+            {
+              "file": "01 - Home.flac",
+              "file_duration_ms": 200000,
+              "slot_title": "Home",
+              "slot_duration_ms": 200000,
+              "slot_preview_url": "",
+              "file_path": "/music/Acceptance Artist/Northbound/01 - Home.flac",
+              "local_title": "Home",
+              "slot_source_track_id": "00000000-0000-4000-8000-000000000001",
+              "disc_number": 1,
+              "track_number": 1,
+              "display_track_number": 1,
+              "confidence": "clear",
+              "assignment_evidence": "audio"
+            },
+            {
+              "file": "02 - Open Water.flac",
+              "file_duration_ms": 210000,
+              "slot_title": "Open Water",
+              "slot_duration_ms": 210000,
+              "slot_preview_url": "",
+              "file_path": "/music/Acceptance Artist/Northbound/02 - Open Water.flac",
+              "local_title": "Open Water",
+              "slot_source_track_id": "00000000-0000-4000-8000-000000000002",
+              "disc_number": 1,
+              "track_number": 2,
+              "display_track_number": 2,
+              "confidence": "clear",
+              "assignment_evidence": "audio"
+            }
+          ],
+          "missing_slots": [],
+          "missing_tracks": [],
+          "extra_files": []
+        }
+      ],
+      "case_id": "album:10:acceptance",
+      "counts": {
+        "confirmed": 0,
+        "changed": 2,
+        "uncertain": 0,
+        "missing": 0,
+        "not_owned": 0,
+        "extra": 0,
+        "settled": 0
+      }
+    },
+    "decisions": [
+      {
+        "id": "metadata",
+        "category": "metadata",
+        "label": "Metadata changes",
+        "risk": "ready",
+        "summary": "2 ready; 0 need review.",
+        "finding_ids": [
+          1,
+          2
+        ],
+        "action_count": 2
+      }
+    ],
+    "refresh": {
+      "state": "idle"
+    }
+  },
+  "queue": {
+    "items": [
+      {
+        "case_id": "album:10:acceptance",
+        "pending": 2,
+        "priority": 1,
+        "album": "Northbound",
+        "artist": "Acceptance Artist",
+        "finding_types": [
+          "reconciliation_metadata"
+        ],
+        "error_count": 0,
+        "plan": {
+          "ready": 2,
+          "manual": 0,
+          "destructive": 0,
+          "blocked": 0,
+          "total": 2,
+          "status": "ready",
+          "blocker_reasons": [],
+          "can_apply_ready": true,
+          "can_organize": true,
+          "decision_count": 1,
+          "categories": [
+            "metadata"
+          ],
+          "decisions": [
+            {
+              "id": "metadata",
+              "category": "metadata",
+              "label": "Metadata changes",
+              "risk": "ready",
+              "summary": "2 ready; 0 need review.",
+              "finding_ids": [
+                null,
+                null
+              ],
+              "action_count": 2
+            }
+          ]
+        },
+        "album_thumb_url": null
+      }
+    ],
+    "total": 1,
+    "ready_total": 2,
+    "page": 0,
+    "limit": 30
+  },
+  "summary": {
+    "all": 1,
+    "review": 0,
+    "ready": 1,
+    "files": 0,
+    "waiting": 0,
+    "ready_total": 2,
+    "ready_albums_total": 1
+  },
+  "ready_preview": {
+    "signature": "saved:signature:7",
+    "albums": [
+      {
+        "case_id": "album:10:acceptance",
+        "album": "Northbound",
+        "actions": [
+          {
+            "id": 1,
+            "description": "Update 01 - Home.flac: musicbrainz recording id, library recording mbid",
+            "file_action": false
+          },
+          {
+            "id": 2,
+            "description": "Update 02 - Open Water.flac: album, musicbrainz recording id, musicbrainz release id, library recording mbid",
+            "file_action": false
+          }
+        ]
+      }
+    ],
+    "action_count": 2,
+    "file_actions": 0
+  },
+  "finding_types": [
+    {
+      "type": "reconciliation_metadata",
+      "label": "Audio-backed Repair",
+      "verb": "Apply Repair",
+      "fixable": true,
+      "destructive": false,
+      "review_only": true,
+      "job_ids": [
+        "library_reconciliation"
+      ]
+    }
+  ]
+}

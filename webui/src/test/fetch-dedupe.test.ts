@@ -42,6 +42,23 @@ describe('API GET dedupe', () => {
     },
   );
 
+  it.each(['no-store', 'reload', 'no-cache'] as const)(
+    'honors an explicit %s refresh inside the dedupe window',
+    async (cache) => {
+      let version = 0;
+      const raw = vi.fn<typeof fetch>(async () => Response.json({ version: ++version }));
+      const fetch = install(raw);
+      await fetch('/api/repair/review-queue');
+      expect(await (await fetch('/api/repair/review-queue', { cache })).json()).toEqual({
+        version: 2,
+      });
+      expect(
+        await (await fetch(new Request(`${ORIGIN}/api/repair/review-queue`, { cache }))).json(),
+      ).toEqual({ version: 3 });
+      expect(raw).toHaveBeenCalledTimes(3);
+    },
+  );
+
   it.each([
     new Request(`${ORIGIN}/api/automations/42`, { method: 'PATCH' }),
     new URL(`${ORIGIN}/api/automations/42`),

@@ -76,7 +76,10 @@ export function SelectedActionDetail({
       : undefined;
   const canReplaceWrongAudio = Boolean(wrongAudio && replacement?.source_track_id);
   const suggested = finding.review_tier === 'ready';
-  const compactReason = finding.review_reason || finding.description;
+  const compactReason =
+    finding.finding_type === 'reconciliation_extra'
+      ? finding.description || finding.review_reason
+      : finding.review_reason || finding.description;
   const details = record(finding.details);
   const localDurationMs = Number(
     details.file_duration_ms || record(details.current_tags).duration_ms || 0,
@@ -353,10 +356,11 @@ export function SelectedActionDetail({
                   }
                   localDurationMs={localDurationMs}
                   comparisonPath={comparisonPath}
-                  comparisonTitle={
-                    textValue(details.expected_title || record(details.replacement_track).name) ||
-                    'Release recording'
-                  }
+                  comparisonTitle={textValue(
+                    details.expected_title ||
+                      record(details.replacement_track).title ||
+                      record(details.replacement_track).name,
+                  )}
                   comparisonDurationMs={comparisonDurationMs || releaseDurationMs}
                   previewUrl={textValue(
                     details.expected_preview_url || record(details.replacement_track).preview_url,

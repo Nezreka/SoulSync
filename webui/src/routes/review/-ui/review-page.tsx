@@ -906,6 +906,7 @@ export function ReviewPage() {
     try {
       const response = await fetch(
         `/api/repair/review-queue/apply-ready${scopeCaseId ? `?case_id=${encodeURIComponent(scopeCaseId)}` : ''}`,
+        { cache: 'no-store' },
       );
       if (!response.ok) throw new Error('Could not load the ready album plans.');
       const preview = (await response.json()) as {
@@ -1789,8 +1790,40 @@ export function ReviewPage() {
                       {readyActionControls}
                       <div className={styles.readyChanges}>
                         <h4>Planned changes</h4>
-                        <p>Choose a field to inspect the affected tracks and exact values.</p>
+                        {readyChangeGroups.length > 0 && (
+                          <p>Choose a field to inspect the affected tracks and exact values.</p>
+                        )}
                         {readySummaryList}
+                        {reviewCase.items.some((item) => item.planned_file_action) && (
+                          <Notice
+                            tone="warning"
+                            aria-label="Planned file actions"
+                            className={styles.plannedFileActions}
+                          >
+                            <div>
+                              <h4>File decisions included</h4>
+                              <ul>
+                                {reviewCase.items
+                                  .filter((item) => item.planned_file_action)
+                                  .map((item) => (
+                                    <li key={item.id}>
+                                      <p>{item.planned_file_action}</p>
+                                      <Button
+                                        type="button"
+                                        onClick={() => {
+                                          const decision = decisionsByFinding.get(item.id);
+                                          if (decision)
+                                            openDecision({ ...decision, finding_ids: [item.id] });
+                                        }}
+                                      >
+                                        Review file decision
+                                      </Button>
+                                    </li>
+                                  ))}
+                              </ul>
+                            </div>
+                          </Notice>
+                        )}
                         {active &&
                           activeDecision?.risk === 'ready' &&
                           !activeAssignment &&
@@ -2210,7 +2243,7 @@ export function ReviewPage() {
                         {pairedConflictCount > 0 && (
                           <p className={styles.versionExplanation}>
                             {pairedConflictCount} version conflict
-                            {pairedConflictCount === 1 ? '' : 's'} pair a local file with an
+                            {pairedConflictCount === 1 ? ' pairs' : 's pair'} a local file with an
                             unmatched release slot. Each pair contributes one extra file and one
                             missing slot to the counts above.
                           </p>

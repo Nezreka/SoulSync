@@ -181,6 +181,7 @@ export interface ReviewFinding extends RepairFinding {
   updated_at?: string | null;
   review_tier?: 'ready' | 'manual' | 'destructive' | 'blocked';
   review_reason?: string;
+  planned_file_action?: string;
 }
 
 export interface ReviewCase {
@@ -249,7 +250,9 @@ export async function fetchReviewQueue(
   });
   if (category) params.set('category', category);
   if (risk) params.set('risk', risk);
-  return readJson<ReviewQueuePage>(await fetch(`/api/repair/review-queue?${params}`));
+  return readJson<ReviewQueuePage>(
+    await fetch(`/api/repair/review-queue?${params}`, { cache: 'no-store' }),
+  );
 }
 
 export async function fetchReviewQueueModeTotals(
@@ -257,7 +260,9 @@ export async function fetchReviewQueueModeTotals(
   category = '',
 ): Promise<ReviewQueueModeTotals> {
   const params = new URLSearchParams({ q, category, job_id: 'library_reconciliation' });
-  return readJson<ReviewQueueModeTotals>(await fetch(`/api/repair/review-queue/summary?${params}`));
+  return readJson<ReviewQueueModeTotals>(
+    await fetch(`/api/repair/review-queue/summary?${params}`, { cache: 'no-store' }),
+  );
 }
 
 export async function applyReviewDecisionGroup(
@@ -305,6 +310,7 @@ export async function fetchReviewCase(caseId: string): Promise<ReviewCase> {
   return readJson<ReviewCase>(
     await fetch(
       `/api/repair/review-queue/${encodeURIComponent(caseId)}?job_id=library_reconciliation`,
+      { cache: 'no-store' },
     ),
   );
 }

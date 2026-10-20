@@ -83,6 +83,7 @@ export function AssignmentRow({
       </span>
       <span className={styles.rowStatus}>
         <i>{statusLabel(row.status, row)}</i>
+        {row.companion_of && row.status !== 'confirmed' && <small>Intentional companion</small>}
         {row.status === 'settled' && row.audio_conflict && <small>Previously reviewed</small>}
         {row.fulfillment_state === 'wishlisted' && <small>Waiting for download</small>}
         {row.fulfillment_state === 'cancelled' && <small>Request cancelled · still wanted</small>}

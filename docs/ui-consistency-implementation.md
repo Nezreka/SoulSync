@@ -1,5 +1,116 @@
 # UI reuse and consistency implementation
 
+## Stage 3 recovery — authorized 2026-10-20
+
+Baseline: `0235284ad`; deployed application `1283b55b6502`.
+The original assessment defines this stage as **durable acceptance evidence**,
+not another redesign or matching-policy expansion. Preserve Stage 1 and 2.
+
+### Acceptance checklist
+
+- [x] A1. Fixed, fully supported album: correct assignment, supported edits,
+  readiness and truthful evidence labels.
+- [x] A2. Metadata-only album: exact proposed effects, no invented audio proof.
+- [x] A3. Genuine recording conflict: explicit reason and manual decision;
+  matching tags cannot silently authorize wrong audio.
+- [x] A4. Harmless qualifier/detail difference: useful wording preserved, with
+  negative controls for genuinely different performances.
+- [x] A5. Repeated recordings in original/deluxe sections: each intended slot
+  remains represented; repeated occurrences do not become disposable duplicates.
+- [x] A6. Missing versus contradictory metadata: blanks do not erase coherent
+  identities; genuine disagreements remain visible and require review.
+- [x] A7. Duplicates and intentional companions: complete file inventory,
+  distinct roles, keeper evidence and no premature file mutation.
+- [x] A8. Partial albums and selective missing-track requests: only intended
+  slots requested, with exact provider/release identity and cancellation state.
+- [x] A9. Saved choices, relocation and stale evidence: retain valid decisions,
+  reopen materially changed evidence, reject stale submissions, preserve
+  navigation and accurately render each state.
+- [x] A10. Link backend acceptance output to browser fixtures; verify exact
+  effects/explanations/inventory and desktop/mobile rendering. Keep repeatable
+  commands, reviewed baselines and coverage limitations in the repository.
+
+Completion requires semantic assertions as well as rendered comparisons. Fixture
+updates must be explicit; test runs must not silently bless new recommendations.
+All mutations used for verification operate on disposable files/databases.
+
+### Acceptance evidence
+
+`tests/library/test_review_acceptance.py` builds tagged files and a real SQLite
+library, runs the reconciliation job, persists choices through the worker, and
+captures the full case, queue, summary, ready preview and finding capabilities.
+Its 19 tests cover 12 initial scenarios, seven derived lifecycle states, and four
+actual metadata-apply cases. Catalogue/fingerprint responses and tiny-file
+durations are controlled; matching, inventory, proposals, persistence, wishlist
+identity and queue projection are production code.
+
+| Requirements | Independent assertions and rendered evidence |
+| --- | --- |
+| A1–A2 | Exact proposed field dictionaries; whole-album readiness; all resulting tags after apply; resolved albums leave the queue. Metadata-only evidence never claims independent audio confirmation. |
+| A3–A4 | Wrong-recording identity and missing/extra inventory remain explicit and manual. Equivalent live detail preserves the local wording; a different performance date remains a conflict despite the shared recording ID. |
+| A5–A6 | Repeated occurrences occupy distinct release slots and cannot become duplicate removals. Blank fields are filled; contradictory album/release IDs remain manual and their exact replacements are visible. |
+| A7 | Every physical local file appears exactly once, including intentional and unmatched lossy companions. Duplicate keeper selection leaves file bytes unchanged; Plan and apply confirmation name the same keeper and quarantine paths. |
+| A8 | Partial intent selects Open Water and excludes Afterglow. Wishlist contains only the requested recording and exact release. Cancelling the request retains partial scope, wanted status and the uncollected slot. Browser tests check exact request bodies and cancellation before submission. |
+| A9 | Saved decisions survive unchanged rescans and a real directory move; the old case resolves to the new case. Material tag changes reopen review and reject old evidence tokens and signed apply. Browser navigation and refresh follow these states on desktop and phone. |
+| A10 | Nineteen generated JSON states feed 41 inspected screenshots at 1800/390px, plus 320px collision checks. Six browser workflows cover save/move/stale apply, selective request/cancellation, and staged duplicate choices on desktop and phone. |
+
+Snapshots normalize only temporary paths, timestamps and opaque tokens; semantic
+expectations run before an explicit update. Raw token changes and stale rejection
+are separately asserted. The normal Python CI job checks generated output, and
+the new blocking `review-acceptance` job checks rendered meaning and pixels in
+the pinned Playwright image. Commands and update rules are documented in
+`webui/tests/visual/README.md`.
+
+### Defects exposed and corrected
+
+- Explicit queue/detail/summary/apply-preview reads now bypass the shell's short
+  GET deduplication cache. Immediate Reload after an external cancellation or
+  stale response must actually reach the server. Shared fetch tests cover all
+  three explicit refresh cache modes and Request objects.
+- Ready plans now list saved file decisions as well as metadata fields. The
+  backend shares the exact action description with the signed apply preview,
+  and the summary links back to the relevant decision. File-only plans do not
+  instruct the user to select a nonexistent metadata field.
+- Intentional companions retain their role label when they have pending edits
+  or do not fit a release slot. Unassigned-track detail explains the actual
+  mismatch and uses the local title for service searches.
+- Duplicate facts and keeper buttons wrap without colliding. Waiting badges,
+  explanations and Wishlist links remain separated. The mobile completion
+  banner clears the fixed shell navigation control. Singular evidence and
+  version-conflict labels were corrected.
+
+These fixes do not change matcher thresholds, readiness policy, saved-choice
+authority or file-writing policy.
+
+### Local verification
+
+- **632 backend tests passed** across planner, end-to-end, authority, cache,
+  inventory, catalogue, fulfillment, Tools, queue/group, fetch and acceptance
+  suites. The **19 acceptance tests also passed under Python 3.11** in the cached
+  application image with isolated temporary data and no network.
+- **95 focused UI tests passed** across Review, metadata comparison and fetch
+  deduplication. `npm run check`: **zero errors / 485 existing warnings**;
+  production build, affected Python lint and whitespace checks passed.
+- **58 pinned-browser checks passed without updating baselines**: 47 new
+  acceptance checks and all 11 existing Review/Library visual comparisons.
+  Every new screenshot was visually inspected, including the final corrected
+  phone layouts. Existing baselines were unchanged.
+- **14 existing layout/navigation checks passed**, covering 1800/1280/768/390/320px,
+  paging, focus, identity-edit visibility and acquisition status. A missing local
+  browser path was corrected in the temporary runner; no app change was needed.
+
+Deployment verification will be recorded after the committed source is rolled
+out. No live plan, wishlist request or music file is used as mutation test data.
+
+### Coverage boundaries
+
+This is a fixed, finite acceptance corpus, not proof of universal matching
+accuracy. Tiny tagged fixtures do not exercise fingerprint extraction from real
+audio or remote catalogue availability. Browser mutation responses are fixtures;
+the corresponding persistence, rejection and exact effects are exercised by the
+Python tests. Live verification is read-only. Broader negative-control and
+fulfillment tests remain necessary alongside this corpus.
+
 ## Stage 2 recovery — authorized 2026-10-20
 
 Baseline: `c836973fe` (application code deployed as `6f42d601ba6e`).

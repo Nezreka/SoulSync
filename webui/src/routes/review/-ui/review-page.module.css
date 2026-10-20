@@ -1439,6 +1439,7 @@
 }
 .duplicateList article {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -1449,8 +1450,10 @@
 }
 .duplicateList article > div {
   display: grid;
+  flex: 1 1 220px;
   gap: 3px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .duplicateList small,
 .duplicateList span {
@@ -1463,6 +1466,7 @@
 }
 .duplicateList button {
   flex: 0 0 auto;
+  max-width: 100%;
   border: 1px solid rgba(var(--warning-rgb), 0.45);
   border-radius: var(--radius-md);
   padding: 8px 11px;
@@ -1728,6 +1732,19 @@
   font-size: 20px;
   cursor: pointer;
 }
+@media (max-width: 768px) {
+  .albumNotice {
+    /* Clear the shared shell's fixed 44px navigation button at left:16px. */
+    padding-left: 32px;
+    flex-wrap: wrap;
+  }
+  .albumNotice > span {
+    flex: 1 1 150px;
+  }
+  .albumNotice > button {
+    flex: none;
+  }
+}
 .pendingFulfillment,
 .waitingNotice {
   border: 1px solid rgba(var(--info-rgb), 0.45);
@@ -1737,10 +1754,22 @@
 }
 .pendingFulfillment {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
   margin: 16px 0;
   padding: 15px;
+}
+.pendingFulfillment > span {
+  flex: none;
+}
+.pendingFulfillment > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.pendingFulfillment a {
+  display: inline-flex;
+  margin-top: var(--space-2);
 }
 .pendingFulfillment p,
 .waitingNotice {
@@ -2690,6 +2719,25 @@
 }
 .applyPreview li + li {
   margin-top: var(--space-2);
+}
+.plannedFileActions {
+  margin-top: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.plannedFileActions h4 {
+  font-size: 14px;
+  margin-bottom: var(--space-2);
+}
+.plannedFileActions ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.plannedFileActions li + li {
+  margin-top: var(--space-3);
+}
+.plannedFileActions p {
+  margin-bottom: var(--space-2);
+  color: var(--text-1);
 }
 
 /* Each evidence section participates in one spacing rhythm. */

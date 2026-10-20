@@ -1252,7 +1252,8 @@ export function ReconciliationEvidence({
               <ul>
                 {objects(values).map((entry) => (
                   <li key={label(entry.value)}>
-                    {label(entry.value) || 'Not set'} · {count(entry.files)} files
+                    {label(entry.value) || 'Not set'} · {count(entry.files)} file
+                    {count(entry.files) === 1 ? '' : 's'}
                   </li>
                 ))}
               </ul>

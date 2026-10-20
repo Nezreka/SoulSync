@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:visual": "npm run build && node scripts/visual.mjs",
+    "test:review-acceptance": "npm run build && node scripts/visual.mjs review-acceptance.visual.spec.ts",
     "test:visual:update": "npm run build && node scripts/visual.mjs --update-snapshots=all",
     "test:visual:compare": "node scripts/visual-compare.mjs"
   },

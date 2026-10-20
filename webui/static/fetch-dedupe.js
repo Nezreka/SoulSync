@@ -32,6 +32,10 @@
             var method = ((init && init.method) ||
                 (input && typeof input === 'object' && input.method) || 'GET');
             if (String(method).toUpperCase() !== 'GET') return null;
+            // Explicit refreshes must reach the server, including when another
+            // tab changed state during the short deduplication window.
+            var cache = (init && init.cache) || (input && input.cache);
+            if (cache === 'no-store' || cache === 'reload' || cache === 'no-cache') return null;
             var url = typeof input === 'string' ? input
                 : (input && typeof input === 'object' ? input.url : '') || '';
             if (!url) return null;

@@ -291,7 +291,7 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                        f'{"s do" if len(rows) != 1 else " does"} not fit the release.')
         elif category == 'duplicates':
             summary = (f'{len(rows)} duplicate-copy decision'
-                       f'{"s" if len(rows) != 1 else ""} remain.')
+                       f'{"s remain" if len(rows) != 1 else " remains"}.')
         else:
             summary = rows[0].get('description') or 'Review the supporting evidence.'
         decisions.append({
@@ -520,6 +520,12 @@ def get_case(db, case_id: str, *, status: str = 'pending',
                 'evidence_token': evidence_token(row),
             })
         plan = classify_case(items)
+        for item in items:
+            if (item['review_tier'] == 'ready'
+                    and item['finding_type'] != 'reconciliation_metadata'
+                    and not item['details'].get('plan_keep')):
+                item['planned_file_action'] = _ready_action_description(
+                    item, item['file_path'], item['title'])
         tier_rank = {'manual': 0, 'destructive': 1, 'blocked': 2, 'ready': 3}
         items.sort(key=lambda item: (tier_rank.get(item.get('review_tier'), 9), item['id']))
         first = items[0]
@@ -714,6 +720,31 @@ def get_case(db, case_id: str, *, status: str = 'pending',
         conn.close()
 
 
+def _ready_action_description(item: dict, file_path: str | None, title: str | None) -> str:
+    """Use the same exact effects in the album plan and apply confirmation."""
+    details = item['details']
+    action = (details.get('planned_choice') or {}).get('fix_action') or ''
+    filename = os.path.basename(file_path or '')
+    if details.get('plan_keep'):
+        return f'Keep current values: {filename or title or "track"}'
+    if item['finding_type'] == 'reconciliation_metadata':
+        fields = ', '.join(name.replace('_', ' ') for name in details.get('changes') or {})
+        return f'Update {filename}: {fields}'
+    if item['finding_type'] == 'reconciliation_duplicate':
+        copies = details.get('duplicate_copies') or details.get('competing_copies') or []
+        keeper = action.split(':', 1)[-1]
+        keep_path = next((copy.get('file_path') for copy in copies
+                          if str(copy.get('track_id') or copy.get('id')) == keeper), keeper)
+        removed = [copy.get('file_path') or str(copy.get('track_id')) for copy in copies
+                   if str(copy.get('track_id') or copy.get('id')) != keeper]
+        return f'Keep {keep_path}; move to recoverable quarantine: {", ".join(removed) or "the other duplicate copies"}'
+    if action == 'replace':
+        return f'Move {filename} to recoverable quarantine and request its release-track replacement'
+    if action == 'request_missing':
+        return f'Request {(details.get("replacement_track") or {}).get("title") or details.get("expected_title") or filename or "the missing release track"}'
+    return f'Move {filename} to recoverable quarantine and remove its library entry'
+
+
 def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False) -> dict:
     """Reviewable, immutable batch selection used by confirmation and execution."""
     conn = db._get_connection()
@@ -729,27 +760,8 @@ def ready_batch_preview(db, *, case_id: str = '', include_snapshot: bool = False
                     continue
                 details = item['details']
                 snapshot.append((key, item['id'], details))
-                choice = details.get('planned_choice') or {}
-                action = choice.get('fix_action') or ''
                 row = conn.execute('SELECT file_path, title FROM repair_findings WHERE id = ?', (item['id'],)).fetchone()
-                filename = os.path.basename(row[0] or '') if row else ''
-                if details.get('plan_keep'):
-                    description = f'Keep current values: {filename or (row[1] if row else "track")}'
-                elif item['finding_type'] == 'reconciliation_metadata':
-                    fields = ', '.join(name.replace('_', ' ') for name in details.get('changes') or {})
-                    description = f'Update {filename}: {fields}'
-                elif item['finding_type'] == 'reconciliation_duplicate':
-                    copies = details.get('duplicate_copies') or details.get('competing_copies') or []
-                    keeper = action.split(':', 1)[-1]
-                    keep_path = next((copy.get('file_path') for copy in copies if str(copy.get('track_id') or copy.get('id')) == keeper), keeper)
-                    removed = [copy.get('file_path') or str(copy.get('track_id')) for copy in copies if str(copy.get('track_id') or copy.get('id')) != keeper]
-                    description = f'Keep {keep_path}; move to recoverable quarantine: {", ".join(removed) or "the other duplicate copies"}'
-                elif action == 'replace':
-                    description = f'Move {filename} to recoverable quarantine and request its release-track replacement'
-                elif action == 'request_missing':
-                    description = f'Request {(details.get("replacement_track") or {}).get("title") or details.get("expected_title") or filename or "the missing release track"}'
-                else:
-                    description = f'Move {filename} to recoverable quarantine and remove its library entry'
+                description = _ready_action_description(item, row[0] if row else '', row[1] if row else '')
                 actions.append({'id': item['id'], 'description': description,
                                 'file_action': item['finding_type'] != 'reconciliation_metadata' and not details.get('plan_keep')})
             actions.sort(key=lambda action: not action['file_action'])
