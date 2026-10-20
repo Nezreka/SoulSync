@@ -138,6 +138,8 @@
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled | tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects | tojson }};
         window._maxPerfActive = {{ initial_max_performance | tojson }};
+        // what profile-api-gate.js holds before a profile is picked (#1763)
+        window.SOULSYNC_PROFILE_GATE = {{ profile_gate_rules | tojson }};
         // Side-access flash guard: the profile arrives over fetch, so on a
         // reload the Music↔Video switcher would render for a beat before the
         // single-side hiding kicks in. The last profile-apply cached its sides
@@ -3332,6 +3334,7 @@
                                                         id="spotify-disconnect-btn" onclick="disconnectSpotify()"
                                                         style="display: none;">🔌
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('spotify')">Test Connection</button>
                                                 </div>
                                                 <div class="form-group"
                                                     style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
@@ -3393,6 +3396,9 @@
                                                         Region-specific albums are auto-searched across other
                                                         storefronts as fallback.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('itunes')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3448,6 +3454,9 @@
                                                         <code>arl</code> value. Provides playlist access + downloads.
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testDeezerConnection()">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3472,6 +3481,9 @@
                                                     <div class="callback-help">Click "Generate new token" — no app
                                                         registration needed. Provides 60 req/min and cover art in search
                                                         results.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('discogs')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3512,6 +3524,7 @@
                                                     <button class="auth-button" onclick="disconnectTidal()"
                                                         style="margin-left: 8px;">
                                                         Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('tidal')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3588,6 +3601,9 @@
                                                         → look in the request headers for <code>X-User-Auth-Token</code>
                                                         → copy that value.</div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('qobuz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3637,6 +3653,9 @@
                                                         setlist.fm/settings/api (non-commercial use).
                                                     </div>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('concerts')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3684,6 +3703,9 @@
                                                         Scrobbling</button>
                                                     <span class="setting-help-text" id="lastfm-scrobble-status"></span>
                                                 </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('lastfm')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3706,6 +3728,9 @@
                                                             style="color: #ffff64;">Genius API Clients</a></div>
                                                     <div class="callback-help">Generate a "Client Access Token" — no
                                                         OAuth flow needed.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('genius')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -3758,6 +3783,9 @@
                                                         search indexes; use its final URL.</small>
                                                 </div>
 
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('musicbrainz')">Test Connection</button>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -3843,6 +3871,9 @@
                                                         <input type="checkbox" id="listenbrainz-scrobble-enabled">
                                                         Scrobble plays to ListenBrainz
                                                     </label>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('listenbrainz')">Test Connection</button>
                                                 </div>
                                             </div>
                                         </div>
@@ -4125,6 +4156,8 @@
                                                         collections from MDBList lists — the real IMDb Top 250, award
                                                         lists (Oscar winners), and thousands of community lists.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="mdblist">Test MDBList</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="nokey">
@@ -4151,6 +4184,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Gap-fill extra data on your library in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="tvmaze,anilist,wikidata">Test Connections</button>
                                             </div>
                                         </div>
                                         <div class="api-service-frame stg-service" data-video-service="ytextras">
@@ -4176,6 +4211,8 @@
                                                     <div class="callback-help">Free community APIs — no key needed.
                                                         Enrich cached YouTube videos in the background.</div>
                                                 </div>
+                                                <button class="test-button" type="button"
+                                                    data-video-test-service="ryd,sponsorblock,dearrow">Test Connections</button>
                                             </div>
                                         </div>
                                     </div>
@@ -7031,10 +7068,28 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label class="checkbox-label">
+                                                        <input type="checkbox" id="m3u-relative-paths">
+                                                        Write M3U entries relative to the playlist file
+                                                    </label>
+                                                    <span class="info-icon" role="button" tabindex="0"
+                                                        title="What's this?" onclick="toggleSettingHelp(this)"
+                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    <div class="setting-help-text setting-help-body" hidden>
+                                                        Entries become <code>../Artist/Album/01 - Song.flac</code>
+                                                        instead of the full path SoulSync sees, so a saved M3U still
+                                                        works when the folder is opened from a network share, another
+                                                        machine or a sync tool. Tracks that don't share a folder with
+                                                        the playlist keep their full path, and the base path and
+                                                        prefix rewrite below still apply to those.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>M3U Entry Base Path:</label>
                                                     <div class="path-input-group">
                                                         <input type="text" id="m3u-entry-base-path"
-                                                            placeholder="e.g. /mnt/music (leave empty for relative paths)"
+                                                            placeholder="e.g. /mnt/music (leave empty to use paths as stored)"
                                                             readonly>
                                                         <button class="browse-button locked"
                                                             onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>
@@ -7134,6 +7189,22 @@
                                                     <small class="settings-hint">Where downloaded audiobooks are saved
                                                         and organized. Keep this separate from your music library so a
                                                         media server does not index chapter files as albums.</small>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-group">
+                                                <div class="form-group">
+                                                    <label>Spoken-word artists (music downloads filed as audiobooks):</label>
+                                                    <div id="audiobook-routes-list"></div>
+                                                    <small class="settings-hint">Children's audio plays and similar
+                                                        releases are found by the music search, not the audiobook
+                                                        search. Downloads by the artists listed here are filed in the
+                                                        audiobooks folder above instead of the music library, and
+                                                        count as owned so playlist syncs do not fetch them again.
+                                                        Add an artist with <strong>Treat as audiobook</strong> on the
+                                                        artist's page or in the watchlist settings. Routing only
+                                                        affects new downloads; <em>Move existing…</em> relocates
+                                                        albums already in the music library.</small>
                                                 </div>
                                             </div>
 
@@ -7301,7 +7372,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$album</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
                                                         <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
@@ -7375,7 +7447,8 @@
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Variables:
                                                         <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$title</code>,
+                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
+                                                        <code>$title</code>,
                                                         <code>$track</code> (01), <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$year</code>,
                                                         <code>$quality</code> (filename only). Use <code>${var}</code>
@@ -8967,6 +9040,43 @@
                                                             <label class="checkbox-label"><input type="checkbox"
                                                                     data-config="hifi.tags.copyright" checked>
                                                                 Copyright</label>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Beatport -->
+                                                    <div class="tag-service-group">
+                                                        <div class="tag-service-header" onclick="toggleTagGroup(this)">
+                                                            <span class="tag-group-arrow">&#9654;</span>
+                                                            <label class="checkbox-label"
+                                                                onclick="event.stopPropagation()">
+                                                                <input type="checkbox" id="embed-beatport" checked
+                                                                    onchange="toggleServiceTags(this, 'beatport')"> Beatport
+                                                            </label>
+                                                            <span class="tag-service-count">6 tags</span>
+                                                        </div>
+                                                        <div class="tag-service-body" style="display:none;">
+                                                            <small class="tag-embed-desc">Found by ISRC, only the exact recording. Free for
+                                                                tracks that came from a Beatport chart; other electronic tracks are looked
+                                                                up on Beatport.</small>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.bpm" checked> BPM</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.key" checked> Key</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.label" checked> Label</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.catalog_number" checked> Catalog
+                                                                number</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.genre_merge" checked> Genre</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    data-config="beatport.tags.track_id" checked> Track
+                                                                ID</label>
+                                                            <label class="checkbox-label"><input type="checkbox"
+                                                                    id="beatport-search-all"> Look up every track, not just
+                                                                electronic ones
+                                                                <small class="tag-embed-desc">Slower: one Beatport request per
+                                                                    track.</small></label>
                                                         </div>
                                                     </div>
 
@@ -11054,11 +11164,62 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- movie night picker: nominate a movie or an episode for
+                            <!-- upload preview & staging modal: preview file with live thumbnail, waveform, and optional comment before sharing -->
+                            <div class="chat-peer-backdrop chat-upload-backdrop" data-chat-upload-backdrop hidden></div>
+                            <div class="chat-upload-modal-overlay" data-chat-upload-modal hidden>
+                                <div class="chat-upload-modal">
+                                    <div class="chat-upload-modal-head">
+                                        <div class="chat-upload-modal-title">
+                                            <span class="chat-upload-modal-icon">📁</span>
+                                            <div>
+                                                <h3 class="chat-upload-modal-heading">Upload &amp; Share File</h3>
+                                                <p class="chat-upload-modal-sub" data-chat-upload-target>Share a file via filepost.dev</p>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="chat-peer-close" data-chat-upload-close title="Cancel (Esc)">&times;</button>
+                                    </div>
+                                    <div class="chat-upload-modal-body">
+                                        <div class="chat-upload-preview-chassis" data-chat-upload-preview-slot></div>
+                                        <div class="chat-upload-meta-strip">
+                                            <div class="chat-upload-meta-info">
+                                                <span class="chat-upload-filename" data-chat-upload-name>filename.ext</span>
+                                                <span class="chat-upload-filesize" data-chat-upload-size>0 KB</span>
+                                            </div>
+                                            <span class="chat-upload-type-badge" data-chat-upload-badge>FILE</span>
+                                        </div>
+                                        <div class="chat-upload-caption-wrap">
+                                            <label class="chat-upload-caption-label" for="chat-upload-caption-input">Add a comment (optional):</label>
+                                            <textarea id="chat-upload-caption-input" class="chat-upload-caption" data-chat-upload-caption placeholder="Add an optional comment or note to accompany this file in chat…" rows="2" maxlength="300"></textarea>
+                                        </div>
+                                        <div class="chat-upload-progress-wrap" data-chat-upload-progress-wrap hidden>
+                                            <div class="chat-upload-progress-bar">
+                                                <div class="chat-upload-progress-fill" data-chat-upload-progress-fill></div>
+                                            </div>
+                                            <div class="chat-upload-progress-text" data-chat-upload-progress-text>Uploading… 0%</div>
+                                        </div>
+                                        <div class="chat-upload-error" data-chat-upload-error hidden></div>
+                                    </div>
+                                    <div class="chat-upload-modal-actions">
+                                        <button type="button" class="modal-button modal-button--secondary" data-chat-upload-cancel>Cancel</button>
+                                        <button type="button" class="modal-button modal-button--primary chat-upload-send-btn" data-chat-upload-send>
+                                            <span>⚡ Upload &amp; Share</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- image lightbox / theater modal for viewing shared images in high resolution -->
+                            <div class="chat-lightbox-backdrop" data-chat-lightbox-backdrop hidden>
+                                <div class="chat-lightbox-content" data-chat-lightbox-content>
+                                    <button type="button" class="chat-lightbox-close" data-chat-lightbox-close title="Close (Esc)">&times;</button>
+                                    <img class="chat-lightbox-img" data-chat-lightbox-img src="" alt="Image preview">
+                                    <div class="chat-lightbox-caption" data-chat-lightbox-caption></div>
+                                </div>
+                            </div>
+                            <!-- watch together picker: nominate a movie or an episode for
                                  the room's ballot (TMDB search via the video side) -->
                             <div class="chat-settings-overlay" data-chat-watch-modal hidden>
                                 <div class="chat-settings-modal chat-watch-modal">
-                                    <h3 class="chat-settings-title">🎬 Nominate for movie night</h3>
+                                    <h3 class="chat-settings-title">🎬 Nominate for Watch Together</h3>
                                     <form class="chat-jbx-searchform" data-chat-watch-searchform>
                                         <input class="chat-input" data-chat-watch-searchinput type="text"
                                             maxlength="200"
@@ -11327,7 +11488,7 @@
                                         <span class="chat-toolbar-hint">**bold** · *italic* · `code` ·
                                             ||spoiler||</span>
                                     </div>
-                                    <div class="chat-emoji-pop" data-chat-emoji-pop hidden></div>
+                                    <div class="chat-emoji-pop chat-emoji-picker" data-chat-emoji-pop hidden></div>
                                     <div class="chat-gif-pop chat-attach-pop" data-chat-attach-pop hidden>
                                         <div class="chat-attach-tabs">
                                             <button type="button" class="chat-fmt-btn"
@@ -12185,11 +12346,7 @@
     <!-- Watchlist Artist Config Modal -->
 
     <!-- Genre Browser Modal: REACT (routes/sync/-ui/genre-browser-modal.tsx).
-         The vanilla copy stood here, OUTSIDE #sync-page, so deleting the page
-         markup did not take it — an id-collision guard caught all three of its
-         ids living in both places. Its only readers are getElementById calls in
-         beatport-ui.js, whose entry point is #browse-by-genre-btn, an element
-         only React renders now. -->
+         The vanilla copy and beatport-ui.js, its only reader, are gone. -->
 
     <!-- Tool Help Modal -->
     <!-- Retag Tool Modal -->
@@ -12468,6 +12625,10 @@
     <!-- fetch-dedupe must load BEFORE the React bundle and every split module,
          so all frameworks share one wire request per identical GET burst. -->
     <script src="{{ url_for('static', filename='fetch-dedupe.js', v=static_v) }}"></script>
+    <!-- profile-api-gate: answers api calls this profile can't have with a local
+         403, so a member's page load doesn't send a burst of 4xx (#1763). after
+         fetch-dedupe so refused calls never reach it. -->
+    <script src="{{ url_for('static', filename='profile-api-gate.js', v=static_v) }}"></script>
     <!-- scrollbar-fade: toggles .is-scrolling on whatever element is scrolling
          so scrollbars.css section 4 can brighten/fade thumbs. Standalone,
          dependency-free, safe to load before every other module. -->
@@ -12494,11 +12655,7 @@
          the vanilla discover page, is long gone.) -->
     <script src="{{ url_for('static', filename='dist/shell.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
-    <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
     <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
          graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
     <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>

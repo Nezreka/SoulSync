@@ -34,6 +34,11 @@ _lock = threading.Lock()
 _inflight: set = set()          # item keys a manual search is currently working
 
 
+def _scene(items, db):
+    from core.video.numbering import annotate
+    return annotate(items, db=db)
+
+
 def _cutoff_rank() -> int:
     try:
         return vpw._default_cutoff_rank()
@@ -187,6 +192,9 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
     items = get_video_db().wishlist_manual_search_items(
         scope, tmdb_id, season_number=season_number, episode_number=episode_number,
         profile_id=profile_id)
+    if media_type == "episode":
+        from core.video.numbering import annotate
+        items = annotate(items)
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
     todo = _prepare(items, media_type, user_initiated=True)
@@ -218,7 +226,7 @@ def search_all() -> Dict[str, str]:
     # due_only=False: the user asked for everything NOW. Backoff paces the
     # machine's own hourly tick, it does not overrule a person clicking search.
     for media_type, fetch in (("movie", lambda: db.movie_wishlist_to_download(due_only=False, profile_id=pid)),
-                              ("episode", lambda: db.episode_wishlist_to_download(due_only=False, profile_id=pid))):
+                              ("episode", lambda: _scene(db.episode_wishlist_to_download(due_only=False, profile_id=pid), db))):
         if vpw.is_running(media_type):
             out[media_type] = "busy"
             continue

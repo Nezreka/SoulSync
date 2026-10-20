@@ -103,7 +103,7 @@ def nav(monkeypatch):
     # the write validator resolves tracks against the app db; the songs it
     # asks for are the fake's
     import core.library.navidrome_identity as ident
-    monkeypatch.setattr(ident, 'resolve_tracks', lambda tracks, songs, db: list(tracks))
+    monkeypatch.setattr(ident, 'resolve_tracks', lambda tracks, songs, db, skipped=None, ambiguous=None: list(tracks))
     monkeypatch.setattr(ident, 'get_database', lambda: None, raising=False)
     return SimpleNamespace(server=server, client=client)
 

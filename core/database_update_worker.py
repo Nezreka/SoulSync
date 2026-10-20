@@ -125,18 +125,12 @@ class DatabaseUpdateWorker:
         database_config = config_manager.get('database', {})
         base_max_workers = database_config.get('max_workers', 5)
         
-        # Optimize worker count - reduce for database concurrency safety
-        if self.server_type == "jellyfin":
-            # Reduce workers to prevent database lock issues with bulk inserts
-            self.max_workers = min(base_max_workers, 3)  # Max 3 workers for database safety
-            if base_max_workers > 3:
-                logger.info(f"Reducing worker count from {base_max_workers} to {self.max_workers} for Jellyfin database safety")
-        elif self.server_type == "navidrome":
-            # Navidrome uses standard worker count like Plex
-            self.max_workers = base_max_workers
-        else:
-            # Plex uses standard worker count
-            self.max_workers = base_max_workers
+        # Optimize worker count - the client says when it needs fewer
+        # (Jellyfin caps at 3: bulk inserts from its cache lock the database).
+        cap = self._scan_hints().get('max_workers_cap')
+        self.max_workers = min(base_max_workers, cap) if cap else base_max_workers
+        if cap and base_max_workers > cap:
+            logger.info(f"Reducing worker count from {base_max_workers} to {self.max_workers} for {self.server_type} database safety")
             
         logger.info(f"Using {self.max_workers} worker threads for {self.server_type} database update")
         self.thread_lock = threading.Lock()
@@ -237,7 +231,7 @@ class DatabaseUpdateWorker:
         self.should_stop = True
         
         # Clear media client cache when user stops scan to free memory
-        if self.server_type in ["jellyfin", "navidrome"] and hasattr(self, 'media_client'):
+        if self._client_caches() and hasattr(self, 'media_client'):
             try:
                 if hasattr(self.media_client, 'get_cache_stats'):
                     cache_stats = self.media_client.get_cache_stats()
@@ -262,18 +256,9 @@ class DatabaseUpdateWorker:
                 logger.info(f"Performing full database refresh for {self.server_type} - clearing existing {self.server_type} data")
                 self.database.clear_server_data(self.server_type, owner_profile_id=self.owner_profile_id)
 
-                # Show cache preparation phase for Jellyfin and set up progress callback
-                if self.server_type == "jellyfin":
-                    self._emit_signal('phase_changed', "Preparing Jellyfin cache for fast processing...")
-                    # Connect Jellyfin client progress to UI
-                    if hasattr(self.media_client, 'set_progress_callback'):
-                        self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
-                elif self.server_type == "navidrome":
-                    self._emit_signal('phase_changed', "Connecting to Navidrome server...")
-                    # Connect Navidrome client progress to UI
-                    if hasattr(self.media_client, 'set_progress_callback'):
-                        self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
-                        logger.info("Connected Navidrome progress callback")
+                # The client names its preparing phase and reports progress
+                # (Jellyfin: cache prep; Navidrome: connecting).
+                self._announce_preparing()
 
                 # A full refresh re-reads the whole server — stale listings
                 # cached by earlier runs must not survive into it.
@@ -334,7 +319,7 @@ class DatabaseUpdateWorker:
                     # on the singleton client, and that pre-import view then
                     # poisoned the NEXT deep scan (#torrent-album-missing).
                     self._clear_media_cache("after incremental (no new content)")
-                    self._repair_navidrome_identities()
+                    self._post_scan()
                     self._emit_finished(0, 0, 0, 0, 0)
                     return
                 logger.info(f"Incremental update: Found {len(artists_to_process)} artists to process")
@@ -363,7 +348,7 @@ class DatabaseUpdateWorker:
             # album/track listings used to outlive it and poison the next
             # deep scan / full refresh with a pre-import view of the library
             # (#torrent-album-missing).
-            if self.server_type in ["jellyfin", "navidrome"]:
+            if self._client_caches():
                 try:
                     if hasattr(self.media_client, 'get_cache_stats'):
                         cache_stats = self.media_client.get_cache_stats()
@@ -374,8 +359,8 @@ class DatabaseUpdateWorker:
                     logger.info(f"Cleared {self.server_type} cache after scan - freed ~{freed_items} items from memory")
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
-            
-            self._repair_navidrome_identities()
+
+            self._post_scan()
 
             self._absorb_superseded_tracks()
 
@@ -453,24 +438,52 @@ class DatabaseUpdateWorker:
             logger.error(f"Database update failed: {str(e)}")
             self._emit_signal('error', f"Database update failed: {str(e)}")
     
-    def _repair_navidrome_identities(self):
-        if self.server_type != 'navidrome':
-            return True
+    # ------------------------------------------------------------------
+    # Server-specific behaviour comes from the client's hooks
+    # (core.media_server.base), not from the server's name.
+    # ------------------------------------------------------------------
+
+    def _scan_hints(self) -> dict:
+        hints = getattr(self.media_client, 'scan_hints', None)
+        try:
+            return dict(hints()) if callable(hints) else {}
+        except Exception as exc:
+            logger.debug("scan_hints failed for %s: %s", self.server_type, exc)
+            return {}
+
+    def _client_caches(self) -> bool:
+        """Clients that keep per-artist album / per-album track listings on a
+        process-wide singleton (Jellyfin, Navidrome) say so in scan_hints.
+        A client without hooks falls back to the old name rule."""
+        if callable(getattr(self.media_client, 'scan_hints', None)):
+            return bool(self._scan_hints().get('caches_listings')) and callable(getattr(self.media_client, 'clear_cache', None))
+        return self.server_type in ("jellyfin", "navidrome") and callable(getattr(self.media_client, 'clear_cache', None))
+
+    def _announce_preparing(self, prefix: str = '') -> None:
+        """Show the client's preparing phase and route its progress to the UI."""
+        message = self._scan_hints().get('preparing_message')
+        if message:
+            self._emit_signal('phase_changed', f"{prefix}{message}")
+        if hasattr(self.media_client, 'set_progress_callback'):
+            self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
+
+    def _post_scan(self) -> bool:
+        """The client's post-scan work (Navidrome: merge same-path rows a
+        rescan rekeyed). Nothing for a client without the hook."""
         if not self.database or self.should_stop:
             return False
-        try:
-            # No inventory fetch unless same-path duplicates need investigation.
-            with self.database._get_connection() as conn:
-                duplicate = conn.execute("SELECT 1 FROM tracks WHERE server_source='navidrome' AND file_path IS NOT NULL AND file_path!='' GROUP BY file_path HAVING COUNT(*) > 1 LIMIT 1").fetchone()
-            if not duplicate:
-                return True
-            from core.library.navidrome_identity import read_inventory, repair_rekeyed_tracks
-            repaired = repair_rekeyed_tracks(self.database, read_inventory(self.media_client))
-            logger.info("Navidrome identity repair: %s obsolete same-path rows merged", repaired)
+        hook = getattr(self.media_client, 'post_scan', None)
+        if not callable(hook):
             return True
+        try:
+            return bool(hook(self.database))
         except Exception as exc:
-            logger.warning("Navidrome identity repair skipped: %s", exc)
+            logger.warning("post_scan failed for %s: %s", self.server_type, exc)
             return False
+
+    def _repair_navidrome_identities(self):
+        """Kept for callers and tests; the work lives in NavidromeClient.post_scan."""
+        return self._post_scan()
 
     def run_deep_scan(self):
         """Deep library scan: fetch ALL content, insert only NEW tracks, remove STALE tracks.
@@ -485,15 +498,8 @@ class DatabaseUpdateWorker:
             logger.info(f"Starting deep library scan for {self.server_type}")
             self._emit_signal('phase_changed', "Deep scan: Connecting to media server...")
 
-            # Phase 1: Cache prep for Jellyfin/Navidrome (same as full refresh)
-            if self.server_type == "jellyfin":
-                self._emit_signal('phase_changed', "Deep scan: Preparing Jellyfin cache...")
-                if hasattr(self.media_client, 'set_progress_callback'):
-                    self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
-            elif self.server_type == "navidrome":
-                self._emit_signal('phase_changed', "Deep scan: Connecting to Navidrome...")
-                if hasattr(self.media_client, 'set_progress_callback'):
-                    self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', msg))
+            # Phase 1: the client's preparing phase (same as full refresh)
+            self._announce_preparing(prefix="Deep scan: ")
 
             # A deep scan is a full re-read of the server — it must not trust
             # album/track listings cached by earlier (incremental) runs, or a
@@ -744,7 +750,7 @@ class DatabaseUpdateWorker:
         earlier incremental run leaves a pre-import view behind and a newly
         imported album silently never reaches the database — it then shows
         as MISSING even though the server has it (#torrent-album-missing)."""
-        if self.server_type not in ("jellyfin", "navidrome"):
+        if not self._client_caches():
             return
         try:
             self.media_client.clear_cache()

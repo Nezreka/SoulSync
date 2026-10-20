@@ -6,7 +6,8 @@ unification). The pre-extraction handler had ~190 lines of per-source
 if/elif branches; this version delegates to the adapter for each
 source, leaving the handler responsible only for:
 
-- filtering sources that can't be refreshed (``file``, ``beatport``),
+- filtering mirrors that can't be refreshed (``file``, user playlists, a
+  beatport mirror that isn't a live list),
 - extracting upstream URLs from the stored ``description`` for URL-
   backed sources (``spotify_public``, ``youtube``),
 - the Spotify-public → authenticated-Spotify fallback (uses the
@@ -27,7 +28,7 @@ from core.automation.deps import AutomationDeps
 from core.profile_context import get_background_profile
 from core.playlists.source_refs import require_refresh_url
 from core.playlists.sources import PlaylistDetail, to_mirror_track_dict
-from core.playlists.user_playlists import NO_UPSTREAM_SOURCES
+from core.playlists.user_playlists import has_upstream
 from core.playlists.sources.base import (
     SOURCE_SPOTIFY,
     SOURCE_SPOTIFY_PUBLIC,
@@ -75,8 +76,8 @@ def auto_refresh_mirrored(config: Dict[str, Any], deps: AutomationDeps) -> Dict[
     else:
         return {'status': 'error', 'reason': 'No playlist specified'}
 
-    # Filter out sources that can't be refreshed (no external API).
-    playlists = [pl for pl in playlists if pl.get('source', '') not in NO_UPSTREAM_SOURCES]
+    # Filter out mirrors that can't be refreshed (nothing upstream to pull).
+    playlists = [pl for pl in playlists if has_upstream(pl)]
 
     refreshed = 0
     errors: List[str] = []
@@ -191,8 +192,15 @@ def _fetch_detail(
     if registry is None:
         return None
 
+    # For request lists, use upstream_playlist_id if available,
+    # or strip the _req_ suffix from source_id so the upstream adapter
+    # resolves the actual upstream collection/playlist.
+    playlist_input = pl.get('upstream_playlist_id') or source_id
+    if pl.get('is_request_list') or '_req_' in str(playlist_input):
+        import re
+        playlist_input = re.sub(r'_req_[a-f0-9]+$', '', str(playlist_input))
+
     # URL-backed sources: pull the upstream URL out of `description`.
-    playlist_input = source_id
     if source in _URL_BACKED_SOURCES:
         # ``require_refresh_url`` raises ValueError on missing URL.
         # The outer try/except in the loop catches it and reports as

@@ -259,6 +259,72 @@ class TestRefreshMirrored:
         assert result['refreshed'] == '0'
         assert db.mirror_calls == []  # nothing got pushed to DB
 
+    def test_soulsync_discovery_ssd_mirror_regenerates(self):
+        # #1724 end-to-end: a Discovery mirror made by Refresh & Mirror
+        # carries source_playlist_id='ssd_discovery_shuffle'. The refresh
+        # handler must regenerate it through the real adapter (previously
+        # the adapter int()-parsed the ID, returned None, and the handler
+        # counted an error while the mirror kept its stale tracks).
+        def _track(tid, name):
+            return SimpleNamespace(
+                track_name=name, artist_name='Artist', album_name='Album',
+                spotify_track_id=tid, itunes_track_id=None, deezer_track_id=None,
+                album_cover_url=None, duration_ms=1000, popularity=1,
+                track_data_json=None, source='discovery',
+                primary_id=lambda tid=tid: tid,
+            )
+
+        record = SimpleNamespace(
+            id=42, profile_id=1, kind='discovery_shuffle', variant='',
+            name='Discovery Shuffle', config=None, track_count=1,
+            last_generated_at='2026-05-26T00:00:00Z', last_synced_at=None,
+            last_generation_source='discovery_pool', last_generation_error=None,
+            is_stale=False,
+        )
+
+        class _Manager:
+            def __init__(self):
+                self.refresh_calls = []
+                self._tracks = [_track('sp-old', 'Old Song')]
+
+            def list_playlists(self, profile_id=1):
+                return [record]
+
+            def get_playlist_tracks(self, playlist_id):
+                return list(self._tracks)
+
+            def refresh_playlist(self, kind, variant='', profile_id=1, config_overrides=None):
+                self.refresh_calls.append((kind, variant, profile_id))
+                self._tracks = [_track('sp-new', 'New Song')]  # a fresh shuffle
+                return record
+
+        manager = _Manager()
+        registry = build_playlist_source_registry(
+            spotify_client_getter=lambda: None,
+            tidal_client_getter=lambda: None,
+            qobuz_client_getter=lambda: None,
+            deezer_client_getter=lambda: None,
+            personalized_manager_getter=lambda: manager,
+            profile_id_getter=lambda: 1,
+        )
+        db = _StubDB(
+            playlists=[{'id': 7, 'name': 'Discovery Shuffle',
+                        'source': 'soulsync_discovery',
+                        'source_playlist_id': 'ssd_discovery_shuffle',
+                        'profile_id': 1}],
+            playlist_tracks={7: [{'source_track_id': 'sp-old'}]},
+        )
+        deps = _build_deps(get_database=lambda: db,
+                           playlist_source_registry=registry)
+        result = auto_refresh_mirrored({'playlist_id': '7'}, deps)
+        assert result['status'] == 'completed'
+        assert result['errors'] == '0'
+        assert result['refreshed'] == '1'
+        assert manager.refresh_calls == [('discovery_shuffle', '', 1)]
+        assert len(db.mirror_calls) == 1
+        new_ids = [t['source_track_id'] for t in db.mirror_calls[0]['tracks']]
+        assert new_ids == ['sp-new']
+
     def test_spotify_refresh_writes_to_db(self):
         track = _StubSpotifyTrack(
             id='track123', name='Hello', artists=['Adele'],

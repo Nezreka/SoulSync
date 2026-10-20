@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
+import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
 
@@ -63,6 +64,9 @@ export function WishlistPage() {
   const queryClient = useQueryClient();
 
   const [abReloadKey, setAbReloadKey] = useState(0);
+  // The audiobook search box lives in WishlistAudiobooks; the audio plays listed
+  // beneath it follow the same text.
+  const [abQuery, setAbQuery] = useState('');
 
   // Only one orb open at a time, matching the vanilla accordion which cleared
   // `.expanded` from every group before setting it on the clicked one.
@@ -96,9 +100,9 @@ export function WishlistPage() {
   const singlesQuery = useQuery(wishlistTracksQueryOptions(profileId, 'singles'));
   const photosQuery = useQuery(wishlistArtistPhotosQueryOptions(profileId));
 
-  const total = statsQuery.data?.total ?? 0;
-  const albumCount = statsQuery.data?.albums ?? 0;
-  const singleCount = statsQuery.data?.singles ?? 0;
+  // The server counts every wanted track. Tracks by artists filed as audiobooks
+  // are shown under Audiobooks instead, so they are taken out of the music
+  // figures below (see routedGroups).
   const currentCycle = cycleQuery.data?.cycle || 'albums';
 
   const artistImages = useMemo(
@@ -110,7 +114,7 @@ export function WishlistPage() {
     [albumsQuery.data, singlesQuery.data, photosQuery.data],
   );
 
-  const groups = useMemo(() => {
+  const allGroups = useMemo(() => {
     const parse = (rows: unknown[] | undefined, type: 'album' | 'single') =>
       (rows ?? [])
         .map((row) => parseWishlistTrack(row as never, type))
@@ -122,9 +126,39 @@ export function WishlistPage() {
     );
   }, [albumsQuery.data?.tracks, singlesQuery.data?.tracks]);
 
+  // Artists whose downloads are filed in the audiobook library. They are still
+  // wanted through the music search, but they belong to the audiobook side, so
+  // the music tab leaves them out and the audiobook tab lists them.
+  const audiobookArtists = useRoutedArtists(allGroups.map((group) => group.name));
+  const groups = useMemo(
+    () => allGroups.filter((group) => !audiobookArtists.has(group.name)),
+    [allGroups, audiobookArtists],
+  );
+  const routedGroups = useMemo(
+    () => allGroups.filter((group) => audiobookArtists.has(group.name)),
+    [allGroups, audiobookArtists],
+  );
+  const routedAlbumTracks = routedGroups.reduce(
+    (sum, group) => sum + group.albums.reduce((n, album) => n + album.tracks.length, 0),
+    0,
+  );
+  const routedSingleTracks = routedGroups.reduce((sum, group) => sum + group.singles.length, 0);
+  const albumCount = Math.max(0, (statsQuery.data?.albums ?? 0) - routedAlbumTracks);
+  const singleCount = Math.max(0, (statsQuery.data?.singles ?? 0) - routedSingleTracks);
+  const total = Math.max(0, (statsQuery.data?.total ?? 0) - routedAlbumTracks - routedSingleTracks);
+
   const visibleGroups = useMemo(
     () => filterWishlistGroups(groups, search.q, search.failing),
     [groups, search.q, search.failing],
+  );
+  const visibleRoutedGroups = useMemo(
+    () =>
+      filterWishlistGroups(
+        routedGroups,
+        media === 'audiobooks' ? abQuery : search.q,
+        search.failing,
+      ),
+    [routedGroups, media, abQuery, search.q, search.failing],
   );
 
   const nebulaGroups = useMemo(() => {
@@ -237,6 +271,21 @@ export function WishlistPage() {
     if (ids.length > 0) bulkAction.mutate({ action: 'grab', ids });
   };
 
+  /** "Search now" on the Audiobooks tab also sends the audio plays listed there
+      (artists filed as audiobooks) to downloads, since only this page knows they
+      belong together. Returns a sentence for the tab's notice. */
+  const searchRouted = async (): Promise<string> => {
+    const ids = routedGroups.flatMap(groupTrackIds);
+    if (ids.length === 0) return '';
+    try {
+      const response = await bulkAction.mutateAsync({ action: 'grab', ids });
+      const sent = (response.results ?? []).filter((result) => result.ok).length;
+      return `Sent ${sent} of ${trackCountLabel(ids.length)} from the music search to downloads.`;
+    } catch {
+      return 'Could not send the audio plays to downloads.';
+    }
+  };
+
   /** New: queue one album's tracks without touching the rest of the artist. */
   const onGrabAlbum = (album: WishlistAlbumGroup) => {
     const ids = album.tracks.map((track) => track.id);
@@ -336,7 +385,31 @@ export function WishlistPage() {
               same wlp hero, stats, triage and command bar — so the two tabs
               read as one page. Only the shared tab strip above is page-level;
               the rest of the panel lives in WishlistAudiobooks. */}
-          <WishlistAudiobooks key={abReloadKey} onClearAll={() => void onClearAudiobooks()} />
+          <WishlistAudiobooks
+            key={abReloadKey}
+            onClearAll={() => void onClearAudiobooks()}
+            onSearchAlso={searchRouted}
+            onQueryChange={setAbQuery}
+          />
+          {routedGroups.length > 0 && (visibleRoutedGroups.length > 0 || !abQuery.trim()) && (
+            <section className="wlp-routed" aria-label="Music releases filed as audiobooks">
+              <h2 className="wlp-routed-title">Audio plays from the music search</h2>
+              <p className="wlp-routed-note">
+                Wanted through the music search, but filed in your audiobook library because the
+                artist is set to <strong>Treat as audiobook</strong>.
+              </p>
+              <WishlistList
+                groups={visibleRoutedGroups}
+                artistImages={artistImages}
+                filterActive={Boolean(abQuery.trim()) || search.failing}
+                onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
+                onGrabArtist={onGrabArtist}
+                onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
+                bulkBusy={bulkAction.isPending}
+              />
+            </section>
+          )}
         </>
       ) : (
         <>

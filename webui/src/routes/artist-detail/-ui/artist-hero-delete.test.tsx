@@ -140,3 +140,9 @@ describe('a confirmed delete', () => {
     await waitFor(() => expect(deleteButton()!.disabled).toBe(false));
   });
 });
+
+// The audiobook toggle has its own tests (features/audiobook-routes); these
+// files pin the hero's own requests, so the toggle must not add fetches.
+vi.mock('@/features/audiobook-routes/audiobook-route-toggle', () => ({
+  AudiobookRouteToggle: () => null,
+}));

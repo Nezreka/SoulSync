@@ -15,6 +15,7 @@ import {
   quarantineAudit,
   quarantineCompare,
   quarantineDeleteEntry,
+  quarantineDeleteGroup,
   quarantinePlayEntry,
   quarantineRecoverEntry,
   reviewableHistoryIds,
@@ -371,5 +372,52 @@ describe('bulk actions', () => {
     await clearAllQuarantine([], vi.fn());
     expect(confirmCalls).toHaveLength(0);
     expect(calls).toHaveLength(0);
+  });
+
+  it('uses totalCount for the clear dialog count', async () => {
+    confirmAnswer = false;
+    ok('/api/quarantine/clear');
+    await clearAllQuarantine([entry()], vi.fn(), 42);
+    expect(confirmCalls).toHaveLength(1);
+    expect(String(confirmCalls[0].message)).toContain('42');
+    expect(String(confirmCalls[0].message)).not.toContain('all 1 ');
+  });
+
+  it('still clears when entries are empty but totalCount is positive', async () => {
+    const calls = ok('/api/quarantine/clear');
+    const onDone = vi.fn();
+    await clearAllQuarantine([], onDone, 7);
+    expect(confirmCalls).toHaveLength(1);
+    expect(String(confirmCalls[0].message)).toContain('7');
+    expect(calls).toHaveLength(1);
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it('is a no-op for empty entries with no totalCount', async () => {
+    const calls = ok('/api/quarantine/clear');
+    await clearAllQuarantine([], vi.fn(), undefined);
+    expect(confirmCalls).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('delete-group with an unknown (null) count confirms without a number and still deletes siblings', async () => {
+    const urls: string[] = [];
+    server.use(
+      http.delete('/api/quarantine/:id', ({ request }) => {
+        urls.push(request.url);
+        return HttpResponse.json({ success: true, deleted: 4 });
+      }),
+    );
+    const onDone = vi.fn();
+    await quarantineDeleteGroup(entry(), null, onDone);
+    expect(confirmCalls).toHaveLength(1);
+    expect(String(confirmCalls[0].message)).toContain('every quarantined candidate');
+    expect(String(confirmCalls[0].message)).not.toMatch(/all \d/);
+    expect(confirmCalls[0].confirmText).toBe('Delete all');
+    expect(urls).toHaveLength(1);
+    expect(urls[0]).toContain('siblings=1');
+    expect(onDone).toHaveBeenCalled();
+    // The toast uses the server's tally, not an invented local one.
+    expect(toasts[0].message).toContain('4');
   });
 });

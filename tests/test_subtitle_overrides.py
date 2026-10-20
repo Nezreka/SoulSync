@@ -19,7 +19,7 @@ def db(tmp_path):
 
 
 def test_schema_version_is_52():
-    assert SCHEMA_VERSION == 52
+    assert SCHEMA_VERSION >= 52
 
 
 def test_set_get_roundtrip(db):

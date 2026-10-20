@@ -143,17 +143,17 @@ def test_every_recorded_consumer_still_uses_it(name, consumers):
 
 def test_esc_still_has_a_home_now_that_library_js_is_gone():
     """`_esc` left this contract when library.js was deleted, but its callers
-    did not go away — auto-sync.js, pages-extra.js and wishlist-tools.js (and
-    video-dashboard.js) still call it, and library.js's copy was only ever a
-    shadowed duplicate of the one in stats-automations.js, which loads later
-    and always won. Pinned here so deleting the surviving declaration fails
-    loudly instead of ReferenceError-ing four files at runtime."""
+    did not go away — pages-extra.js and wishlist-tools.js (and video-dashboard.js)
+    still call it, and library.js's copy was only ever a shadowed duplicate of the
+    one in stats-automations.js, which loads later and always won. Pinned here so
+    deleting the surviving declaration fails loudly instead of ReferenceError-ing
+    surviving files at runtime."""
     assert re.search(r"^function _esc\b", _strip_comments(
         (_STATIC / "stats-automations.js").read_text(encoding="utf-8")), re.M), (
-        "_esc lost its last declaration — auto-sync/pages-extra/wishlist-tools/"
+        "_esc lost its last declaration — pages-extra/wishlist-tools/"
         "video-dashboard all call it"
     )
-    for consumer in ("auto-sync.js", "pages-extra.js", "wishlist-tools.js"):
+    for consumer in ("pages-extra.js", "wishlist-tools.js"):
         source = _strip_comments((_STATIC / consumer).read_text(encoding="utf-8"))
         assert re.search(r"\b_esc\s*\(", source), (
             f"{consumer} stopped using _esc — shrink this guard deliberately"

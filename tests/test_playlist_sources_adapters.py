@@ -826,6 +826,232 @@ def test_soulsync_discovery_adapter_refresh_invokes_manager():
     assert manager.refresh_calls == [("hidden_gems", "", 1)]
 
 
+# ─── #1724: mirrors created by "Refresh & Mirror" carry ssd_ IDs ──────────
+# The frontend mirrors personalized playlists with
+# source_playlist_id="ssd_<kind>[_<variant>]" (its UPSERT-stable key), NOT
+# the personalized row id. The adapter used to int()-parse the ID, fail,
+# and return None — so a scheduled Auto-Sync of such a mirror refreshed
+# nothing and re-synced the stale stored tracks forever.
+
+
+def test_soulsync_discovery_adapter_get_by_synthetic_id():
+    manager = _FakeDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.get_playlist("ssd_hidden_gems")
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+
+
+def test_soulsync_discovery_adapter_refresh_by_synthetic_id():
+    manager = _FakeDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_hidden_gems")
+    assert manager.refresh_calls == [("hidden_gems", "", 1)]
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+
+
+def test_soulsync_discovery_adapter_refresh_by_synthetic_variant_id():
+    manager = _FakeDiscoveryManager()
+    manager._records = [_discovery_record(7, "time_machine", 1, "Time Machine", variant="1990s")]
+    manager.get_playlist_tracks = lambda playlist_id: manager._tracks if playlist_id == 7 else []
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_time_machine_1990s")
+    assert manager.refresh_calls == [("time_machine", "1990s", 1)]
+    assert detail is not None
+
+
+def test_soulsync_discovery_adapter_unknown_synthetic_id_returns_none():
+    manager = _FakeDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.get_playlist("ssd_no_such_kind") is None
+    assert src.refresh_playlist("ssd_no_such_kind") is None
+    assert manager.refresh_calls == []
+
+
+class _GeneratingDiscoveryManager(_FakeDiscoveryManager):
+    """Fake whose refresh creates the personalized row (like the real
+    manager's ensure_playlist inside refresh_playlist)."""
+
+    def __init__(self):
+        super().__init__()
+        self._records = []
+        self.registry = SimpleNamespace(all=lambda: [
+            SimpleNamespace(kind="discovery_shuffle", requires_variant=False),
+            SimpleNamespace(kind="time_machine", requires_variant=True,
+                            variant_resolver=lambda deps: ["1990s", "2000s"]),
+        ])
+
+    def refresh_playlist(self, kind: str, variant: str = "", profile_id: int = 1, config_overrides=None):
+        self.refresh_calls.append((kind, variant, profile_id))
+        name = "Discovery Shuffle" if kind == "discovery_shuffle" else f"Time Machine {variant}"
+        self._records = [_discovery_record(99, kind, 1, name, variant=variant)]
+        return self._records[0]
+
+    def get_playlist_tracks(self, playlist_id: int):
+        return self._tracks if playlist_id == 99 else []
+
+
+def test_soulsync_discovery_adapter_refresh_synthetic_without_record():
+    # Mirror exists but the personalized row is gone: refresh must still
+    # regenerate by parsing the ssd_ ID against the kind registry.
+    manager = _GeneratingDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_discovery_shuffle")
+    assert manager.refresh_calls == [("discovery_shuffle", "", 1)]
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+
+
+def test_soulsync_discovery_adapter_refresh_synthetic_variant_without_record():
+    manager = _GeneratingDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_time_machine_2000s")
+    assert manager.refresh_calls == [("time_machine", "2000s", 1)]
+    assert detail is not None
+
+
+def test_soulsync_discovery_adapter_refresh_unregistered_synthetic_returns_none():
+    manager = _GeneratingDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.refresh_playlist("ssd_reverted_kind_1") is None
+    assert manager.refresh_calls == []
+
+
+def test_soulsync_discovery_adapter_fallback_unproducible_variant_returns_none():
+    # Parsing deliberately doesn't validate variants (free-form genre
+    # variants aren't enumerated by their resolver — see the free-form
+    # test below). A variant that produces nothing is stopped by the
+    # empty-generation guard instead: the refresh was attempted, the
+    # result is None, and no 0-track detail reaches the caller.
+    manager = _EmptyGeneratingManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="time_machine", requires_variant=True),
+    ])
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.refresh_playlist("ssd_time_machine_99") is None
+    assert manager.refresh_calls == [("time_machine", "99", 1)]
+
+
+def test_soulsync_discovery_adapter_fallback_freeform_genre_variant_refreshes():
+    # genre_playlist's resolver enumerates only parent genres, but the
+    # kind supports free-form variants created on demand. The parse
+    # fallback must accept one the resolver doesn't list.
+    manager = _GeneratingDiscoveryManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="genre_playlist", requires_variant=True,
+                        variant_resolver=lambda deps: ["rock", "pop"]),
+    ])
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_genre_playlist_electronic_dance")
+    assert manager.refresh_calls == [("genre_playlist", "electronic_dance", 1)]
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+
+
+def test_soulsync_discovery_adapter_parse_longest_prefix_wins():
+    # With prefix-related kinds registered, the longest kind must claim
+    # the ID (frontend fixture pins the same for time vs time_machine).
+    manager = _GeneratingDiscoveryManager()
+    manager.registry = SimpleNamespace(all=lambda: [
+        SimpleNamespace(kind="time", requires_variant=True),
+        SimpleNamespace(kind="time_machine", requires_variant=True),
+    ])
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("ssd_time_machine_1990s")
+    assert manager.refresh_calls == [("time_machine", "1990s", 1)]
+    assert detail is not None
+
+
+def test_soulsync_discovery_adapter_synthetic_underscore_variant_exact_match():
+    # Variants containing underscores resolve by exact synthetic match,
+    # never by splitting, on both the get and refresh paths.
+    manager = _FakeDiscoveryManager()
+    manager._records = [_discovery_record(33, "genre_playlist", 1, "Genre — electronic_dance",
+                                          variant="electronic_dance")]
+    manager.get_playlist_tracks = lambda playlist_id: manager._tracks if playlist_id == 33 else []
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.get_playlist("ssd_genre_playlist_electronic_dance")
+    assert detail is not None
+    assert detail.tracks[0].source_track_id == "sp-gem"
+    detail = src.refresh_playlist("ssd_genre_playlist_electronic_dance")
+    assert manager.refresh_calls == [("genre_playlist", "electronic_dance", 1)]
+    assert detail is not None
+
+
+def test_soulsync_discovery_adapter_refresh_bare_variant_kind_returns_none():
+    # ssd_<kind> with no variant names a singleton only; a variant kind
+    # without its variant is an orphan ID (the frontend drops those rows).
+    # It must not reach the manager as (kind, '').
+    manager = _GeneratingDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.refresh_playlist("ssd_time_machine") is None
+    assert manager.refresh_calls == []
+
+
+class _EmptyGeneratingManager(_GeneratingDiscoveryManager):
+    """Refresh creates the row but the generator produced no tracks
+    (failure stamped on the row, or a variant with no data)."""
+
+    def refresh_playlist(self, kind: str, variant: str = "", profile_id: int = 1, config_overrides=None):
+        self.refresh_calls.append((kind, variant, profile_id))
+        self._records = [_discovery_record(98, kind, 0, "Empty", variant=variant)]
+        return self._records[0]
+
+    def get_playlist_tracks(self, playlist_id: int):
+        return []
+
+
+def test_soulsync_discovery_adapter_fallback_empty_generation_returns_none():
+    # A first generation via the parse fallback that yields 0 tracks must
+    # read as a FAILED refresh (None): the caller replaces the mirror with
+    # whatever detail it gets, so a 0-track detail would wipe the mirror.
+    manager = _EmptyGeneratingManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.refresh_playlist("ssd_discovery_shuffle") is None
+    assert manager.refresh_calls == [("discovery_shuffle", "", 1)]
+
+
+class _EmptySnapshotManager(_FakeDiscoveryManager):
+    """Existing record whose current snapshot has no tracks."""
+
+    def __init__(self):
+        super().__init__()
+        self._records = [_discovery_record(42, "hidden_gems", 0, "Hidden Gems")]
+
+    def get_playlist_tracks(self, playlist_id: int):
+        return []
+
+
+def test_soulsync_discovery_adapter_record_path_empty_snapshot_unchanged():
+    # The guard is fallback-only: with an existing record, the manager's
+    # snapshot semantics surface as before (here: an empty snapshot).
+    manager = _EmptySnapshotManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    detail = src.refresh_playlist("42")
+    assert detail is not None
+    assert detail.tracks == []
+
+
+class _CountingDiscoveryManager(_FakeDiscoveryManager):
+    def __init__(self):
+        super().__init__()
+        self.list_calls = 0
+
+    def list_playlists(self, profile_id: int = 1):
+        self.list_calls += 1
+        return super().list_playlists(profile_id=profile_id)
+
+
+def test_soulsync_discovery_adapter_garbage_id_does_not_query():
+    # An ID that is neither an integer row ID nor an ssd_ mirror ID
+    # resolves to None without a list_playlists call (pre-ssd_ behavior).
+    manager = _CountingDiscoveryManager()
+    src = SoulSyncDiscoveryPlaylistSource(lambda: manager, profile_id_getter=lambda: 1)
+    assert src.get_playlist("not-a-playlist") is None
+    assert manager.list_calls == 0
+
+
 def _discovery_record(id, kind, track_count, name="X", variant=""):
     return SimpleNamespace(
         id=id, profile_id=1, kind=kind, variant=variant, name=name, config=None,

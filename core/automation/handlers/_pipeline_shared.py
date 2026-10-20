@@ -54,7 +54,7 @@ def run_sync_and_wishlist(
       thread to complete + read the matched_tracks count).
 
     Returns ``{'synced': int, 'skipped': int, 'errors': int,
-    'wishlist_queued': int}`` so the caller can stitch it into its
+    'error_messages': [str], 'wishlist_queued': int}`` so the caller can stitch it into its
     final status.
     """
     deps.update_progress(
@@ -68,6 +68,7 @@ def run_sync_and_wishlist(
     total_synced = 0
     total_skipped = 0
     sync_errors = 0
+    error_messages: List[str] = []
     sync_states = deps.get_sync_states()
     n_playlists = max(1, len(playlists))
     progress_span = max(1, progress_end - progress_start - 1)
@@ -99,6 +100,7 @@ def run_sync_and_wishlist(
             final_status = ss.get('status')
             if timed_out:
                 sync_errors += 1
+                error_messages.append(f'"{pl_name}": timed out after {_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS}s')
                 deps.update_progress(
                     automation_id,
                     log_line=f'Sync timed out "{pl_name}" after {_SYNC_PER_PLAYLIST_TIMEOUT_SECONDS}s',
@@ -108,6 +110,7 @@ def run_sync_and_wishlist(
             if final_status in ('error', 'failed'):
                 sync_errors += 1
                 reason = ss.get('error') or ss.get('reason') or 'background sync failed'
+                error_messages.append(f'"{pl_name}": {reason}')
                 deps.update_progress(
                     automation_id,
                     log_line=f'Sync error "{pl_name}": {reason}',
@@ -134,6 +137,7 @@ def run_sync_and_wishlist(
             )
         elif sync_status == 'error':
             sync_errors += 1
+            error_messages.append(f'"{pl_name}": {sync_result.get("reason", "unknown")}')
             deps.update_progress(
                 automation_id,
                 log_line=f'Sync error "{pl_name}": {sync_result.get("reason", "unknown")}',
@@ -196,9 +200,33 @@ def run_sync_and_wishlist(
         'synced': total_synced,
         'skipped': total_skipped,
         'errors': sync_errors,
+        'error_messages': error_messages,
         'wishlist_queued': wishlist_queued,
         'organize_downloads_started': organize_started,
     }
+
+
+def apply_sync_errors(
+    sync_summary: Dict[str, Any],
+    result: Dict[str, Any],
+    log_line: str,
+    log_type: str,
+) -> tuple:
+    """Stitch the SYNC phase's failures into a pipeline's final result and
+    completion log line. A failed sync used to be counted, then dropped, so
+    the run read as a clean "Completed / Synced 0".
+
+    Sets ``result['sync_errors']`` always, and ``result['error']`` (the
+    history card's error block) when something failed. Returns the possibly
+    downgraded ``(log_line, log_type)``."""
+    errors = int(sync_summary.get('errors', 0) or 0)
+    result['sync_errors'] = str(errors)
+    if errors <= 0:
+        return log_line, log_type
+    messages = list(sync_summary.get('error_messages') or []) or [f'{errors} playlist(s)']
+    result['error'] = 'Sync failed: ' + '; '.join(messages)
+    log_line += f' — {errors} playlist sync{"s" if errors != 1 else ""} failed'
+    return log_line, 'warning'
 
 
 def run_wishlist_phase(
@@ -258,4 +286,4 @@ def run_wishlist_phase(
         return 0
 
 
-__all__ = ['run_sync_and_wishlist', 'run_wishlist_phase']
+__all__ = ['apply_sync_errors', 'run_sync_and_wishlist', 'run_wishlist_phase']

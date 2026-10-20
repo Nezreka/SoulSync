@@ -311,6 +311,14 @@ describe('AdlQuarantineList grouping', () => {
     expect(container.querySelector('.verif-quar-alt-members')?.className).not.toContain('vqg-open');
   });
 
+  it('does not render collapsed group members', () => {
+    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
+    const { container } = render(
+      <AdlQuarantineList {...listProps} groups={[{ key: 'g1', members }]} />,
+    );
+    expect(container.querySelectorAll('.verif-quar-row')).toHaveLength(1);
+  });
+
   it('opens the alternatives when the group is expanded', () => {
     const members = [entry(), entry({ id: 'q2' })];
     const { container } = render(
@@ -325,6 +333,80 @@ describe('AdlQuarantineList grouping', () => {
       'Other attempt at this track',
     );
     expect(container.querySelector('.verif-quar-alt-members')?.className).toContain('vqg-open');
+  });
+
+  it('labels group counts as loaded-only when the list is partial', () => {
+    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
+    const { container } = render(
+      <AdlQuarantineList
+        {...listProps}
+        partial
+        onDeleteGroup={vi.fn()}
+        groups={[{ key: 'g1', members }]}
+      />,
+    );
+    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
+      'Other 2 attempts loaded',
+    );
+    const attemptsBtn = container.querySelector('.verif-quar-attempts') as HTMLElement;
+    expect(attemptsBtn.textContent).toBe('3+ attempts ▾');
+    expect(attemptsBtn.getAttribute('title')).toMatch(
+      /^At least 3 downloads tried to be this track \(the list is paged\)\./,
+    );
+    const del = container.querySelector('.verif-quar-alt-del') as HTMLElement;
+    expect(del.textContent).toBe('Delete all candidates for this track');
+    expect(del.getAttribute('title')).toBe(
+      'Permanently delete every quarantined candidate for this track (the server resolves the full group, including entries not loaded yet)',
+    );
+  });
+
+  it('singularises the partial group heading', () => {
+    const members = [entry(), entry({ id: 'q2' })];
+    const { container } = render(
+      <AdlQuarantineList
+        {...listProps}
+        partial
+        onDeleteGroup={vi.fn()}
+        groups={[{ key: 'g1', members }]}
+      />,
+    );
+    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
+      'Other 1 attempt loaded',
+    );
+  });
+
+  it('passes a null count to onDeleteGroup when the list is partial', () => {
+    const onDeleteGroup = vi.fn();
+    const members = [entry(), entry({ id: 'q2' })];
+    const { container } = render(
+      <AdlQuarantineList
+        {...listProps}
+        partial
+        onDeleteGroup={onDeleteGroup}
+        groups={[{ key: 'g1', members }]}
+      />,
+    );
+    fireEvent.click(container.querySelector('.verif-quar-alt-del') as HTMLElement);
+    expect(onDeleteGroup).toHaveBeenCalledWith(members[0], null);
+  });
+
+  it('keeps total wording for group counts when the list is not partial', () => {
+    const members = [entry(), entry({ id: 'q2' }), entry({ id: 'q3' })];
+    const { container } = render(
+      <AdlQuarantineList
+        {...listProps}
+        onDeleteGroup={vi.fn()}
+        groups={[{ key: 'g1', members }]}
+      />,
+    );
+    expect(container.querySelector('.verif-quar-alt-heading')?.textContent).toBe(
+      'Other 2 attempts at this track',
+    );
+    const del = container.querySelector('.verif-quar-alt-del') as HTMLElement;
+    expect(del.textContent).toBe('Delete all 3');
+    expect(del.getAttribute('title')).toBe(
+      'Permanently delete all 3 quarantined candidates for this track',
+    );
   });
 
   it('singularises the alternatives tooltip', () => {

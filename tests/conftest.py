@@ -1171,6 +1171,22 @@ def _inert_music_disk_guard():
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _inert_spotify_second_pass_fetch():
+    """no real spotify fetch from the #1721 second pass, anywhere in the suite.
+
+    a mirrored spotify track that misses its metadata source gets fetched by
+    id through SpotipyFree, which is the network. tests of the second pass
+    monkeypatch _free_track with a fake; everything else gets nothing back and
+    the track stays wing it, same as before the second pass existed.
+    """
+    import core.discovery.spotify_second_pass as ssp
+    original = ssp._free_track
+    ssp._free_track = lambda track_id: None
+    yield
+    ssp._free_track = original
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _video_db_lazy_create_tripwire():
     """Name the poisoner: log a full stack whenever get_video_db() LAZILY
     CREATES the module-global VideoDatabase during the suite.

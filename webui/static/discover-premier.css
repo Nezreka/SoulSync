@@ -1823,11 +1823,6 @@
         display: none !important;
     }
 
-    /* On mobile, collapse the command analytics panel to prioritize music discovery shelves */
-    .discover-command-panel {
-        display: none !important;
-    }
-
     .discover-mix-card {
         flex: 0 0 152px !important;
         width: 152px !important;

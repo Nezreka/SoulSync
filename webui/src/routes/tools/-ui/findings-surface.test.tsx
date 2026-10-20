@@ -1197,6 +1197,68 @@ describe('per-finding actions', () => {
     expect(document.getElementById('reid-modal')).not.toBeNull();
     expect(document.getElementById('reid-hero-title')?.textContent).toBe('Song');
   });
+
+  // #1567: a poisoned album holds 11 songs by 9 artists. the single-track
+  // modal searched "Music Nickelback" for all of them, which can't work.
+  const poisonedAlbum = (details: Record<string, unknown>) =>
+    finding({
+      id: 43,
+      finding_type: 'suspect_album_tag',
+      entity_type: 'album',
+      entity_id: '700',
+      title: 'Suspect album: "Music" may be a poisoned batch',
+      details: {
+        album_id: 700,
+        album_title: 'Music',
+        album_artist_name: 'Nickelback',
+        reidentify_query: 'Music Nickelback',
+        ...details,
+      },
+    });
+
+  it('opens a poisoned album in the library instead of the track modal', async () => {
+    const navigateToPage = vi.fn().mockResolvedValue(true);
+    Object.assign(window, { SoulSyncWebRouter: { navigateToPage } });
+    routes({ [FINDINGS]: page([poisonedAlbum({ artist_id: 2 })]) });
+    await renderList();
+    await flush();
+
+    const fixBtn = document.querySelector('.repair-finding-btn.fix') as HTMLElement;
+    expect(fixBtn.textContent).toBe('Open album');
+    fireEvent.click(fixBtn);
+    await flush();
+
+    expect(document.getElementById('reid-modal')).toBeNull();
+    expect(navigateToPage).toHaveBeenCalledWith('artist-detail', {
+      artistId: '2',
+      artistName: 'Nickelback',
+      focusAlbumId: '700',
+    });
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/fix'))).toBe(false);
+  });
+
+  it('finds the artist by name for an album finding stored before the id was', async () => {
+    const navigateToPage = vi.fn().mockResolvedValue(true);
+    Object.assign(window, { SoulSyncWebRouter: { navigateToPage } });
+    routes({
+      [FINDINGS]: page([poisonedAlbum({})]),
+      '/api/library/artists?search=Nickelback': {
+        success: true,
+        artists: [{ id: 'nav-2', name: 'Nickelback' }],
+      },
+    });
+    await renderList();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-finding-btn.fix') as HTMLElement);
+    await flush();
+
+    expect(navigateToPage).toHaveBeenCalledWith('artist-detail', {
+      artistId: 'nav-2',
+      artistName: 'Nickelback',
+      focusAlbumId: '700',
+    });
+  });
 });
 
 // ── Bulk paths ───────────────────────────────────────────────────────────────

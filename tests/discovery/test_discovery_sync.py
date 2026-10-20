@@ -22,6 +22,7 @@ class _FakeSyncResult:
     total_tracks: int = 6
     wishlist_added_count: int = 0
     match_details: list = None
+    errors: list = None
 
     def __post_init__(self):
         if self.match_details is None:
@@ -75,8 +76,9 @@ class _FakeSyncService:
         self.cleared_callbacks.append(playlist_name)
 
     async def sync_playlist(self, playlist, download_missing=False, profile_id=1, sync_mode='replace',
-                            user_initiated=False):
+                            user_initiated=False, **kwargs):
         self.user_initiated = user_initiated
+        self.extra_kwargs = kwargs
         if self._raise_on_sync:
             raise self._raise_on_sync
         return self._sync_result
@@ -171,6 +173,7 @@ def _build_deps(
     process_wishlist_automatically=None,
     run_playlist_organize_download=None,
     is_wishlist_actually_processing=None,
+    invalidate_sync_fingerprint=None,
 ):
     return ds.SyncDeps(
         config_manager=config or _FakeConfig(),
@@ -190,6 +193,7 @@ def _build_deps(
         process_wishlist_automatically=process_wishlist_automatically,
         run_playlist_organize_download=run_playlist_organize_download,
         is_wishlist_actually_processing=is_wishlist_actually_processing,
+        invalidate_sync_fingerprint=invalidate_sync_fingerprint,
     )
 
 
@@ -340,6 +344,46 @@ def test_successful_sync_marks_state_finished(patched_db):
 
     assert states['pOK']['status'] == 'finished'
     assert states['pOK']['progress']['matched_tracks'] == 10
+
+
+def test_failed_playlist_write_is_an_error_that_keeps_its_counts(patched_db):
+    """The matching ran but the server write was refused (Navidrome mid-scan):
+    the run is an error, history keeps the real match count instead of 0, and
+    no new sync status is saved while the last good run's fingerprint is
+    dropped, so the next run cannot smart-skip the write as unchanged."""
+    states = {}
+    saved_status = []
+    invalidated = []
+    result = _FakeSyncResult(matched_tracks=2652, total_tracks=3230, synced_tracks=0,
+                             failed_tracks=578, errors=['Navidrome playlist write failed'])
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, sync_states=states,
+                       update_and_save_sync_status=lambda *a, **kw: saved_status.append(kw),
+                       invalidate_sync_fingerprint=invalidated.append)
+
+    ds.run_sync_task('pW', 'PW', [_track()], deps=deps)
+
+    assert states['pW']['status'] == 'error'
+    assert 'write failed' in states['pW']['error']
+    assert patched_db.completion_calls[0][1:] == (2652, 0, 578)
+    assert saved_status == []
+    assert invalidated == ['pW']
+
+
+def test_failed_resync_drops_the_playlists_own_fingerprint(patched_db, monkeypatch):
+    """A re-sync from history runs as resync_<entry>_<ts>, but the scheduled
+    run reads the fingerprint under the playlist's own id: that one goes."""
+    monkeypatch.setattr(patched_db, 'get_sync_history_entry',
+                        lambda entry_id: {'playlist_id': 'auto_mirror_1', 'batch_id': 'b'},
+                        raising=False)
+    invalidated = []
+    result = _FakeSyncResult(errors=['Navidrome playlist write failed'])
+    svc = _FakeSyncService(media_client=_FakeMediaClient(), sync_result=result)
+    deps = _build_deps(sync_service=svc, invalidate_sync_fingerprint=invalidated.append)
+
+    ds.run_sync_task('resync_42_1234', 'Liked Songs', [_track()], deps=deps)
+
+    assert invalidated == ['auto_mirror_1']
 
 
 def test_unmatched_tracks_summary_added_to_state(patched_db):

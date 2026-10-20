@@ -267,6 +267,11 @@ class DatabaseTrackWithMetadata:
     duration: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Per-track credit, when the row carries one. The sync match cache
+    # revalidation (#1721) scores this row as a candidate: without the
+    # credit, compilation/soundtrack evidence was invisible to the artist
+    # scorer and legitimate cached matches failed validation.
+    track_artist: Optional[str] = None
 
 @dataclass
 class WatchlistArtist:
@@ -866,6 +871,21 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
 
+            # Artists whose music downloads are filed in the audiobook library
+            # instead (core/audiobook_routing.py). Keyed on the normalized
+            # artist name: every download path knows the artist, none of them
+            # reliably knows the playlist.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS audiobook_routes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL DEFAULT 'artist',
+                    route_key TEXT NOT NULL,
+                    label TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(kind, route_key)
+                )
+            """)
+
             # #652 again. the "don't pick this same bad upload again" list used
             # to be built by reading the sidecars sitting in ss_quarantine. so
             # the review queue WAS the blocklist, and emptying the queue (approve,
@@ -1367,6 +1387,9 @@ class MusicDatabase:
                     track_count INTEGER DEFAULT 0,
                     profile_id INTEGER DEFAULT 1,
                     quality_profile_id INTEGER DEFAULT NULL,
+                    is_request_list INTEGER NOT NULL DEFAULT 0,
+                    auto_remove_fulfilled INTEGER NOT NULL DEFAULT 0,
+                    upstream_playlist_id TEXT DEFAULT NULL,
                     mirrored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(source, source_playlist_id, profile_id)
@@ -1465,6 +1488,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_quality_profile_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
+            self._add_mirrored_playlist_request_list_columns(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1928,6 +1952,8 @@ class MusicDatabase:
                 _ensure_client_matches(cursor)
             except Exception as e:
                 logger.error(f"client_music_matches schema init failed: {e}")
+            self._requeue_similar_artists_rematch(cursor)
+            self._purge_beatport_positional_matches(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
@@ -2028,6 +2054,8 @@ class MusicDatabase:
         'sample_analysis_v1':        ('table', 'sample_analysis'),
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
+        'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
+        'beatport_positional_purged': ('table', '_beatport_positional_purged'),
     }
 
     def _record_migration(self, cursor, name):
@@ -2936,6 +2964,32 @@ class MusicDatabase:
                 logger.info("Added quality_profile_id column to mirrored_playlists")
         except Exception as e:
             logger.error(f"Error adding mirrored playlist quality profile column: {e}")
+
+    def _add_mirrored_playlist_request_list_columns(self, cursor):
+        """Add request list and upstream tracking columns to mirrored_playlists."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {column[1] for column in cursor.fetchall()}
+            if cols and 'is_request_list' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN is_request_list INTEGER NOT NULL DEFAULT 0")
+                logger.info("Added is_request_list column to mirrored_playlists")
+            if cols and 'auto_remove_fulfilled' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN auto_remove_fulfilled INTEGER NOT NULL DEFAULT 0")
+                logger.info("Added auto_remove_fulfilled column to mirrored_playlists")
+            if cols and 'upstream_playlist_id' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN upstream_playlist_id TEXT DEFAULT NULL")
+                logger.info("Added upstream_playlist_id column to mirrored_playlists")
+            cursor.execute("""
+                UPDATE mirrored_playlists
+                SET upstream_playlist_id = CASE
+                    WHEN source_playlist_id LIKE '%_req_%' THEN
+                        substr(source_playlist_id, 1, instr(source_playlist_id, '_req_') - 1)
+                    ELSE source_playlist_id
+                END
+                WHERE is_request_list = 1 AND (upstream_playlist_id IS NULL OR upstream_playlist_id = '')
+            """)
+        except Exception as e:
+            logger.error(f"Error adding request list columns to mirrored_playlists: {e}")
 
     def _backfill_native_quality_profile_assignments(self, cursor):
         """Repair missing/dangling Watchlist and playlist assignments.
@@ -5157,6 +5211,61 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding similar-artists worker columns: {e}")
 
+    def _requeue_similar_artists_rematch(self, cursor):
+        """one-time: fetch every artist's similar artists again.
+
+        names used to resolve to the first search hit, so stored similars hold
+        namesakes (a thai pop act as Korn, Colde for Cold). the worker never
+        re-runs a matched artist and the watchlist only refetches after 30
+        days, so neither would heal them. requeue both; replace_similar_artists
+        swaps each set as it lands. occurrence_count goes back to one per row:
+        every refetch had bumped it and the reader sums it."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='_similar_artists_rematch_applied'")
+            if cursor.fetchone():
+                return
+            cursor.execute("UPDATE artists SET similar_artists_match_status = NULL "
+                           "WHERE similar_artists_match_status IS NOT NULL")
+            requeued = max(cursor.rowcount, 0)
+            cursor.execute("UPDATE similar_artists SET occurrence_count = 1, "
+                           "last_updated = datetime('now', '-60 days')")
+            cursor.execute("CREATE TABLE _similar_artists_rematch_applied (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artists_rematch')
+            logger.info("similar artists rematch: requeued %s library artists", requeued)
+        except Exception as e:
+            logger.error(f"Error requeueing similar artists rematch: {e}")
+
+    def _purge_beatport_positional_matches(self, cursor):
+        """one-time: drop what the old beatport ids and enrichment left behind.
+
+        every beatport chart called its tracks beatport_chart_0, _1, ... by
+        position, so a sync match saved for chart A's track 1 came back for
+        every chart's track 1 (maV, oct 12 2026: a trance chart synced with
+        tracks from the beatport top 10). those rows can't be told apart, so
+        they all go, along with manual matches filed under the same ids. the
+        cached beatport track pages go too: the old enrichment stored charts
+        as tracks there, and the json reads refill them correctly."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_beatport_positional_purged' in tables:
+                return
+            counts = {}
+            if 'sync_match_cache' in tables:
+                cursor.execute("DELETE FROM sync_match_cache WHERE spotify_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['sync_match_cache'] = max(cursor.rowcount, 0)
+            if 'manual_library_track_matches' in tables:
+                cursor.execute("DELETE FROM manual_library_track_matches WHERE source_track_id LIKE 'beatport\\_chart\\_%' ESCAPE '\\'")
+                counts['manual_library_track_matches'] = max(cursor.rowcount, 0)
+            if 'metadata_cache_entities' in tables:
+                cursor.execute("DELETE FROM metadata_cache_entities WHERE source = 'beatport' AND entity_type = 'track'")
+                counts['metadata_cache_entities'] = max(cursor.rowcount, 0)
+            cursor.execute("CREATE TABLE _beatport_positional_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'beatport_positional_purged')
+            logger.info("beatport positional id purge: %s", counts)
+        except Exception as e:
+            logger.error(f"Error purging beatport positional matches: {e}")
+
     def _add_amazon_columns(self, cursor):
         """Add Amazon enrichment tracking columns to artists, albums, and tracks."""
         try:
@@ -6824,6 +6933,36 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error saving plex account for profile {profile_id}: {e}")
             return False
+
+    def get_profile_server_identity(self, profile_id: int, server: str) -> Optional[Dict[str, Any]]:
+        """Who a profile is on ``server``, shaped for the client's
+        ``user_view(identity)`` hook, or None when the profile acts as the app
+        account. One facade over the three per-server storages (#1265):
+        Plex home user link, Jellyfin user and library pick, Navidrome login.
+        Every dict carries ``label`` (what to show or log for that user)."""
+        if not profile_id or not server:
+            return None
+        try:
+            if server == 'plex':
+                link = self.get_profile_plex_home_user(profile_id)
+                if not link:
+                    return None
+                return {'token': link['token'], 'title': link.get('title') or '',
+                        'id': link.get('id'), 'label': link.get('title') or link.get('id') or ''}
+            if server == 'jellyfin':
+                libs = self.get_profile_server_library(profile_id) or {}
+                user_id, library_id = libs.get('jellyfin_user_id'), libs.get('jellyfin_library_id')
+                if not user_id and not library_id:
+                    return None
+                return {'user_id': user_id, 'library_id': library_id, 'label': user_id or 'default'}
+            if server == 'navidrome':
+                login = self.get_profile_navidrome_login(profile_id)
+                if not login:
+                    return None
+                return {'username': login[0], 'password': login[1], 'label': login[0]}
+        except Exception as e:
+            logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
+        return None
 
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,
@@ -11347,8 +11486,8 @@ class MusicDatabase:
             track_id_str = str(track_id)
             scope_sql, scope_params = self._current_scope_sql('t.owner_profile_id')
             cursor.execute(f"""
-                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number, 
-                       t.duration, t.created_at, t.updated_at,
+                SELECT t.id, t.album_id, t.artist_id, t.title, t.track_number,
+                       t.duration, t.created_at, t.updated_at, t.track_artist,
                        a.name as artist_name, al.title as album_title
                 FROM tracks t
                 JOIN artists a ON t.artist_id = a.id
@@ -11368,7 +11507,8 @@ class MusicDatabase:
                     track_number=row['track_number'],
                     duration=row['duration'],
                     created_at=row['created_at'],
-                    updated_at=row['updated_at']
+                    updated_at=row['updated_at'],
+                    track_artist=row['track_artist'] if 'track_artist' in row.keys() else None
                 )
             return None
             
@@ -12297,7 +12437,7 @@ class MusicDatabase:
                        names + scope_params)
         return cursor.fetchone() is not None
 
-    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
+    def check_track_exists(self, title: str, artist: str, confidence_threshold: float = 0.8, server_source: str = None, album: str = None, candidate_tracks: Optional[List[DatabaseTrack]] = None, candidate_tracks_exhaustive: bool = False, include_downloads: bool = False) -> Tuple[Optional[DatabaseTrack], float]:
         """
         Check if a track exists in the database with enhanced fuzzy matching and confidence scoring.
 
@@ -12417,9 +12557,116 @@ class MusicDatabase:
 
             # Album-aware fallback: find album by title (any artist), check tracks on it
             # Handles multi-artist albums filed under a different artist in the library
-            if album and best_confidence < confidence_threshold:
+            if album and (artist or '').strip() and best_confidence < confidence_threshold:
                 logger.debug(f"Artist-specific search failed, trying album-aware fallback: '{title}' on '{album}'")
                 try:
+                    # (#1715) Evidence helpers, computed once per call. A
+                    # "placeholder" artist name carries no artist evidence
+                    # either way; anything else is a real filing/credit
+                    # that can agree or conflict with the searched artist.
+                    try:
+                        from core.imports.compilation import is_various_artists_name as _is_va_name
+                    except Exception as _va_import_err:
+                        logger.debug(f"Album-aware fallback: VA-name helper unavailable: {_va_import_err}")
+                        _is_va_name = None
+                    try:
+                        from core.text.normalize import normalize_key as _artist_nkey
+                    except Exception as _nkey_import_err:
+                        logger.debug(f"Album-aware fallback: normalize_key unavailable: {_nkey_import_err}")
+                        _artist_nkey = self._normalize_for_comparison
+                    _placeholder_squashed = {
+                        'unknown', 'unknownartist', 'unknownartists',
+                        'artistunknown', 'noartist', 'unknownalbum',
+                        'unknownalbumartist', 'untitled',
+                    }
+
+                    def _placeholder_artist(name):
+                        n = (name or '').strip()
+                        if not n:
+                            return True
+                        if _is_va_name is not None and _is_va_name(n):
+                            return True
+                        # MusicBrainz/Picard spellings: '[Unknown]',
+                        # '<Unknown>', '[No Artist]' — brackets are
+                        # punctuation around the placeholder, not a name.
+                        core = self._normalize_for_comparison(n).strip(' []<>(){}')
+                        return core.replace(' ', '') in _placeholder_squashed
+
+                    # Exact artist-evidence keys for the searched artist:
+                    # every known variation, keyed the way artists.name_key
+                    # is ('AC/DC' == 'ACDC', spacing unified). Fuzzy
+                    # similarity is NOT identity — edit-distance-1 names
+                    # (John William vs John Williams) must not pass.
+                    _artist_keys = {
+                        _artist_nkey(v) for v in self._get_artist_variations(artist)
+                    } | {_artist_nkey(artist)}
+                    _split_re = r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*'
+
+                    def _evidence_keys(db_track):
+                        """Keyed artist names the row evidences: the album
+                        artist and the per-track credit, each whole and
+                        split on credit delimiters — a joint filing
+                        ('Simon & Garfunkel', 'Tony Bennett & Lady Gaga')
+                        evidences EACH partner, in either field."""
+                        keys = set()
+                        for name in (db_track.artist_name, getattr(db_track, 'track_artist', None)):
+                            if not name:
+                                continue
+                            keys.add(_artist_nkey(name))
+                            for piece in re.split(_split_re, self._normalize_for_comparison(name), flags=re.IGNORECASE):
+                                if piece.strip():
+                                    keys.add(_artist_nkey(piece))
+                        return keys
+
+                    def _fallback_row_confidence(db_track):
+                        """(confidence, is_evidence) for one fallback row,
+                        or None when the row must not match. (#1715) This
+                        fallback used to take title_sim as the whole
+                        confidence, so a same-titled track on a same-named
+                        album by a COMPLETELY DIFFERENT artist matched at
+                        1.0: playlist sync put the wrong song on the
+                        playlist and counted the real track as owned, so
+                        it was never wishlisted or downloaded."""
+                        _title_score, _title_passed = self._score_title_similarity(title, db_track)
+                        if not _title_passed:
+                            return None
+                        if _placeholder_artist(db_track.track_artist) and _placeholder_artist(db_track.artist_name):
+                            # No usable artist evidence anywhere on the
+                            # row (placeholder album artist and a
+                            # placeholder or missing credit — the
+                            # soundtrack-rip shape). Title+album is the
+                            # only signal, so the title must clear every
+                            # guard the scorer applies AND be
+                            # near-identical: a merely similar title here
+                            # is a different song ('Believe' vs
+                            # 'Believer'), which a raw char ratio waved
+                            # through.
+                            if _title_score < 0.95:
+                                return None
+                            return _title_score, False
+                        # The row DOES carry artist evidence — a real
+                        # per-track credit, or filing under a specific
+                        # artist. This fallback is the only path that can
+                        # surface a cross-artist row at all, so the
+                        # evidence must be exact: a keyed name/piece equal
+                        # to a searched-artist variation. Deliberate
+                        # trade: a soundtrack filed under its composer
+                        # with no per-track credit no longer matches its
+                        # performer here — that filing is
+                        # indistinguishable from the wrong-artist case
+                        # above. An exact key is artist similarity 1.0,
+                        # so the confidence is the scorer's weighting
+                        # with the artist term at full marks.
+                        if not (_evidence_keys(db_track) & _artist_keys):
+                            return None
+                        return _title_score * 0.5 + 0.5, True
+
+                    _fallback_gate = max(0.7, confidence_threshold)
+                    _evidence_best = None
+                    _evidence_best_conf = 0.0
+                    _plain_best = None
+                    _plain_best_conf = 0.0
+
                     album_candidates = self.search_albums(title=album, artist="", limit=10, server_source=server_source)
                     for album_candidate in album_candidates:
                         album_title_sim = max(
@@ -12440,8 +12687,10 @@ class MusicDatabase:
                             JOIN albums al ON al.id = t.album_id
                             WHERE t.album_id = ? {source_filter}
                         """, params)
+                        _rows = cursor.fetchall()
+                        conn.close()
 
-                        for row in cursor.fetchall():
+                        for row in _rows:
                             # DatabaseTrack is a strict dataclass — only the declared
                             # fields go in __init__; the joined artist/album/server
                             # values are attached afterwards just like _rows_to_tracks
@@ -12458,19 +12707,50 @@ class MusicDatabase:
                             db_track.album_title = row['album_title']
                             db_track.server_source = row['server_source']
                             db_track.track_artist = row['track_artist'] if 'track_artist' in row.keys() else None
-                            title_sim = max(
-                                self._string_similarity(self._normalize_for_comparison(title), self._normalize_for_comparison(db_track.title)),
-                                self._string_similarity(self._clean_track_title_for_comparison(title), self._clean_track_title_for_comparison(db_track.title))
-                            )
-                            if title_sim > best_confidence and title_sim >= 0.7:
-                                best_confidence = title_sim
-                                best_match = db_track
+                            try:
+                                _scored = _fallback_row_confidence(db_track)
+                            except Exception as _row_err:
+                                # One bad row must not abandon the whole
+                                # fallback (remaining rows/albums may hold
+                                # the real match).
+                                logger.debug(f"Album-aware fallback row scoring failed for '{db_track.title}': {_row_err}")
+                                continue
+                            if _scored is None:
+                                continue
+                            _conf, _is_evidence = _scored
+                            if _is_evidence:
+                                if _conf > _evidence_best_conf:
+                                    _evidence_best_conf = _conf
+                                    _evidence_best = db_track
+                            elif _conf > _plain_best_conf:
+                                _plain_best_conf = _conf
+                                _plain_best = db_track
 
-                        if best_match and best_confidence >= 0.7:
-                            logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{best_match.title}' by '{best_match.artist_name}' (title_sim: {best_confidence:.3f})")
-                            return best_match, best_confidence
+                    # A row WITH artist evidence outranks a no-evidence row
+                    # even at a lower weighted confidence: the scales are
+                    # not comparable (pure guarded title vs title+artist),
+                    # and the credited row is the one whose artist agrees.
+                    if _evidence_best is not None and _evidence_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_evidence_best.title}' by '{_evidence_best.artist_name}' (confidence: {_evidence_best_conf:.3f})")
+                        return _evidence_best, _evidence_best_conf
+                    if _plain_best is not None and _plain_best_conf >= _fallback_gate:
+                        logger.debug(f"Album-aware fallback matched: '{title}' on '{album}' -> '{_plain_best.title}' by '{_plain_best.artist_name}' (confidence: {_plain_best_conf:.3f})")
+                        return _plain_best, _plain_best_conf
+                    # Fold the strongest fallback score into the diagnostic
+                    # best the no-match return below reports.
+                    for _m, _c in ((_evidence_best, _evidence_best_conf), (_plain_best, _plain_best_conf)):
+                        if _m is not None and _c > best_confidence:
+                            best_match = _m
+                            best_confidence = _c
                 except Exception as album_fallback_err:
                     logger.debug(f"Album-aware fallback error: {album_fallback_err}")
+
+            # Only callers that ask "do we already have this file" opt in. A sync
+            # asks "is it on the media server", and a ``routed:`` id means nothing there.
+            if include_downloads:
+                routed = self._routed_download_match(title, artist, confidence_threshold)
+                if routed is not None:
+                    return routed
 
             logger.debug(f"No confident track match for '{title}' (best: {best_confidence:.3f}, threshold: {confidence_threshold})")
             return None, best_confidence
@@ -12478,6 +12758,41 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error checking track existence for '{title}' by '{artist}': {e}")
             return None, 0.0
+
+    def _routed_download_match(self, title: str, artist: str, confidence_threshold: float):
+        """Ownership for artists routed to the audiobook library.
+
+        Their files never reach the media server's library, so the ``tracks``
+        table can't know them and every sync would fetch them again. The
+        download ledger can: a completed download whose file still exists
+        counts as owned. Returns ``(track, confidence)`` or None.
+        """
+        from core.audiobook_routing import existing_download_path, is_routed_artist, route_key
+        if not is_routed_artist(artist, self):
+            return None
+        key = route_key(artist)
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT id, file_path, track_title, track_artist, track_album "
+                "FROM track_downloads WHERE status = 'completed' AND file_path IS NOT NULL "
+                "AND track_artist IS NOT NULL").fetchall()
+        best, best_confidence = None, 0.0
+        for row in rows:
+            if route_key(row['track_artist']) != key:
+                continue
+            candidate = DatabaseTrack(
+                id=f"routed:{row['id']}", album_id=None, artist_id=None,
+                title=row['track_title'] or '', file_path=row['file_path'])
+            candidate.artist_name = row['track_artist']
+            candidate.album_title = row['track_album'] or ''
+            confidence = self._calculate_track_confidence(title, artist, candidate)
+            if confidence <= best_confidence or confidence < confidence_threshold:
+                continue
+            found = existing_download_path(row['file_path'])
+            if found:
+                candidate.file_path = found
+                best, best_confidence = candidate, confidence
+        return (best, best_confidence) if best else None
     
     def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
         """
@@ -13108,6 +13423,9 @@ class MusicDatabase:
             album, confidence = self.check_album_exists_with_editions(title, artist, confidence_threshold, expected_track_count, server_source, candidate_albums=candidate_albums, strict_discography_match=strict_discography_match, expected_year=expected_year, metadata_source=metadata_source, card_source_id=card_source_id, strip_single_kind=strip_single_kind)
 
             if not album:
+                routed = self._routed_library_album(title, artist, expected_track_count)
+                if routed:
+                    return routed
                 return None, 0.0, 0, 0, False, []
 
             if completeness_cache is None and candidate_albums is not None and candidate_tracks is not None:
@@ -13122,6 +13440,27 @@ class MusicDatabase:
             logger.error(f"Error checking album existence with completeness for '{title}' by '{artist}': {e}")
             return None, 0.0, 0, 0, False, []
     
+    def _routed_library_album(self, title: str, artist: str, expected_track_count: Optional[int] = None):
+        """Ownership for a routed artist's album, from the audiobook library.
+
+        The files never reach the media server, so ``albums`` cannot know them.
+        The audiobook library index can. Presence counts as complete: a book
+        merged into one m4b has one file, not one per streaming track, so
+        comparing file counts would call a whole book partial.
+        Returns the same tuple as check_album_exists_with_completeness, or None.
+        """
+        from core.audiobook_routing import routed_library_match
+        book = routed_library_match(title, artist, self)
+        if not book:
+            return None
+        files = int(book.get("file_count") or 0)
+        expected = int(expected_track_count or files or 1)
+        album = DatabaseAlbum(
+            id=f"routed:{book.get('id')}", artist_id=None, title=str(book.get("title") or title),
+            track_count=files or None)
+        formats = [f.upper() for f in str(book.get("audio_format") or "").split("/") if f]
+        return album, 1.0, expected, expected, True, formats
+
     def check_album_exists_with_editions(self, title: str, artist: str, confidence_threshold: float = 0.8, expected_track_count: Optional[int] = None, server_source: Optional[str] = None, candidate_albums: Optional[List[DatabaseAlbum]] = None, strict_discography_match: bool = False, expected_year=None, metadata_source: Optional[str] = None, card_source_id: Optional[str] = None, strip_single_kind: bool = False) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Enhanced album existence check that handles edition variants.
@@ -13664,6 +14003,151 @@ class MusicDatabase:
         from core.text.normalize import normalize_for_comparison
         return normalize_for_comparison(text)
     
+    def _score_title_similarity(self, search_title: str, db_track: DatabaseTrack):
+        """The guarded title score from _calculate_track_confidence, split
+        out so the album-aware fallback can apply the SAME title guards
+        (length penalty, context/subtitle qualifier handling, word-level
+        plausibility, 0.6 floor) instead of trusting a raw char ratio
+        (#1715 review). Returns (score, passed): when passed is False the
+        score is the halved sub-threshold value _calculate_track_confidence
+        returns immediately; when True, score is the title similarity the
+        artist weighting should use."""
+        search_title_norm = self._normalize_for_comparison(search_title)
+        db_title_norm = self._normalize_for_comparison(db_track.title)
+
+        # Direct similarity with Unicode normalization
+        title_similarity = self._string_similarity(search_title_norm, db_title_norm)
+
+        # Also try with cleaned versions (removing parentheses, brackets, etc.)
+        clean_search_title = self._clean_track_title_for_comparison(search_title)
+        clean_db_title = self._clean_track_title_for_comparison(db_track.title)
+        clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
+
+        # Use the best title similarity (direct or cleaned)
+        best_title_similarity = max(title_similarity, clean_title_similarity)
+
+        # Length ratio penalty: if the DB title is significantly longer/shorter than the
+        # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
+        # SequenceMatcher gives high scores when the shorter string is fully contained
+        # in the longer one, which causes false positives for prefix/suffix matches.
+        len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
+        len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
+        if len_search > 0 and len_db > 0:
+            len_ratio = min(len_search, len_db) / max(len_search, len_db)
+            if len_ratio < 0.7:
+                # Titles differ in length by more than 30% — penalize heavily
+                best_title_similarity *= len_ratio
+
+        # #808: a parenthetical qualifier that merely RESTATES the release
+        # context is album context, not a version difference. Wishlist
+        # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
+        # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
+        # the qualifier appears in the album title, yet the length-ratio
+        # penalty above crushed the pair to ~0.17 and wishlist cleanup
+        # never recognised the owned edition. Strip qualifiers confirmed
+        # by the db album title (or by the other title) and score that
+        # variant with its OWN length guard — genuine version markers
+        # ('(Live)' on a studio album) appear in no context, keep their
+        # qualifier, and keep their penalty.
+        db_album_norm = self._normalize_for_comparison(
+            getattr(db_track, 'album_title', '') or '')
+        from core.text.title_match import strip_redundant_context_qualifiers
+        ctx_search = strip_redundant_context_qualifiers(
+            search_title_norm, db_album_norm, db_title_norm)
+        ctx_db = strip_redundant_context_qualifiers(
+            db_title_norm, db_album_norm, search_title_norm)
+        if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
+            ctx_sim = self._string_similarity(ctx_search, ctx_db)
+            ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
+            if ctx_ratio < 0.7:
+                ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
+            best_title_similarity = max(best_title_similarity, ctx_sim)
+
+        # #825: a bracketed qualifier that is a SUBTITLE — not a version
+        # marker and not numeric — is the same song. 'Llamando a la tierra
+        # (Serenade From the Stars)' vs the library's bare 'Llamando a la
+        # tierra': the subtitle restates nothing (so #808 keeps it) and the
+        # length penalty crushed the pair to ~0.14 — sync re-added it to
+        # the wishlist forever and cleanup (same matcher) never removed it.
+        # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
+        # are kept by the helper, so their mismatch penalty still stands.
+        from core.text.title_match import strip_subtitle_qualifiers
+        sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
+        sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
+        if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
+            sub_sim = self._string_similarity(sub_search, sub_db)
+            sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
+            if sub_ratio < 0.7:
+                sub_sim *= sub_ratio  # stripped forms still length-guarded
+            best_title_similarity = max(best_title_similarity, sub_sim)
+
+        # Word-level guard: SequenceMatcher's char ratio over-credits
+        # different songs that share a long substring or only a stopword
+        # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
+        # vs "Around the World" = 0.62). Since a same-artist comparison
+        # always scores artist = 1.0, the title is the only discriminator,
+        # so a bad-but-moderate title score gets carried over the threshold
+        # (#769). Reject pairs that aren't near-identical AND share no
+        # significant word — the real track is then reported missing.
+        from core.text.title_match import titles_plausibly_same
+        if not titles_plausibly_same(
+            clean_search_title or search_title_norm,
+            clean_db_title or db_title_norm,
+            best_title_similarity,
+        ):
+            return best_title_similarity * 0.5, False  # below any threshold
+
+        # Require minimum title similarity to prevent a perfect artist match from
+        # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
+        if best_title_similarity < 0.6:
+            return best_title_similarity * 0.5, False  # Can never exceed 0.3, well below any threshold
+
+        return best_title_similarity, True
+
+    def _score_artist_similarity(self, search_artist: str, db_track: DatabaseTrack) -> float:
+        """The artist score from _calculate_track_confidence, split out so
+        its exact semantics can be reused and probed on their own
+        (#1715)."""
+        search_artist_norm = self._normalize_for_comparison(search_artist)
+        db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
+
+        artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
+
+        # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
+        # often differs from the per-track artist (e.g. Vaiana OST is filed under
+        # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
+        # Jackson). Score against tracks.track_artist too and take the better
+        # match so playlist sync can find these.
+        #
+        # Featured artists: tracks with multiple credits ("Artist1, Artist2",
+        # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
+        # delimiters and score each piece independently. Without this, a
+        # discography completion check for Artist2 would miss a track stored
+        # in the library under Artist1's album with a "feat. Artist2" credit.
+        db_track_artist = getattr(db_track, 'track_artist', None)
+        if db_track_artist:
+            db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
+            # Whole-string similarity first as the floor.
+            track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
+            # Then split on multi-artist delimiters and score each piece —
+            # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
+            # "x" between names all show up here in real-world tags.
+            pieces = re.split(
+                r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
+                db_track_artist_norm,
+                flags=re.IGNORECASE,
+            )
+            for piece in pieces:
+                piece = piece.strip()
+                if not piece:
+                    continue
+                piece_sim = self._string_similarity(search_artist_norm, piece)
+                if piece_sim > track_artist_sim:
+                    track_artist_sim = piece_sim
+            artist_similarity = max(artist_similarity, track_artist_sim)
+
+        return artist_similarity
+
     def _calculate_track_confidence(self, search_title: str, search_artist: str, db_track: DatabaseTrack) -> float:
         """Calculate confidence score for track match with enhanced cleaning and Unicode normalization"""
         try:
@@ -13672,139 +14156,20 @@ class MusicDatabase:
             search_artist_norm = self._normalize_for_comparison(search_artist)
             db_title_norm = self._normalize_for_comparison(db_track.title)
             db_artist_norm = self._normalize_for_comparison(db_track.artist_name)
-            
+
             # Debug logging for Unicode normalization
             if search_title != search_title_norm or search_artist != search_artist_norm or \
                db_track.title != db_title_norm or db_track.artist_name != db_artist_norm:
                 logger.debug("Unicode normalization:")
                 logger.debug(f"   Search: '{search_title}' → '{search_title_norm}' | '{search_artist}' → '{search_artist_norm}'")
                 logger.debug(f"   Database: '{db_track.title}' → '{db_title_norm}' | '{db_track.artist_name}' → '{db_artist_norm}'")
-            
-            # Direct similarity with Unicode normalization
-            title_similarity = self._string_similarity(search_title_norm, db_title_norm)
 
-            # Also try with cleaned versions (removing parentheses, brackets, etc.)
-            clean_search_title = self._clean_track_title_for_comparison(search_title)
-            clean_db_title = self._clean_track_title_for_comparison(db_track.title)
-            clean_title_similarity = self._string_similarity(clean_search_title, clean_db_title)
-            
-            # Use the best title similarity (direct or cleaned)
-            best_title_similarity = max(title_similarity, clean_title_similarity)
+            best_title_similarity, title_passed = self._score_title_similarity(search_title, db_track)
+            if not title_passed:
+                return best_title_similarity
 
-            # Length ratio penalty: if the DB title is significantly longer/shorter than the
-            # search title, it's likely a different track (e.g. "Believe" vs "Believe In Me").
-            # SequenceMatcher gives high scores when the shorter string is fully contained
-            # in the longer one, which causes false positives for prefix/suffix matches.
-            len_search = len(clean_search_title) if clean_search_title else len(search_title_norm)
-            len_db = len(clean_db_title) if clean_db_title else len(db_title_norm)
-            if len_search > 0 and len_db > 0:
-                len_ratio = min(len_search, len_db) / max(len_search, len_db)
-                if len_ratio < 0.7:
-                    # Titles differ in length by more than 30% — penalize heavily
-                    best_title_similarity *= len_ratio
+            artist_similarity = self._score_artist_similarity(search_artist, db_track)
 
-            # #808: a parenthetical qualifier that merely RESTATES the release
-            # context is album context, not a version difference. Wishlist
-            # title 'Champagne Supernova (OurVinyl Sessions)' vs the library's
-            # bare 'Champagne Supernova' on the album '… (OurVinyl Sessions)':
-            # the qualifier appears in the album title, yet the length-ratio
-            # penalty above crushed the pair to ~0.17 and wishlist cleanup
-            # never recognised the owned edition. Strip qualifiers confirmed
-            # by the db album title (or by the other title) and score that
-            # variant with its OWN length guard — genuine version markers
-            # ('(Live)' on a studio album) appear in no context, keep their
-            # qualifier, and keep their penalty.
-            db_album_norm = self._normalize_for_comparison(
-                getattr(db_track, 'album_title', '') or '')
-            from core.text.title_match import strip_redundant_context_qualifiers
-            ctx_search = strip_redundant_context_qualifiers(
-                search_title_norm, db_album_norm, db_title_norm)
-            ctx_db = strip_redundant_context_qualifiers(
-                db_title_norm, db_album_norm, search_title_norm)
-            if (ctx_search, ctx_db) != (search_title_norm, db_title_norm) and ctx_search and ctx_db:
-                ctx_sim = self._string_similarity(ctx_search, ctx_db)
-                ctx_ratio = min(len(ctx_search), len(ctx_db)) / max(len(ctx_search), len(ctx_db))
-                if ctx_ratio < 0.7:
-                    ctx_sim *= ctx_ratio  # 'Believe' vs 'Believe In Me' still penalised
-                best_title_similarity = max(best_title_similarity, ctx_sim)
-
-            # #825: a bracketed qualifier that is a SUBTITLE — not a version
-            # marker and not numeric — is the same song. 'Llamando a la tierra
-            # (Serenade From the Stars)' vs the library's bare 'Llamando a la
-            # tierra': the subtitle restates nothing (so #808 keeps it) and the
-            # length penalty crushed the pair to ~0.14 — sync re-added it to
-            # the wishlist forever and cleanup (same matcher) never removed it.
-            # Version qualifiers ('(Live)', '(Versión 1988)', '(Dueto 2007)')
-            # are kept by the helper, so their mismatch penalty still stands.
-            from core.text.title_match import strip_subtitle_qualifiers
-            sub_search = strip_subtitle_qualifiers(search_title_norm, db_title_norm)
-            sub_db = strip_subtitle_qualifiers(db_title_norm, search_title_norm)
-            if (sub_search, sub_db) != (search_title_norm, db_title_norm) and sub_search and sub_db:
-                sub_sim = self._string_similarity(sub_search, sub_db)
-                sub_ratio = min(len(sub_search), len(sub_db)) / max(len(sub_search), len(sub_db))
-                if sub_ratio < 0.7:
-                    sub_sim *= sub_ratio  # stripped forms still length-guarded
-                best_title_similarity = max(best_title_similarity, sub_sim)
-
-            # Word-level guard: SequenceMatcher's char ratio over-credits
-            # different songs that share a long substring or only a stopword
-            # ("Dani California" vs "Californication" = 0.67; "Under The Bridge"
-            # vs "Around the World" = 0.62). Since a same-artist comparison
-            # always scores artist = 1.0, the title is the only discriminator,
-            # so a bad-but-moderate title score gets carried over the threshold
-            # (#769). Reject pairs that aren't near-identical AND share no
-            # significant word — the real track is then reported missing.
-            from core.text.title_match import titles_plausibly_same
-            if not titles_plausibly_same(
-                clean_search_title or search_title_norm,
-                clean_db_title or db_title_norm,
-                best_title_similarity,
-            ):
-                return best_title_similarity * 0.5  # below any threshold
-
-            # Require minimum title similarity to prevent a perfect artist match from
-            # carrying a bad title match over the threshold (e.g. "Time" vs "Time Flies")
-            if best_title_similarity < 0.6:
-                return best_title_similarity * 0.5  # Can never exceed 0.3, well below any threshold
-
-            # the artist is scored only once the title has cleared its floor:
-            # below 0.6 the result is title-only, and almost every candidate in a
-            # pool is a different song by the same artist
-            artist_similarity = self._string_similarity(search_artist_norm, db_artist_norm)
-
-            # Soundtracks/compilations: the album-level artist (artists.name via JOIN)
-            # often differs from the per-track artist (e.g. Vaiana OST is filed under
-            # Lin-Manuel Miranda but "Where You Are" is performed by Christopher
-            # Jackson). Score against tracks.track_artist too and take the better
-            # match so playlist sync can find these.
-            #
-            # Featured artists: tracks with multiple credits ("Artist1, Artist2",
-            # "Artist1 feat. Artist2", "Artist1 & Artist2") split on common
-            # delimiters and score each piece independently. Without this, a
-            # discography completion check for Artist2 would miss a track stored
-            # in the library under Artist1's album with a "feat. Artist2" credit.
-            db_track_artist = getattr(db_track, 'track_artist', None)
-            if db_track_artist:
-                db_track_artist_norm = self._normalize_for_comparison(db_track_artist)
-                # Whole-string similarity first as the floor.
-                track_artist_sim = self._string_similarity(search_artist_norm, db_track_artist_norm)
-                # Then split on multi-artist delimiters and score each piece —
-                # Spotify's "feat.", "ft.", commas, semicolons, ampersands, and
-                # "x" between names all show up here in real-world tags.
-                pieces = re.split(
-                    r'\s*(?:[;,&]|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bvs\.?\b|\bx\b)\s*',
-                    db_track_artist_norm,
-                    flags=re.IGNORECASE,
-                )
-                for piece in pieces:
-                    piece = piece.strip()
-                    if not piece:
-                        continue
-                    piece_sim = self._string_similarity(search_artist_norm, piece)
-                    if piece_sim > track_artist_sim:
-                        track_artist_sim = piece_sim
-                artist_similarity = max(artist_similarity, track_artist_sim)
-            
             # Weight: 50% title, 50% artist (equal weight to prevent false positives)
             # Also require minimum artist similarity to prevent matching wrong artists
             confidence = (best_title_similarity * 0.5) + (artist_similarity * 0.5)
@@ -13814,11 +14179,11 @@ class MusicDatabase:
                 confidence *= 0.3  # Reduce confidence by 70%
 
             return confidence
-            
+
         except Exception as e:
             logger.error(f"Error calculating track confidence: {e}")
             return 0.0
-    
+
     def _clean_track_title_for_comparison(self, title: str) -> str:
         """Clean track title for comparison by normalizing brackets/dashes and removing noise"""
         return MusicDatabase._clean_track_title_cached(title)
@@ -15466,6 +15831,49 @@ class MusicDatabase:
     # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
     # user-cancelled tracks are not auto-re-queued. All methods fail-open
     # (an error here must never block a legitimate wishlist add).
+
+    def has_audiobook_route(self, kind: str, route_key: str) -> bool:
+        """True when this artist/key is routed to the audiobook library."""
+        with self._get_connection() as conn:
+            row = conn.cursor().execute(
+                "SELECT 1 FROM audiobook_routes WHERE kind = ? AND route_key = ? LIMIT 1",
+                (kind, route_key)).fetchone()
+        return row is not None
+
+    def add_audiobook_route(self, kind: str, route_key: str, label: str = "") -> bool:
+        """Route a key to the audiobook library. Re-adding refreshes the label."""
+        try:
+            with self._get_connection() as conn:
+                conn.cursor().execute(
+                    "INSERT INTO audiobook_routes (kind, route_key, label) VALUES (?, ?, ?) "
+                    "ON CONFLICT(kind, route_key) DO UPDATE SET label = excluded.label",
+                    (kind, route_key, label or ""))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error adding audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def remove_audiobook_route(self, kind: str, route_key: str) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM audiobook_routes WHERE kind = ? AND route_key = ?",
+                    (kind, route_key))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing audiobook route {kind}:{route_key}: {e}")
+            return False
+
+    def list_audiobook_routes(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT kind, route_key, label, created_at FROM audiobook_routes "
+                "ORDER BY label COLLATE NOCASE, route_key")
+            return [dict(zip([c[0] for c in cursor.description], row, strict=True)) for row in cursor.fetchall()]
 
     def add_to_wishlist_ignore(self, track_id: str, track_name: str = "",
                                artist_name: str = "", reason: str = "removed",
@@ -18156,6 +18564,67 @@ class MusicDatabase:
             logger.error(f"Error adding similar artist: {e}")
             return False
 
+    def replace_similar_artists(self, source_artist_id: str, similars: List[Dict[str, Any]],
+                                profile_id: int = 1,
+                                source_provider: Optional[str] = None) -> int:
+        """swap one artist's similar artists for a fresh fetch, in one go.
+
+        the upsert only ever added. a name a better match no longer produces
+        (Colde stored for Cold) stayed forever, and every refetch bumped
+        occurrence_count, which the reader sums. the hero's rotation history
+        (last_featured) carries over by name.
+
+        each entry takes add_or_update_similar_artist's kwargs. returns how
+        many rows went in; an empty list leaves the old set alone."""
+        from core.context_sentinels import is_context_sentinel
+        if is_context_sentinel(source_artist_id):
+            logger.warning(
+                "Refusing similar artists for %r: a context placeholder is not an artist id",
+                source_artist_id)
+            return 0
+        rows = [s for s in similars or [] if s.get('similar_artist_name')]
+        if not rows:
+            return 0
+        provider = (str(source_provider).strip().lower() or None) if source_provider else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT similar_artist_name, last_featured FROM similar_artists
+                    WHERE profile_id = ? AND source_artist_id = ? AND last_featured IS NOT NULL
+                """, (profile_id, source_artist_id))
+                featured = {(r[0] or '').casefold(): r[1] for r in cursor.fetchall()}
+                cursor.execute(
+                    "DELETE FROM similar_artists WHERE profile_id = ? AND source_artist_id = ?",
+                    (profile_id, source_artist_id))
+                stored = 0
+                for row in rows:
+                    name = row['similar_artist_name']
+                    genres = row.get('genres')
+                    image_url = row.get('image_url')
+                    cursor.execute("""
+                        INSERT INTO similar_artists
+                        (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
+                         similar_artist_deezer_id, similar_artist_musicbrainz_id, similar_artist_name,
+                         similarity_rank, occurrence_count, last_updated, profile_id,
+                         image_url, genres, popularity, metadata_updated_at, source_provider,
+                         last_featured)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?, ?, ?, ?,
+                                CASE WHEN ? IS NOT NULL THEN CURRENT_TIMESTAMP END, ?, ?)
+                        ON CONFLICT(profile_id, source_artist_id, similar_artist_name) DO NOTHING
+                    """, (source_artist_id, row.get('similar_artist_spotify_id'),
+                          row.get('similar_artist_itunes_id'), row.get('similar_artist_deezer_id'),
+                          row.get('similar_artist_musicbrainz_id'), name,
+                          row.get('similarity_rank', 1), profile_id, image_url,
+                          json.dumps(genres) if genres else None, row.get('popularity', 0) or 0,
+                          image_url, provider, featured.get(name.casefold())))
+                    stored += max(cursor.rowcount, 0)
+                conn.commit()
+                return stored
+        except Exception as e:
+            logger.error(f"Error replacing similar artists: {e}")
+            return 0
+
     def get_similar_artists_for_source(self, source_artist_id: str, profile_id: int = 1) -> List[SimilarArtist]:
         """Get all similar artists for a given source artist"""
         try:
@@ -20822,6 +21291,35 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error saving sync match cache: {e}")
             return False
+
+    def delete_sync_match_cache(self, spotify_track_id: str, server_source: str,
+                                server_track_id: str = None) -> int:
+        """Delete ONE sync match cache row. Returns rows deleted.
+
+        Used when a cached pairing is proven stale under the current
+        matcher (#1721): the row must not survive to poison the next sync,
+        but the rest of the cache (other tracks, other servers) is fine.
+        With ``server_track_id`` given, the delete only lands when the
+        row actually points at that server track — proof about one
+        pairing must not delete a different, live one filed under the
+        same source id (#1754)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            if server_track_id is None:
+                cursor.execute(
+                    "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?",
+                    (str(spotify_track_id), server_source))
+            else:
+                cursor.execute(
+                    "DELETE FROM sync_match_cache WHERE spotify_track_id = ? AND server_source = ?"
+                    " AND server_track_id = ?",
+                    (str(spotify_track_id), server_source, str(server_track_id)))
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error(f"Error deleting sync match cache row: {e}")
+            return 0
 
     def invalidate_sync_match_cache(self, server_source: str = None) -> int:
         """Clear sync match cache entries. If server_source given, only clear that server's entries."""
@@ -24597,8 +25095,8 @@ class MusicDatabase:
                     INSERT INTO mirrored_playlists
                         (source, source_playlist_id, name, description, owner,
                          image_url, track_count, profile_id, quality_profile_id,
-                         source_skipped, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         source_skipped, is_request_list, auto_remove_fulfilled, upstream_playlist_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ON CONFLICT(source, source_playlist_id, profile_id) DO UPDATE SET
                         name = excluded.name,
                         description = COALESCE(NULLIF(excluded.description, ''), mirrored_playlists.description),
@@ -24613,6 +25111,18 @@ class MusicDatabase:
                             WHEN ? THEN excluded.source_skipped
                             ELSE mirrored_playlists.source_skipped
                         END,
+                        is_request_list = CASE
+                            WHEN ? THEN excluded.is_request_list
+                            ELSE mirrored_playlists.is_request_list
+                        END,
+                        auto_remove_fulfilled = CASE
+                            WHEN ? THEN excluded.auto_remove_fulfilled
+                            ELSE mirrored_playlists.auto_remove_fulfilled
+                        END,
+                        upstream_playlist_id = CASE
+                            WHEN ? THEN excluded.upstream_playlist_id
+                            ELSE mirrored_playlists.upstream_playlist_id
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """, (
                     source, source_playlist_id, name,
@@ -24620,8 +25130,14 @@ class MusicDatabase:
                     kwargs.get('image_url'), len(tracks), profile_id,
                     resolved_quality_profile_id,
                     self._source_skipped_json(kwargs.get('source_skipped')),
+                    1 if kwargs.get('is_request_list') else 0,
+                    1 if kwargs.get('auto_remove_fulfilled') else 0,
+                    kwargs.get('upstream_playlist_id'),
                     1 if quality_profile_id is not None else 0,
                     1 if 'source_skipped' in kwargs else 0,
+                    1 if 'is_request_list' in kwargs else 0,
+                    1 if 'auto_remove_fulfilled' in kwargs else 0,
+                    1 if 'upstream_playlist_id' in kwargs else 0,
                 ))
                 playlist_id = cursor.execute(
                     "SELECT id FROM mirrored_playlists WHERE source=? AND source_playlist_id=? AND profile_id=?",
@@ -24842,8 +25358,12 @@ class MusicDatabase:
             logger.error(f"Error backfilling mirrored covers: {e}")
         return filled
 
-    def get_mirrored_playlists(self, profile_id: int = 1) -> List[Dict]:
-        """Return all mirrored playlists for a profile, newest first."""
+    def get_mirrored_playlists(self, profile_id: int = 1, is_request_list: Optional[bool] = None) -> List[Dict]:
+        """Return all mirrored playlists for a profile, newest first.
+        If is_request_list is True, return only request lists.
+        If is_request_list is False, return only non-request lists.
+        If is_request_list is None, return all (backward compatible).
+        """
         # Most sources supply no poster of their own, so a playlist borrows one
         # from the first track discovery matched. Doing it here means the first
         # visit after an upgrade fixes the whole library; every later visit
@@ -24852,9 +25372,15 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                if is_request_list is True:
+                    req_clause = " AND is_request_list = 1"
+                elif is_request_list is False:
+                    req_clause = " AND (is_request_list = 0 OR is_request_list IS NULL)"
+                else:
+                    req_clause = ""
+                cursor.execute(f"""
                     SELECT * FROM mirrored_playlists
-                    WHERE profile_id = ?
+                    WHERE profile_id = ?{req_clause}
                     ORDER BY updated_at DESC
                 """, (profile_id,))
                 return [
@@ -24928,11 +25454,91 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        pl['is_request_list'] = bool(pl.get('is_request_list', 0))
+        pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
+        pl['upstream_playlist_id'] = pl.get('upstream_playlist_id') or None
         try:
             pl['source_skipped'] = json.loads(pl['source_skipped']) if pl.get('source_skipped') else None
         except (TypeError, ValueError):
             pl['source_skipped'] = None
         return pl
+
+    def set_mirrored_playlist_auto_remove(
+        self,
+        playlist_id: int,
+        auto_remove_fulfilled: bool,
+        profile_id: Optional[int] = None,
+    ) -> bool:
+        """Update auto_remove_fulfilled on a request list."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                owner_sql, owner_params = self._mirror_owner_clause(profile_id)
+                cursor.execute(
+                    "UPDATE mirrored_playlists SET auto_remove_fulfilled = ?, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ?" + owner_sql,
+                    [1 if auto_remove_fulfilled else 0, playlist_id, *owner_params],
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting auto_remove_fulfilled for playlist {playlist_id}: {e}")
+            return False
+
+    def copy_to_request_list(
+        self,
+        playlist_id: int,
+        name: Optional[str] = None,
+        profile_id: Optional[int] = None,
+        **kwargs,
+    ) -> Optional[int]:
+        """Clone an existing mirrored playlist or user playlist into a new request list."""
+        import uuid
+        if not name and 'new_name' in kwargs:
+            name = kwargs['new_name']
+        mirror = self.get_mirrored_playlist(playlist_id, profile_id=profile_id)
+        if not mirror:
+            return None
+        tracks = self.get_mirrored_playlist_tracks(playlist_id, profile_id=profile_id)
+
+        original_source = mirror.get('source', '')
+        original_source_id = mirror.get('source_playlist_id', '')
+        unique_suffix = uuid.uuid4().hex[:8]
+        new_source_playlist_id = f"{original_source_id}_req_{unique_suffix}"
+
+        from core.playlists.naming import effective_mirrored_name
+        base_name = name or effective_mirrored_name(mirror) or mirror.get('name') or 'Request List'
+        new_name = name if name else f"{base_name} (Requests)"
+
+        upstream_id = mirror.get('upstream_playlist_id')
+        if not upstream_id:
+            if original_source == 'spotify':
+                upstream_id = original_source_id
+            elif original_source == 'spotify_public':
+                from core.playlists.source_refs import _parse_spotify_ref
+                parsed = _parse_spotify_ref(mirror.get('description') or '')
+                upstream_id = (parsed.get('id') if parsed else None) or original_source_id
+            elif original_source_id:
+                import re
+                upstream_id = re.sub(r'_req_[a-f0-9]+$', '', original_source_id)
+        if upstream_id and '_req_' in str(upstream_id):
+            import re
+            upstream_id = re.sub(r'_req_[a-f0-9]+$', '', str(upstream_id))
+
+        return self.mirror_playlist(
+            source=original_source,
+            source_playlist_id=new_source_playlist_id,
+            name=new_name,
+            tracks=tracks,
+            profile_id=int(profile_id or mirror.get('profile_id') or 1),
+            description=mirror.get('description'),
+            owner=mirror.get('owner'),
+            image_url=mirror.get('image_url'),
+            quality_profile_id=mirror.get('quality_profile_id'),
+            is_request_list=1,
+            auto_remove_fulfilled=1 if original_source in ('spotify', 'spotify_public') else 0,
+            upstream_playlist_id=upstream_id,
+        )
 
     def set_mirrored_playlist_source_skipped(
         self,
@@ -25582,7 +26188,7 @@ class MusicDatabase:
                 for row in cursor.fetchall():
                     result[row['playlist_id']] = {
                         'total': 0, 'discovered': 0, 'wishlisted': 0,
-                        'in_library': 0, 'library_checked': 0,
+                        'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                     }
 
                 # Core counts: total + discovered, grouped per playlist
@@ -25614,12 +26220,26 @@ class MusicDatabase:
                                WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 0
                                WHEN (
                                    (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                                    AND EXISTS (SELECT 1 FROM tracks ti
-                                                WHERE ti.spotify_track_id = mpt.source_track_id
-                                                   OR ti.deezer_id = mpt.source_track_id
-                                                   OR ti.tidal_id = mpt.source_track_id
-                                                   OR ti.qobuz_id = mpt.source_track_id
-                                                   OR ti.itunes_track_id = mpt.source_track_id))
+                                    -- Separate probes avoid a multi-column OR scan.
+                                    -- IS NOT NULL skips NULL entries even on SQLite 3.45,
+                                    -- which can otherwise scan an all-NULL index after ANALYZE.
+                                    AND (
+                                        EXISTS (SELECT 1 FROM tracks ti
+                                                WHERE ti.spotify_track_id IS NOT NULL
+                                                  AND ti.spotify_track_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.deezer_id IS NOT NULL
+                                                     AND ti.deezer_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.tidal_id IS NOT NULL
+                                                     AND ti.tidal_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.qobuz_id IS NOT NULL
+                                                     AND ti.qobuz_id = mpt.source_track_id)
+                                        OR EXISTS (SELECT 1 FROM tracks ti
+                                                   WHERE ti.itunes_track_id IS NOT NULL
+                                                     AND ti.itunes_track_id = mpt.source_track_id)
+                                    ))
                                    -- The name join stays exact (case-sensitive):
                                    -- COLLATE NOCASE would defeat idx_artists_name /
                                    -- idx_tracks_title (~18s vs ~6ms on a 300k-track
@@ -25648,7 +26268,7 @@ class MusicDatabase:
                     if pid not in result:
                         result[pid] = {
                             'total': 0, 'discovered': 0, 'wishlisted': 0,
-                            'in_library': 0, 'library_checked': 0,
+                            'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                         }
                     result[pid]['total'] = row['total'] or 0
                     result[pid]['discovered'] = row['discovered'] or 0
@@ -25662,17 +26282,32 @@ class MusicDatabase:
                         FROM mirrored_playlist_tracks mpt
                         JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
                         WHERE mp.profile_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
+                          AND {_WISHLISTED}
                         GROUP BY mpt.playlist_id
-                    """, (profile_id,))
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (profile_id,))
                     for row in cursor.fetchall():
                         pid = row['playlist_id']
                         if pid in result:
                             result[pid]['wishlisted'] = row['wishlisted'] or 0
                 except Exception as e:
                     logger.debug(f"Batch wishlist counts failed: {e}")
+
+                # wing it guesses nobody fixed: what the card's "need a match"
+                # link opens, so it counts exactly what the pool lists (#1721)
+                try:
+                    cursor.execute(f"""
+                        SELECT mpt.playlist_id, COUNT(*) as needs_match
+                        FROM mirrored_playlist_tracks mpt
+                        JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                        WHERE mp.profile_id = ? AND {self._WING_IT_ATTENTION}
+                        GROUP BY mpt.playlist_id
+                    """, (profile_id,))
+                    for row in cursor.fetchall():
+                        pid = row['playlist_id']
+                        if pid in result:
+                            result[pid]['needs_match'] = row['needs_match'] or 0
+                except Exception as e:
+                    logger.debug(f"Batch needs-match counts failed: {e}")
 
                 # NOTE: in_library is no longer derived here. It used to be a
                 # join with two paths and both were wrong. The ID path compared
@@ -25699,6 +26334,47 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting batch mirrored playlist status counts: {e}")
         return result
+
+    # a mirrored track is wishlisted under the id sync filed it under: the
+    # matched id once discovery found one (often deezer's), the playlist's own
+    # id before that. asking only for the source id read 0 for every
+    # deezer-identified spotify playlist (#1721).
+    _MIRROR_TRACK_WISHLISTED = (
+        "((mpt.source_track_id IS NOT NULL AND mpt.source_track_id != '' "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = mpt.source_track_id)) "
+        "OR (json_valid(mpt.extra_data) "
+        "AND json_extract(mpt.extra_data, '$.matched_data.id') IS NOT NULL "
+        "AND EXISTS (SELECT 1 FROM wishlist_tracks wt "
+        "WHERE wt.spotify_track_id = json_extract(mpt.extra_data, '$.matched_data.id'))))"
+    )
+
+    def get_wishlisted_ids(self, ids, profile_id: Optional[int] = None) -> set:
+        """which of ``ids`` have a wishlist row, for this profile when given."""
+        wanted = sorted({str(i) for i in ids or [] if i})
+        found: set = set()
+        if not wanted:
+            return found
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(wishlist_tracks)")
+                scoped = profile_id is not None and any(
+                    r[1] == 'profile_id' for r in cursor.fetchall())
+                # sqlite caps bound parameters, so ask in chunks
+                for start in range(0, len(wanted), 500):
+                    chunk = wanted[start:start + 500]
+                    sql = ("SELECT spotify_track_id FROM wishlist_tracks WHERE spotify_track_id IN ("
+                           + ",".join("?" * len(chunk)) + ")")
+                    params = list(chunk)
+                    if scoped:
+                        sql += " AND profile_id = ?"
+                        params.append(int(profile_id))
+                    cursor.execute(sql, params)
+                    found.update(str(r[0]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug(f"wishlisted id lookup failed: {e}")
+        return found
 
     def get_mirrored_playlist_status_counts(self, playlist_id: int) -> dict:
         """Return discovery, wishlisted, and downloaded counts for a mirrored playlist.
@@ -25728,10 +26404,8 @@ class MusicDatabase:
                         SELECT COUNT(*) as wishlisted
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
-                          AND mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                          AND EXISTS (SELECT 1 FROM wishlist_tracks wt
-                                      WHERE wt.spotify_track_id = mpt.source_track_id)
-                    """, (playlist_id,))
+                          AND {_WISHLISTED}
+                    """.replace("{_WISHLISTED}", self._MIRROR_TRACK_WISHLISTED), (playlist_id,))
                     result['wishlisted'] = cursor.fetchone()['wishlisted'] or 0
                 except Exception as extra_err:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
@@ -25750,12 +26424,25 @@ class MusicDatabase:
                         WHERE mpt.playlist_id = ?
                           AND (
                             (mpt.source_track_id IS NOT NULL AND mpt.source_track_id != ''
-                             AND EXISTS (SELECT 1 FROM tracks ti
-                                         WHERE ti.spotify_track_id = mpt.source_track_id
-                                            OR ti.deezer_id = mpt.source_track_id
-                                            OR ti.tidal_id = mpt.source_track_id
-                                            OR ti.qobuz_id = mpt.source_track_id
-                                            OR ti.itunes_track_id = mpt.source_track_id))
+                             -- Use the same separate, non-NULL provider probes as
+                             -- the batched counts, including on SQLite 3.45.
+                             AND (
+                                 EXISTS (SELECT 1 FROM tracks ti
+                                         WHERE ti.spotify_track_id IS NOT NULL
+                                           AND ti.spotify_track_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.deezer_id IS NOT NULL
+                                              AND ti.deezer_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.tidal_id IS NOT NULL
+                                              AND ti.tidal_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.qobuz_id IS NOT NULL
+                                              AND ti.qobuz_id = mpt.source_track_id)
+                                 OR EXISTS (SELECT 1 FROM tracks ti
+                                            WHERE ti.itunes_track_id IS NOT NULL
+                                              AND ti.itunes_track_id = mpt.source_track_id)
+                             ))
                             OR EXISTS (SELECT 1 FROM artists a
                                        JOIN tracks t ON t.artist_id = a.id
                                        WHERE (a.name = mpt.artist_name

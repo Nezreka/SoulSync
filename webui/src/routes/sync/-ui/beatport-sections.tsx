@@ -8,8 +8,8 @@
  * wiring, and the two things the wiring alone decides:
  *
  *  - WHICH CLICK HANDLER a card gets. All four release-ish sections hand off to
- *    openBeatportRelease; the two chart sections hand off to
- *    openBeatportChartCard with their own variant.
+ *    openBeatportRelease; the two chart sections open their chart as a
+ *    playlist to identify (env.openList).
  *  - WHETHER a card is clickable at all. Three of the four apply the vanilla's
  *    url test and attach nothing when it fails.
  *
@@ -23,7 +23,7 @@ import type { BeatportChart, BeatportHeroTrack, BeatportRelease } from '../-beat
 import type { BeatportDownloadEnv } from '../-beatport.downloads';
 
 import { BEATPORT_SLIDERS } from '../-beatport.core';
-import { openBeatportChartCard, openBeatportRelease } from '../-beatport.downloads';
+import { openBeatportRelease } from '../-beatport.downloads';
 import {
   heroClickRelease,
   isBeatportReleaseClickable,
@@ -43,6 +43,15 @@ import {
   heroSlideAttributes,
 } from './beatport-cards';
 import { BeatportSection } from './beatport-section';
+
+/** a featured or dj chart opens as a playlist to identify, by its url */
+function openChart(chart: BeatportChart, env: BeatportDownloadEnv): void {
+  if (!chart.url) {
+    env.showToast('No chart URL available', 'error');
+    return;
+  }
+  env.openList?.({ url: chart.url, label: chart.name || 'chart' });
+}
 
 export interface BeatportSectionEnvProps {
   env: BeatportDownloadEnv;
@@ -173,9 +182,7 @@ export function BeatportFeaturedChartsSection({ env }: BeatportSectionEnvProps) 
           // 1158 attaches the handler unconditionally — the url test lives
           // inside handleBeatportChartCardClick, which toasts. Unlike the three
           // release sections, which refuse to bind at all.
-          onClick={() => {
-            void openBeatportChartCard(chart, 'chart', env);
-          }}
+          onClick={() => openChart(chart, env)}
         />
       )}
     />
@@ -195,9 +202,7 @@ export function BeatportDJChartsSection({ env }: BeatportSectionEnvProps) {
           key={index}
           chart={chart}
           variant="dj"
-          onClick={() => {
-            void openBeatportChartCard(chart, 'dj', env);
-          }}
+          onClick={() => openChart(chart, env)}
         />
       )}
     />

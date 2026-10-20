@@ -33,6 +33,23 @@ def test_inventory_rejects_scanning():
     assert client._make_request.call_count == 1
 
 
+def test_playlist_write_waits_out_a_running_scan(monkeypatch):
+    """A scan running when the write starts (downloads trigger them) is waited
+    out, not a refusal that throws the whole sync away."""
+    import core.library.navidrome_identity as identity
+    monkeypatch.setattr(identity.time, 'sleep', lambda s: None)
+    client, current, writes = _server(monkeypatch)
+    request = client._make_request
+    scans = iter([True, True])
+    def scanning_at_first(endpoint, params=None, timeout=None):
+        if endpoint == 'getScanStatus' and next(scans, False):
+            return {'scanStatus': {'scanning': True, 'count': 1}}
+        return request(endpoint, params, timeout)
+    client._make_request = scanning_at_first
+    assert client.create_playlist(name='P', tracks=[SimpleNamespace(ratingKey='old')], playlist_id='pl')
+    assert current == ['new']
+
+
 def test_resolve_stale_id_by_unique_exact_path():
     db = _old_db('/music/song.opus')
     result = resolve_tracks([SimpleNamespace(ratingKey='old')], {'new': {'id': 'new', 'title': 'Song', 'path': '/music/song.opus'}}, db)
@@ -134,6 +151,120 @@ def test_append_keeps_existing_tracks_and_deduplicates_recovered_id(monkeypatch)
     assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='old')])
     assert current == ['new', 'extra']
     assert not writes
+
+
+# #1715: one song navidrome no longer has (deleted from review) blocked every
+# other track on the playlist, sync after sync.
+def test_a_dead_id_is_skipped_not_fatal():
+    skipped = []
+    songs = {'live': {'id': 'live', 'title': 'Song', 'path': '/live'}}
+    result = resolve_tracks([SimpleNamespace(ratingKey='live'), SimpleNamespace(ratingKey='gone')],
+                            songs, _old_db(), skipped)
+    assert [t.ratingKey for t in result] == ['live']
+    assert skipped == ['gone']
+
+
+def test_append_writes_the_good_tracks_past_a_dead_one(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['extra']
+    assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert current == ['extra', 'new']
+    assert len(writes) == 1
+
+
+# #1754: the guard's drops used to exist only in this log line, so the sync
+# counted a deleted song as synced forever. The write now records them on
+# the client for the sync layer to read.
+def test_a_guarded_write_records_the_ids_it_skipped(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['extra']
+    assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert client._last_validated_write_skipped == ['gone']
+    # a later clean write resets the record instead of leaking the old drops
+    assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='new')])
+    assert client._last_validated_write_skipped == []
+
+
+def test_a_fresh_client_has_no_recorded_skips():
+    assert NavidromeClient()._last_validated_write_skipped == []
+
+
+def test_an_all_dead_write_still_records_its_drops(monkeypatch):
+    # every offered track is gone: resolve raises before the guard can
+    # hand the drops over inline, so the guard's failure path must —
+    # otherwise those tracks stay "matched" forever (#1754 review)
+    client, current, writes = _server(monkeypatch)
+    assert not client.append_to_playlist(
+        'P', [SimpleNamespace(ratingKey='gone1'), SimpleNamespace(ratingKey='gone2')])
+    assert sorted(client._last_validated_write_skipped) == ['gone1', 'gone2']
+    assert not writes
+
+
+def test_resolve_splits_proven_dead_from_ambiguous():
+    # 'gone' has no live candidate at all: proven dead. 'old' has TWO
+    # live songs at its stored path: a rekey might explain it, but
+    # nothing proves which — uncertainty must not read as deletion.
+    skipped, ambiguous = [], []
+    songs = {'live': {'id': 'live', 'title': 'Song', 'path': '/live'},
+             'a': {'id': 'a', 'title': 'Song', 'path': '/song'},
+             'b': {'id': 'b', 'title': 'Song', 'path': '/song'}}
+    result = resolve_tracks(
+        [SimpleNamespace(ratingKey='live'), SimpleNamespace(ratingKey='gone'),
+         SimpleNamespace(ratingKey='old')],
+        songs, _old_db(), skipped, ambiguous)
+    assert [t.ratingKey for t in result] == ['live']
+    assert skipped == ['gone']
+    assert ambiguous == ['old']
+
+
+def test_an_ambiguous_id_is_not_recorded_as_server_dead(monkeypatch):
+    import core.library.navidrome_identity as identity
+    songs = {'new': {'id': 'new', 'title': 'Song', 'path': '/new'},
+             'a': {'id': 'a', 'title': 'Song', 'path': '/song'},
+             'b': {'id': 'b', 'title': 'Song', 'path': '/song'}}
+    monkeypatch.setattr(identity, 'read_inventory',
+                        lambda client, scan_wait=0: songs)
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['extra']
+    # 'old' (db row at /song) has two live candidates: left out of the
+    # write, but NOT recorded as dead — the sync layer must not wishlist
+    # or unmatch it on a guess (#1754)
+    assert client.append_to_playlist(
+        'P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='old')])
+    assert current == ['extra', 'new']
+    assert client._last_validated_write_skipped == []
+
+
+def test_a_write_failing_before_resolution_clears_the_previous_record(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['extra']
+    assert client.append_to_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert client._last_validated_write_skipped == ['gone']
+    # the next write cannot even read the inventory: it must not leak the
+    # previous write's drops into a later sync's readback
+    request = client._make_request
+    def broken(endpoint, params=None, timeout=None):
+        if endpoint == 'search3':
+            return None
+        return request(endpoint, params, timeout)
+    client._make_request = broken
+    assert not client.append_to_playlist('P', [SimpleNamespace(ratingKey='other')])
+    assert client._last_validated_write_skipped == []
+
+
+def test_reconcile_with_a_dead_id_never_drops_what_is_there(monkeypatch):
+    # 'extra' could be the dead song under a new key, so nothing gets removed
+    client, current, writes = _server(monkeypatch)
+    assert not client.reconcile_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert not writes
+    assert current == ['new', 'extra']
+
+
+def test_reconcile_with_a_dead_id_goes_ahead_when_nothing_would_drop(monkeypatch):
+    client, current, writes = _server(monkeypatch)
+    current[:] = ['new']
+    assert client.reconcile_playlist('P', [SimpleNamespace(ratingKey='new'), SimpleNamespace(ratingKey='gone')])
+    assert current == ['new']
 
 
 def test_no_matches_cannot_empty_a_playlist(monkeypatch):

@@ -64,7 +64,8 @@ def test_history_joins_by_hash_and_falls_back_to_path():
     assert r['match']['source'] is None
     assert r['match']['matches'][0] == {'track_name': 'One', 'track_number': None,
                                         'file': '01.flac', 'file_path': '/Staging/X/01.flac',
-                                        'confidence': 0.9}
+                                        'confidence': 0.9, 'import_status': None,
+                                        'import_reason': None, 'import_error': None}
     # the claimed history row is not repeated as a history-only row
     assert len(rows) == 1
 

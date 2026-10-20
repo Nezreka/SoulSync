@@ -48,7 +48,7 @@ def fold_confusables(name: str) -> str:
     return name
 
 
-def find_on_disk(base_dir: str, suffix_parts):
+def find_on_disk(base_dir: str, suffix_parts, *, fold_case: bool = False):
     """Descend ``base_dir`` following ``suffix_parts`` (the path components of a
     stored file path). Each component is matched exactly when it exists, else by
     confusable-folded comparison against the directory's real entries. Returns
@@ -57,6 +57,11 @@ def find_on_disk(base_dir: str, suffix_parts):
     Exact matches always win — the folded scan only runs for a component that
     isn't present byte-for-byte, so this never changes behaviour for paths that
     already resolve.
+
+    ``fold_case`` also folds case, but only takes a component when exactly ONE
+    entry matches. plex reports "Bring Me the Horizon" for a folder that is
+    "Bring Me The Horizon" here; two files that differ only by case stay a
+    refusal, so a delete can't land on the wrong one.
     """
     if not base_dir or not os.path.isdir(base_dir):
         return None
@@ -69,17 +74,19 @@ def find_on_disk(base_dir: str, suffix_parts):
             current = exact
             continue
         target = fold_confusables(part)
-        match = None
         try:
-            for entry in os.listdir(current):
-                if fold_confusables(entry) == target:
-                    match = os.path.join(current, entry)
-                    break
+            entries = os.listdir(current)
         except OSError:
             return None
+        match = next((e for e in entries if fold_confusables(e) == target), None)
+        if match is None and fold_case:
+            folded = target.casefold()
+            hits = [e for e in entries if fold_confusables(e).casefold() == folded]
+            if len(hits) == 1:
+                match = hits[0]
         if match is None:
             return None
-        current = match
+        current = os.path.join(current, match)
     return current if current != base_dir else None
 
 

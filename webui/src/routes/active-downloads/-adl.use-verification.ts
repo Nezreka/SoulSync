@@ -8,6 +8,7 @@ import type {
 } from './-adl.types';
 
 import {
+  QUARANTINE_PAGE_SIZE,
   fetchDeletedFiles,
   fetchQuarantine,
   fetchReviewQueueSummary,
@@ -25,6 +26,9 @@ export interface AdlVerificationState {
   acoustidEnabled: boolean | null;
   subView: AdlSubView;
   quarantine: AdlQuarantineEntry[];
+  quarantineTotal: number | null;
+  /** Raw server offset consumed so far — see quarantineOffsetRef. */
+  quarantineOffset: number;
   quarantineLoaded: boolean;
   /** the last list-fetch failure; null when the list is trustworthy. */
   quarantineError: string | null;
@@ -51,6 +55,8 @@ export interface AdlVerificationController {
   acoustidEnabled: boolean;
   setSubView: (view: AdlSubView) => void;
   loadQuarantine: (force?: boolean) => Promise<void>;
+  loadMoreQuarantine: () => Promise<void>;
+  loadAllQuarantine: () => Promise<{ entries: AdlQuarantineEntry[]; complete: boolean }>;
   loadDeleted: (force?: boolean) => Promise<void>;
   refreshSummary: () => Promise<void>;
   toggleUnverified: (key: string) => void;
@@ -74,6 +80,8 @@ export function useAdlVerification(): AdlVerificationController {
     acoustidEnabled: null,
     subView: 'unverified',
     quarantine: [],
+    quarantineTotal: null,
+    quarantineOffset: 0,
     quarantineLoaded: false,
     quarantineError: null,
     summary: null,
@@ -98,6 +106,20 @@ export function useAdlVerification(): AdlVerificationController {
   const loadedRef = useRef(false);
   const deletedLoadingRef = useRef(false);
   const deletedLoadedRef = useRef(false);
+  /**
+   * Synchronous mirrors of the loaded quarantine page(s) and the server
+   * total, for the same reason as the flags above: loadMore/loadAll read
+   * the current length and total at call time, and state would still hold
+   * the previous render's values. Updated wherever quarantine state is set.
+   */
+  const quarantineRef = useRef<AdlQuarantineEntry[]>([]);
+  const quarantineTotalRef = useRef<number | null>(null);
+  /**
+   * Raw server offset consumed so far, tracked separately from the deduped
+   * list length: a page of duplicates must still advance the cursor, or
+   * loadMore/loadAll would refetch the same window forever.
+   */
+  const quarantineOffsetRef = useRef(0);
 
   /**
    * Set every render, read only when loadQuarantine runs. Lets the two call
@@ -111,17 +133,130 @@ export function useAdlVerification(): AdlVerificationController {
     if (loadingRef.current || (loadedRef.current && !force)) return;
 
     loadingRef.current = true;
-    const result = await fetchQuarantine();
+    const result = await fetchQuarantine({ limit: QUARANTINE_PAGE_SIZE, offset: 0 });
     loadedRef.current = true;
     loadingRef.current = false;
+    if ('entries' in result) {
+      quarantineRef.current = result.entries;
+      quarantineTotalRef.current = result.total;
+      quarantineOffsetRef.current = result.entries.length;
+    }
     // a failed fetch keeps the last good list and carries the reason - an
     // empty render with a big badge number must say WHY, not look empty
     setState((prev) =>
       'entries' in result
-        ? { ...prev, quarantine: result.entries, quarantineLoaded: true, quarantineError: null }
+        ? {
+            ...prev,
+            quarantine: result.entries,
+            quarantineTotal: result.total,
+            quarantineOffset: quarantineOffsetRef.current,
+            quarantineLoaded: true,
+            quarantineError: null,
+          }
         : { ...prev, quarantineLoaded: true, quarantineError: result.error },
     );
     void refreshSummaryRef.current?.();
+  }, []);
+
+  const loadMoreQuarantine = useCallback(async () => {
+    if (loadingRef.current) return;
+    const total = quarantineTotalRef.current;
+    if (quarantineOffsetRef.current >= (total ?? 0)) return;
+
+    loadingRef.current = true;
+    const result = await fetchQuarantine({
+      limit: QUARANTINE_PAGE_SIZE,
+      offset: quarantineOffsetRef.current,
+    });
+    loadingRef.current = false;
+    if ('entries' in result) {
+      quarantineOffsetRef.current += result.entries.length;
+      const seen = new Set(quarantineRef.current.map((e) => e.id));
+      const appended = result.entries.filter((e) => !seen.has(e.id));
+      const next = [...quarantineRef.current, ...appended];
+      quarantineRef.current = next;
+      quarantineTotalRef.current = result.total;
+      loadedRef.current = true;
+      setState((prev) => ({
+        ...prev,
+        quarantine: next,
+        quarantineTotal: result.total,
+        quarantineOffset: quarantineOffsetRef.current,
+        quarantineLoaded: true,
+        quarantineError: null,
+      }));
+    } else {
+      setState((prev) => ({ ...prev, quarantineError: result.error }));
+    }
+  }, []);
+
+  const loadAllQuarantine = useCallback(async (): Promise<{
+    entries: AdlQuarantineEntry[];
+    complete: boolean;
+  }> => {
+    if (loadingRef.current) return { entries: quarantineRef.current, complete: false };
+    // Accumulate locally and publish ONCE at the end: per-page setState
+    // re-mounted the growing full list on every page and re-froze the tab.
+    let entries = [...quarantineRef.current];
+    let expectedTotal = quarantineTotalRef.current;
+    let lastTotal = quarantineTotalRef.current;
+    let nextOffset = quarantineOffsetRef.current;
+    let loaded = loadedRef.current;
+    let fetchError: string | null = null;
+    let drifted = false;
+    // Page through until we hold `expectedTotal` entries. Start from what's
+    // loaded; when nothing is loaded yet the first fetch is offset 0.
+    while (expectedTotal === null || entries.length < expectedTotal) {
+      loadingRef.current = true;
+      const result = await fetchQuarantine({
+        limit: QUARANTINE_PAGE_SIZE,
+        offset: nextOffset,
+      });
+      loadingRef.current = false;
+      if (!('entries' in result)) {
+        fetchError = result.error;
+        break;
+      }
+      const reportedTotal = result.total;
+      nextOffset += result.entries.length;
+      const seen = new Set(entries.map((e) => e.id));
+      entries = [...entries, ...result.entries.filter((e) => !seen.has(e.id))];
+      loaded = true;
+      if (expectedTotal === null) {
+        expectedTotal = reportedTotal;
+        lastTotal = reportedTotal;
+      } else if (reportedTotal !== expectedTotal) {
+        // The queue changed mid-load: a count match against the new total
+        // would over-claim coverage of a list we never fully saw.
+        lastTotal = reportedTotal;
+        drifted = true;
+        break;
+      } else {
+        lastTotal = reportedTotal;
+      }
+      if (result.entries.length === 0) break;
+      // A page of pure duplicates (offsets shifted) advances nextOffset but
+      // not entries; the loop still terminates because nextOffset grows and
+      // the server returns an empty page past the end — guard anyway.
+      if (expectedTotal !== null && nextOffset > expectedTotal && entries.length < expectedTotal)
+        break;
+    }
+    // Refs and the single published state must agree when this returns.
+    quarantineRef.current = entries;
+    quarantineTotalRef.current = lastTotal;
+    quarantineOffsetRef.current = nextOffset;
+    loadedRef.current = loaded;
+    const complete =
+      !fetchError && !drifted && expectedTotal !== null && entries.length >= expectedTotal;
+    setState((prev) => ({
+      ...prev,
+      quarantine: entries,
+      quarantineTotal: lastTotal,
+      quarantineOffset: nextOffset,
+      quarantineLoaded: loaded,
+      quarantineError: fetchError,
+    }));
+    return { entries, complete };
   }, []);
 
   const loadDeleted = useCallback(async (force = false) => {
@@ -229,6 +364,8 @@ export function useAdlVerification(): AdlVerificationController {
     acoustidEnabled: state.acoustidEnabled !== false,
     setSubView,
     loadQuarantine,
+    loadMoreQuarantine,
+    loadAllQuarantine,
     loadDeleted,
     refreshSummary,
     toggleUnverified,

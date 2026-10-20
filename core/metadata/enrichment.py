@@ -146,7 +146,11 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             disc_num_str = str(_disc_num)
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             from core.metadata.multi_value import genre_values
-            genres_out = genre_values(metadata.get("genre"), bool(write_multi))
+            from core.audiobook_routing import routed_root_for_context
+            # Streaming services tag a children's audio play "Rock"; a routed
+            # album is an audiobook, whatever the source says.
+            genre = "Audiobook" if routed_root_for_context(context) else metadata.get("genre")
+            genres_out = genre_values(genre, bool(write_multi))
             artists_list = metadata.get("_artists_list", [])
             album_artists_list = metadata.get("_album_artists_list", [])
 
@@ -301,4 +305,8 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                     logger.info("Persisted core tags (and restored art) after enrichment error.")
             except Exception as restore_exc:
                 logger.debug("Tag/art persist after error failed: %s", restore_exc)
+            # a crash before any tag was built persists an empty file, which the
+            # media server files under Unknown Album. put the basics back.
+            from core.metadata.core_tag_guard import ensure_core_tags
+            ensure_core_tags(file_path, context, artist, album_info)
             return False

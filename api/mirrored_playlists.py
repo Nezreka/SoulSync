@@ -96,16 +96,12 @@ def _invalidate_mirror_sync_fingerprint(playlist_id):
     the smallest change that makes the very next scheduled run authoritative,
     and it degrades safely: a lost preference write only costs one extra sync.
     """
+    from core.sync.sync_fingerprint import clear_fingerprint
     key = f"auto_mirror_{int(playlist_id)}"
     try:
         sync_statuses = _load_sync_status_file()
-        status = sync_statuses.get(key)
-        if not status:
-            return
-        for field in ('tracks_hash', 'mirror_tracks_hash', 'matched_tracks'):
-            status.pop(field, None)
-        sync_statuses[key] = status
-        _save_sync_status_file(sync_statuses)
+        if clear_fingerprint(sync_statuses, key):
+            _save_sync_status_file(sync_statuses)
     except Exception as e:
         logger.debug("Could not invalidate sync fingerprint for %s: %s", key, e)
 
@@ -134,7 +130,11 @@ def get_mirrored_playlists_endpoint():
         from core.playlists.naming import effective_mirrored_name
         database = get_database()
         profile_id = get_current_profile_id()
-        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        is_req_param = request.args.get('is_request_list')
+        is_req_filter = None
+        if is_req_param is not None:
+            is_req_filter = is_req_param.lower() in ('1', 'true', 'yes')
+        playlists = database.get_mirrored_playlists(profile_id=profile_id, is_request_list=is_req_filter)
         # Single batched query instead of N per-playlist round-trips. Used to
         # take ~50ms per playlist (new connection + 4 sub-queries) — at 30
         # playlists that's 1.5s of modal load time just for status counts.
@@ -150,7 +150,7 @@ def get_mirrored_playlists_endpoint():
         for pl in playlists:
             counts = batch_counts.get(pl['id'], {
                 'total': 0, 'discovered': 0, 'wishlisted': 0,
-                'in_library': 0, 'library_checked': 0,
+                'in_library': 0, 'library_checked': 0, 'needs_match': 0,
             })
             pl['discovered_count'] = counts['discovered']
             pl['total_count'] = counts['total']
@@ -161,6 +161,8 @@ def get_mirrored_playlists_endpoint():
             # owning none of it, and the card must not report the second when it
             # only knows the first.
             pl['library_checked_count'] = counts.get('library_checked', 0)
+            # wing it guesses still waiting on a pick, the card links to them (#1721)
+            pl['needs_match_count'] = counts.get('needs_match', 0)
             source_ref = describe_mirrored_source_ref(pl)
             pl['source_ref'] = source_ref.source_ref
             pl['source_ref_kind'] = source_ref.source_ref_kind
@@ -207,6 +209,21 @@ def _owned_mirrored_playlist(database, playlist_id):
     return database.get_mirrored_playlist(playlist_id, profile_id=_mirror_scope_profile_id())
 
 
+def _stamp_track_statuses(database, playlist):
+    """where each track stands, on the track, plus the totals (#1721).
+    best effort: the tracks still show without it."""
+    try:
+        from core.playlists.track_status import status_counts, track_status, wishlist_ids
+        tracks = playlist.get('tracks') or []
+        ids = {i for t in tracks for i in wishlist_ids(t)}
+        wishlisted = database.get_wishlisted_ids(ids, profile_id=playlist.get('profile_id'))
+        for t in tracks:
+            t['status'] = track_status(t, wishlisted)
+        playlist['status_counts'] = status_counts(t['status'] for t in tracks)
+    except Exception as e:
+        logger.debug(f"track statuses unavailable for mirror {playlist.get('id')}: {e}")
+
+
 @bp.route('/api/mirrored-playlists/<int:playlist_id>', methods=['GET'])
 def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
@@ -225,6 +242,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         playlist['display_name'] = effective_mirrored_name(playlist)
         playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
+        _stamp_track_statuses(database, playlist)
         return jsonify(playlist)
     except Exception as e:
         logger.error(f"Error getting mirrored playlist: {e}")
@@ -380,6 +398,61 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
         return jsonify({"error": str(e)}), 500
 
 
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/copy-to-request-list', methods=['POST'])
+def copy_to_request_list_endpoint(playlist_id):
+    """Clone an existing mirrored playlist as a new Request List."""
+    try:
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        data = request.get_json(silent=True) or {}
+        custom_name = data.get('custom_name') or data.get('name')
+
+        new_id = database.copy_to_request_list(
+            playlist_id, new_name=custom_name, profile_id=_mirror_scope_profile_id()
+        )
+        if not new_id:
+            return jsonify({"error": "Failed to copy playlist to request list"}), 500
+
+        created = _owned_mirrored_playlist(database, new_id) or {}
+        return jsonify({"success": True, "new_playlist_id": new_id, "playlist": created})
+    except Exception as e:
+        logger.error(f"Error copying playlist {playlist_id} to request list: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/request-list-settings', methods=['PATCH'])
+def update_request_list_settings_endpoint(playlist_id):
+    """Update settings for a request list (e.g. auto_remove_fulfilled)."""
+    try:
+        data = request.get_json() or {}
+        if 'auto_remove_fulfilled' not in data:
+            return jsonify({"error": "auto_remove_fulfilled is required"}), 400
+
+        auto_remove = parse_strict_bool(data.get('auto_remove_fulfilled'))
+        if auto_remove is None:
+            return jsonify({"error": "Invalid auto_remove_fulfilled value"}), 400
+
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        ok = database.set_mirrored_playlist_auto_remove(
+            playlist_id, auto_remove, profile_id=_mirror_scope_profile_id()
+        )
+        if not ok:
+            return jsonify({"error": "Failed to update request list settings"}), 500
+
+        updated = _owned_mirrored_playlist(database, playlist_id) or {}
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating request list settings for playlist {playlist_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 def _resolve_spotify_public_alias(database, playlist_ref, profile_id):
     """Find a link-pasted Spotify mirror by raw Spotify ID.
 
@@ -455,9 +528,11 @@ def _playlist_pipeline_state_key(playlist_id, profile_id=None):
 
 
 def _snapshot_playlist_pipeline_state(playlist_id, profile_id=None):
+    if playlist_pipeline_progress_lock is None:
+        return None
     key = _playlist_pipeline_state_key(playlist_id, profile_id)
     with playlist_pipeline_progress_lock:
-        state = playlist_pipeline_progress_states.get(key)
+        state = (playlist_pipeline_progress_states or {}).get(key)
         return dict(state) if state else None
 
 
@@ -608,8 +683,8 @@ def run_mirrored_playlist_pipeline_endpoint(playlist_id):
         playlist = _owned_mirrored_playlist(database, playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
-        from core.playlists.user_playlists import PIPELINE_SKIPPED_SOURCES
-        if playlist.get('source') in PIPELINE_SKIPPED_SOURCES:
+        from core.playlists.user_playlists import pipeline_runs
+        if not pipeline_runs(playlist):
             return jsonify({"error": "This playlist source cannot be refreshed by the pipeline"}), 400
         if _get_automation_deps() is None:
             return jsonify({"error": "Playlist pipeline is not available"}), 503

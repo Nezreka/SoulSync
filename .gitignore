@@ -13,6 +13,7 @@ __pycache__/
 # User-specific files (auto-created by the app if missing)
 config/config.json
 config/youtube_cookies.txt
+config/sidebar_weather_snapshot.json
 # All app databases are live user data — never commit (music_library, video_library, …)
 database/*.db
 database/*.db-shm

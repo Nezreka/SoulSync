@@ -76,7 +76,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 52   # v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 53   # v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -4021,6 +4021,7 @@ class VideoDatabase:
                     "OR mf.episode_id IN (SELECT e.id FROM episodes e JOIN shows s ON s.id=e.show_id "
                     "WHERE s.server_source=?)") if server_source else \
                    "SELECT COALESCE(SUM(size_bytes), 0) FROM media_files"
+        from core.video.stats import ACTIVE_STATUSES
         conn = self._get_connection()
         try:
             def scalar(sql: str, params=()):
@@ -4030,17 +4031,22 @@ class VideoDatabase:
                 "library": {
                     "movies": scalar("SELECT COUNT(*) FROM movies" + mw, sv),
                     "shows": scalar("SELECT COUNT(*) FROM shows" + mw, sv),
+                    # an episode row is not an owned episode: tmdb backfill adds the
+                    # ones you don't have, so only count the ones with a file
                     "episodes": scalar(
-                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id" + sw, sv),
+                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id"
+                        + (sw + " AND" if sw else " WHERE") + " e.has_file=1", sv),
                     "size_bytes": scalar(size_sql, (sv + sv) if server_source else ()),
                 },
+                # video_downloads is the live queue. the old downloads table is
+                # never written, so reading it kept these tiles at 0
                 "downloads": {
                     "active": scalar(
-                        "SELECT COUNT(*) FROM downloads "
-                        "WHERE status IN ('queued','downloading','importing')"),
-                    "finished": scalar("SELECT COUNT(*) FROM downloads WHERE status = 'completed'"),
+                        "SELECT COUNT(*) FROM video_downloads WHERE status IN ("
+                        + ",".join("?" * len(ACTIVE_STATUSES)) + ")", ACTIVE_STATUSES),
+                    "finished": scalar("SELECT COUNT(*) FROM video_downloads WHERE status = 'completed'"),
                     "speed_bps": scalar(
-                        "SELECT COALESCE(SUM(download_speed_bps), 0) FROM downloads "
+                        "SELECT COALESCE(SUM(speed_bps), 0) FROM video_downloads "
                         "WHERE status = 'downloading'"),
                 },
                 # Curated watchlist (explicit follows + actively-airing library
@@ -7761,6 +7767,66 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def tvdb_season_cached(self, tvdb_id, season_number):
+        """(episodes, fetched_at) for a cached TVDB season, or None. episodes is
+        [(episode_number, air_date), ...]."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT episodes, fetched_at FROM tvdb_episode_cache WHERE tvdb_id=? AND season_number=?",
+                (int(tvdb_id), int(season_number))).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        try:
+            eps = [(int(e[0]), e[1]) for e in json.loads(row[0] or "[]")]
+        except (TypeError, ValueError, IndexError):
+            return None
+        return eps, row[1]
+
+    def wished_episodes_on(self, show_tmdb_id, air_date) -> list:
+        """[(season, episode)] of a show's wished episodes that aired on this day."""
+        if not show_tmdb_id or not air_date:
+            return []
+        conn = self._get_connection()
+        try:
+            return [(int(r[0]), int(r[1])) for r in conn.execute(
+                "SELECT DISTINCT season_number, episode_number FROM video_wishlist "
+                "WHERE kind='episode' AND tmdb_id=? AND substr(air_date, 1, 10)=? "
+                "AND season_number IS NOT NULL AND episode_number IS NOT NULL",
+                (int(show_tmdb_id), str(air_date)[:10]))]
+        finally:
+            conn.close()
+
+    def tvdb_season_store(self, tvdb_id, season_number, episodes, fetched_at=None) -> None:
+        """cache a TVDB season's [(episode_number, air_date), ...]; an empty list
+        is stored too, so a season TVDB doesn't have isn't asked again all week."""
+        conn = self._get_connection()
+        try:
+            if fetched_at is not None:
+                if hasattr(fetched_at, "strftime"):
+                    fetched_str = fetched_at.strftime("%Y-%m-%d %H:%M:%S")
+                else:
+                    fetched_str = str(fetched_at)
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []]),
+                     fetched_str))
+            else:
+                conn.execute(
+                    "INSERT INTO tvdb_episode_cache (tvdb_id, season_number, episodes, fetched_at) "
+                    "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(tvdb_id, season_number) DO UPDATE SET "
+                    "episodes=excluded.episodes, fetched_at=excluded.fetched_at",
+                    (int(tvdb_id), int(season_number),
+                     json.dumps([[int(n), d] for n, d in episodes or []])))
+            conn.commit()
+        finally:
+            conn.close()
+
     def episode_wishlist_to_download(self, due_only: bool = True, profile_id: int | None = None) -> list:
         """Wished episodes READY to grab: aired (or air-date-unknown), never episodes still in
         the future. Upcoming episodes CAN sit on the wishlist now (e.g. pre-ordered from the
@@ -7795,13 +7861,26 @@ class VideoDatabase:
                 # series type (P8): daily/anime shows QUERY differently (air date /
                 # absolute number). NULL for shows not in the library = standard.
                 # MAX = a type set on ANY server's row wins over a NULL sibling.
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
+                # no type set: a show tagged Anime is numbered the anime way
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
+                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
+                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
                 # External ids for the indexer search. A tvdbid is what Sonarr hands
                 # Newznab so id-aware indexers resolve the series exactly instead of
                 # matching on a title that scene naming may spell differently. MAX
                 # picks a populated id over a NULL sibling row, same as series_type.
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
-                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
+                # the SHOW's year, for the show-identity gate and the $year in TV
+                # paths. an episode's own air year is not it (#dark-matter-2024).
+                "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "
+                "  FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS show_year, "
+                # the newest air date the library knows for this season: a season
+                # still airing has no pack yet, so the drain shouldn't look for one
+                "(SELECT MAX(e.air_date) FROM episodes e JOIN shows s ON e.show_id = s.id "
+                "  WHERE s.tmdb_id = w.tmdb_id AND e.season_number = w.season_number) AS season_last_air "
                 "FROM video_wishlist w WHERE w.kind='episode' AND w.tmdb_id IS NOT NULL " + _pf
                 + (" AND " + _due_sql("w") + " " if due_only else "")
                 # Un-following a show means stop bothering with it. The airing scan
@@ -7873,9 +7952,16 @@ class VideoDatabase:
                 "  AS owned_resolutions, "
                 "COALESCE(w.quality_profile_id, (SELECT s.quality_profile_id FROM shows s "
                 "  WHERE s.tmdb_id = w.tmdb_id)) AS quality_profile_id, "
-                "(SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS series_type, "
+                "COALESCE((SELECT MAX(s.series_type) FROM shows s WHERE s.tmdb_id = w.tmdb_id), "
+                # no type set: a show tagged Anime is numbered the anime way
+                # (One Piece S23E1177 is 'One Piece - 1177'). a type set by hand wins.
+                "  (SELECT 'anime' FROM shows s JOIN show_genres sg ON sg.show_id = s.id "
+                "   JOIN genres g ON g.id = sg.genre_id WHERE s.tmdb_id = w.tmdb_id "
+                "   AND lower(g.name) = 'anime' LIMIT 1)) AS series_type, "
                 "(SELECT MAX(s.tvdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS tvdb_id, "
-                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id "
+                "(SELECT MAX(s.imdb_id) FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS imdb_id, "
+                "(SELECT MIN(COALESCE(s.year, CAST(substr(NULLIF(s.first_air_date, ''), 1, 4) AS INTEGER))) "
+                "  FROM shows s WHERE s.tmdb_id = w.tmdb_id) AS show_year "
                 "FROM video_wishlist w WHERE w.profile_id=? AND w.kind='episode' AND w.tmdb_id=?" + where +
                 " ORDER BY w.season_number, w.episode_number", [int(profile_id)] + args)]
         finally:

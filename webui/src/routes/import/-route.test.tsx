@@ -328,6 +328,51 @@ describe('import route', () => {
     expect(window.SoulSyncWebShellBridge?.showReactHost).toHaveBeenCalledWith('import');
   });
 
+  it('a finished import says what it did with each track', async () => {
+    const outcome = (
+      track_name: string,
+      track_number: number,
+      import_status: 'completed' | 'skipped_owned',
+      import_reason: string,
+    ) => ({
+      track_name,
+      track_number,
+      file: `${track_number}.flac`,
+      file_path: `/music/Staging/Album/${track_number}.flac`,
+      confidence: 1,
+      import_status,
+      import_reason,
+    });
+    inbox = inboxPayload([
+      albumItem({
+        status: 'imported',
+        in_staging: false,
+        processed_at: '2026-10-15T08:00:00Z',
+        match: {
+          matched_count: 2,
+          total_tracks: 2,
+          matches: [
+            outcome('Hell Above', 2, 'skipped_owned', 'already in the library, copy is fine'),
+            outcome('King For A Day', 4, 'skipped_owned', 'already in the library, copy is fine'),
+          ],
+          summary: { imported: 0, upgraded: 0, skipped_owned: 2, failed: 0 },
+        },
+      }),
+    ]);
+    renderImportRoute(['/import?filter=history']);
+
+    const row = (await screen.findAllByTestId('import-inbox-row'))[0];
+    // nothing was imported, so the pill doesn't claim it was
+    expect(within(row).getByText('Already in library')).toBeInTheDocument();
+    expect(within(row).getByText('2 already in library')).toBeInTheDocument();
+    expect(within(row).queryByTestId('import-outcome')).toBeNull();
+
+    fireEvent.click(within(row).getByRole('button', { name: 'What happened' }));
+    const detail = within(row).getByTestId('import-outcome');
+    expect(within(detail).getByText('Hell Above')).toBeInTheDocument();
+    expect(within(detail).getAllByText('already in the library, copy is fine')).toHaveLength(2);
+  });
+
   it('singles lead with the title tag, not the filename (#1289)', async () => {
     renderImportRoute(['/import?filter=all']);
     // The single has title tag 'Loose Song' on files[0]; the backend falls back
@@ -646,6 +691,49 @@ describe('import route', () => {
     expect(screen.getByText(/Tagged as/)).toHaveTextContent('Tagged as Loose Song by Artist B');
   });
 
+  it('importing a single with no track picked sends from_own_tags and no manual match (#1772)', async () => {
+    let bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/import/singles/process', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, processed: 1, errors: [] });
+      }),
+    );
+    renderImportRoute(['/import/match/hash-2']);
+    expect(
+      await screen.findByText('No track picked: imported from its own tags'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const files = bodies[0].files as Record<string, unknown>[];
+    expect(files).toHaveLength(1);
+    expect(files[0].from_own_tags).toBe(true);
+    expect(files[0].manual_match).toBeUndefined();
+    expect(files[0].title).toBe('Loose Song');
+    expect(files[0].artist).toBe('Artist B');
+  });
+
+  it('importing a single with a track picked sends the manual match and no from_own_tags (#1772)', async () => {
+    let bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post('/api/import/singles/process', async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return HttpResponse.json({ success: true, processed: 1, errors: [] });
+      }),
+    );
+    renderImportRoute(['/import/match/hash-2']);
+    expect(
+      await screen.findByText('No track picked: imported from its own tags'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Loose Song · Artist B/ }));
+    expect(screen.getByText(/Tagged as/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    const files = bodies[0].files as Record<string, unknown>[];
+    expect(files[0].from_own_tags).toBeUndefined();
+    expect(files[0].manual_match).toMatchObject({ name: 'Loose Song' });
+  });
+
   it('the matcher opens on the worker release, keeps the source, and imports through the history row', async () => {
     let resolved: string[] = [];
     let processBodies: Record<string, unknown>[] = [];
@@ -776,6 +864,8 @@ describe('import route', () => {
       expect((bodies[0].files as { full_path: string }[])[0].full_path).toBe(
         '/music/Staging/s1.flac',
       );
+      // "from tags" must reach the server: no catalogue rematch (#1772)
+      expect((bodies[0].files as { from_own_tags?: boolean }[])[0].from_own_tags).toBe(true);
       expect(await screen.findByText('2 of 2 imported')).toBeInTheDocument();
     });
 

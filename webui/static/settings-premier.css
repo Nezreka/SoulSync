@@ -161,3 +161,9 @@
     position: sticky !important; top: 0; z-index: 20;
     background: rgb(15, 15, 15) !important; padding: 12px 0 !important;
 }
+
+/* Settings > Library: spoken-word artists list */
+#audiobook-routes-list .abr-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#audiobook-routes-list .abr-row > span { flex: 1; }
+#audiobook-routes-list .abr-remove { padding: 8px 12px; color: #ef5350; border-color: rgba(239, 83, 80, 0.3); }
+#audiobook-routes-list .abr-empty { color: rgba(255, 255, 255, 0.45); font-size: 0.85em; padding: 4px 0; }

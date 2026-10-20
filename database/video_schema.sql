@@ -976,3 +976,16 @@ CREATE TABLE IF NOT EXISTS subtitle_overrides (
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (kind, item_id)
 );
+
+-- ── scene numbering (TMDB vs TVDB) ──
+-- the wishlist numbers episodes the TMDB way, the scene names releases the
+-- TVDB way, and for ~40% of wanted episodes they disagree (60 Minutes S59E25
+-- is TVDB S58E48). one row per TVDB season: its episodes with air dates, so the
+-- drain can map an episode by air date without asking TVDB per search.
+CREATE TABLE IF NOT EXISTS tvdb_episode_cache (
+    tvdb_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    episodes TEXT NOT NULL,          -- JSON [[episode_number, "YYYY-MM-DD"], ...]
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (tvdb_id, season_number)
+);

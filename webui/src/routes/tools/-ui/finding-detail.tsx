@@ -844,6 +844,15 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       pushIf(rows, d.artist, 'Artist');
       return <DetailGrid rows={rows} />;
 
+    case 'untagged_download':
+      pushIf(rows, d.track_title, 'Track');
+      pushIf(rows, d.artist, 'Artist');
+      pushIf(rows, d.album_title, 'Album');
+      if (list<string>(d.missing).length)
+        rows.push(['Missing tags', list<string>(d.missing).join(', ')]);
+      pushIf(rows, d.file_path, 'File', 'path');
+      return <DetailGrid rows={rows} />;
+
     case 'empty_folder': {
       pushIf(rows, d.folder_path, 'Folder', 'path');
       const junk = list<string>(d.junk_files);
@@ -933,7 +942,8 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       if (d.full_track_count) {
         rows.push(['Full Release Tracks', text(d.full_track_count)]);
       }
-      pushIf(rows, d.reidentify_query, 'Search Query');
+      // an album finding has no single search, its fix is per track
+      if (finding.entity_type !== 'album') pushIf(rows, d.reidentify_query, 'Search Query');
       if (finding.file_path) {
         rows.push(['File', finding.file_path, 'path']);
       }

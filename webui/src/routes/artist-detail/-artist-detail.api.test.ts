@@ -195,6 +195,40 @@ describe('watchlistIdentity', () => {
     ).toEqual({ id: 'sp1', name: 'From Library' });
   });
 
+  describe('source', () => {
+    const sourceArtist = { artist: { id: '262836961', name: 'Adele' } };
+
+    it('is set for a source artist, from the page it was opened on', () => {
+      expect(watchlistIdentity(sourceArtist, 'itunes')).toEqual({
+        id: '262836961',
+        name: 'Adele',
+        source: 'itunes',
+      });
+      expect(watchlistIdentity(sourceArtist, 'Deezer')?.source).toBe('deezer');
+    });
+
+    it('is left out for a library artist, whose id the server translates', () => {
+      // An explicit source would skip the library-id lookup on the server.
+      const library = { artist: { id: 270083, name: 'Adele', server_source: 'plex' } };
+      expect(watchlistIdentity(library, 'library')?.source).toBeUndefined();
+      expect(watchlistIdentity(library, 'deezer')?.source).toBeUndefined();
+    });
+
+    it('is left out when the identity is a Spotify id', () => {
+      const withSpotify = {
+        ...sourceArtist,
+        spotify_artist: { spotify_artist_id: 'sp1', spotify_artist_name: 'Adele' },
+      };
+      expect(watchlistIdentity(withSpotify, 'itunes')?.source).toBeUndefined();
+    });
+
+    it('is left out for sources the watchlist has no column for, and for no source', () => {
+      expect(watchlistIdentity(sourceArtist, 'bandcamp')?.source).toBeUndefined();
+      expect(watchlistIdentity(sourceArtist, 'library')?.source).toBeUndefined();
+      expect(watchlistIdentity(sourceArtist)?.source).toBeUndefined();
+    });
+  });
+
   it('returns null unless BOTH halves resolve', () => {
     // The vanilla required id AND name before initialising the button.
     expect(watchlistIdentity({ artist: { id: 42 } })).toBeNull();

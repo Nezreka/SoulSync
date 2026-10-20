@@ -1853,73 +1853,7 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
                 ${generateDownloadModalHeroSection(heroContext)}
             </div>
 
-            <div class="download-missing-modal-body">
-                <div class="download-progress-section">
-                    <div class="progress-item">
-                        <div class="progress-label">
-                            🔍 Library Analysis
-                            <span id="analysis-progress-text-${virtualPlaylistId}">Ready to start</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill analysis" id="analysis-progress-fill-${virtualPlaylistId}"></div>
-                        </div>
-                    </div>
-                    <div class="progress-item">
-                        <div class="progress-label">
-                            ⏬ Downloads
-                            <span id="download-progress-text-${virtualPlaylistId}">Waiting for analysis</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill download" id="download-progress-fill-${virtualPlaylistId}"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="download-tracks-section">
-                    <div class="download-tracks-header">
-                        <h3 class="download-tracks-title">📋 Track Analysis & Download Status</h3>
-                        <span class="track-selection-count" id="track-selection-count-${virtualPlaylistId}">${spotifyTracks.length} / ${spotifyTracks.length} tracks selected</span>
-                    </div>
-                    <div class="download-tracks-table-container">
-                        <table class="download-tracks-table">
-                            <thead>
-                                <tr>
-                                    <th class="track-select-header">
-                                        <input type="checkbox" class="track-select-all"
-                                               id="select-all-${virtualPlaylistId}" checked
-                                               onchange="toggleAllTrackSelections('${virtualPlaylistId}', this.checked)">
-                                    </th>
-                                    <th>#</th>
-                                    <th>Track Name</th>
-                                    <th>Artist(s)</th>
-                                    <th>Duration</th>
-                                    <th>Library Status</th>
-                                    <th>Download Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="download-tracks-tbody-${virtualPlaylistId}">
-                                ${spotifyTracks.map((track, index) => `
-                                    <tr data-track-index="${index}">
-                                        <td class="track-select-cell">
-                                            <input type="checkbox" class="track-select-cb"
-                                                   data-track-index="${index}" checked
-                                                   onchange="updateTrackSelectionCount('${virtualPlaylistId}')">
-                                        </td>
-                                        <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(virtualPlaylistId, index)}${renderModalTrackPlaylistButton(virtualPlaylistId, index)}${escapeHtml(track.name)}</td>
-                                        <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
-                                        <td class="track-duration">${formatDuration(track.duration_ms)}</td>
-                                        <td class="track-match-status match-checking" id="match-${virtualPlaylistId}-${index}">🔍 Pending</td>
-                                        <td class="track-download-status" id="download-${virtualPlaylistId}-${index}">-</td>
-                                        <td class="track-actions" id="actions-${virtualPlaylistId}-${index}">-</td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+            ${renderDownloadModalBody(virtualPlaylistId, spotifyTracks, ['Track Name', 'Artist(s)', 'Library Status'])}
             
             <div class="download-missing-modal-footer">
                 <div class="download-phase-controls">
@@ -1986,6 +1920,8 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
+    // owned/missing per track straight away, not after Begin Analysis
+    if (typeof previewModalOwnership === 'function') void previewModalOwnership(virtualPlaylistId);
 
     console.log(`✅ Successfully opened download missing tracks modal for: ${playlistName}`);
 }
@@ -4739,29 +4675,7 @@ function cleanArtistName(artistName) {
     return cleaned.trim();
 }
 
-/**
- * formatDuration — milliseconds to M:SS.
- *
- * THE ONE DEFINITION. There were three, all top-level `function` declarations
- * in classic scripts, so the last script loaded silently won and the other two
- * were dead code:
- *
- *   sync-spotify.js  1967  (loads 8372)  no guard  -> undefined gives 'NaN:NaN'
- *   wishlist-tools.js 1575 (loads 8376)  '--:--'
- *   sync-services.js 10062 (loads 8382)  '0:00'    <- the winner, and therefore
- *                                                     the ONLY one that ever ran
- *
- * This is sync-services' behaviour transcribed exactly, so nothing on screen
- * changes. It is pinned HERE, in a file that survives, because the two sync
- * files are deleted when the sync page flips to React — and without this the
- * survivor would have become wishlist-tools', turning every unknown duration
- * from '0:00' into '--:--' across the downloads page, the wishlist and stats.
- * None of those is the sync page, and none of it would have been intended.
- *
- * Whether '--:--' is the better answer for an unknown duration is a fair
- * question and a separate one. Changing it here would be smuggling a behaviour
- * change into a refactor.
- */
+/** Format milliseconds as M:SS, preserving '0:00' for unknown durations. */
 function formatDuration(durationMs) {
     if (!durationMs) return '0:00';
     const minutes = Math.floor(durationMs / 60000);

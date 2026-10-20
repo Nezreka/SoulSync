@@ -9,6 +9,8 @@ import type {
   ImportInboxFile,
   ImportInboxItem,
   ImportInboxStatus,
+  ImportOutcomeSummary,
+  ImportTrackOutcome,
 } from './-import.types';
 
 import { formatDuration, formatImportBytes } from './-import.helpers';
@@ -181,6 +183,74 @@ export function describeItemMatch(item: ImportInboxItem): string {
     return `${item.match.matched_count}/${item.match.total_tracks} tracks matched`;
   }
   return '';
+}
+
+/** what the import did, counted: the history row's summary, or tallied from
+ * its tracks for rows written before the summary existed. null before it ran. */
+export function importOutcomeCounts(item: ImportInboxItem): ImportOutcomeSummary | null {
+  if (item.match?.summary) return item.match.summary;
+  const ran = (item.match?.matches ?? []).filter((m) => m.import_status);
+  if (!ran.length) return null;
+  const count = (status: ImportTrackOutcome) =>
+    ran.filter((m) => m.import_status === status).length;
+  return {
+    imported: count('completed'),
+    upgraded: count('upgraded'),
+    skipped_owned: count('skipped_owned'),
+    failed: count('failed'),
+  };
+}
+
+/** "12 imported · 47 already in library · 2 upgraded", '' before it ran */
+export function describeImportOutcome(item: ImportInboxItem): string {
+  const counts = importOutcomeCounts(item);
+  if (!counts) return '';
+  const parts: string[] = [];
+  if (counts.imported) parts.push(`${counts.imported} imported`);
+  if (counts.skipped_owned) parts.push(`${counts.skipped_owned} already in library`);
+  if (counts.upgraded) parts.push(`${counts.upgraded} upgraded`);
+  if (counts.failed) parts.push(`${counts.failed} failed`);
+  return parts.join(' · ');
+}
+
+/** a run that found everything already in the library imported nothing, so
+ * "Imported" would be the wrong word for it */
+export function everythingWasOwned(item: ImportInboxItem): boolean {
+  const counts = importOutcomeCounts(item);
+  return Boolean(
+    counts && counts.skipped_owned > 0 && !counts.imported && !counts.upgraded && !counts.failed,
+  );
+}
+
+export const TRACK_OUTCOME_META: Record<ImportTrackOutcome, { label: string; tone: InboxTone }> = {
+  completed: { label: 'Imported', tone: 'success' },
+  upgraded: { label: 'Upgraded', tone: 'info' },
+  skipped_owned: { label: 'Already in library', tone: 'neutral' },
+  failed: { label: 'Failed', tone: 'danger' },
+};
+
+export interface ImportOutcomeLine {
+  key: string;
+  number: string;
+  track: string;
+  file: string;
+  outcome: ImportTrackOutcome;
+  why: string;
+}
+
+/** one line per track the import decided something about, in track order */
+export function importOutcomeLines(item: ImportInboxItem): ImportOutcomeLine[] {
+  return (item.match?.matches ?? [])
+    .filter((m) => m.import_status)
+    .map((m, index) => ({
+      key: `${m.file_path || m.file}-${index}`,
+      number: m.track_number != null && m.track_number !== '' ? String(m.track_number) : '',
+      track: m.track_name || m.file,
+      file: m.file,
+      outcome: m.import_status as ImportTrackOutcome,
+      why: (m.import_status === 'failed' ? m.import_error : m.import_reason) || '',
+    }))
+    .sort((a, b) => (Number(a.number) || 0) - (Number(b.number) || 0));
 }
 
 export function confidencePercent(item: ImportInboxItem): number | null {

@@ -80,7 +80,7 @@
         pollDismissals: Object.create(null), // fallback when browser storage is unavailable
         trivDismissedAt: null,   // locally-dismissed closed trivia (its ask ts)
         arcade: null,            // {game, sel, promo, flip} when the Arcade view is open
-        watch: {                 // movie night (reduced from watch.* on the bus)
+        watch: {                 // watch together (reduced from watch.* on the bus)
             searchResults: [],   //   picker modal TMDB results
             searching: false,    //   picker fetch in flight
             pickShow: -1,        //   result index awaiting a season/episode pick
@@ -1334,7 +1334,10 @@
 
     function _fileCardHtml(m, fileOverride) {
         var f = fileOverride || m.file || {};
-        var url = String(f.url || m.message || '').trim();
+        var rawUrl = String(f.url || m.message || '').trim();
+        var url = rawUrl;
+        var urlMatch = rawUrl.match(/https?:\/\/[^\s]+/i);
+        if (urlMatch) url = urlMatch[0];
         var name = String(f.n || 'file');
         var mime = String(f.m || '');
         var isAudio = mime.indexOf('audio/') === 0 || _AUDIO_EXT.test(name);
@@ -1345,34 +1348,120 @@
             // as plain text instead of a clickable trap
             return m.rich ? renderRich(m.message) : renderPlain(m.message);
         }
-        var icon = isAudio ? '🎵' : isVideo ? '🎬' : isImage ? '🖼' : '📄';
-        var preview = '';
-        if (isAudio) {
-            preview = '<button type="button" class="chat-embed-chip" data-chat-file-audio="' +
-                attr(url) + '">▶ preview</button>';
-        } else if (isVideo) {
-            preview = '<button type="button" class="chat-embed-chip" data-chat-file-video="' +
-                attr(url) + '">▶ preview</button>';
-        } else if (isImage) {
-            preview = '<button type="button" class="chat-embed-chip" data-chat-embed-img="' +
-                attr(url) + '">🖼 show</button>';
+
+        var ext = '';
+        if (name.lastIndexOf('.') !== -1) {
+            ext = name.slice(name.lastIndexOf('.') + 1).toLowerCase();
         }
-        var card = '<div class="chat-file-card">' +
-            '<span class="chat-file-icon">' + icon + '</span>' +
-            '<span class="chat-file-meta"><b class="chat-file-name">' + esc(name) + '</b>' +
-            (f.s ? '<span class="chat-file-size">' + esc(_fmtBytes(f.s)) + '</span>' : '') +
-            '</span>' +
-            preview +
-            (isAudio
-                ? '<button type="button" class="chat-embed-chip chat-file-save" ' +
-                    'data-chat-file-save="' + attr(url) + '" data-chat-file-name="' + attr(name) +
-                    '" data-chat-file-mime="' + attr(mime) + '">➕ save to library</button>'
-                : '') +
-            '<a class="chat-embed-chip chat-file-dl" href="' + attr(url) +
-                '" target="_blank" rel="noopener noreferrer" download>⬇ download</a>' +
-            '<div class="chat-file-slot"></div></div>';
-        if (f.textLead) {
-            var leadHtml = m.rich ? renderRich(f.textLead) : renderPlain(f.textLead);
+
+        var cardModifier = isAudio ? 'chat-file-card--audio' : isVideo ? 'chat-file-card--video' : isImage ? 'chat-file-card--image' : 'chat-file-card--generic';
+
+        // Header badges
+        var tagHtml = isAudio
+            ? '<span class="chat-file-tag"><span class="chat-file-eq"><i></i><i></i><i></i></span> AUDIO</span>'
+            : isVideo
+                ? '<span class="chat-file-tag">🎬 VIDEO</span>'
+                : isImage
+                    ? '<span class="chat-file-tag">🖼 IMAGE</span>'
+                    : '<span class="chat-file-tag">📁 FILE</span>';
+
+        var typeLabel = ext ? ext.toUpperCase() : (isAudio ? 'AUDIO' : isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'FILE');
+        var typePill = '<span class="chat-file-type-pill">' + esc(typeLabel) + '</span>';
+        var sizePill = f.s ? '<span class="chat-file-size-pill">' + esc(_fmtBytes(f.s)) + '</span>' : '';
+        var srcPill = '<span class="chat-file-src-pill">FILEPOST.DEV</span>';
+
+        // Body & preview
+        var bodyThumbHtml = '';
+        var subDesc = isAudio
+            ? 'Streamable audio file'
+            : isVideo
+                ? 'Streamable video'
+                : isImage
+                    ? 'Shared image'
+                    : 'Shared file';
+
+        if (isAudio) {
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--audio">' +
+                '<span class="chat-file-thumb-icon">🎵</span>' +
+                '<div class="chat-file-eq chat-file-eq--disc"><i></i><i></i><i></i><i></i></div>' +
+                '</div>';
+        } else if (isVideo) {
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--video">' +
+                '<span class="chat-file-thumb-icon">🎬</span>' +
+                '</div>';
+        } else if (isImage) {
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--img" data-chat-file-toggle-expand title="Click to toggle expanded preview">' +
+                '<img class="chat-file-thumb-img" src="' + attr(url) + '" alt="' + attr(name) + '">' +
+                '<span class="chat-file-thumb-expand-icon">🔍</span>' +
+                '</div>';
+        } else {
+            bodyThumbHtml = '<div class="chat-file-thumb chat-file-thumb--generic">' +
+                '<span class="chat-file-thumb-icon">📄</span>' +
+                '</div>';
+        }
+
+        var metaHtml = '<div class="chat-file-meta">' +
+            '<div class="chat-file-name" title="' + attr(name) + '">' + esc(name) + '</div>' +
+            '<div class="chat-file-sub">' + esc(subDesc) + (f.s ? ' · ' + esc(_fmtBytes(f.s)) : '') + '</div>' +
+            '</div>';
+
+        // Expanded preview for images (minified/collapsed by default)
+        var expandedPreviewHtml = '';
+        if (isImage) {
+            expandedPreviewHtml = '<div class="chat-file-expanded-preview" hidden>' +
+                '<div class="chat-file-img-wrap" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="Click to view full image in Lightbox">' +
+                '<img class="chat-file-img-thumb" src="' + attr(url) + '" alt="' + attr(name) + '" loading="lazy">' +
+                '<span class="chat-file-img-zoom-hint">🔍 View Fullscreen</span>' +
+                '</div>' +
+                '</div>';
+        }
+
+        // Action buttons
+        var actionsHtml = '<div class="chat-file-actions">';
+        if (isAudio) {
+            actionsHtml += '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-file-audio="' + attr(url) + '" title="Preview audio">▶ Preview</button>' +
+                '<button type="button" class="chat-card-btn chat-card-btn--success chat-card-btn--glow chat-file-save" ' +
+                    'data-chat-file-save="' + attr(url) + '" data-chat-file-name="' + attr(name) + '" data-chat-file-mime="' + attr(mime) + '" title="Save to SoulSync Library">➕ Save to Library</button>' +
+                '<a class="chat-card-btn chat-card-btn--accent" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download file">⬇ Download</a>' +
+                '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
+        } else if (isVideo) {
+            actionsHtml += '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-file-video="' + attr(url) + '" title="Watch video">▶ Play Video</button>' +
+                '<a class="chat-card-btn chat-card-btn--accent" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download file">⬇ Download</a>' +
+                '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
+        } else if (isImage) {
+            actionsHtml += '<button type="button" class="chat-card-btn chat-card-btn--primary" data-chat-file-toggle-expand title="Expand preview inline">🖼 Expand Preview</button>' +
+                '<button type="button" class="chat-card-btn" data-chat-file-lightbox="' + attr(url) + '" data-chat-file-title="' + attr(name) + '" title="View in Lightbox">🔍 Fullscreen</button>' +
+                '<a class="chat-card-btn chat-card-btn--accent" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download image">⬇ Download</a>' +
+                '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
+        } else {
+            actionsHtml += '<a class="chat-card-btn chat-card-btn--primary" href="' + attr(url) + '" target="_blank" rel="noopener noreferrer" download title="Download file">⬇ Download File</a>' +
+                '<button type="button" class="chat-card-btn" data-chat-copy-url="' + attr(url) + '" title="Copy direct link">📋 Copy Link</button>';
+        }
+        actionsHtml += '</div>';
+
+        var card = '<div class="chat-file-card ' + cardModifier + '">' +
+            '<div class="chat-file-header">' +
+                tagHtml +
+                typePill +
+                sizePill +
+                srcPill +
+            '</div>' +
+            '<div class="chat-file-body">' +
+                bodyThumbHtml +
+                metaHtml +
+            '</div>' +
+            expandedPreviewHtml +
+            actionsHtml +
+            '<div class="chat-file-slot"></div>' +
+            '</div>';
+
+        var textLead = f.textLead || '';
+        if (!textLead && m.message && m.message !== url) {
+            var extracted = _extractFileFromText(m.message);
+            if (extracted && extracted.textLead) textLead = extracted.textLead;
+        }
+        if (textLead) {
+            var leadHtml = m.rich ? renderRich(textLead) : renderPlain(textLead);
             return '<div class="chat-file-lead">' + leadHtml + '</div>' + card;
         }
         return card;
@@ -5783,7 +5872,7 @@
               '<button class="chat-filter-btn' + (state.jukebox.open ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-jukebox-btn title="Room jukebox — listen together, vote on what plays next">♫ Jukebox</button>' +
               '<button class="chat-filter-btn" type="button" data-chat-watch-btn ' +
-              'title="Movie night — nominate something, the room votes, owners watch together">🎬 Movie night</button>' +
+              'title="Watch Together — nominate something, the room votes, owners watch together">🎬 Watch Together</button>' +
               '<button class="chat-filter-btn' + (state.ssOnly ? ' chat-filter-btn--on' : '') +
               '" type="button" data-chat-filter title="' +
               (state.ssOnly ? 'SoulSync only: hiding other Soulseek clients, and sending in SoulSync format'
@@ -5955,18 +6044,20 @@
     function showReactRow(anchorBtn, user, text) {
         closeReactRow();
         var row = document.createElement('div');
-        row.className = 'chat-react-pick';
+        row.className = 'chat-react-pick chat-react-pick--direct';
         row.setAttribute('data-chat-react-pick-row', '1');
-        row.innerHTML = QUICK_REACTS.map(function (e2) {
-            return '<button type="button" class="chat-emoji" data-chat-react-do="' + e2 + '">' + e2 + '</button>';
-        }).join('') +
-            '<button type="button" class="chat-emoji chat-react-more" data-chat-react-expand title="More emoji…">+</button>';
         row._target = { user: user, text: text };
         anchorBtn.parentNode.insertBefore(row, anchorBtn.nextSibling);
+        _buildReactFullPicker(row);
     }
 
     function _showReactFullPicker(expandBtn) {
         var row = expandBtn.closest('[data-chat-react-pick-row]');
+        if (!row) return;
+        _buildReactFullPicker(row);
+    }
+
+    function _buildReactFullPicker(row) {
         if (!row) return;
         var existing = row.querySelector('[data-chat-react-full]');
         if (existing) { existing.remove(); return; }
@@ -7549,9 +7640,11 @@
         return payload;
     }
 
-    function _sendFileMessage(meta) {
+    function _sendFileMessage(meta, caption) {
         var url = String(meta.url || '');
         if (!url) return;
+        var lead = caption ? String(caption).trim() : '';
+        var msgText = lead ? (lead + '\n' + url) : url;
         var done = function (res) {
             _attachStatus('');
             toggleAttachPanel(true);
@@ -7560,19 +7653,204 @@
                 showToast(res.body && res.body.error || 'Could not send the file link', 'error');
             }
         };
+        var filePayload = { n: meta.name || 'file', s: meta.size || 0, m: meta.mime || '' };
+        if (lead) filePayload.textLead = lead;
         if (state.view === 'room') {
             postJSON('/api/chat/room/message', _tagRoomPayload({
-                message: url,
-                file: { n: meta.name || 'file', s: meta.size || 0, m: meta.mime || '' },
+                message: msgText,
+                file: filePayload,
             })).then(done);
         } else if (state.pmUser) {
             // PMs are plaintext by design — the recipient gets a usable URL
             postJSON('/api/chat/conversations/' + encodeURIComponent(state.pmUser),
-                     { message: url }).then(done);
+                     { message: msgText }).then(done);
         }
     }
 
-    function attachUploadFile(file) {
+    var _stagedUploadFile = null;
+    var _stagedBlobUrl = null;
+
+    function openUploadPreviewModal(file) {
+        if (!file) return;
+        if (file.size > 50 * 1024 * 1024) {
+            if (typeof showToast === 'function') {
+                showToast('Too big — filepost.dev caps uploads at 50 MB', 'error');
+            } else {
+                _attachStatus('Too big — filepost.dev caps uploads at 50 MB', true);
+            }
+            return;
+        }
+
+        _stagedUploadFile = file;
+        if (_stagedBlobUrl) {
+            try { URL.revokeObjectURL(_stagedBlobUrl); } catch (e) {}
+            _stagedBlobUrl = null;
+        }
+
+        var overlay = q('[data-chat-upload-modal]');
+        var backdrop = q('[data-chat-upload-backdrop]');
+        if (!overlay || !backdrop) {
+            attachUploadFileDirect(file);
+            return;
+        }
+
+        var targetEl = q('[data-chat-upload-target]');
+        if (targetEl) {
+            if (state.view === 'room') {
+                var chanName = state.channel || 'general';
+                targetEl.textContent = 'Sharing to #' + chanName + ' in ' + (state.room || 'SoulSync Chat');
+            } else if (state.pmUser) {
+                targetEl.textContent = 'Sharing direct to @' + state.pmUser;
+            } else {
+                targetEl.textContent = 'Share a file via filepost.dev';
+            }
+        }
+
+        var nameEl = q('[data-chat-upload-name]');
+        if (nameEl) nameEl.textContent = file.name;
+        var sizeEl = q('[data-chat-upload-size]');
+        if (sizeEl) sizeEl.textContent = _fmtBytes(file.size);
+
+        var ext = '';
+        if (file.name.lastIndexOf('.') !== -1) {
+            ext = file.name.slice(file.name.lastIndexOf('.') + 1).toLowerCase();
+        }
+
+        var ftype = file.type || '';
+        var isAudio = ftype.indexOf('audio/') === 0 || _AUDIO_EXT.test(file.name);
+        var isVideo = ftype.indexOf('video/') === 0 || _VIDEO_EXT.test(file.name);
+        var isImage = ftype.indexOf('image/') === 0 || _IMAGE_EXT.test(file.name);
+
+        var badgeEl = q('[data-chat-upload-badge]');
+        if (badgeEl) {
+            var badgeText = ext ? ext.toUpperCase() : (isAudio ? 'AUDIO' : isVideo ? 'VIDEO' : isImage ? 'IMAGE' : 'FILE');
+            badgeEl.textContent = badgeText;
+        }
+
+        var slot = q('[data-chat-upload-preview-slot]');
+        if (slot) {
+            slot.innerHTML = '';
+            if (isImage) {
+                _stagedBlobUrl = URL.createObjectURL(file);
+                slot.innerHTML = '<div class="chat-upload-preview-img-wrap">' +
+                    '<img class="chat-upload-preview-img" src="' + attr(_stagedBlobUrl) + '" alt="' + attr(file.name) + '">' +
+                    '</div>';
+            } else if (isAudio) {
+                _stagedBlobUrl = URL.createObjectURL(file);
+                slot.innerHTML = '<div class="chat-upload-preview-audio-wrap">' +
+                    '<div class="chat-upload-audio-icon-disc">🎵</div>' +
+                    '<div class="chat-upload-audio-preview-meta">' +
+                        '<div class="chat-upload-audio-preview-name">' + esc(file.name) + '</div>' +
+                        '<audio class="chat-upload-audio-element" controls src="' + attr(_stagedBlobUrl) + '"></audio>' +
+                    '</div>' +
+                    '</div>';
+            } else if (isVideo) {
+                _stagedBlobUrl = URL.createObjectURL(file);
+                slot.innerHTML = '<div class="chat-upload-preview-video-wrap">' +
+                    '<video controls src="' + attr(_stagedBlobUrl) + '"></video>' +
+                    '</div>';
+            } else {
+                slot.innerHTML = '<div class="chat-upload-preview-file-wrap">' +
+                    '<div class="chat-upload-file-icon-box">📁</div>' +
+                    '<div class="chat-upload-file-icon-text">' +
+                        '<div class="chat-upload-file-type-name">' + esc(file.name) + '</div>' +
+                        '<div class="chat-upload-file-type-sub">' + esc(file.type || 'Binary file') + ' · ' + esc(_fmtBytes(file.size)) + '</div>' +
+                    '</div>' +
+                    '</div>';
+            }
+        }
+
+        var capInp = q('[data-chat-upload-caption]');
+        if (capInp) capInp.value = '';
+
+        var progWrap = q('[data-chat-upload-progress-wrap]');
+        if (progWrap) progWrap.hidden = true;
+        var progFill = q('[data-chat-upload-progress-fill]');
+        if (progFill) progFill.style.width = '0%';
+        var progText = q('[data-chat-upload-progress-text]');
+        if (progText) progText.textContent = 'Uploading… 0%';
+
+        var errEl = q('[data-chat-upload-error]');
+        if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
+
+        var sendBtn = q('[data-chat-upload-send]');
+        if (sendBtn) sendBtn.disabled = false;
+
+        backdrop.hidden = false;
+        overlay.hidden = false;
+        if (capInp) capInp.focus();
+    }
+
+    function closeUploadPreviewModal() {
+        if (_stagedBlobUrl) {
+            try { URL.revokeObjectURL(_stagedBlobUrl); } catch (e) {}
+            _stagedBlobUrl = null;
+        }
+        _stagedUploadFile = null;
+        var overlay = q('[data-chat-upload-modal]');
+        if (overlay) overlay.hidden = true;
+        var backdrop = q('[data-chat-upload-backdrop]');
+        if (backdrop) backdrop.hidden = true;
+        var slot = q('[data-chat-upload-preview-slot]');
+        if (slot) slot.innerHTML = '';
+    }
+
+    function uploadStagedFile() {
+        if (!_stagedUploadFile) return;
+        var file = _stagedUploadFile;
+        var caption = '';
+        var capInp = q('[data-chat-upload-caption]');
+        if (capInp) caption = capInp.value.trim();
+
+        var progWrap = q('[data-chat-upload-progress-wrap]');
+        if (progWrap) progWrap.hidden = false;
+        var progFill = q('[data-chat-upload-progress-fill]');
+        var progText = q('[data-chat-upload-progress-text]');
+        var sendBtn = q('[data-chat-upload-send]');
+        if (sendBtn) sendBtn.disabled = true;
+        var errEl = q('[data-chat-upload-error]');
+        if (errEl) { errEl.textContent = ''; errEl.hidden = true; }
+
+        var fd = new FormData();
+        fd.append('file', file, file.name);
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/chat/files/upload', true);
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable) {
+                var pct = Math.round((e.loaded / e.total) * 100);
+                if (progFill) progFill.style.width = pct + '%';
+                if (progText) progText.textContent = 'Uploading… ' + pct + '%';
+            }
+        };
+        xhr.onload = function () {
+            try {
+                var res = JSON.parse(xhr.responseText);
+                if (xhr.status >= 200 && xhr.status < 300 && res && res.ok) {
+                    if (progFill) progFill.style.width = '100%';
+                    if (progText) progText.textContent = 'Shared to chat!';
+                    setTimeout(function () {
+                        closeUploadPreviewModal();
+                        _sendFileMessage(res, caption);
+                    }, 250);
+                    return;
+                }
+                var errMsg = (res && res.error) || ('Upload failed (' + xhr.status + ')');
+                if (errEl) { errEl.textContent = errMsg; errEl.hidden = false; }
+                if (sendBtn) sendBtn.disabled = false;
+            } catch (err) {
+                if (errEl) { errEl.textContent = 'Failed to parse response from server'; errEl.hidden = false; }
+                if (sendBtn) sendBtn.disabled = false;
+            }
+        };
+        xhr.onerror = function () {
+            if (errEl) { errEl.textContent = 'Upload network error'; errEl.hidden = false; }
+            if (sendBtn) sendBtn.disabled = false;
+        };
+        xhr.send(fd);
+    }
+
+    function attachUploadFileDirect(file) {
         if (!file) return;
         if (file.size > 50 * 1024 * 1024) {
             _attachStatus('Too big — filepost.dev caps uploads at 50 MB', true);
@@ -7591,6 +7869,28 @@
                 _sendFileMessage(res.body);
             })
             .catch(function () { _attachStatus('Upload failed', true); });
+    }
+
+    function attachUploadFile(file) {
+        openUploadPreviewModal(file);
+    }
+
+    function openImageLightbox(src, title) {
+        if (!src) return;
+        var box = q('[data-chat-lightbox-backdrop]');
+        var img = q('[data-chat-lightbox-img]');
+        var cap = q('[data-chat-lightbox-caption]');
+        if (!box || !img) return;
+        img.src = src;
+        if (cap) cap.textContent = title || '';
+        box.hidden = false;
+    }
+
+    function closeImageLightbox() {
+        var box = q('[data-chat-lightbox-backdrop]');
+        if (box) box.hidden = true;
+        var img = q('[data-chat-lightbox-img]');
+        if (img) img.src = '';
     }
 
     function attachSendTrack(trackId, label) {
@@ -8039,7 +8339,23 @@
             if (sPane) {
                 var allS = sPane.querySelectorAll('.chat-emoji-section:not([data-emoji-section="search"])');
                 for (var k = 0; k < allS.length; k++) allS[k].hidden = false;
-                sPane.scrollTop = 0;
+                var recents = _getRecentEmojis();
+                if (!recents.length) {
+                    var animSec = sPane.querySelector('[data-emoji-section="animated"]');
+                    var animTab = pop.querySelector('.chat-emoji-tab[data-emoji-cat="animated"]');
+                    if (animSec) {
+                        sPane.scrollTop = animSec.offsetTop - sPane.offsetTop;
+                        pop.querySelectorAll('.chat-emoji-tab').forEach(function (t) { t.classList.remove('chat-emoji-tab--active'); });
+                        if (animTab) animTab.classList.add('chat-emoji-tab--active');
+                    } else {
+                        sPane.scrollTop = 0;
+                    }
+                } else {
+                    sPane.scrollTop = 0;
+                    pop.querySelectorAll('.chat-emoji-tab').forEach(function (t) { t.classList.remove('chat-emoji-tab--active'); });
+                    var rTab = pop.querySelector('.chat-emoji-tab[data-emoji-cat="recent"]');
+                    if (rTab) rTab.classList.add('chat-emoji-tab--active');
+                }
             }
         }
     }
@@ -9557,10 +9873,41 @@
                 var card = t.closest('.chat-file-card');
                 var slot = card && card.querySelector('.chat-file-slot');
                 if (slot) {
-                    slot.innerHTML = '<audio class="chat-file-player" controls preload="none" src="' +
-                        t.getAttribute('data-chat-file-audio').replace(/"/g, '&quot;') + '"></audio>';
-                    slot.querySelector('audio').play().catch(function () {});
-                    t.remove();
+                    var audio = slot.querySelector('audio');
+                    var eq = card.querySelector('.chat-file-eq');
+                    if (audio) {
+                        if (audio.paused) {
+                            audio.play().then(function () {
+                                t.textContent = '⏸ Pause';
+                                if (eq) eq.classList.add('chat-file-eq--playing');
+                            }).catch(function () {});
+                        } else {
+                            audio.pause();
+                            t.textContent = '▶ Preview';
+                            if (eq) eq.classList.remove('chat-file-eq--playing');
+                        }
+                    } else {
+                        slot.innerHTML = '<div class="chat-file-player-wrap">' +
+                            '<audio class="chat-file-player" controls preload="auto" src="' +
+                            attr(t.getAttribute('data-chat-file-audio')) + '"></audio></div>';
+                        var newAudio = slot.querySelector('audio');
+                        newAudio.addEventListener('play', function () {
+                            t.textContent = '⏸ Pause';
+                            if (eq) eq.classList.add('chat-file-eq--playing');
+                        });
+                        newAudio.addEventListener('pause', function () {
+                            t.textContent = '▶ Preview';
+                            if (eq) eq.classList.remove('chat-file-eq--playing');
+                        });
+                        newAudio.addEventListener('ended', function () {
+                            t.textContent = '▶ Preview';
+                            if (eq) eq.classList.remove('chat-file-eq--playing');
+                        });
+                        newAudio.play().then(function () {
+                            t.textContent = '⏸ Pause';
+                            if (eq) eq.classList.add('chat-file-eq--playing');
+                        }).catch(function () {});
+                    }
                 }
                 return;
             }
@@ -9569,10 +9916,72 @@
                 var vcard = t.closest('.chat-file-card');
                 var vslot = vcard && vcard.querySelector('.chat-file-slot');
                 if (vslot) {
-                    vslot.innerHTML = '<video class="chat-file-player chat-file-player--video" controls preload="metadata" src="' +
-                        t.getAttribute('data-chat-file-video').replace(/"/g, '&quot;') + '"></video>';
-                    t.remove();
+                    var vid = vslot.querySelector('video');
+                    if (vid) {
+                        if (vid.paused) {
+                            vid.play().then(function () { t.textContent = '⏸ Pause Video'; }).catch(function () {});
+                        } else {
+                            vid.pause();
+                            t.textContent = '▶ Play Video';
+                        }
+                    } else {
+                        vslot.innerHTML = '<div class="chat-file-video-wrap">' +
+                            '<video class="chat-file-player chat-file-player--video" controls autoplay preload="metadata" src="' +
+                            attr(t.getAttribute('data-chat-file-video')) + '"></video></div>';
+                        t.textContent = '⏸ Pause Video';
+                        var newVid = vslot.querySelector('video');
+                        newVid.addEventListener('pause', function () { t.textContent = '▶ Play Video'; });
+                        newVid.addEventListener('play', function () { t.textContent = '⏸ Pause Video'; });
+                        newVid.addEventListener('ended', function () { t.textContent = '▶ Play Video'; });
+                    }
                 }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-toggle-expand]');
+            if (t) {
+                var expCard = t.closest('.chat-file-card');
+                if (expCard) {
+                    var expWrap = expCard.querySelector('.chat-file-expanded-preview');
+                    var toggleBtn = expCard.querySelector('[data-chat-file-toggle-expand].chat-card-btn');
+                    if (expWrap) {
+                        var willOpen = expWrap.hidden;
+                        expWrap.hidden = !willOpen;
+                        expCard.classList.toggle('chat-file-card--expanded', willOpen);
+                        if (toggleBtn) {
+                            toggleBtn.textContent = willOpen ? '🔼 Collapse Preview' : '🖼 Expand Preview';
+                            toggleBtn.title = willOpen ? 'Collapse preview inline' : 'Expand preview inline';
+                        }
+                    }
+                }
+                return;
+            }
+            t = e.target.closest('[data-chat-file-lightbox]');
+            if (t) {
+                var imgUrl = t.getAttribute('data-chat-file-lightbox') || (t.querySelector('img') && t.querySelector('img').src);
+                var imgTitle = t.getAttribute('data-chat-file-title') || 'Image Preview';
+                if (imgUrl) openImageLightbox(imgUrl, imgTitle);
+                return;
+            }
+            t = e.target.closest('[data-chat-copy-url]');
+            if (t) {
+                var copyUrl = t.getAttribute('data-chat-copy-url');
+                if (copyUrl && navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(copyUrl).then(function () {
+                        if (typeof showToast === 'function') showToast('Link copied to clipboard', 'success');
+                    }).catch(function () {});
+                }
+                return;
+            }
+            if (e.target.closest('[data-chat-lightbox-close]') || (e.target.matches && e.target.matches('[data-chat-lightbox-backdrop]'))) {
+                closeImageLightbox();
+                return;
+            }
+            if (e.target.closest('[data-chat-upload-close]') || e.target.closest('[data-chat-upload-cancel]') || (e.target.matches && e.target.matches('[data-chat-upload-backdrop]'))) {
+                closeUploadPreviewModal();
+                return;
+            }
+            if (e.target.closest('[data-chat-upload-send]')) {
+                uploadStagedFile();
                 return;
             }
             t = e.target.closest('[data-chat-file-save]');
@@ -10163,7 +10572,7 @@
                 }
                 return;
             }
-            // ── movie night ──
+            // ── watch together ──
             t = e.target.closest('[data-chat-watch-btn]');
             if (t) { _openWatchModal(); return; }
             t = e.target.closest('[data-chat-watch-searchclose]');
@@ -10680,6 +11089,10 @@
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
+                var upM = q('[data-chat-upload-modal]');
+                if (upM && !upM.hidden) { closeUploadPreviewModal(); }
+                var lbM = q('[data-chat-lightbox-backdrop]');
+                if (lbM && !lbM.hidden) { closeImageLightbox(); }
                 var setM = q('[data-chat-settings-modal]');
                 if (setM && !setM.hidden) { setM.hidden = true; }
                 var bm = q('[data-chat-browse-modal]');
@@ -10694,6 +11107,16 @@
                 if (incM && !incM.hidden) { _closeIncomingShareModal(); }
             }
         });
+
+        var uploadCapInp = q('[data-chat-upload-caption]');
+        if (uploadCapInp) {
+            uploadCapInp.addEventListener('keydown', function (e) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    uploadStagedFile();
+                }
+            });
+        }
 
         var wantInputEl = q('[data-chat-want-input]');
         if (wantInputEl) {
@@ -12124,7 +12547,7 @@
         if (typeof showToast === 'function') showToast('♫ Added to the room queue', 'success');
     }
 
-    // ── movie night (watch-together — a pure fold over watch.* carriers) ──
+    // ── watch together (watch-together — a pure fold over watch.* carriers) ──
     // The ballot/party state lives on the bus (chat-protocol.js reduceWatch):
     // every client folds the same nominations, votes and party clock.
     // OWNERSHIP is the one personal ingredient — each SoulSync probes its own
@@ -12390,7 +12813,7 @@
             }
         }
         var can = state.canSend;
-        var html = '<div class="chat-watch-headrow">🎬 <b>Movie night</b>' +
+        var html = '<div class="chat-watch-headrow">🎬 <b>Watch Together</b>' +
             '<span class="chat-jbx-meta">' +
                 (st.now ? 'showing now' : st.noms.length + ' nominated · ' +
                     st.tally.total + ' vote' + (st.tally.total === 1 ? '' : 's')) + '</span>' +
@@ -12518,7 +12941,7 @@
         }).catch(function () { delete state.watch.grabbed[key]; renderWatch(); });
     }
 
-    // ── movie night picker (TMDB search via the video side) ─────────────
+    // ── watch together picker (TMDB search via the video side) ─────────────
     function _openWatchModal() {
         var ov = q('[data-chat-watch-modal]');
         if (!ov) return;
@@ -12542,7 +12965,7 @@
         var results = state.watch.searchResults;
         if (!results.length) {
             return '<div class="chat-watch-resnote">Type at least two letters — this searches YOUR library.<br>' +
-                'Movie night runs on what someone can actually press play on.</div>';
+                'Watch Together runs on what someone can actually press play on.</div>';
         }
         return results.map(function (r, i) {
             var isShow = r.kind === 'show';

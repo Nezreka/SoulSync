@@ -58,6 +58,8 @@ export interface MirroredPlaylistRow {
    * attempt at this went wrong.
    */
   library_checked_count?: number;
+  /** wing it guesses nobody has fixed yet, what the wing it pool lists (#1721) */
+  needs_match_count?: number;
   quality_profile_id?: number | null;
   /**
    * Download missing tracks into a playlist-named folder.
@@ -80,6 +82,12 @@ export interface MirroredPlaylistRow {
     phase?: string;
     error?: string;
   } | null;
+  /** Whether this playlist is a request list (downloads tracks without creating server playlist). */
+  is_request_list?: boolean;
+  /** Whether fulfilled tracks are automatically removed from Spotify upstream playlist. */
+  auto_remove_fulfilled?: boolean;
+  /** Upstream playlist ID or reference (e.g. for Spotify back-sync). */
+  upstream_playlist_id?: string | null;
 }
 
 /** Per-source card icon (571-572); anything unlisted gets the clipboard. */
@@ -144,7 +152,16 @@ export interface MirroredTrack {
   image_url?: string;
   /** when it joined the playlist, for sort by date added */
   added_at?: string | null;
+  /** where it stands: core/playlists/track_status.py (#1721) */
+  status?: MirroredTrackStatus;
 }
+
+export type MirroredTrackStatus =
+  | 'in_library'
+  | 'wishlisted'
+  | 'needs_match'
+  | 'missing'
+  | 'unchecked';
 
 /** Hero artwork: playlist cover → the first track that has art → none (1092). */
 export function mirroredHeroArt(
@@ -406,4 +423,69 @@ export function mirroredPipelineStateWriter(
       ...applyPipelineState(s.phase, state),
     }));
   };
+}
+
+/* ── where each track stands (#1721) ─────────────────────────────────────── */
+
+/**
+ * the chip a track row carries. in library is the resting state and says
+ * nothing, same as a healthy card, and "not synced yet" would sit on every row
+ * of a fresh playlist, so the strip says that once instead.
+ */
+export function trackStatusChip(status: MirroredTrackStatus | undefined): string | null {
+  switch (status) {
+    case 'wishlisted':
+      return 'Wishlisted';
+    case 'needs_match':
+      return 'Needs a match';
+    case 'missing':
+      return 'Not downloaded';
+    default:
+      return null;
+  }
+}
+
+export interface TrackStatusSegment {
+  status: MirroredTrackStatus;
+  count: number;
+  label: string;
+}
+
+const STRIP_ORDER: MirroredTrackStatus[] = [
+  'in_library',
+  'wishlisted',
+  'needs_match',
+  'missing',
+  'unchecked',
+];
+
+/** "103 in library · 9 wishlisted · 42 need a match", empty statuses left out. */
+export function trackStatusSegments(
+  counts: Partial<Record<MirroredTrackStatus, number>> | null | undefined,
+): TrackStatusSegment[] {
+  if (!counts) return [];
+  const label = (status: MirroredTrackStatus, n: number): string => {
+    switch (status) {
+      case 'in_library':
+        return 'in library';
+      case 'wishlisted':
+        return 'wishlisted';
+      case 'needs_match':
+        return n === 1 ? 'needs a match' : 'need a match';
+      case 'missing':
+        return 'not downloaded';
+      default:
+        return 'not synced yet';
+    }
+  };
+  return STRIP_ORDER.flatMap((status) => {
+    const count = counts[status] ?? 0;
+    return count > 0 ? [{ status, count, label: label(status, count) }] : [];
+  });
+}
+
+/** the card's link text, or null when nothing needs a match. */
+export function needsMatchLabel(row: { needs_match_count?: number }): string | null {
+  const n = row.needs_match_count ?? 0;
+  return n > 0 ? `${n} need${n === 1 ? 's' : ''} a match` : null;
 }

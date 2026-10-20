@@ -11,6 +11,10 @@ exact-name join still holds.
 
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
 from database.music_database import MusicDatabase
 
 
@@ -44,12 +48,75 @@ def _build_db(tmp_path):
     return db
 
 
-def test_batched_owned_count_is_id_first(tmp_path):
+@pytest.mark.parametrize("provider_id_column", [
+    "spotify_track_id", "deezer_id", "tidal_id", "qobuz_id", "itunes_track_id",
+])
+def test_batched_owned_count_is_id_first(tmp_path, provider_id_column):
     db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE tracks SET spotify_track_id = NULL WHERE id = 1")
+        conn.execute(f"UPDATE tracks SET {provider_id_column} = 'sp-humble' WHERE id = 1")
+        conn.commit()
     counts = db.get_all_mirrored_playlist_status_counts(profile_id=1)
     assert counts[10]['total'] == 3
     # HUMBLE. via spotify id + DNA. via exact name; the ghost stays unowned.
     assert counts[10]['in_library'] == 2
+    assert db.get_mirrored_playlist_status_counts(10)['in_library'] == 2
+
+
+@pytest.mark.parametrize("batched", [True, False], ids=["batched", "single"])
+def test_owned_counts_stay_bounded_after_analyze(tmp_path, monkeypatch, batched):
+    """Sparse provider IDs must not cause a library scan per unchecked track.
+
+    Budget SQLite VM work rather than wall time, so slow CI machines do not
+    fail this regression. The old multi-column OR exceeds this budget after
+    ANALYZE makes the mostly-NULL provider indexes look unselective.
+    """
+    db = _build_db(tmp_path)
+    with db._get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO tracks (id, album_id, artist_id, title, spotify_track_id) "
+            "VALUES (?, 1, 1, ?, ?)",
+            ((i + 100, f"Library track {i}", f"library-{i}") for i in range(10_000)),
+        )
+        conn.executemany(
+            "INSERT INTO mirrored_playlist_tracks "
+            "(playlist_id, position, track_name, artist_name, source_track_id) "
+            "VALUES (10, ?, ?, 'Missing artist', ?)",
+            ((i + 3, f"Missing track {i}", f"missing-{i}") for i in range(100)),
+        )
+        # Reproduce persisted full-ANALYZE stats from an upgraded installation.
+        # The production helper may sample, which hides the old query's bad plan.
+        conn.execute("PRAGMA analysis_limit=0")
+        conn.execute("ANALYZE")
+        conn.commit()
+
+    connect = db._get_connection
+    steps = 0
+
+    def limit_work():
+        nonlocal steps
+        steps += 1_000
+        return steps >= 200_000
+
+    def budgeted_connection():
+        conn = connect()
+        conn.set_progress_handler(limit_work, 1_000)
+        return conn
+
+    monkeypatch.setattr(db, "_get_connection", budgeted_connection)
+    counts = (
+        db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]
+        if batched else db.get_mirrored_playlist_status_counts(10)
+    )
+    assert steps < 200_000, (
+        f"Status counts exhausted the SQLite work budget (SQLite {sqlite3.sqlite_version})"
+    )
+    expected = {"total": 103, "discovered": 0, "wishlisted": 0, "in_library": 2}
+    if batched:
+        # the playlist card's "N need a match" (#1721)
+        expected.update(library_checked=0, needs_match=0)
+    assert counts == expected
 
 
 def test_per_playlist_owned_count_matches_batched(tmp_path):

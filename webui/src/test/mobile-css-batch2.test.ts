@@ -228,6 +228,6 @@ describe('RC6 — the dashboard listen band stacks on phones', () => {
   });
 
   it('desktop keeps the two-column band', () => {
-    expect(PREMIER).toContain('grid-template-columns: 1.55fr 1fr;');
+    expect(PREMIER).toContain('grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);');
   });
 });

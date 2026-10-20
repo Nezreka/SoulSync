@@ -519,8 +519,8 @@ function validateFileOrganizationTemplates() {
 
     // Valid variables for each template type
     const validVars = {
-        album: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
-        single: ['$artist', '$albumartist', '$artistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
+        album: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$disc', '$discnum', '$cdnum', '$year', '$quality', '$disambiguation', '$label'],
+        single: ['$artist', '$albumartist', '$artistletter', '$albumartistletter', '$album', '$albumtype', '$atypes', '$title', '$track', '$year', '$quality'],
         playlist: ['$artist', '$artistletter', '$playlist', '$title', '$year', '$quality'],
         video: ['$artist', '$artistletter', '$title', '$year'],
         podcast: ['$show', '$podcast', '$author', '$artist', '$title', '$season', '$seasonnum', '$episode', '$episodenum', '$year', '$date', '$type'],
@@ -734,6 +734,30 @@ const SERVICE_GLYPHS = {
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
 };
 
+// Grouped by what each service does for you, same headings as the download
+// chain. Order inside a group is the order here, not page order. A service not
+// listed lands in "Other" so a new one can never vanish from the grid.
+const SERVICE_GROUPS = {
+    music: [
+        { label: 'Metadata', hint: 'artists, albums and tracks',
+          ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
+        { label: 'Scrobbling', hint: 'listening history and recommendations',
+          ids: ['lastfm', 'listenbrainz'] },
+        { label: 'Extras', hint: 'lyrics, concerts and fingerprint checks',
+          ids: ['genius', 'concerts', 'acoustid'] },
+    ],
+    video: [
+        { label: 'Metadata', hint: 'movies, shows and episodes',
+          ids: ['tmdb', 'tvdb', 'nokey'] },
+        { label: 'Ratings & lists', hint: 'scores and list collections',
+          ids: ['omdb', 'trakt', 'mdblist'] },
+        { label: 'Subtitles', hint: 'found and downloaded for your library',
+          ids: ['opensubtitles', 'subdl', 'subsource'] },
+        { label: 'Artwork & extras', hint: 'posters, fanart and trailers',
+          ids: ['fanart', 'ytextras'] },
+    ],
+};
+
 // Follow the side you are standing on, exactly like the download chain does.
 // Defaulting to music meant a video user landed on a grid of Spotify and Tidal
 // tiles with their own TMDB key nowhere in sight.
@@ -821,7 +845,7 @@ function buildServiceTiles() {
         return;
     }
     const attr = SERVICE_KINDS[_svcKind].attr;
-    grid.innerHTML = '<div class="svc-tile-row">' + frames.map(frame => {
+    const tile = (frame) => {
         const id = frame.getAttribute(attr);
         const m = _svcMeta(frame);
         const set = _svcConfigured(frame);
@@ -850,7 +874,21 @@ function buildServiceTiles() {
              + `<span class="svc-tile-art">${art}</span>`
              + `<span class="svc-tile-name">${escapeHtml(m.name)}</span>`
              + chip + '</button>';
-    }).join('') + '</div>';
+    };
+
+    const byId = new Map(frames.map(f => [f.getAttribute(attr), f]));
+    const groups = (SERVICE_GROUPS[_svcKind] || []).map(g => ({
+        ...g, frames: g.ids.map(id => byId.get(id)).filter(Boolean),
+    }));
+    const listed = new Set(groups.flatMap(g => g.ids));
+    groups.push({ label: 'Other', hint: '', frames: frames.filter(f => !listed.has(f.getAttribute(attr))) });
+
+    grid.innerHTML = groups.filter(g => g.frames.length).map(g =>
+        `<div class="src-group"><div class="src-group-head">`
+        + `<span class="src-group-label">${g.label}</span>`
+        + `<span class="src-group-count">${g.frames.length}</span>`
+        + (g.hint ? `<span class="src-group-hint">${g.hint}</span>` : '')
+        + `</div><div class="svc-tile-row">${g.frames.map(tile).join('')}</div></div>`).join('');
 }
 window.buildServiceTiles = buildServiceTiles;
 
@@ -2915,6 +2953,7 @@ async function loadSettingsData() {
         document.getElementById('navidrome-username').value = settings.navidrome?.username || '';
         document.getElementById('navidrome-password').value = settings.navidrome?.password || '';
         loadNavidromePlaylistLogin();
+        loadMediaServerNames();
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
@@ -3067,6 +3106,7 @@ async function loadSettingsData() {
                 ? defaultPodcastPath
                 : (currentPodcastsVal || defaultPodcastPath);
         }
+        loadAudiobookRoutes();
         const defaultAudiobookPath = isDocker ? '/app/audiobooks' : './audiobooks';
         const audiobooksEl = document.getElementById('audiobooks-path');
         if (audiobooksEl) {
@@ -3240,6 +3280,10 @@ async function loadSettingsData() {
         document.getElementById('embed-lastfm').checked = settings.lastfm?.embed_tags !== false;
         document.getElementById('embed-genius').checked = settings.genius?.embed_tags !== false;
         document.getElementById('embed-hifi').checked = settings.hifi?.embed_tags !== false;
+        const embedBeatport = document.getElementById('embed-beatport');
+        if (embedBeatport) embedBeatport.checked = settings.beatport?.embed_tags !== false;
+        const beatportSearchAll = document.getElementById('beatport-search-all');
+        if (beatportSearchAll) beatportSearchAll.checked = settings.beatport?.search_all_tracks === true;
         // Load per-tag toggles from data-config attributes
         document.querySelectorAll('[data-config]').forEach(cb => {
             const path = cb.dataset.config.split('.');
@@ -3248,7 +3292,7 @@ async function loadSettingsData() {
             cb.checked = val !== false;
         });
         // Apply service disabled state to child tags
-        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi'].forEach(svc => {
+        ['spotify', 'itunes', 'musicbrainz', 'deezer', 'audiodb', 'tidal', 'qobuz', 'lastfm', 'genius', 'hifi', 'beatport'].forEach(svc => {
             const master = document.getElementById('embed-' + svc);
             if (master) toggleServiceTags(master, svc);
         });
@@ -3452,6 +3496,8 @@ async function loadSettingsData() {
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
+        const _m3uRelEl = document.getElementById('m3u-relative-paths');
+        if (_m3uRelEl) _m3uRelEl.checked = settings.m3u_export?.relative_paths === true;
         document.getElementById('m3u-entry-base-path').value = settings.m3u_export?.entry_base_path || '';
         document.getElementById('m3u-rewrite-from').value = settings.m3u_export?.rewrite_from || '';
         document.getElementById('m3u-rewrite-to').value = settings.m3u_export?.rewrite_to || '';
@@ -3980,19 +4026,36 @@ async function clearPlexConfiguration() {
     }
 }
 
-function toggleServer(serverType) {
-    // Update toggle buttons
-    document.getElementById('plex-toggle').classList.remove('active');
-    document.getElementById('jellyfin-toggle').classList.remove('active');
-    document.getElementById('navidrome-toggle').classList.remove('active');
-    document.getElementById('soulsync-toggle')?.classList.remove('active');
-    document.getElementById(`${serverType}-toggle`)?.classList.add('active');
+// The media server names, in UI order. Refreshed from GET /api/media-servers
+// (the per-server descriptor) when the settings page loads; this list is
+// what the page knew before the endpoint existed and stays the fallback.
+let _mediaServerNames = ['plex', 'jellyfin', 'navidrome', 'soulsync'];
 
-    // Show/hide server containers
-    document.getElementById('plex-container').classList.toggle('hidden', serverType !== 'plex');
-    document.getElementById('jellyfin-container').classList.toggle('hidden', serverType !== 'jellyfin');
-    document.getElementById('navidrome-container').classList.toggle('hidden', serverType !== 'navidrome');
-    document.getElementById('soulsync-container')?.classList.toggle('hidden', serverType !== 'soulsync');
+async function loadMediaServerNames() {
+    try {
+        const res = await fetch('/api/media-servers');
+        if (!res.ok) return;
+        const names = ((await res.json())?.servers || []).map(s => s?.name).filter(Boolean);
+        if (names.length) _mediaServerNames = names;
+    } catch (e) {
+        // fallback list stays
+    }
+}
+
+// The server whose toggle is active, else the first one.
+function activeServerFromToggles() {
+    const hit = _mediaServerNames.find(name => document.getElementById(`${name}-toggle`)?.classList.contains('active'));
+    return hit || _mediaServerNames[0];
+}
+
+function toggleServer(serverType) {
+    // Update toggle buttons and show the matching config container. A
+    // server without a toggle or a container on this page (the standalone
+    // library on the video side) is simply skipped.
+    for (const name of _mediaServerNames) {
+        document.getElementById(`${name}-toggle`)?.classList.toggle('active', name === serverType);
+        document.getElementById(`${name}-container`)?.classList.toggle('hidden', name !== serverType);
+    }
 
     // Show Plex setup when Plex is selected; otherwise hide both Plex panels
     const plexConfig = document.getElementById('plex-configuration');
@@ -5476,6 +5539,69 @@ function renderSamplePaths(paths) {
     });
 }
 
+// --- Spoken-word artists: music downloads filed in the audiobook library ---
+// The artist page and watchlist own the toggle (React); this is only the list.
+
+async function loadAudiobookRoutes() {
+    const list = document.getElementById('audiobook-routes-list');
+    if (!list) return;
+    try {
+        const { artists = [] } = await (await fetch('/api/audiobook-routes')).json();
+        list.innerHTML = artists.length
+            ? artists.map(a => `<div class="abr-row"><span>${escapeHtml(a.label || a.route_key)}</span>
+                <button class="test-button" type="button" data-route="${escapeHtml(a.route_key)}" data-action="move">Move existing…</button>
+                <button class="test-button abr-remove" type="button" data-route="${escapeHtml(a.route_key)}" data-action="remove">&times;</button></div>`).join('')
+            : '<div class="abr-empty">No artists routed. Use “Treat as audiobook” on an artist’s page.</div>';
+        list.onclick = e => {
+            const btn = e.target.closest('button[data-action]');
+            if (btn) audiobookRouteAction(btn.dataset.action, btn.dataset.route);
+        };
+    } catch (e) {
+        list.textContent = 'Could not load the list.';
+    }
+}
+
+async function audiobookRouteAction(action, key) {
+    const url = '/api/audiobook-routes/' + encodeURIComponent(key);
+    const call = (path, init) => fetch(url + path, init).then(async r => {
+        const data = await r.json();
+        if (!data.success) throw new Error(data.error || 'failed');
+        return data;
+    });
+    const post = apply => call('/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply }),
+    });
+    try {
+        if (action === 'remove') {
+            await call('', { method: 'DELETE' });
+            await loadAudiobookRoutes();
+            return;
+        }
+        const items = (await post(false)).items || [];
+        const todo = items.filter(i => i.action === 'move').length;
+        const clash = items.filter(i => i.action === 'exists').length;
+        if (!todo) {
+            showToast(clash ? `Nothing to move: ${clash} album(s) already exist in the audiobook folder.`
+                            : 'No albums of this artist in the music library.', 'info');
+            return;
+        }
+        if (!await showConfirmDialog({
+            title: 'Move albums',
+            message: `Move ${todo} album folder(s) from the music library to the audiobook folder? `
+                + `${clash ? `${clash} album(s) already exist there and stay as they are. ` : ''}`
+                + 'Your media server needs a library scan afterwards.',
+            confirmText: 'Move',
+        })) return;
+        const done = await post(true);
+        showToast(`Moved ${done.moved} album(s)` + (done.failed ? `, ${done.failed} failed` : ''),
+                  done.failed ? 'error' : 'success');
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
 function addSamplePathRow() {
     const container = document.getElementById('sample-paths-list');
     if (!container) return;
@@ -6158,14 +6284,7 @@ async function saveSettings(quiet = false) {
     }
 
     // Determine active server from toggle buttons
-    let activeServer = 'plex';
-    if (document.getElementById('jellyfin-toggle').classList.contains('active')) {
-        activeServer = 'jellyfin';
-    } else if (document.getElementById('navidrome-toggle').classList.contains('active')) {
-        activeServer = 'navidrome';
-    } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
-        activeServer = 'soulsync';
-    }
+    let activeServer = activeServerFromToggles();
     // ISOLATION: this page is reused on the video side. Connection details (Plex/
     // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
     // change the MUSIC active server. So when saving from the video side, keep
@@ -6377,6 +6496,13 @@ async function saveSettings(quiet = false) {
             embed_tags: document.getElementById('embed-hifi').checked,
             tags: _collectServiceTags('hifi')
         },
+        // read only when the inputs exist: a missing element must leave the
+        // stored setting alone rather than save over it
+        beatport: document.getElementById('embed-beatport') ? {
+            embed_tags: document.getElementById('embed-beatport').checked,
+            search_all_tracks: _cfgBool('beatport-search-all'),
+            tags: _collectServiceTags('beatport')
+        } : undefined,
         deezer_download: {
             arl: document.getElementById('deezer-download-arl').value || '',
         },
@@ -6619,6 +6745,7 @@ async function saveSettings(quiet = false) {
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
+            relative_paths: _cfgBool('m3u-relative-paths'),
             entry_base_path: document.getElementById('m3u-entry-base-path').value || '',
             rewrite_from: document.getElementById('m3u-rewrite-from').value || '',
             rewrite_to: document.getElementById('m3u-rewrite-to').value || '',
@@ -6806,8 +6933,10 @@ async function testConnection(service) {
         const result = await response.json();
 
         if (result.success) {
-            // Use backend's message which contains dynamic source name
-            showToast(result.message || `${service} connection successful`, 'success');
+            // Use backend's message which contains dynamic source name. a pass
+            // can still carry a warning (leading \u26a0), which shouldn't read as green
+            const warned = String(result.message || '').trim().startsWith('\u26a0');
+            showToast(result.message || `${service} connection successful`, warned ? 'warning' : 'success');
 
             // Load music libraries after successful connection
             if (service === 'plex') {
@@ -6823,6 +6952,40 @@ async function testConnection(service) {
     } catch (error) {
         console.error(`Error testing ${service} connection:`, error);
         showToast(`Failed to test ${service} connection`, 'error', 'gs-connecting');
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+// the deezer card holds two logins: the oauth app (favorites, playlists) and an
+// ARL (playlists + downloads). testConnection('deezer') covers the public api and
+// the oauth token; the ARL has its own check, so run both and say what each found.
+async function testDeezerConnection() {
+    let arl = document.getElementById('deezer-connection-arl')?.value || '';
+    if (!arl.trim()) return testConnection('deezer');
+    // an untouched field holds the redaction mask; empty means "test the saved one" (#870)
+    if (arl === REDACTED_SECRET_SENTINEL) arl = '';
+    try {
+        if (typeof settingsAutoSaveTimer !== 'undefined' && settingsAutoSaveTimer) {
+            clearTimeout(settingsAutoSaveTimer);
+            settingsAutoSaveTimer = null;
+            if (typeof saveSettings === 'function') await saveSettings(true);
+        }
+        showLoadingOverlay('Testing Deezer connection...');
+        const post = (url, body) => fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        }).then(r => r.json()).catch(() => ({ success: false, error: 'request failed' }));
+        const [api, arlRes] = await Promise.all([
+            post(API.testConnection, { service: 'deezer' }),
+            post('/api/deezer-download/test', { arl }),
+        ]);
+        const apiMsg = api.success ? (api.message || 'Deezer reachable') : `Deezer failed: ${api.error}`;
+        const arlMsg = arlRes.success
+            ? `ARL: ${arlRes.user || 'Unknown'} (${arlRes.tier || 'Free'})`
+            : `ARL failed: ${arlRes.error || 'rejected'}`;
+        const ok = api.success && arlRes.success;
+        const warned = String(api.message || '').trim().startsWith('\u26a0');
+        showToast(`${apiMsg} · ${arlMsg}`, !ok ? 'error' : (warned ? 'warning' : 'success'), ok ? undefined : 'gs-connecting');
     } finally {
         hideLoadingOverlay();
     }

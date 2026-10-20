@@ -463,6 +463,56 @@ class LifecycleDeps:
 # is_music_batch helper
 # ---------------------------------------------------------------------------
 
+# a finished batch is dropped this long after anyone last looked at it.
+# counting from completion alone pulled tasks out from under a user still
+# picking candidates for the not-found rows in an open modal.
+TERMINAL_BATCH_GRACE_SECONDS = 300
+
+
+def stamp_batches_watched(batch_ids, now: Optional[float] = None) -> None:
+    """mark batches as on screen right now. caller holds tasks_lock.
+
+    a wishlist run is split into sibling batches but the modal polls one id,
+    so the stamp covers every sibling of the same run."""
+    now = time.time() if now is None else now
+    wanted = {b for b in (batch_ids or ()) if b in download_batches}
+    if not wanted:
+        return
+    run_ids = {download_batches[b].get('wishlist_run_id') for b in wanted} - {None}
+    for bid, batch in download_batches.items():
+        if bid in wanted or (run_ids and batch.get('wishlist_run_id') in run_ids):
+            batch['_watched_at'] = now
+
+
+_IN_FLIGHT_TASK_STATES = ('searching', 'downloading', 'queued', 'post_processing')
+
+
+def batch_has_in_flight_tasks(batch: dict) -> bool:
+    """a finished batch can still be moving: a manual candidate pick on one of
+    its not-found rows restarts that task. caller holds tasks_lock.
+
+    tasks already counted done (_completed_task_ids) don't hold it, same as the
+    healer's active count, so a zombie status can't pin a batch forever."""
+    done = batch.get('_completed_task_ids') or set()
+    for tid in batch.get('queue') or ():
+        task = download_tasks.get(tid)
+        if task and tid not in done and task.get('status') in _IN_FLIGHT_TASK_STATES:
+            return True
+    return False
+
+
+def terminal_batch_is_stale(batch: dict, now: float) -> bool:
+    """true once a finished batch has gone unwatched for the grace window
+    and nothing in it is still downloading."""
+    completed = batch.get('completion_time')
+    if not completed:
+        return False
+    if batch_has_in_flight_tasks(batch):
+        return False
+    last_seen = max(completed, batch.get('_watched_at') or 0)
+    return now - last_seen > TERMINAL_BATCH_GRACE_SECONDS
+
+
 def is_music_batch(batch_id: str, batch: Optional[dict] = None) -> bool:
     """Determine if a batch belongs to the music download pipeline.
 
@@ -769,8 +819,10 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         _scan_owed = more_pending
         try:
             if deps.automation_engine:
+                _batch_artist = batch.get('artist_context')
                 deps.automation_engine.emit('batch_complete', {
                     'playlist_name': playlist_name,
+                    'artist': (_batch_artist.get('name') or '') if isinstance(_batch_artist, dict) else '',
                     'total_tracks': str(len(queue)),
                     'completed_tracks': str(successful_downloads),
                     'failed_tracks': str(failed_count),
@@ -816,6 +868,13 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
                 'artist': artist_str,
                 'duration_ms': ti.get('duration_ms', 0),
             })
+
+    if successful_downloads > 0:
+        try:
+            from core.sync.post_download_sync import register_completed_playlist_batch
+            register_completed_playlist_batch(batch, tasks_snapshot=tasks_snapshot, database=MusicDatabase())
+        except Exception as reg_err:
+            logger.debug("register_completed_playlist_batch failed: %s", reg_err)
 
     if is_music_batch(batch_id, batch):
         # Mark that wishlist processing is starting (prevents premature cleanup)

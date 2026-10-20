@@ -1,17 +1,8 @@
+import { humanizeType, parseServerTime } from '@/features/automations/format';
+
 import { type Automation, type AutomationBlocks, BLOCK_CATEGORIES } from './-automations.types';
 
-/**
- * Parse a server timestamp as UTC.
- *
- * The API hands back SQLite datetimes with no zone ("2026-07-27 02:10:37").
- * `new Date(naive)` reads those as LOCAL time, so every relative label is wrong
- * by the viewer's offset — "2h ago" for something that just ran. Timestamps
- * that already carry a zone are parsed as-is.
- */
-export function parseServerTime(ts: string): number {
-  if (/[Zz]$/.test(ts) || /[+-]\d{2}:\d{2}$/.test(ts)) return new Date(ts).getTime();
-  return new Date(`${ts}Z`).getTime();
-}
+export { humanizeType, parseServerTime };
 
 /** "just now" / "5m ago" / "3h ago" / "2d ago"; "Never" when unset. */
 export function timeAgo(ts: string | null | undefined, now: number = Date.now()): string {
@@ -38,18 +29,6 @@ export function timeUntil(ts: string | null | undefined, now: number = Date.now(
   if (d < 3600) return `in ${Math.ceil(d / 60)}m`;
   if (d < 86400) return `in ${Math.round(d / 3600)}h`;
   return `in ${Math.round(d / 86400)}d`;
-}
-
-/** Last-resort label: 'video_deep_scan_tv' -> 'Deep Scan Tv'. Never show raw snake_case. */
-export function humanizeType(type: string | null | undefined): string {
-  return (
-    String(type || '')
-      .replace(/^(video|music)_/, '')
-      .split('_')
-      .filter(Boolean)
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-      .join(' ') || 'Unknown'
-  );
 }
 
 /**
@@ -240,6 +219,16 @@ const TRIGGER_LABELS: Record<string, string> = {
   watchlist_artist_removed: 'Artist Unwatched',
   import_completed: 'Import Complete',
   import_needs_attention: 'Import Needs Attention',
+  audiobook_grab_started: 'Audiobook Grabbed',
+  audiobook_download_failed: 'Audiobook Download Failed',
+  audiobook_import_needs_attention: 'Audiobook Import Held',
+  audiobook_wishlist_item_added: 'Audiobook Wishlist Item Added',
+  audiobook_wishlist_processing_completed: 'Audiobook Wishlist Processed',
+  audiobook_new_release: 'Audiobook New Release Found',
+  audiobook_watchlist_scan_completed: 'Audiobook Watchlist Scan Done',
+  audiobook_author_followed: 'Audiobook Author Followed',
+  audiobook_author_unfollowed: 'Audiobook Author Unfollowed',
+  audiobook_library_scan_completed: 'Audiobook Library Scan Done',
   mirrored_playlist_created: 'Playlist Mirrored',
   quality_scan_completed: 'Quality Scan Done',
   duplicate_scan_completed: 'Duplicate Scan Done',
@@ -305,6 +294,7 @@ const ACTION_LABELS: Record<string, string> = {
   notify_only: 'Notify Only',
   start_database_update: 'Update Database',
   start_database_update_hourly: 'Update Database (Hourly)',
+  sync_downloaded_playlists: 'Sync Downloaded Playlists',
   run_duplicate_cleaner: 'Run Duplicate Cleaner',
   clear_quarantine: 'Clear Quarantine',
   library_cleanup: 'Clear Quarantine + Empty Recycle Bin',

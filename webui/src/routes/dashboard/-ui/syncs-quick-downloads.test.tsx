@@ -1,19 +1,10 @@
-/**
- * The Sync band (schedule + history merged), Quick Actions, and the Active
- * Downloads ADOPTED shell. Quick Actions / Active Downloads keep their
- * artefact differentials against the live vanilla region; the band diverges
- * from the vanilla syncs card BY DESIGN (the merge), so it gets behavioral
- * pins instead — the invariants inherited from the old Recent Syncs card
- * (payload render, detail-modal click, delete fade, 401 unlock, app-locked
- * poll guard) all still hold on the band's rows.
- */
+/** Sync band behavior and the Active Downloads adopted shell. */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActiveDownloadsShell } from './active-downloads-shell';
 import { compareTrees, extractDashArticle, parseVanilla } from './dash-artefact';
-import { QuickActionsCard } from './quick-actions';
 import { SyncBand } from './sync-band';
 
 const fetchMock = vi.fn((..._args: unknown[]) => Promise.reject(new Error('down')));
@@ -59,14 +50,6 @@ async function mount(node: React.ReactElement) {
 }
 
 describe('the artefact differentials', () => {
-  it('Quick Actions renders the vanilla card 1:1', async () => {
-    const vanilla = parseVanilla(
-      extractDashArticle('<article class="dash-card dash-card--quick-actions" data-card="tools">'),
-    );
-    const view = await mount(<QuickActionsCard />);
-    compareTrees(vanilla, view.container.firstElementChild!, 'tools');
-  });
-
   it('Active Downloads renders the vanilla shell 1:1', async () => {
     const vanilla = parseVanilla(
       extractDashArticle(
@@ -197,31 +180,6 @@ describe('the Sync band', () => {
     const view = await mount(<SyncBand />);
     fireEvent.click(view.container.querySelector('.autosync-manage-btn')!);
     expect(openAutoSyncScheduleModal).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('Quick Actions', () => {
-  it('the three tiles hit their seams', async () => {
-    const openAutoSyncScheduleModal = vi.fn();
-    const navigateToPage = vi.fn(() => Promise.resolve(true));
-    window.openAutoSyncScheduleModal = openAutoSyncScheduleModal;
-    window.navigateToPage = navigateToPage as never;
-    const view = await mount(<QuickActionsCard />);
-    fireEvent.click(view.container.querySelector('.qa-tile--sync')!);
-    fireEvent.click(view.container.querySelector('.qa-tile--tools')!);
-    fireEvent.click(view.container.querySelector('.qa-tile--auto')!);
-    expect(openAutoSyncScheduleModal).toHaveBeenCalledTimes(1);
-    expect(navigateToPage.mock.calls).toEqual([['tools'], ['automations']]);
-  });
-
-  it('survives the vanilla is-live toggles (adopted class)', async () => {
-    const view = await mount(<QuickActionsCard />);
-    const tile = view.container.querySelector('.qa-tile--sync')!;
-    // core.js's interval toggles this class imperatively; the static component
-    // must never re-render it away. Nothing re-renders here by design — assert
-    // the imperative write itself sticks.
-    tile.classList.add('is-live');
-    expect(tile.className).toBe('qa-tile qa-tile--hero qa-tile--sync is-live');
   });
 });
 

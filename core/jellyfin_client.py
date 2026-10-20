@@ -48,143 +48,124 @@ def _primary_image_url(item_id: Optional[str], item: Dict[str, Any]) -> Optional
     return f"/Items/{item_id}/Images/Primary"
 
 
-class JellyfinArtist:
-    """Wrapper class to mimic Plex artist object interface"""
+from core.media_server.items import MediaAlbum, MediaArtist, MediaTrack, parse_iso_date
+
+
+class JellyfinArtist(MediaArtist):
+    """Jellyfin/Emby MusicArtist. Shape owned by ``core.media_server.items``."""
+    server = 'jellyfin'
+
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
-        self._data = jellyfin_data
-        self._client = client
-        self.ratingKey = jellyfin_data.get('Id', '')
-        self.title = jellyfin_data.get('Name', 'Unknown Artist')
-        self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
-        
-        # Create genres property from Jellyfin data (empty list for now since data structure needs investigation)
-        self.genres = []
-        # TODO: Map Jellyfin genre data to match Plex format
-        
-        # Create summary property from Jellyfin data (used for timestamp storage)
-        self.summary = jellyfin_data.get('Overview', '') or ''
+        artist_id = jellyfin_data.get('Id', '')
+        super().__init__(
+            artist_id,
+            jellyfin_data.get('Name', 'Unknown Artist'),
+            client=client,
+            data=jellyfin_data,
+            added_at=parse_iso_date(jellyfin_data.get('DateCreated')),
+            # TODO: Map Jellyfin genre data to match Plex format
+            genres=[],
+            summary=jellyfin_data.get('Overview', '') or '',
+            # None when the artist has no image (#1253)
+            thumb=_primary_image_url(artist_id, jellyfin_data),
+        )
 
-        # Create thumb property for artist images
-        self.thumb = self._get_artist_image_url()
-        
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        """Parse Jellyfin date string to datetime"""
-        if not date_str:
-            return None
-        try:
-            # Jellyfin uses ISO format: 2023-12-01T10:30:00.000Z
-            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        except:
-            return None
+class JellyfinAlbum(MediaAlbum):
+    """Jellyfin/Emby MusicAlbum. Shape owned by ``core.media_server.items``."""
+    server = 'jellyfin'
 
-    def _get_artist_image_url(self) -> Optional[str]:
-        """Generate Jellyfin artist image URL, or None when the artist has no image."""
-        return _primary_image_url(self.ratingKey, self._data)
-    
-    def albums(self) -> List['JellyfinAlbum']:
-        """Get all albums for this artist"""
-        return self._client.get_albums_for_artist(self.ratingKey)
-
-    def albums_verified(self):
-        """(albums, ok): ok is False when the server gave no answer, which
-        albums() folds into an empty list. the deep scan reads this one."""
-        return self._client.get_albums_for_artist_verified(self.ratingKey)
-
-class JellyfinAlbum:
-    """Wrapper class to mimic Plex album object interface"""
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
-        self._data = jellyfin_data
-        self._client = client
-        self.ratingKey = jellyfin_data.get('Id', '')
-        self.title = jellyfin_data.get('Name', 'Unknown Album')
-        self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
-        self._artist_id = jellyfin_data.get('AlbumArtists', [{}])[0].get('Id', '') if jellyfin_data.get('AlbumArtists') else ''
-        # Album cover image, mirroring JellyfinArtist.thumb — so the library
-        # scan stores albums.thumb_url instead of leaving it empty. Without
-        # this, EVERY album reads back with no thumb, the web UI shows blank
-        # art, and the Cover Art Filler flags the entire library as "missing
-        # cover art" (it became the only thing populating the column).
-        self.thumb = self._get_album_image_url()
+        album_id = jellyfin_data.get('Id', '')
+        album_artists = jellyfin_data.get('AlbumArtists') or [{}]
+        super().__init__(
+            album_id,
+            jellyfin_data.get('Name', 'Unknown Album'),
+            client=client,
+            data=jellyfin_data,
+            added_at=parse_iso_date(jellyfin_data.get('DateCreated')),
+            # The old wrapper never set a year; the insert path read None.
+            year=jellyfin_data.get('ProductionYear'),
+            # Album cover image, mirroring the artist one, so the library
+            # scan stores albums.thumb_url instead of leaving it empty.
+            thumb=_primary_image_url(album_id, jellyfin_data),
+            artist_id=album_artists[0].get('Id', ''),
+        )
 
-    def _get_album_image_url(self) -> Optional[str]:
-        """Jellyfin/Emby album primary image URL (same shape as the artist one)."""
-        return _primary_image_url(self.ratingKey, self._data)
+class JellyfinTrack(MediaTrack):
+    """Jellyfin/Emby Audio item. Shape owned by ``core.media_server.items``."""
+    server = 'jellyfin'
 
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        if not date_str:
-            return None
-        try:
-            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        except:
-            return None
-
-    def artist(self) -> Optional[JellyfinArtist]:
-        """Get the album artist"""
-        if self._artist_id:
-            return self._client.get_artist_by_id(self._artist_id)
-        return None
-    
-    def tracks(self) -> List['JellyfinTrack']:
-        """Get all tracks for this album"""
-        return self._client.get_tracks_for_album(self.ratingKey)
-
-    def tracks_verified(self):
-        """(tracks, ok): ok is False when the server gave no answer."""
-        return self._client.get_tracks_for_album_verified(self.ratingKey)
-
-class JellyfinTrack:
-    """Wrapper class to mimic Plex track object interface"""
     def __init__(self, jellyfin_data: Dict[str, Any], client: 'JellyfinClient'):
-        self._data = jellyfin_data
-        self._client = client
-        self.ratingKey = jellyfin_data.get('Id', '')
-        self.title = jellyfin_data.get('Name', 'Unknown Track')
-        self.duration = jellyfin_data.get('RunTimeTicks', 0) // 10000  # Convert from ticks to milliseconds
-        self.trackNumber = jellyfin_data.get('IndexNumber')
-        self.discNumber = jellyfin_data.get('ParentIndexNumber')  # multi-disc: disc number
-        self.year = jellyfin_data.get('ProductionYear')
-        self.userRating = jellyfin_data.get('UserData', {}).get('Rating')
-        self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))
-        
-        self._album_id = jellyfin_data.get('AlbumId', '')
-        self._artist_ids = [artist.get('Id', '') for artist in jellyfin_data.get('ArtistItems', [])]
-
-        # File path and media info (used by quality scanner and DB update)
-        self.path = jellyfin_data.get('Path')
-        # Extract bitrate + file size from MediaSources if available.
-        # `file_size` powers the Library Disk Usage card on the Stats
-        # page — populated free during the deep scan from data Jellyfin
-        # already returns in MediaSources[].
+        # Bitrate + file size from MediaSources when present. `file_size`
+        # powers the Library Disk Usage card on the Stats page.
         media_sources = jellyfin_data.get('MediaSources', [])
-        self.bitRate = (media_sources[0].get('Bitrate') or 0) // 1000 if media_sources else None  # Convert bps to kbps
-        self.file_size = (media_sources[0].get('Size') or 0) if media_sources else None
-        if self.file_size == 0:
-            self.file_size = None
-        
-    def _parse_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        if not date_str:
+        bitrate = (media_sources[0].get('Bitrate') or 0) // 1000 if media_sources else None  # bps to kbps
+        file_size = (media_sources[0].get('Size') or 0) if media_sources else None
+        if file_size == 0:
+            file_size = None
+        super().__init__(
+            jellyfin_data.get('Id', ''),
+            jellyfin_data.get('Name', 'Unknown Track'),
+            client=client,
+            data=jellyfin_data,
+            added_at=parse_iso_date(jellyfin_data.get('DateCreated')),
+            duration_ms=jellyfin_data.get('RunTimeTicks', 0) // 10000,  # ticks to ms
+            track_number=jellyfin_data.get('IndexNumber'),
+            disc_number=jellyfin_data.get('ParentIndexNumber'),
+            year=jellyfin_data.get('ProductionYear'),
+            user_rating=jellyfin_data.get('UserData', {}).get('Rating'),
+            path=jellyfin_data.get('Path'),
+            bitrate_kbps=bitrate,
+            file_size=file_size,
+            album_id=jellyfin_data.get('AlbumId', ''),
+            artist_ids=[artist.get('Id', '') for artist in jellyfin_data.get('ArtistItems', [])],
+        )
+
+from core.media_server.base import MediaServerBase
+from core.media_server.contract import Capability
+
+
+class JellyfinClient(MediaServerBase):
+    CAPABILITIES = frozenset({
+        Capability.RECENTLY_ADDED, Capability.SCAN_TRIGGER, Capability.LIBRARY_STATS,
+        Capability.PLAYLISTS, Capability.PLAYLIST_IMAGE, Capability.PLAY_HISTORY,
+        Capability.CURATION_SIGNALS, Capability.METADATA_WRITE, Capability.PER_USER_VIEWS,
+    })
+
+    def scan_hints(self):
+        # Bulk inserts from the Jellyfin cache lock the database with more
+        # workers; the worker capped itself at 3 for Jellyfin.
+        return {'max_workers_cap': 3,
+                'preparing_message': 'Preparing Jellyfin cache for fast processing...',
+                # per-artist album / per-album track listings live on a
+                # process-wide singleton; the scan clears them
+                'caches_listings': True}
+
+    def image_url(self, thumb):
+        """Jellyfin image references are /Items/<id>/Images/... paths (or a
+        localhost URL holding one); they load with the base URL and the
+        API key as X-Emby-Token."""
+        if not thumb:
             return None
-        try:
-            return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-        except:
+        from urllib.parse import urlparse
+        jf_config = config_manager.get_jellyfin_config()
+        base_url = (jf_config.get('base_url') or '').rstrip('/')
+        if not base_url:
             return None
-    
-    def artist(self) -> Optional[JellyfinArtist]:
-        """Get the primary track artist"""
-        if self._artist_ids:
-            return self._client.get_artist_by_id(self._artist_ids[0])
-        return None
-    
-    def album(self) -> Optional[JellyfinAlbum]:
-        """Get the track's album"""
-        if self._album_id:
-            return self._client.get_album_by_id(self._album_id)
-        return None
+        path = thumb if thumb.startswith(('/Items/', '/api/')) else urlparse(thumb).path
+        if not path.startswith(('/Items/', '/api/')):
+            return None
+        token = jf_config.get('api_key') or ''
+        if not token:
+            return f"{base_url}{path}"
+        separator = '&' if '?' in path else '?'
+        return f"{base_url}{path}{separator}X-Emby-Token={token}"
 
-from core.media_server.contract import MediaServerClient
+    def user_view(self, identity):
+        """``as_user`` under the shared hook name (see MediaServerBase)."""
+        user_id = (identity or {}).get('user_id')
+        return self.as_user(user_id, (identity or {}).get('library_id')) if user_id else None
 
-
-class JellyfinClient(MediaServerClient):
     # Sent alongside X-Emby-Token on every request.
     #
     # X-Emby-Token is the Emby-compatibility header Jellyfin has accepted

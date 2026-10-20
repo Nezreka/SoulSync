@@ -36,6 +36,7 @@ _ALL_MODULES = (
     "core/audiobook_client.py",
     "core/audiobook_database.py",
     "core/audiobook_download_monitor.py",
+    "core/audiobook_events.py",
     "core/audiobook_grab.py",
     "core/audiobook_organizer.py",
     "core/audiobook_release_search.py",

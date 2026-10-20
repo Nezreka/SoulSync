@@ -515,6 +515,7 @@ def test_album_process_posts_valid_files_and_records_side_effects(tmp_path):
             "batch_complete",
             {
                 "playlist_name": "Import: Album",
+                "artist": "Artist",
                 "total_tracks": "2",
                 "completed_tracks": "1",
                 "failed_tracks": "1",
@@ -607,6 +608,229 @@ def test_process_single_import_file_resolves_and_posts_context(tmp_path):
                                 # explicit user match — quality profile has no veto (#1017)
                                 "_skip_quarantine_check": ["quality", "bit_depth"]}
     assert post_calls[0][2] == str(audio_file)
+
+
+def test_process_single_import_file_from_own_tags_skips_catalogue_match(tmp_path):
+    """#1772: "No track picked" must reach the resolver as an explicit
+    own-tags request (with the file's tag fields), not as a bare title/artist
+    the resolver is free to rematch to an unrelated catalogue track."""
+    audio_file = tmp_path / "Dj StarSunglasses - Live Mix.mp3"
+    _touch(audio_file)
+    captured = {}
+    post_calls = []
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(kwargs)
+        captured["title"] = title
+        captured["artist"] = artist
+        return {
+            "source": None,
+            "context": {
+                "track_info": {"name": title, "_manual_metadata": True},
+                "artist": {"name": artist},
+                "album": {"name": kwargs.get("album") or ""},
+                "_manual_metadata": True,
+            },
+        }
+
+    from core.imports.context import normalize_import_context as _real_normalize
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        # the REAL normalizer, not an identity stub: this pins that the
+        # manual flag survives the normalization the production runtime runs
+        normalize_import_context=_real_normalize,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda key, context, path: post_calls.append((key, context, path)),
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": "Live Mix",
+            "artist": "Dj StarSunglasses",
+            "album": "Live Mix",
+            "track_number": 1,
+            "disc_number": 1,
+            "duration_ms": 2_880_000,
+            "from_own_tags": True,
+        },
+    )
+
+    assert outcome == ("ok", "Live Mix")
+    assert captured["from_own_tags"] is True
+    assert captured["override_id"] is None
+    assert captured["album"] == "Live Mix"
+    assert captured["duration_ms"] == 2_880_000
+    assert len(post_calls) == 1
+    assert post_calls[0][1]["_manual_metadata"] is True
+    assert post_calls[0][1]["track_info"]["_manual_metadata"] is True
+
+
+def test_process_single_import_file_from_own_tags_requires_a_real_true(tmp_path):
+    """The flag is parsed strictly: the string "false" from a raw API
+    caller must not turn own-tags mode ON."""
+    audio_file = tmp_path / "Song.flac"
+    _touch(audio_file)
+    captured = {}
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(kwargs)
+        return {
+            "source": "deezer",
+            "context": {"track_info": {"name": "Song"}, "artist": {"name": "Artist"}},
+        }
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        normalize_import_context=lambda context: context,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": "Song",
+            "artist": "Artist",
+            "from_own_tags": "false",
+        },
+    )
+
+    assert outcome == ("ok", "Song")
+    assert captured["from_own_tags"] is False
+
+
+def test_process_single_import_file_nonstring_title_artist_falls_back_to_filename(tmp_path):
+    """If title and artist are non-strings (e.g. invalid JSON data from an
+    external caller), process_single_import_file treats them as absent and
+    parses the filename instead of passing non-strings into the pipeline."""
+    audio_file = tmp_path / "Parsed Artist - Parsed Title.mp3"
+    _touch(audio_file)
+    captured = {}
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(title=title, artist=artist)
+        return {
+            "source": None,
+            "context": {"track_info": {"name": title}, "artist": {"name": artist}},
+        }
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        normalize_import_context=lambda context: context,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": 12345,
+            "artist": ["invalid"],
+            "from_own_tags": True,
+        },
+    )
+
+    assert outcome == ("ok", "Parsed Title")
+    assert captured["title"] == "Parsed Title"
+    assert captured["artist"] == "Parsed Artist"
+
+
+def test_process_single_import_file_empty_manual_match_counts_as_no_pick(tmp_path):
+    """An empty manual_match dict is "no match picked" (its pre-flag
+    meaning), so the own-tags flag still applies and no override is sent."""
+    audio_file = tmp_path / "Song.flac"
+    _touch(audio_file)
+    captured = {}
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(kwargs)
+        return {
+            "source": None,
+            "context": {"track_info": {"name": "Song"}, "artist": {"name": "Artist"}},
+        }
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        normalize_import_context=lambda context: context,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": "Song",
+            "artist": "Artist",
+            "from_own_tags": True,
+            "manual_match": {},
+        },
+    )
+
+    assert outcome == ("ok", "Song")
+    assert captured["from_own_tags"] is True
+    assert captured["override_id"] is None
+
+
+def test_process_single_import_file_manual_match_wins_over_from_own_tags(tmp_path):
+    audio_file = tmp_path / "Song.flac"
+    _touch(audio_file)
+    captured = {}
+
+    def fake_context(title, artist, **kwargs):
+        captured.update(kwargs)
+        return {
+            "source": "deezer",
+            "context": {"track_info": {"name": "Picked Song"}, "artist": {"name": "Picked Artist"}},
+        }
+
+    runtime = ImportRouteRuntime(
+        get_allowed_import_roots=lambda: [str(tmp_path)],
+        get_single_track_import_context=fake_context,
+        normalize_import_context=lambda context: context,
+        get_import_context_artist=lambda context: context["artist"],
+        get_import_track_info=lambda context: context["track_info"],
+        post_process_matched_download=lambda *_args: None,
+        logger=_FakeLogger(),
+    )
+
+    outcome = process_single_import_file(
+        runtime,
+        {
+            "full_path": str(audio_file),
+            "filename": audio_file.name,
+            "title": "Song",
+            "artist": "Artist",
+            "from_own_tags": True,
+            "manual_match": {"id": "track-9", "source": "deezer"},
+        },
+    )
+
+    assert outcome == ("ok", "Picked Song")
+    assert captured["from_own_tags"] is False
+    assert captured["override_id"] == "track-9"
+    assert captured["override_source"] == "deezer"
 
 
 def test_process_single_import_file_rejects_malformed_manual_match(tmp_path):
@@ -723,6 +947,7 @@ def test_singles_process_aggregates_worker_results_and_side_effects():
             "batch_complete",
             {
                 "playlist_name": "Import: Singles",
+                "artist": "Various",
                 "total_tracks": "2",
                 "completed_tracks": "1",
                 "failed_tracks": "1",

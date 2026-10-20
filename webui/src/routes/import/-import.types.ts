@@ -47,18 +47,33 @@ export interface ImportInboxFile {
   size: number;
 }
 
+/** what an import did with one track. 'completed' is a plain import. */
+export type ImportTrackOutcome = 'completed' | 'upgraded' | 'skipped_owned' | 'failed';
+
+export interface ImportOutcomeSummary {
+  imported: number;
+  upgraded: number;
+  skipped_owned: number;
+  failed: number;
+}
+
 export interface ImportInboxMatchLine {
   track_name: string;
   track_number?: number | string | null;
   file: string;
   file_path: string;
   confidence: number;
+  /** set once the import ran: what it did with this track, and why */
+  import_status?: ImportTrackOutcome | null;
+  import_reason?: string | null;
+  import_error?: string | null;
 }
 
 export interface ImportInboxMatch {
   matched_count: number;
   total_tracks: number;
   matches: ImportInboxMatchLine[];
+  summary?: ImportOutcomeSummary | null;
 }
 
 /** One staging item: an album folder, a loose-file group, or a single file,
@@ -135,6 +150,9 @@ export interface ImportStagingFile {
   duration_ms?: number | null;
   bitrate?: number | null;
   manual_match?: ImportTrackResult;
+  /** the user declined a catalogue match: import from the file's own tags,
+   * with no further automatic lookup on the server (#1772) */
+  from_own_tags?: boolean;
 }
 
 /** While a large staging folder is still being scanned in the background (#947), the
@@ -351,6 +369,8 @@ export interface ImportAutoImportSettingsPayload {
   // app-wide default profile" (Settings -> Quality), same as every other
   // context that doesn't specify its own.
   quality_profile_id?: number | null;
+  /** take a folder out of staging once every track was imported or already owned */
+  clear_finished?: boolean;
   error?: string;
 }
 
@@ -375,9 +395,11 @@ export interface ImportAutoImportMatchData {
     track?: { name?: string | null };
     file?: string | null;
     confidence?: number | null;
-    import_status?: 'completed' | 'failed' | null;
+    import_status?: ImportTrackOutcome | null;
+    import_reason?: string | null;
     import_error?: string | null;
   }>;
+  summary?: ImportOutcomeSummary | null;
 }
 
 export interface ImportAutoImportResult {

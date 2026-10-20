@@ -128,11 +128,6 @@ export function SyncPage() {
   );
 
   /**
-   * `runPipeline` is the page's ONE controller, injected rather than reached
-   * for on `window` — `runMirroredPlaylistPipeline` lives in auto-sync.js,
-   * which the flip deletes.
-   */
-  /**
    * Open for the Auto-Sync modal OR for Activity's scheduled-runs tab, which
    * reads the same run history. Leaving it closed there would show an empty
    * list on a tab whose whole job is that list.
@@ -244,7 +239,12 @@ export function SyncPage() {
         onOpen={(sourceId) => openSourceModal('qobuz', sourceId)}
       />
     ),
-    beatport: <BeatportTab />,
+    beatport: (
+      <BeatportTab
+        vertical={page.verticals.beatport}
+        onOpen={(sourceId) => openSourceModal('beatport', sourceId)}
+      />
+    ),
     deezer: <DeezerArlTab />,
     // The link variant is the same SERVICE: one config, one vertical, one
     // modal id space. Only the way a playlist arrives differs.
@@ -290,6 +290,16 @@ export function SyncPage() {
     'my-playlists': (
       <MirroredTab
         scope="user"
+        vertical={page.verticals.mirrored}
+        onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
+        sourceName={sourceName}
+        pipeline={page.pipeline}
+        registerReload={page.registerMirroredReload}
+      />
+    ),
+    'request-lists': (
+      <MirroredTab
+        scope="requests"
         vertical={page.verticals.mirrored}
         onOpen={(sourceId) => openSourceModal('mirrored', sourceId)}
         sourceName={sourceName}

@@ -984,6 +984,7 @@ def check_single_completion(
                             confidence_threshold=0.7,
                             server_source=active_server,
                             candidate_tracks=release_tracks,
+                            include_downloads=True,
                         )
                         single_owned = db_track is not None
                     else:

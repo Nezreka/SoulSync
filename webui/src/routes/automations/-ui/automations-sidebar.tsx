@@ -17,6 +17,8 @@ const COLLECTION_ICONS: Record<string, string> = {
   scheduled: '◷',
   events: '⚡',
   off: '○',
+  operations: '⚡',
+  maintenance: '🛠',
   system: '⚙',
   ungrouped: '◇',
   guides: '📖',
@@ -60,7 +62,7 @@ interface Props {
  *
  * The old page stacked every family vertically — System, each group, then the
  * ungrouped remainder — so reaching anything meant scrolling past everything
- * else. The sidebar turns those families plus a few smart lenses into one
+ * else. The sidebar turns those same families plus a few smart lenses into one
  * click each: the main pane shows exactly one collection at a time.
  *
  * Group rows double as drop targets: dragging a card onto a group in the
@@ -83,8 +85,12 @@ export function AutomationsSidebar({
   dnd,
 }: Props) {
   const smart = collections.filter(
-    (c) => !['system', 'ungrouped', 'guides'].includes(c.key) && c.kind !== 'group',
+    (c) =>
+      !['system', 'operations', 'maintenance', 'ungrouped', 'guides'].includes(c.key) &&
+      c.kind !== 'group',
   );
+  const operations = collections.find((c) => c.key === 'operations');
+  const maintenance = collections.find((c) => c.key === 'maintenance');
   const system = collections.find((c) => c.key === 'system');
   const groups = collections.filter((c) => c.kind === 'group');
   const ungrouped = collections.find((c) => c.key === 'ungrouped');
@@ -96,23 +102,20 @@ export function AutomationsSidebar({
     const isActive = active === def.key;
     const isAttention = def.key === 'attention';
     const groupName = collectionGroupName(def.key);
-    // System is protected (never a drop target); groups and the ungrouped
+    const isProtectedSystem =
+      def.key === 'system' || def.key === 'operations' || def.key === 'maintenance';
+    // System collections are protected (never a drop target); groups and the ungrouped
     // bucket accept drops, keyed exactly as the old section bodies were.
-    const dropKey =
-      def.key === 'system'
-        ? null
-        : groupName !== null
-          ? def.key
-          : def.key === 'ungrouped'
-            ? 'ungrouped'
-            : null;
+    const dropKey = isProtectedSystem
+      ? null
+      : groupName !== null
+        ? def.key
+        : def.key === 'ungrouped'
+          ? 'ungrouped'
+          : null;
     const zoneProps =
       dropKey !== null
-        ? dnd.zoneProps(
-            dropKey,
-            groupName,
-            def.key === 'system' ? { isProtected: true } : undefined,
-          )
+        ? dnd.zoneProps(dropKey, groupName, isProtectedSystem ? { isProtected: true } : undefined)
         : {};
     const isDropTarget = dropKey !== null && dnd.overKey === dropKey;
 
@@ -131,7 +134,7 @@ export function AutomationsSidebar({
           {iconFor(def)}
         </span>
         <span className="automx-nav-label">{def.label}</span>
-        {def.kind === 'group' || def.key === 'system' || def.key === 'ungrouped' ? (
+        {def.kind === 'group' || isProtectedSystem || def.key === 'ungrouped' ? (
           <span
             className={`automx-health-dot ${health}`}
             title={
@@ -195,8 +198,12 @@ export function AutomationsSidebar({
         <div className="automx-nav-heading">Library</div>
         {smart.map(renderRow)}
 
+        <div className="automx-nav-heading">System</div>
+        {operations ? renderRow(operations) : null}
+        {maintenance ? renderRow(maintenance) : null}
+        {!operations && !maintenance && system ? renderRow(system) : null}
+
         <div className="automx-nav-heading">Groups</div>
-        {system ? renderRow(system) : null}
         {groups.map(renderRow)}
         {ungrouped ? renderRow(ungrouped) : null}
 

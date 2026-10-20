@@ -135,13 +135,10 @@ describe('timings and caps still match discover.js', () => {
     expect(ARTMAP_TAP_SLOP).toBe(8);
     expect(ARTMAP_LIVE_CAP).toBe(600);
     expect(ARTMAP_REVEAL_CAP).toBe(2200);
-    expect(SOURCE).toContain('}, 2500);');
-    expect(SOURCE).toContain('const CAP = revealing ? 2200 : 600;');
   });
 
   it('keeps the reveal’s three stagger values', () => {
     expect(ARTMAP_REVEAL).toEqual({ ISL_STAGGER: 145, RADIAL_MS: 430, NODE_DUR: 470 });
-    expect(SOURCE).toContain('ISL_STAGGER = 145, RADIAL_MS = 430, NODE_DUR = 470');
   });
 
   it('keeps the web’s tuning', () => {
@@ -153,11 +150,6 @@ describe('timings and caps still match discover.js', () => {
     expect(WEB_PREVIEW_VOLUME).toBe(0.9);
     expect(WEB_SPREAD_EASE).toBe(0.18);
     expect(WEB_SPREAD_EPSILON).toBe(0.0005);
-    expect(SOURCE).toContain('}, 8000);');
-    expect(SOURCE).toContain('}, 140);');
-    expect(SOURCE).toContain('}, 650);');
-    expect(SOURCE).toContain('audio.volume = 0.9;');
-    expect(SOURCE).toContain('EASE = 0.18');
   });
 });
 

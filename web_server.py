@@ -45,7 +45,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.5.4"
+_SOULSYNC_BASE_VERSION = "3.5.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -450,6 +450,13 @@ def _inject_soulsync_version():
     everywhere it's rendered."""
     return {'soulsync_version': SOULSYNC_VERSION, 'soulsync_base_version': _SOULSYNC_BASE_VERSION}
 
+
+@app.context_processor
+def _inject_profile_gate_rules():
+    """the no-profile and page rules profile-api-gate.js mirrors (#1763)"""
+    from core.security.session_profile import client_gate_rules
+    return {'profile_gate_rules': client_gate_rules()}
+
 # --- Flask Session Setup (for multi-profile support) ---
 import secrets as _secrets
 def _init_flask_secret_key():
@@ -761,13 +768,17 @@ def _set_profile_context():
                                   login_mode=_require_login_enabled(),
                                   profile_count=_profile_count)
     if pid is None:
+        if _require_login_enabled() and session.get('login_authenticated'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                session.pop(_k, None)
         g.profile_id = None
         g.is_admin = False
         g.can_download = False
         g.profile_name = "No profile"
         g.allowed_sides = 'none'
         if no_profile_request_is_blocked(path, request.method):
-            return jsonify({"error": "profile_required", "profile_required": True}), 401
+            return jsonify({"error": "profile_required", "profile_required": True,
+                            "signed_out": True}), 401
         return
 
     # "sign out everywhere": a session signed in before the profile's epoch
@@ -787,7 +798,7 @@ def _set_profile_context():
         if not _signed_out:
             _devices.touch(_device_id, lambda d: get_database().touch_profile_device(d))
         if _signed_out:
-            for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated', 'launch_pin_verified'):
+            for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
                 session.pop(_k, None)
             g.profile_id = None
             g.is_admin = False
@@ -817,6 +828,12 @@ def _set_profile_context():
             try:
                 database = get_database()
                 profile = database.get_profile(pid)
+                if not profile:
+                    for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                        session.pop(_k, None)
+                    g.profile_id = None
+                    g.is_admin = False
+                    return
                 g.is_admin = bool((profile or {}).get('is_admin', False))
             except Exception:
                 g.is_admin = False
@@ -828,15 +845,23 @@ def _set_profile_context():
             database = get_database()
             profile = database.get_profile(pid)
             if not profile:
-                session.pop('profile_id', None)
-                from flask import jsonify as _jsonify
-                return _jsonify({"error": "profile_required", "message": "Profile no longer exists"}), 401
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
+                    session.pop(_k, None)
+                g.profile_id = None
+                g.is_admin = False
+                g.can_download = False
+                g.profile_name = "No profile"
+                g.allowed_sides = 'none'
+                if no_profile_request_is_blocked(path, request.method):
+                    return jsonify({"error": "profile_required", "profile_required": True,
+                                    "signed_out": True, "message": "Profile no longer exists"}), 401
+                return
             g.can_download = bool((profile or {}).get('can_download', True))
             g.profile_name = (profile or {}).get('name') or ("Profile %s" % pid)
             g.is_admin = bool((profile or {}).get('is_admin', False))
             # a turned-off profile is kept but can't be used, same as gone
             if (profile or {}).get('disabled') and not g.is_admin:
-                for _k in ('profile_id', 'profile_epoch', 'device_id', 'login_authenticated'):
+                for _k in ('profile_id', 'profile_epoch', 'device_id', 'device_owner', 'login_authenticated', 'launch_pin_verified'):
                     session.pop(_k, None)
                 g.profile_id = None
                 g.is_admin = False
@@ -1611,6 +1636,59 @@ def _register_automation_handlers():
         discover_callable=_discover_callable_for_registry,
     )
 
+    # Resolve album-completion dependencies at registration time.
+    from core.automation.album_completion_queue import queue_album_completion
+    from core.automation.album_completion_scope import verify_shared_album_scope
+    from core.automation.album_completion_verify import filter_still_missing
+    from core.automation.album_completion_cooldown import claim_attempt, is_cooling_down, release_attempt
+    from core.automation.album_pin import get_current_album_pin
+    from core.search.enriched_download import fetch_release
+
+    def _queue_album_completion(**kwargs):
+        completion_deps = types.SimpleNamespace(
+            profile_id=get_current_profile_id(),
+            verify_album_scope=lambda album_id, profile_id: (
+                verify_shared_album_scope(get_database(), album_id, profile_id)
+            ),
+            verify_missing_tracks=lambda album_id, tracks, profile_id, related_album_ids: (
+                filter_still_missing(
+                    get_database(), album_id, tracks,
+                    profile_id, related_album_ids
+                )
+            ),
+            claim_completion_attempt=lambda profile_id, source, release_id: (
+                claim_attempt(get_database(), profile_id, source, release_id)
+            ),
+            release_completion_attempt=lambda profile_id, source, release_id, token: (
+                release_attempt(
+                    get_database(), profile_id, source, release_id, token
+                )
+            ),
+            download_batches=download_batches,
+            tasks_lock=tasks_lock,
+            submit=lambda batch_id, playlist_id, tracks: (
+                missing_download_executor.submit(
+                    _run_full_missing_tracks_process,
+                    batch_id, playlist_id, tracks
+                )
+            ),
+        )
+        return queue_album_completion(**kwargs, deps=completion_deps)
+
+    def _completion_cooling_down(source, release_id):
+        return is_cooling_down(get_database(), get_current_profile_id(), source, release_id)
+
+    def _get_completion_album_pin(album_id):
+        return get_current_album_pin(get_database(), album_id)
+
+    def _fetch_completion_release(**kwargs):
+        return fetch_release(
+            kwargs["canonical_source"],
+            kwargs["canonical_album_id"],
+            kwargs["album_title"],
+            kwargs["artist"],
+        )
+
     _automation_deps = AutomationDeps(
         engine=automation_engine,
         state=_automation_state,
@@ -1651,6 +1729,11 @@ def _register_automation_handlers():
         bulk_fix_repair_findings=(
             (lambda finding_ids: repair_worker.bulk_fix_findings(finding_ids=finding_ids))
             if repair_worker else None),
+        get_repair_findings=(lambda **kw: repair_worker.get_findings(**kw)) if repair_worker else None,
+        queue_album_completion=_queue_album_completion,
+        get_current_album_pin=_get_completion_album_pin,
+        fetch_canonical_release=_fetch_completion_release,
+        album_completion_cooling_down=_completion_cooling_down,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -2345,13 +2428,14 @@ def validate_and_heal_batch_states():
                     if not completion_time:
                         # Set completion time if not set
                         batch_data['completion_time'] = current_time
-                    else:
-                        # Check if batch has been complete for >5 minutes
+                    elif _downloads_lifecycle.terminal_batch_is_stale(batch_data, current_time):
+                        # 5 minutes after completion AND after the modal last
+                        # polled it. an open modal is someone still picking
+                        # candidates for the not-found rows.
                         time_since_completion = current_time - completion_time
-                        if time_since_completion > 300:  # 5 minutes
-                            logger.warning(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
-                            batches_to_cleanup.append(batch_id)
-                            continue  # Skip other healing logic for this batch
+                        logger.warning(f"[Auto-Cleanup] Removing stale completed batch {batch_id} (completed {time_since_completion:.0f}s ago)")
+                        batches_to_cleanup.append(batch_id)
+                        continue  # Skip other healing logic for this batch
 
                 # Count actually active tasks
                 actually_active = 0
@@ -3174,6 +3258,7 @@ from core.connection_test import (
 
 
 from core.connection_detect import run_detection
+from core.media_server import specs as _media_specs
 
 # --- Web UI Routes ---
 
@@ -3509,17 +3594,20 @@ def fix_navidrome_urls():
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
-def _m3u_entry_path(path):
-    """Final transforms for one m3u entry line: the prefix hot-swap
-    (m3u_export.rewrite_from → rewrite_to, wolf39us — container path in,
-    playback-machine path out) and the '#' comment-guard (#1072). Shared
-    logic lives in core.library.m3u_export.finalize_m3u_entry; this wrapper
-    just feeds it the configured mapping. Empty settings = '#'-guard only."""
-    from core.library.m3u_export import finalize_m3u_entry
-    return finalize_m3u_entry(
+def _m3u_entry_path(path, m3u_dir=None):
+    """One m3u entry line from a library file path: relative to ``m3u_dir``
+    when m3u_export.relative_paths is on and the file is being written there,
+    else the base path prepend + prefix hot-swap (wolf39us). the '#'
+    comment-guard (#1072) applies either way. Shared logic lives in
+    core.library.m3u_export.m3u_entry_line; this just feeds it the settings."""
+    from core.library.m3u_export import m3u_entry_line
+    relative = bool(m3u_dir) and bool(config_manager.get('m3u_export.relative_paths', False))
+    return m3u_entry_line(
         path,
+        entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '',
         rewrite_from=config_manager.get('m3u_export.rewrite_from', '') or '',
         rewrite_to=config_manager.get('m3u_export.rewrite_to', '') or '',
+        relative_to=m3u_dir if relative else '',
     )
 
 
@@ -3539,8 +3627,8 @@ def _regenerate_batch_m3u(batch, tracks):
         playlist_name = batch.get('playlist_name', 'Playlist')
         db = get_database()
         active_server = config_manager.get_active_media_server()
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
+        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
 
         # Resolve file paths from library DB
         from collections import defaultdict
@@ -3585,7 +3673,7 @@ def _regenerate_batch_m3u(batch, tracks):
             lines.append(f'#EXTINF:{dur_s},{artist} - {name}')
             fp = file_path_map.get(idx)
             if fp:
-                path = _m3u_entry_path(f'{entry_base_path}/{fp}' if entry_base_path else fp)
+                path = _m3u_entry_path(fp, m3u_folder)
                 lines.append(path)
                 found += 1
             else:
@@ -3596,8 +3684,6 @@ def _regenerate_batch_m3u(batch, tracks):
             return  # Don't overwrite with an all-missing M3U
 
         m3u_content = '\n'.join(lines)
-        transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-        m3u_folder = _compute_m3u_folder(transfer_dir, 'playlist', playlist_name, '', '', '')
         os.makedirs(m3u_folder, exist_ok=True)
         safe_fn = _sanitize_filename(playlist_name)
         m3u_path = os.path.join(m3u_folder, f'{safe_fn}.m3u')
@@ -3692,9 +3778,6 @@ def generate_playlist_m3u():
         if save_to_disk and not force and not config_manager.get('m3u_export.enabled', False):
             return jsonify({"success": True, "skipped": True, "reason": "m3u_export disabled"})
 
-        raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
-        entry_base_path = raw_base.rstrip('/\\')
-
         db = get_database()
         active_server = config_manager.get_active_media_server()
 
@@ -3754,6 +3837,17 @@ def generate_playlist_m3u():
             )
             file_path_map[idx] = matched_path
 
+        # where it will be saved, worked out up front so entries can be
+        # relative to it. a content-only request has no folder: absolute.
+        will_save = save_to_disk and (force or config_manager.get('m3u_export.enabled', False))
+        m3u_folder = None
+        if will_save:
+            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
+            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
+                                              artist_name_ctx, album_name, year,
+                                              sample_track_path=next(
+                                                  (p for p in file_path_map.values() if p), None))
+
         # --- build M3U content ---
         import datetime as _dt
         found_count = 0
@@ -3775,7 +3869,7 @@ def generate_playlist_m3u():
             if file_path:
                 found_count += 1
                 lines.append('#STATUS:FOUND_IN_LIBRARY')
-                entry = _m3u_entry_path(f'{entry_base_path}/{file_path}' if entry_base_path else file_path)
+                entry = _m3u_entry_path(file_path, m3u_folder)
                 lines.append(entry.replace('\\', '/'))
             else:
                 missing_count += 1
@@ -3795,12 +3889,7 @@ def generate_playlist_m3u():
 
         # --- optionally save to disk ---
         saved_path = None
-        if save_to_disk and (force or config_manager.get('m3u_export.enabled', False)):
-            transfer_dir = docker_resolve_path(config_manager.get('soulseek.transfer_path', './Transfer'))
-            m3u_folder = _compute_m3u_folder(transfer_dir, context_type, playlist_name,
-                                              artist_name_ctx, album_name, year,
-                                              sample_track_path=next(
-                                                  (p for p in file_path_map.values() if p), None))
+        if will_save:
             os.makedirs(m3u_folder, exist_ok=True)
             if context_type == 'album' and artist_name_ctx and album_name:
                 safe_fn = _sanitize_filename(f'{artist_name_ctx} - {album_name}')
@@ -4246,7 +4335,7 @@ def handle_settings():
                         reset_own_library_fallback_notifications()
                     except Exception as _inv_err:
                         logger.debug("scope cache invalidation failed: %s", _inv_err)
-                    if new_server not in ('plex', 'jellyfin'):
+                    if new_server not in _media_specs.names_where(supports_own_libraries=True):
                         try:
                             own_profs = get_database().get_own_library_profiles()
                             if own_profs:
@@ -4274,7 +4363,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4691,7 +4780,7 @@ def test_connection_endpoint():
         if service == 'spotify':
             invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful test")
-        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
+        elif _media_specs.is_known(service):
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -4927,7 +5016,7 @@ def test_dashboard_connection_endpoint():
         if service == 'spotify':
             invalidate_metadata_status_caches()
             logger.info("Updated Spotify status cache after successful dashboard test")
-        elif service in ['plex', 'jellyfin', 'navidrome', 'soulsync']:
+        elif _media_specs.is_known(service):
             _status_cache['media_server']['connected'] = True
             _status_cache['media_server']['type'] = service
             _status_cache_timestamps['media_server'] = current_time
@@ -7813,6 +7902,7 @@ def get_task_candidates(task_id):
             task = download_tasks.get(task_id)
             if not task:
                 return jsonify({"error": "Task not found"}), 404
+            _downloads_lifecycle.stamp_batches_watched([task.get('batch_id')])
 
             candidates = task.get('cached_candidates', [])
             track_info = task.get('track_info', {})
@@ -7863,6 +7953,7 @@ def download_selected_candidate(task_id):
 
             batch_id = task.get('batch_id')
             track_info = task.get('track_info', {})
+            _downloads_lifecycle.stamp_batches_watched([batch_id])
 
             # Reset task state
             task['status'] = 'downloading'
@@ -8081,6 +8172,7 @@ def manual_search_for_task(task_id):
             if not task:
                 return jsonify({"error": "Task not found"}), 404
             track_info = dict(task.get('track_info', {}))
+            _downloads_lifecycle.stamp_batches_watched([task.get('batch_id')])
 
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
@@ -14963,6 +15055,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     Returns:
         Processed path string
     """
+    import re
     # Sanitize context values BEFORE template substitution
     # This prevents '/' in metadata from creating unintended path components
     clean_context = _sanitize_context_values(context)
@@ -15008,14 +15101,31 @@ def _apply_path_template(template: str, context: dict) -> str:
     _disc_number = int(clean_context.get('disc_number', 1) or 1)
     cdnum_value = f"CD{_disc_number:02d}" if _total_discs > 1 else ''
 
+    from core.imports.compilation import is_various_artists_name
+
+    album_artist_letter_value = _shared_artist_letter(album_artist_value)
+    has_albumartist_in_template = bool(re.search(r"\$(?:\{albumartist\}|albumartist(?![a-zA-Z0-9_]))", template))
+    has_artist_in_template = bool(re.search(r"\$(?:\{artist\}|artist(?![a-zA-Z0-9_]))", template))
+
+    if has_albumartist_in_template:
+        letter_artist_name = album_artist_value
+    elif has_artist_in_template:
+        letter_artist_name = clean_context.get('artist', 'U')
+    elif clean_context.get('albumartist') and not is_various_artists_name(album_artist_value):
+        letter_artist_name = album_artist_value
+    else:
+        letter_artist_name = clean_context.get('artist', 'U')
+    artist_letter_value = _shared_artist_letter(letter_artist_name)
+
     # Support ${var} delimited syntax (e.g. ${albumtype}s → Albums)
     # Must run before $var replacements to prevent partial matching
     _bracket_map = {
         'albumartist': album_artist_value,
+        'albumartistletter': album_artist_letter_value,
         'albumtype': clean_context.get('albumtype', 'Album'),
         'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
-        'artistletter': _shared_artist_letter(clean_context.get('artist', 'U')),
+        'artistletter': artist_letter_value,
         'artist': clean_context.get('artist', 'Unknown Artist'),
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
@@ -15033,6 +15143,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         result = result.replace('${' + var_name + '}', val)
 
     result = result.replace('$disambiguation', clean_context.get('disambiguation', ''))
+    # Longest prefix first: $albumartistletter before $albumartist
+    result = result.replace('$albumartistletter', album_artist_letter_value)
     result = result.replace('$albumartist', album_artist_value)
     result = result.replace('$albumtype', clean_context.get('albumtype', 'Album'))
     # This replacer is a hand-maintained copy of core.imports.paths, so a new
@@ -15043,7 +15155,7 @@ def _apply_path_template(template: str, context: dict) -> str:
     result = result.replace('$playlist', clean_context.get('playlist_name', ''))
 
     # Medium length variables
-    result = result.replace('$artistletter', _shared_artist_letter(clean_context.get('artist', 'U')))
+    result = result.replace('$artistletter', artist_letter_value)
     result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
@@ -16292,14 +16404,17 @@ def _tracks_with_mirrored_quality_profile(
 
 def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     batch = download_batches.get(batch_id, {})
-    tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
-        batch.get('playlist_id') or playlist_id,
-        batch.get('playlist_name'),
-        tracks_json,
-        profile_id=batch.get('profile_id', 1),
-        explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
-        source=batch.get('playlist_source'),
-    )
+    if batch.get("album_completion_only"):
+        quality_profile_id = None
+    else:
+        tracks_json, quality_profile_id = _tracks_with_mirrored_quality_profile(
+            batch.get('playlist_id') or playlist_id,
+            batch.get('playlist_name'),
+            tracks_json,
+            profile_id=batch.get('profile_id', 1),
+            explicit_quality_profile_id=batch.get('requested_quality_profile_id'),
+            source=batch.get('playlist_source'),
+        )
     if quality_profile_id is not None:
         batch['quality_profile_id'] = quality_profile_id
     return _downloads_master.run_full_missing_tracks_process(
@@ -16966,11 +17081,28 @@ def get_batched_download_statuses():
     """Returns status for multiple download batches in one request."""
     try:
         requested_batch_ids = request.args.getlist('batch_ids')
+        # batches whose modal is open on screen; keeps them past the auto-cleanup
+        watching = request.args.getlist('watching')
+        if watching:
+            with tasks_lock:
+                _downloads_lifecycle.stamp_batches_watched(watching)
         return jsonify(_downloads_status.build_batched_status(requested_batch_ids, _build_status_deps()))
     except Exception as e:
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/download_status/watch', methods=['POST'])
+def watch_download_batches():
+    """keepalive from a backgrounded tab: its open modals still count as watched."""
+    data = request.get_json(silent=True) or {}
+    batch_ids = data.get('batch_ids')
+    if not isinstance(batch_ids, list):
+        return jsonify({"success": False, "error": "batch_ids must be a list"}), 400
+    with tasks_lock:
+        _downloads_lifecycle.stamp_batches_watched([b for b in batch_ids if isinstance(b, str)])
+    return jsonify({"success": True})
 
 
 @app.route('/api/downloads/all', methods=['GET'])
@@ -17614,6 +17746,14 @@ def cleanup_batch():
                         "error": "Batch cleanup deferred - wishlist processing in progress",
                         "deferred": True
                     }), 202  # 202 = Accepted but not yet processed
+
+                # a manual candidate pick is still downloading: closing the modal
+                # must not pull the task out from under it. the healer drops the
+                # batch once it settles.
+                if _downloads_lifecycle.batch_has_in_flight_tasks(batch):
+                    logger.info(f"[Cleanup] Batch {batch_id} cleanup deferred - a task is still in flight")
+                    return jsonify({"success": True, "deferred": True,
+                                    "message": "Batch still has a download in flight; it will be cleaned up when done."})
 
                 # Get the list of task IDs before deleting the batch
                 task_ids_to_remove = batch.get('queue', [])
@@ -19112,6 +19252,37 @@ def mlm_delete(match_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/playlists/<playlist_id>/ownership-preview', methods=['POST'])
+def playlist_ownership_preview(playlist_id):
+    """which of these tracks are already in the library, before Begin Analysis.
+
+    the same answer the analysis gives, read-only, so the album modal opens
+    with found/missing filled in instead of 'pending'.
+    """
+    data = request.get_json(silent=True) or {}
+    tracks = data.get('tracks') or []
+    if not isinstance(tracks, list) or not tracks:
+        return jsonify({"success": False, "error": "No tracks provided"}), 400
+    try:
+        from core.downloads.master import preview_ownership
+        from database.music_database import MusicDatabase
+        is_album = bool(data.get('is_album_download', False))
+        results = preview_ownership(
+            MusicDatabase(), tracks,
+            album_context=data.get('album_context'),
+            artist_context=data.get('artist_context'),
+            is_album=is_album,
+            profile_id=get_current_profile_id() or 1,
+            source=_downloads_history.detect_sync_source(playlist_id),
+            active_server=config_manager.get_active_media_server(),
+            allow_duplicates=config_manager.get('wishlist.allow_duplicate_tracks', True),
+        )
+        return jsonify({"success": True, "results": results})
+    except Exception as e:
+        logger.error(f"[Ownership Preview] {playlist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/playlists/<playlist_id>/start-missing-process', methods=['POST'])
 def start_missing_tracks_process(playlist_id):
     """
@@ -19527,6 +19698,25 @@ def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, sna
 
     except Exception as e:
         logger.error(f"Error updating sync status for {playlist_id}: {e}")
+
+def _invalidate_sync_fingerprint(playlist_id):
+    """Drop the smart-skip fingerprint of a playlist whose sync failed.
+
+    A scheduled run skips a playlist whose track hash is unchanged and was
+    fully matched last time. A later failed write leaves that fingerprint
+    from the last good run in place, so the next run would skip the write
+    again, indefinitely. The rest of the status (last_synced, snapshot) still
+    describes that last good write and stays.
+    """
+    from core.sync.sync_fingerprint import clear_fingerprint
+    try:
+        sync_statuses = _load_sync_status_file()
+        if not clear_fingerprint(sync_statuses, playlist_id):
+            return
+        _save_sync_status_file(sync_statuses)
+        logger.info(f"Cleared smart-skip fingerprint for playlist {playlist_id} after a failed sync")
+    except Exception as e:
+        logger.error(f"Error clearing sync fingerprint for {playlist_id}: {e}")
 
 @app.route('/api/spotify/playlists', methods=['GET'])
 def get_spotify_playlists():
@@ -22978,9 +23168,11 @@ def _ws_session_profile():
         return pid, True
     try:
         profile = get_database().get_profile(pid)
+        if not profile:
+            return None, False
         return pid, bool((profile or {}).get('is_admin', False))
     except Exception:
-        return pid, False
+        return None, False
 
 # --- Phase 2: Dashboard emitters ---
 
@@ -23288,11 +23480,18 @@ _configure_stats_api(get_database=get_database, config_manager=config_manager,
                      lastfm_import_workers_getter=lambda: lastfm_import_workers)
 app.register_blueprint(_create_stats_blueprint())
 
+# Media server descriptors for the UI (settings page, wizard, quick-switch).
+from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
+_configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
+app.register_blueprint(_create_media_servers_blueprint())
+
 # Quality profiles / auto-import watcher / metadata-cache browser - three
 # self-contained clusters lifted to their own api/ modules.
 from api.quality_profiles import configure as _cfg_qp, create_blueprint as _bp_qp
 _cfg_qp(get_database=get_database, add_activity_item=add_activity_item)
 app.register_blueprint(_bp_qp())
+from api.audiobook_routes import create_blueprint as _bp_abr
+app.register_blueprint(_bp_abr())
 from api.auto_import import configure as _cfg_ai, create_blueprint as _bp_ai
 def _get_auto_import_worker():
     # the worker handle lives (and is rebound) in api.import_routes
@@ -23681,6 +23880,7 @@ _cfg_sp(
     _run_full_missing_tracks_process=_run_full_missing_tracks_process,
     _tracks_with_mirrored_quality_profile=_tracks_with_mirrored_quality_profile,
     _update_and_save_sync_status=_update_and_save_sync_status,
+    _invalidate_sync_fingerprint=_invalidate_sync_fingerprint,
     _update_automation_progress=_update_automation_progress,
     is_wishlist_actually_processing=is_wishlist_actually_processing,
     get_tidal_client_for_profile=get_tidal_client_for_profile,

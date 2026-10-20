@@ -1177,3 +1177,110 @@ def test_an_absolute_root_is_left_exactly_as_configured(monkeypatch, tmp_path):
     )
 
     assert final_path == str(tmp_path / "Transfer" / "Lenka" / "Lenka - Lenka" / "01 - The Show.flac")
+
+
+# ── #1785: $artistletter must use album artist, not featured track artists ──
+
+def test_album_artistletter_uses_album_artist_when_track_has_guest_artist(monkeypatch, tmp_path):
+    """#1785 (QT3496): $artistletter in an album template must evaluate to the
+    album artist, not the track-level guest artist. Otherwise tracks featuring
+    Busta Rhymes or Nelly Furtado scatter Tiësto's album across B/ and N/."""
+    cfg = _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$artistletter/$albumartist/$album/$track - $title",
+            "single_path": "$artistletter/$albumartist/$title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: cfg)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    context = {
+        "artist": {"name": "Tiësto"},
+        "album": {"name": "Kaleidoscope", "id": "alb-1", "release_date": "2009-10-06",
+                  "total_tracks": 17, "album_type": "album", "artists": [{"name": "Tiësto"}]},
+        "track_info": {"name": "Escape Me", "id": "t2", "track_number": 2,
+                       "disc_number": 1, "artists": [{"name": "Busta Rhymes"}, {"name": "Tiësto"}]},
+        "original_search_result": {"title": "Escape Me", "clean_title": "Escape Me",
+                                   "clean_album": "Kaleidoscope", "clean_artist": "Tiësto",
+                                   "artists": [{"name": "Busta Rhymes"}]},
+        "source": "deezer", "is_album_download": True,
+    }
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        context, {"name": "Tiësto"},
+        {"is_album": True, "album_name": "Kaleidoscope", "track_number": 2, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    expected = str(tmp_path / "Transfer" / "T" / "Tiësto" / "Kaleidoscope" / "02 - Escape Me.flac")
+    assert final_path == expected
+
+
+def test_album_artistletter_numeric_producer_with_guest_artists(monkeypatch, tmp_path):
+    """#1785: Alphanumeric/numeric producer (183rd) with guest artists (Benny The Butcher)
+    must route to 1/183rd, not B/183rd."""
+    cfg = _Config({
+        "soulseek.transfer_path": str(tmp_path / "Transfer"),
+        "file_organization.enabled": True,
+        "file_organization.templates": {
+            "album_path": "$artistletter/$albumartist/$album/$track - $title",
+        },
+        "file_organization.collab_artist_mode": "first",
+        "file_organization.disc_label": "Disc",
+    })
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: cfg)
+    monkeypatch.setattr(import_paths, "_get_album_tracks_for_source", lambda *a: None)
+
+    context = {
+        "artist": {"name": "183rd"},
+        "album": {"name": "Black Soprano", "id": "alb-183", "release_date": "2020-01-01",
+                  "total_tracks": 8, "album_type": "album", "artists": [{"name": "183rd"}]},
+        "track_info": {"name": "Intro", "id": "t1", "track_number": 1,
+                       "disc_number": 1, "artists": [{"name": "Benny The Butcher"}]},
+        "original_search_result": {"title": "Intro", "artists": [{"name": "Benny The Butcher"}]},
+        "source": "deezer", "is_album_download": True,
+    }
+
+    final_path, _ = import_paths.build_final_path_for_track(
+        context, {"name": "183rd"},
+        {"is_album": True, "album_name": "Black Soprano", "track_number": 1, "disc_number": 1},
+        ".flac", create_dirs=False,
+    )
+
+    expected = str(tmp_path / "Transfer" / "1" / "183rd" / "Black Soprano" / "01 - Intro.flac")
+    assert final_path == expected
+
+
+def test_albumartistletter_explicit_template_variable():
+    """#1785: $albumartistletter and ${albumartistletter} explicitly evaluate to
+    the letter of $albumartist."""
+    context = {
+        "artist": "Busta Rhymes",
+        "albumartist": "Tiësto",
+        "album": "Kaleidoscope",
+        "title": "Escape Me",
+        "track_number": 2,
+    }
+    rendered = import_paths.apply_path_template(
+        "$albumartistletter/${albumartistletter}/$albumartist - $title", context
+    )
+    assert rendered == "T/T/Tiësto - Escape Me"
+
+
+def test_artist_template_without_albumartist_uses_track_artist_letter():
+    """#1785: If a template is organized by $artist (e.g. $artistletter/$artist/$title)
+    without $albumartist, $artistletter must use $artist so the letter matches the folder."""
+    context = {
+        "artist": "Drake",
+        "albumartist": "Metro Boomin",
+        "album": "Heroes & Villains",
+        "title": "Trance",
+    }
+    rendered = import_paths.apply_path_template(
+        "$artistletter/$artist/$title", context
+    )
+    assert rendered == "D/Drake/Trance"

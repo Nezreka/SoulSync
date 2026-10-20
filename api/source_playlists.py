@@ -70,6 +70,7 @@ _recover_youtube_artist_cleaned = None
 _run_full_missing_tracks_process = None
 _tracks_with_mirrored_quality_profile = None
 _update_and_save_sync_status = None
+_invalidate_sync_fingerprint = None
 _update_automation_progress = None
 is_wishlist_actually_processing = None
 get_tidal_client_for_profile = None
@@ -1869,10 +1870,19 @@ def _join_artist_names(artists):
     """Join artist names from a list that may contain dicts or strings."""
     return ', '.join(_extract_artist_names(artists))
 
+def _get_matching_engine():
+    engine = _matching_engine() if callable(_matching_engine) else _matching_engine
+    if engine is None:
+        from core.matching_engine import MusicMatchingEngine
+        return MusicMatchingEngine()
+    return engine
+
+
 def _get_discovery_cache_key(title, artist):
     """Normalize title/artist for discovery cache lookup using _matching_engine()."""
-    norm_title = _matching_engine().clean_title(title)
-    norm_artist = _matching_engine().clean_artist(_extract_artist_name(artist))
+    engine = _get_matching_engine()
+    norm_title = engine.clean_title(title)
+    norm_artist = engine.clean_artist(_extract_artist_name(artist))
     return (norm_title, norm_artist)
 
 
@@ -1880,7 +1890,8 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
     """Check if a cached discovery match has a valid artist. Returns False if the
     cached result's artist doesn't match the source artist (stale/wrong cache entry)."""
     min_artist_similarity = 0.5
-    source_artist_cleaned = _matching_engine().clean_artist(source_artist)
+    engine = _get_matching_engine()
+    source_artist_cleaned = engine.clean_artist(source_artist)
     if not source_artist_cleaned:
         return True  # No source artist to validate against
 
@@ -1897,11 +1908,11 @@ def _validate_discovery_cache_artist(source_artist, cached_match):
             cand_artist = cand_artist.get('name', '')
             if not cand_artist:
                 continue
-        cand_normalized = _matching_engine().normalize_string(cand_artist)
+        cand_normalized = engine.normalize_string(cand_artist)
         if source_artist_cleaned in cand_normalized:
             return True
-        cand_cleaned = _matching_engine().clean_artist(cand_artist)
-        sim = _matching_engine().similarity_score(source_artist_cleaned, cand_cleaned)
+        cand_cleaned = engine.clean_artist(cand_artist)
+        sim = engine.similarity_score(source_artist_cleaned, cand_cleaned)
         if sim > best_sim:
             best_sim = sim
 
@@ -5282,6 +5293,7 @@ def _build_sync_deps():
         record_sync_history_start=_record_sync_history_start,
         update_automation_progress=_update_automation_progress,
         update_and_save_sync_status=_update_and_save_sync_status,
+        invalidate_sync_fingerprint=_invalidate_sync_fingerprint,
         sync_states=sync_states,
         sync_lock=sync_lock,
         process_wishlist_automatically=_process_wishlist_automatically,
@@ -5316,6 +5328,9 @@ def _run_sync_task(
     skip_wishlist_add=False,
     organize_by_playlist=False,
     user_initiated=False,
+    is_request_list=False,
+    auto_remove_fulfilled=False,
+    **kwargs,
 ):
     # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
     # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
@@ -5341,6 +5356,8 @@ def _run_sync_task(
         skip_wishlist_add=skip_wishlist_add,
         organize_by_playlist=organize_by_playlist,
         user_initiated=user_initiated,
+        is_request_list=is_request_list,
+        auto_remove_fulfilled=auto_remove_fulfilled,
     )
 
 
@@ -5443,6 +5460,12 @@ def get_sync_status(playlist_id):
     with sync_lock:
         state = sync_states.get(playlist_id)
         if not state:
+            # a page-load probe asking "is anything running?" gets a 200. idle
+            # is the normal answer, and a burst of 404s on every load trips
+            # crowdsec / fail2ban probing rules (#1763). pollers keep the 404,
+            # they give up on it.
+            if request.args.get('probe') == '1':
+                return jsonify({"status": "idle"})
             return jsonify({"status": "not_found"}), 404
 
         # If the task is finished but the state hasn't been updated, check the future

@@ -190,6 +190,255 @@ describe('loading the quarantine', () => {
   });
 });
 
+describe('paged loading', () => {
+  function stubPaged(all: AdlQuarantineEntry[]) {
+    const state = { calls: 0 };
+    server.use(
+      http.get('/api/quarantine/list', ({ request }) => {
+        state.calls += 1;
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get('limit') ?? all.length);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        return HttpResponse.json({
+          success: true,
+          entries: all.slice(offset, offset + limit),
+          total: all.length,
+          limit,
+          offset,
+        });
+      }),
+    );
+    return state;
+  }
+
+  it('loadMore appends the next page, de-duplicated by id', async () => {
+    // Page size is 100, so build 102 entries: page 1 is 100, page 2 is 2.
+    const all = Array.from({ length: 102 }, (_, i) => entry({ id: `q${i}` }));
+    stubPaged(all);
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    expect(result.current.state.quarantine).toHaveLength(100);
+    expect(result.current.state.quarantineTotal).toBe(102);
+    await act(async () => {
+      await result.current.loadMoreQuarantine();
+    });
+    expect(result.current.state.quarantine).toHaveLength(102);
+    expect(new Set(result.current.state.quarantine.map((e) => e.id)).size).toBe(102);
+    // No more to load: a further call is a no-op.
+    await act(async () => {
+      await result.current.loadMoreQuarantine();
+    });
+    expect(result.current.state.quarantine).toHaveLength(102);
+  });
+
+  it('loadAll pages through to the total and returns the full list', async () => {
+    const all = Array.from({ length: 102 }, (_, i) => entry({ id: `q${i}` }));
+    stubPaged(all);
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    let returned: { entries: AdlQuarantineEntry[]; complete: boolean } = {
+      entries: [],
+      complete: false,
+    };
+    await act(async () => {
+      returned = await result.current.loadAllQuarantine();
+    });
+    expect(returned.entries).toHaveLength(102);
+    expect(returned.complete).toBe(true);
+    expect(result.current.state.quarantine).toHaveLength(102);
+  });
+
+  it('loadMore de-duplicates an overlapping page and advances past it', async () => {
+    const all = Array.from({ length: 104 }, (_, i) => entry({ id: `q${i}` }));
+    const offsets: number[] = [];
+    server.use(
+      http.get('/api/quarantine/list', ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get('limit') ?? all.length);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        offsets.push(offset);
+        // Simulate the list shifting by one between pages: the second page
+        // starts one entry early, so its first id repeats page one's last.
+        const start = offset === 0 ? 0 : offset - 1;
+        return HttpResponse.json({
+          success: true,
+          entries: all.slice(start, start + limit),
+          total: all.length,
+          limit,
+          offset,
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    expect(result.current.state.quarantine).toHaveLength(100);
+    await act(async () => {
+      await result.current.loadMoreQuarantine();
+    });
+    const ids = result.current.state.quarantine.map((e) => e.id);
+    expect(ids).toHaveLength(104);
+    expect(new Set(ids).size).toBe(104);
+    expect(offsets).toEqual([0, 100]);
+    // The raw offset advanced past the total, so another loadMore is a no-op.
+    await act(async () => {
+      await result.current.loadMoreQuarantine();
+    });
+    expect(offsets).toEqual([0, 100]);
+  });
+
+  it('loadAll reports incomplete when a page fetch errors mid-paging', async () => {
+    const all = Array.from({ length: 102 }, (_, i) => entry({ id: `q${i}` }));
+    server.use(
+      http.get('/api/quarantine/list', ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get('limit') ?? all.length);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        if (offset >= 100) {
+          return HttpResponse.json({ success: false, error: 'boom' });
+        }
+        return HttpResponse.json({
+          success: true,
+          entries: all.slice(offset, offset + limit),
+          total: all.length,
+          limit,
+          offset,
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    let returned: { entries: AdlQuarantineEntry[]; complete: boolean } = {
+      entries: [],
+      complete: true,
+    };
+    await act(async () => {
+      returned = await result.current.loadAllQuarantine();
+    });
+    expect(returned.complete).toBe(false);
+    expect(returned.entries).toHaveLength(100);
+  });
+
+  it('loadAll reports incomplete when the total changes mid-load', async () => {
+    const all = Array.from({ length: 102 }, (_, i) => entry({ id: `q${i}` }));
+    server.use(
+      http.get('/api/quarantine/list', ({ request }) => {
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get('limit') ?? all.length);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        // Page 1 says 102 total; page 2 says 100. The entries we hold now
+        // number 102, which would "complete" against the drifted total —
+        // loadAll must not claim coverage of a queue that changed mid-load.
+        const total = offset === 0 ? 102 : 100;
+        return HttpResponse.json({
+          success: true,
+          entries: all.slice(offset, offset + limit),
+          total,
+          limit,
+          offset,
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    let returned: { entries: AdlQuarantineEntry[]; complete: boolean } = {
+      entries: [],
+      complete: true,
+    };
+    await act(async () => {
+      returned = await result.current.loadAllQuarantine();
+    });
+    expect(returned.complete).toBe(false);
+    expect(result.current.state.quarantineTotal).toBe(100);
+  });
+
+  it('publishes the raw offset after duplicate-heavy paging', async () => {
+    // 180 entries total. Page 2 (requested at offset 100) overlaps page 1
+    // by 20, so it returns 100 raw rows of which only 80 are new: the
+    // deduped list reaches 180 while the raw offset consumed is 200.
+    // Offset-based hasMore (200 < 180) is false — no dead Show-more button.
+    const all = Array.from({ length: 180 }, (_, i) => entry({ id: `q${i}` }));
+    server.use(
+      http.get('/api/quarantine/list', ({ request }) => {
+        const url = new URL(request.url);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        const entries = offset === 0 ? all.slice(0, 100) : all.slice(80, 180);
+        return HttpResponse.json({
+          success: true,
+          entries,
+          total: all.length,
+          limit: 100,
+          offset,
+        });
+      }),
+    );
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    expect(result.current.state.quarantineOffset).toBe(100);
+    await act(async () => {
+      await result.current.loadMoreQuarantine();
+    });
+    expect(result.current.state.quarantine).toHaveLength(180);
+    expect(result.current.state.quarantineOffset).toBe(200);
+    expect(result.current.state.quarantineTotal).toBe(180);
+  });
+
+  it('loadAll reports incomplete while a load is already in flight', async () => {
+    const all = Array.from({ length: 102 }, (_, i) => entry({ id: `q${i}` }));
+    stubPaged(all);
+    const { result } = renderHook(() => useAdlVerification());
+    await waitFor(() => expect(result.current.state.acoustidEnabled).toBe(true));
+    await act(async () => {
+      await result.current.loadQuarantine(true);
+    });
+    expect(result.current.state.quarantine).toHaveLength(100);
+    // Replace the stub with a delayed one so the forced reload stays in flight.
+    server.use(
+      http.get('/api/quarantine/list', async ({ request }) => {
+        await new Promise((r) => setTimeout(r, 40));
+        const url = new URL(request.url);
+        const limit = Number(url.searchParams.get('limit') ?? all.length);
+        const offset = Number(url.searchParams.get('offset') ?? 0);
+        return HttpResponse.json({
+          success: true,
+          entries: all.slice(offset, offset + limit),
+          total: all.length,
+          limit,
+          offset,
+        });
+      }),
+    );
+    let returned: { entries: AdlQuarantineEntry[]; complete: boolean } = {
+      entries: [],
+      complete: true,
+    };
+    await act(async () => {
+      const pending = result.current.loadQuarantine(true);
+      returned = await result.current.loadAllQuarantine();
+      await pending;
+    });
+    expect(returned.complete).toBe(false);
+    expect(returned.entries).toHaveLength(100);
+    expect(returned.entries.map((e) => e.id)).toEqual(
+      result.current.state.quarantine.map((e) => e.id),
+    );
+  });
+});
+
 describe('the sub-view', () => {
   it('fetches fresh entries every time quarantine is opened', async () => {
     const quar = stubQuarantine([entry()]);

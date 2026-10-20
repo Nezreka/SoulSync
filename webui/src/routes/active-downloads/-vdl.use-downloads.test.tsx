@@ -34,7 +34,6 @@ const listProps = {
   collapsedGroups: new Set<string>(),
   metaFor: () => undefined,
   ensureMeta: () => {},
-  onToggleExpanded: () => {},
   onToggleGroup: () => {},
   cardActions: {
     onCancel: () => {},

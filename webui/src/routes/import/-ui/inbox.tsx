@@ -33,14 +33,19 @@ import {
   countInbox,
   describeFile,
   describeItemFiles,
+  describeImportOutcome,
   describeItemMatch,
+  everythingWasOwned,
   filterInboxItems,
+  importOutcomeLines,
   INBOX_STATUS_META,
   inboxActions,
+  type ImportOutcomeLine,
   itemSubtitle,
   methodLabel,
   secondsToNextScan,
   timeAgo,
+  TRACK_OUTCOME_META,
 } from '../-import.inbox';
 import styles from './import-page.module.css';
 import {
@@ -262,6 +267,8 @@ export function Inbox({
         size: f.size,
         duration_ms: f.duration_ms,
         bitrate: f.bitrate,
+        // "from tags" is a promise: no catalogue lookup on the server (#1772)
+        from_own_tags: true,
       };
     });
     addQueueJob({
@@ -771,10 +778,17 @@ function InboxRow({
 }) {
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
-  const meta = INBOX_STATUS_META[item.status];
+  const [outcomeOpen, setOutcomeOpen] = useState(false);
+  const meta =
+    item.status === 'imported' && everythingWasOwned(item)
+      ? { label: 'Already in library', tone: 'neutral' as const, hint: 'Nothing new to import' }
+      : INBOX_STATUS_META[item.status];
   const actions = inboxActions(item);
   const percent = confidencePercent(item);
-  const matchLine = describeItemMatch(item);
+  const outcome = describeImportOutcome(item);
+  const outcomeLines = importOutcomeLines(item);
+  // once it ran, what it did says more than how many tracks matched
+  const matchLine = outcome || describeItemMatch(item);
   const when = timeAgo(item.processed_at || item.created_at);
   const method = methodLabel(item.identification_method);
   const isLive = item.status === 'importing' || item.status === 'identifying';
@@ -854,6 +868,16 @@ function InboxRow({
               onClick={() => setExpanded((open) => !open)}
             >
               {expanded ? 'Hide files' : `Show ${item.files.length === 1 ? 'file' : 'files'}`}
+            </button>
+          ) : null}
+          {outcomeLines.length > 0 ? (
+            <button
+              type="button"
+              className={styles.expandButton}
+              aria-expanded={outcomeOpen}
+              onClick={() => setOutcomeOpen((open) => !open)}
+            >
+              {outcomeOpen ? 'Hide what happened' : 'What happened'}
             </button>
           ) : null}
         </div>
@@ -938,6 +962,16 @@ function InboxRow({
         ) : null}
       </div>
 
+      {outcomeOpen && outcomeLines.length > 0 ? (
+        <div className={styles.rowDetail} data-testid="import-outcome">
+          <div className={styles.fileTable}>
+            {outcomeLines.map((line, index) => (
+              <OutcomeLine key={line.key} index={index} line={line} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {expanded && item.files.length > 0 ? (
         <div className={styles.rowDetail}>
           <div className={styles.fileTable}>
@@ -959,6 +993,25 @@ function InboxRow({
         </div>
       ) : null}
     </article>
+  );
+}
+
+function OutcomeLine({ line, index }: { line: ImportOutcomeLine; index: number }) {
+  const meta = TRACK_OUTCOME_META[line.outcome];
+  return (
+    <>
+      <span className={styles.fileNum}>{line.number || index + 1}</span>
+      <span
+        className={styles.fileName}
+        title={line.why ? `${line.track}\n${line.why}` : line.track}
+      >
+        {line.track}
+        {line.why ? <small>{line.why}</small> : null}
+      </span>
+      <span className={clsx(styles.status, styles.outcomePill)} data-tone={meta?.tone ?? 'neutral'}>
+        {meta?.label ?? line.outcome}
+      </span>
+    </>
   );
 }
 

@@ -3,26 +3,9 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Which of the page's UI pieces actually have a component.
- *
- * WHY THIS EXISTS. I reported the component layer as complete. It was not: five
- * cache shelves, the BYLT sections, the seasonal PLAYLIST section and six modals
- * had no component at all. Every one of their logic modules was ported and
- * tested, the whole suite was green, and every other gate passed — because
- * nothing anywhere asked the question "is there UI for this?".
- *
- * "Done" was my judgement, and my judgement was wrong. So it is a test now.
- *
- * ── How it works ───────────────────────────────────────────────────────────
- *
- * Each entry names a UI piece and a few symbols only its component could
- * plausibly use. If no component mentions any of them, the piece is missing.
- * That is deliberately loose: the point is to catch a piece that does not exist
- * AT ALL, not to police how it is built.
- *
- * MISSING_UI is a ratchet. It may only shrink, and a piece that gains a
- * component fails the test until it is removed from the list — so the list
- * cannot quietly go stale the way a comment would.
+ * Keep the completed Discover UI inventory from losing a component or feeder.
+ * This source-level check catches missing pieces, not rendering or behavior;
+ * those are covered by the component and hook suites.
  */
 
 const UI = resolve(process.cwd(), 'src/routes/discover/-ui');
@@ -55,7 +38,6 @@ const REQUIRED_UI: Record<string, string[]> = {
 
   'BYLT sections': ['ByltSections'],
 
-  // ── Not built yet ────────────────────────────────────────────────────────
   'cache-* shelves': ['CacheShelf', 'GenreExplorerSection'],
   /*
    * Discovered while building the cache shelves: the Genre Explorer pills open
@@ -102,19 +84,6 @@ const REQUIRED_UI: Record<string, string[]> = {
   'decade shelf feeder': ['decadeTrackToSpotify', 'decadeHasTracks'],
 };
 
-/**
- * The pieces with no component yet. This number may only go DOWN.
- *
- * Each one is a section or modal a user can reach in the vanilla today, so the
- * route flip cannot happen while this list is non-empty without losing it.
- */
-/**
- * EMPTY — the designed end state. Every piece the vanilla page offers has a
- * component or a hook consumer; the gate now exists to catch a REGRESSION
- * (a piece losing its component), which is the 'gained' branch below.
- */
-const MISSING_UI: string[] = [];
-
 describe('every UI piece the page needs has a component', () => {
   // -ui components PLUS the route level (route.tsx, the page hook): shelf
   // FEEDERS live in the hook, not in a component, and must still count.
@@ -153,33 +122,17 @@ describe('every UI piece the page needs has a component', () => {
         : new RegExp(`\\b${s}\\b`).test(components),
     );
 
-  it('matches the recorded gap exactly, so the list can only shrink', () => {
+  it('keeps every required component or feeder', () => {
     const missing = Object.entries(REQUIRED_UI)
       .filter(([, symbols]) => !built(symbols))
       .map(([name]) => name)
       .sort();
 
-    const gained = missing.filter((m) => !MISSING_UI.includes(m));
-    const fixed = MISSING_UI.filter((m) => !missing.includes(m));
-
     expect(
       missing,
-      gained.length
-        ? `\nUI that USED to exist and no longer does:\n  ${gained.join('\n  ')}\n`
-        : fixed.length
-          ? `\nBuilt now — remove from MISSING_UI:\n  ${fixed.join('\n  ')}\n`
-          : undefined,
-    ).toEqual([...MISSING_UI].sort());
-  });
-
-  it('confirms the pieces that ARE built', () => {
-    const shouldExist = Object.keys(REQUIRED_UI).filter((k) => !MISSING_UI.includes(k));
-    const broken = shouldExist.filter((k) => !built(REQUIRED_UI[k]));
-    expect(
-      broken,
-      broken.length ? `\nThese lost their component:\n  ${broken.join('\n  ')}\n` : undefined,
+      missing.length ? `\nThese lost their component:\n  ${missing.join('\n  ')}\n` : undefined,
     ).toEqual([]);
-    // A guard that asserted nothing would also pass an empty REQUIRED_UI.
-    expect(shouldExist.length).toBeGreaterThan(20);
+    // An empty inventory must not silently pass.
+    expect(Object.keys(REQUIRED_UI).length).toBeGreaterThan(20);
   });
 });

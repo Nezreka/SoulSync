@@ -54,7 +54,7 @@ class _FakeDB:
         self.track_results_calls = []
         self.manual_matches = []
 
-    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None):
+    def check_track_exists(self, title, artist, confidence_threshold=0.7, server_source=None, album=None, include_downloads=False):
         key = (title.lower().strip(), artist.lower().strip())
         if key in self.found_tracks:
             conf = self.found_tracks[key]
@@ -1798,3 +1798,70 @@ def test_a_complete_track_list_still_answers():
     assert mw.expected_release_duration_seconds([
         {'duration_ms': 180_000}, {'duration_ms': 120_000},
     ]) == 300
+
+
+@pytest.mark.parametrize('source_mode', ['soulseek', 'torrent'])
+def test_album_completion_skips_whole_album_bundles(monkeypatch, source_mode):
+    """Completion requests missing tracks without downloading a whole release."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    plugin = _FakeAlbumBundleSoulseek()
+    deps = _build_deps(
+        config=_FakeConfig({'download_source.mode': source_mode}),
+        soulseek=_FakePluginWrapper({source_mode: plugin}),
+    )
+    batch_id = f'completion-{source_mode}'
+    album_ctx = {'name': 'Test Album', 'total_tracks': 10}
+    artist_ctx = {'name': 'Artist'}
+    _seed_batch(
+        batch_id,
+        is_album_download=True,
+        album_completion_only=True,
+        album_context=album_ctx,
+        artist_context=artist_ctx,
+    )
+    missing_tracks = [
+        {'name': 'Missing Track', 'artists': ['Artist'], 'track_number': 8}
+    ]
+
+    mw.run_full_missing_tracks_process(
+        batch_id, 'album:1', missing_tracks, deps,
+    )
+
+    assert plugin.calls == [], 'Album completion must not fetch a whole release'
+    assert len(download_batches[batch_id]['queue']) == 1
+    task_id = download_batches[batch_id]['queue'][0]
+    track_info = download_tasks[task_id]['track_info']
+    assert track_info['name'] == 'Missing Track'
+    assert track_info['_explicit_album_context'] == album_ctx
+    assert track_info['_explicit_artist_context'] == artist_ctx
+
+
+def test_album_completion_bypasses_mirrored_playlist_folder(monkeypatch):
+    """Album completion must never consult mirrored-playlist folder settings."""
+    db = _FakeDB()
+    monkeypatch.setattr("database.music_database.MusicDatabase", lambda: db)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Album completion consulted mirrored-playlist folder settings")
+    monkeypatch.setattr("core.downloads.playlist_folder.resolve_playlist_folder_mode_for_batch", forbidden)
+    deps = _build_deps(config=_FakeConfig({"download_source.mode": "soulseek"}))
+    _seed_batch("completion-folder", is_album_download=True, album_completion_only=True, playlist_folder_mode=False, album_context={"name": "Test Album"}, artist_context={"name": "Artist"})
+    mw.run_full_missing_tracks_process("completion-folder", "album:1", [{"name": "Missing Track", "artists": ["Artist"], "track_number": 8}], deps)
+    assert download_batches["completion-folder"]["playlist_folder_mode"] is False
+
+
+def test_album_completion_worker_uses_batch_owner_library(monkeypatch):
+    """Completion analysis uses its batch owner, not the active profile."""
+    from core import library_scope as ls
+    scopes = []
+    monkeypatch.setattr(ls, "library_scope_for_profile", lambda pid: (scopes.append(pid), "owner-library")[1])
+    monkeypatch.setattr(mw, "_run_full_missing_tracks_process", lambda *args: ls.current_library_scope())
+    _seed_batch("completion-owner", profile_id=7, album_completion_only=True)
+    before = ls.current_library_scope()
+    deps = _build_deps()
+    scopes.clear()
+    result = mw.run_full_missing_tracks_process("completion-owner", "album:1", [], deps)
+    assert scopes == [7]
+    assert result == "owner-library"
+    assert ls.current_library_scope() == before

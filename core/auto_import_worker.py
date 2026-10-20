@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
 from core.imports.paths import config_root_path, docker_resolve_path
-from core.imports.pipeline import import_rejection_reason
+from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
 from utils.logging_config import get_logger
 
 logger = get_logger("auto_import")
@@ -576,26 +576,30 @@ class AutoImportWorker:
             return
 
         candidates = self._enumerate_folders(staging)
+        # folders that already have a finished row (failed and needs-attention
+        # included) are only listed, never re-run. count them apart so the log
+        # doesn't read like the same folders are imported every minute.
+        settled, fresh = [], []
+        for c in candidates:
+            (settled if self._is_already_processed(c) else fresh).append(c)
+        summary = f"{len(candidates)} candidates in {staging}"
+        if settled:
+            summary += (f" ({len(settled)} already handled, left alone until you"
+                        f" retry or fix them in the import inbox)")
         if self._scan_problems:
             unreadable = '; '.join(f"{p['path']}: {p['error']}" for p in self._scan_problems[:3])
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging} "
-                        f"(could not read: {unreadable})")
-        else:
-            logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
-        if not candidates:
+            summary += f" (could not read: {unreadable})"
+        logger.info(f"[Auto-Import] Scan cycle: {summary}")
+        if not fresh:
             return
 
         if self._executor is None:
             logger.warning("[Auto-Import] Executor not initialized — skipping scan")
             return
 
-        for candidate in candidates:
+        for candidate in fresh:
             if self.should_stop or self.paused:
                 break
-
-            # Skip if already processed (DB-level dedup)
-            if self._is_already_processed(candidate):
-                continue
 
             # Skip if already submitted to / running in the pool. This
             # de-dupes across the timer loop + manual scan triggers
@@ -751,6 +755,8 @@ class AutoImportWorker:
                     msg = self._partial_import_message(match_result, process_errors)
                     self._emit_needs_attention(
                         candidate, 'partial', identification, msg, confidence)
+                elif success:
+                    self._clear_finished_folder(candidate)
             elif confidence >= 0.7:
                 status = 'pending_review'
                 self._bump_stat('pending_review')
@@ -790,6 +796,32 @@ class AutoImportWorker:
             # No stale "processing track 3/14" because the entry is
             # gone — the UI's polling read returns an empty array.
             self._unregister_active(candidate.folder_hash)
+
+    def _gate_quality_profile(self, profile_id) -> dict:
+        """the quality profile the library pre-check judges "the library copy
+        is fine" by: the one this import will be checked against. {} falls
+        back to the global replace setting, same as the pipeline."""
+        try:
+            from core.quality.selection import load_profile_by_id
+            profile = load_profile_by_id(profile_id)
+            return profile if isinstance(profile, dict) else {}
+        except Exception:
+            return {}
+
+    def _clear_finished_folder(self, candidate: 'FolderCandidate') -> None:
+        """opt-in (Import settings): once every track in a folder was imported
+        or found already in the library, take what's left of it out of
+        staging so it doesn't sit there being listed again."""
+        if not self._config_manager or not self._config_manager.get('import.clear_finished_from_staging', False):
+            return
+        try:
+            from core.imports.file_ops import clear_finished_staging
+            staging_root = self._resolve_staging_path() or self.staging_path
+            removed = clear_finished_staging(staging_root, list(candidate.audio_files or []))
+            if removed:
+                logger.info(f"[Auto-Import] Cleared {candidate.name} from staging ({len(removed)} item(s))")
+        except Exception as e:
+            logger.warning(f"[Auto-Import] Could not clear {candidate.name} from staging: {e}")
 
     def _partial_import_message(self, match_result: Dict,
                                 process_errors: List[str]) -> str:
@@ -1058,6 +1090,17 @@ class AutoImportWorker:
           behavior — so single-album staging with parallel disc folders
           (the user's Mr. Morale layout) keeps working unchanged.
         """
+        # a re-identify copy is always its own single, whatever its tags say.
+        # its hint names the release, and the hint is only read on a
+        # one-file candidate (#1567)
+        from core.imports.rematch_apply import is_reidentify_copy
+        for f in [f for f in loose_files if is_reidentify_copy(f)]:
+            candidates.append(FolderCandidate(
+                path=f, name=os.path.basename(f), audio_files=[f],
+                folder_hash=_compute_folder_hash([f]), is_single=True,
+            ))
+        loose_files = [f for f in loose_files if not is_reidentify_copy(f)]
+
         # Group by normalised album tag
         groups: Dict[str, List[str]] = {}
         untagged: List[str] = []
@@ -1239,8 +1282,14 @@ class AutoImportWorker:
         if row is None or not row['match_data']:
             return False
         try:
-            leftovers = set(json.loads(row['match_data']).get('unmatched_files') or [])
-        except (ValueError, TypeError):
+            data = json.loads(row['match_data'])
+            leftovers = set(data.get('unmatched_files') or [])
+            # files the run left alone because the library already has them
+            leftovers.update(
+                m.get('file') for m in data.get('matches') or []
+                if isinstance(m, dict) and m.get('import_status') == 'skipped_owned' and m.get('file')
+            )
+        except (ValueError, TypeError, AttributeError):
             return False
         return bool(leftovers) and current <= leftovers
 
@@ -2115,6 +2164,18 @@ class AutoImportWorker:
                     seen_genres.add(key)
                     aggregated_genres.append(g)
 
+        # existing-library pre-check, the same gate the manual import page
+        # runs: a track already in the library (exact ISRC/MBID pairing, same
+        # release, the library copy is fine) is left alone instead of being
+        # retagged and run through the pipeline. fails open on any doubt.
+        from core.imports.library_check import (
+            DECISION_SKIP_OWNED,
+            DECISION_UPGRADE,
+            check_track_library_status,
+        )
+        gate_profile = self._gate_quality_profile(auto_import_profile_id)
+        skipped = 0
+
         for index, match in enumerate(all_matches, start=1):
             track = match['track']
             file_path = match['file']
@@ -2139,6 +2200,32 @@ class AutoImportWorker:
                 match['import_status'] = 'failed'
                 match['import_error'] = error
                 continue
+
+            try:
+                gate = check_track_library_status(
+                    self.database,
+                    track=track,
+                    staging_file_path=file_path,
+                    match_type=match.get('match_type'),
+                    confidence=match.get('confidence', 0) or 0,
+                    source_hint=source,
+                    album_name=album_name,
+                    quality_profile=gate_profile,
+                )
+            except Exception as e:
+                logger.debug("library pre-check failed, importing anyway: %s", e)
+                gate = {'decision': 'uncertain', 'reason': 'library check failed — imported'}
+            match['import_reason'] = gate.get('reason')
+            if gate.get('decision') == DECISION_SKIP_OWNED:
+                # same as a kept copy below: for a re-identify this is where
+                # it landed, or replace deletes it as the old track (#1567)
+                if gate.get('library_path'):
+                    reid_final_paths.append(gate['library_path'])
+                match['import_status'] = 'skipped_owned'
+                skipped += 1
+                logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
+                continue
+            is_upgrade = gate.get('decision') == DECISION_UPGRADE
 
             try:
                 # Build context matching the manual import format.
@@ -2289,13 +2376,29 @@ class AutoImportWorker:
                 final_path = context.get('_final_processed_path') or context.get('_final_path')
                 if rejection:
                     raise RuntimeError(rejection)
+                # the library check couldn't prove it was the same track, but
+                # the pipeline found it already at its library path and kept
+                # that copy. that's "already in library", not a failure: it
+                # used to fail every track of an album you already own.
+                if kept_existing_library_file(context):
+                    # a re-identify counts this as where it landed. without it
+                    # the replace cleanup can't see the kept file and deletes
+                    # it as the old track when it's the same file (#1567)
+                    if final_path:
+                        reid_final_paths.append(final_path)
+                    match['import_status'] = 'skipped_owned'
+                    match['import_reason'] = 'already in library at the same spot, kept the library copy'
+                    skipped += 1
+                    logger.info(f"[Auto-Import] Already in library, left alone: {track_number}. {track_name}")
+                    continue
                 if not context.get('_pipeline_import_succeeded'):
-                    raise RuntimeError('post-processing did not confirm a successful import')
+                    raise RuntimeError(context.get('_context_failure_msg')
+                                       or 'post-processing did not confirm a successful import')
                 if not final_path or not os.path.isfile(final_path):
                     raise RuntimeError('post-processing produced no final file')
 
                 processed += 1
-                match['import_status'] = 'completed'
+                match['import_status'] = 'upgraded' if is_upgrade else 'completed'
                 # Capture where the pipeline actually landed the file (#889 same-home
                 # guard) — the pipeline writes it back into the mutable context.
                 _landed = final_path
@@ -2342,6 +2445,7 @@ class AutoImportWorker:
                 })
                 self._automation_engine.emit('batch_complete', {
                     'playlist_name': f'Import: {album_name}',
+                    'artist': artist_name,
                     'total_tracks': str(len(match_result.get('matches', []))),
                     'completed_tracks': str(processed),
                     'failed_tracks': str(len(errors)),
@@ -2356,9 +2460,19 @@ class AutoImportWorker:
         except Exception as e:
             logger.debug("could not stash reid final paths: %s", e)
 
-        if all_matches and processed == len(all_matches) and not errors:
+        # what the import decided, kept on the history row so it can be read
+        # after the fact: "12 imported · 47 already in library · 2 upgraded"
+        statuses = [m.get('import_status') for m in all_matches]
+        match_result['summary'] = {
+            'imported': statuses.count('completed'),
+            'upgraded': statuses.count('upgraded'),
+            'skipped_owned': skipped,
+            'failed': statuses.count('failed'),
+        }
+
+        if all_matches and processed + skipped == len(all_matches) and not errors:
             return 'completed', []
-        return ('partial' if processed else 'failed'), errors
+        return ('partial' if processed or skipped else 'failed'), errors
 
     # ── Database ──
 
@@ -2455,7 +2569,9 @@ class AutoImportWorker:
                              'file': os.path.basename(m['file']),
                              'confidence': m['confidence'],
                              'import_status': m.get('import_status'),
+                             'import_reason': m.get('import_reason'),
                              'import_error': m.get('import_error')} for m in match_data.get('matches', [])],
+                'summary': match_data.get('summary'),
                 'unmatched_files': [os.path.basename(f) for f in match_data.get('unmatched_files', [])],
                 'total_tracks': match_data.get('total_tracks', 0),
                 'matched_count': match_data.get('matched_count', 0),

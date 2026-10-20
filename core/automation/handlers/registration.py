@@ -18,6 +18,7 @@ from core.automation.handlers.scan_watchlist_podcasts import auto_scan_watchlist
 from core.automation.handlers.scan_library import auto_scan_library
 from core.automation.handlers.refresh_mirrored import auto_refresh_mirrored
 from core.automation.handlers.sync_playlist import auto_sync_playlist
+from core.automation.handlers.sync_downloaded_playlists import auto_sync_downloaded_playlists
 from core.automation.handlers.discover_playlist import auto_discover_playlist
 from core.automation.handlers.playlist_pipeline import auto_playlist_pipeline
 from core.automation.handlers.personalized_pipeline import auto_personalized_pipeline
@@ -46,6 +47,7 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.complete_incomplete_albums import auto_complete_incomplete_albums
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes_all_profiles, is_airing_already_running
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules, is_refresh_already_running
 from core.automation.handlers.video_reenrich_stale import auto_video_reenrich_stale, is_reenrich_already_running
@@ -88,6 +90,13 @@ def register_all(deps: AutomationDeps) -> None:
     behaves identically to the pre-extraction code.
     """
     engine = deps.engine
+
+    # Opt-in album completion. The handler independently requires a
+    # successful Album Completeness scan event before queueing anything.
+    engine.register_action_handler(
+        'complete_incomplete_albums',
+        lambda config: auto_complete_incomplete_albums(config, deps),
+    )
 
     # Self-guards prevent duplicate runs of the SAME operation, but
     # different operations can run concurrently — wishlist downloads
@@ -144,6 +153,10 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'sync_playlist',
         lambda config: auto_sync_playlist(config, deps),
+    )
+    engine.register_action_handler(
+        'sync_downloaded_playlists',
+        lambda config: auto_sync_downloaded_playlists(config, deps),
     )
     engine.register_action_handler(
         'discover_playlist',

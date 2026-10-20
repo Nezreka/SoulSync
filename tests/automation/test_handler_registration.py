@@ -41,6 +41,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'scan_library',
     'refresh_mirrored',
     'sync_playlist',
+    'sync_downloaded_playlists',
     'discover_playlist',
     'playlist_pipeline',
     'personalized_pipeline',
@@ -64,6 +65,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'full_cleanup',
     'run_script',
     'search_and_download',
+    'complete_incomplete_albums',
     # Video side (isolated app, shared engine).
     'video_scan_library',
     'video_deep_scan_movies',

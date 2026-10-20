@@ -55,7 +55,9 @@
         if (ind) {
             var dot = ind.querySelector('.status-dot');
             if (dot) dot.className = 'status-dot ' + (ok ? 'connected' : 'disconnected');
-            ind.setAttribute('data-status-ready', ok ? 'true' : 'false');
+            // ready means "status has landed", not "configured". tying it to ok hid
+            // unset rows forever and left a blank gap in the sidebar
+            ind.setAttribute('data-status-ready', 'true');
         }
         var nm = document.getElementById(nameId);
         if (nm && name != null) nm.textContent = name;
@@ -65,7 +67,8 @@
         var m = d.metadata || {}, s = d.server || {}, dl = d.download || {};
         setDot('video-metadata-indicator', 'video-metadata-name', !!m.configured,
             m.configured ? 'TMDB / TVDB' : 'TMDB / TVDB — add keys');
-        setDot('video-server-indicator', 'video-server-name', !!s.configured, s.name || 'No server');
+        setDot('video-server-indicator', 'video-server-name', !!s.configured,
+            s.configured ? (s.name || 'Media Server') : 'Media server not set');
         setDot('video-download-indicator', 'video-download-name', !!dl.configured, dl.name || 'Downloads');
     }
     function fetchStatus() {

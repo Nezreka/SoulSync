@@ -461,6 +461,7 @@ def track_already_owned(
             album=album_name or None,
             candidate_tracks=candidate_tracks,
             candidate_tracks_exhaustive=candidate_tracks_exhaustive,
+            include_downloads=True,
         )
     except Exception:
         # Fail-open is deliberate (a redundant wishlist add is cheaper than a

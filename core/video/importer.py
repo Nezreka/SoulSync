@@ -146,6 +146,10 @@ def _ctx(dl: dict) -> dict:
         "video_title": sc.get("video_title"),
         "published_at": sc.get("published_at"),
         "youtube_id": sc.get("youtube_id"),
+        # the scene (TVDB) numbering, when it differs (core/video/numbering.py)
+        "alt_season": sc.get("alt_season"),
+        "alt_episode": sc.get("alt_episode"),
+        "alt_exclusive": sc.get("alt_exclusive"),
     }
 
 
@@ -245,6 +249,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
         for k in ("title", "year", "season", "episode", "episode_title"):
             if override.get(k) is not None:
                 ctx[k] = override.get(k)
+        if override.get("season") is not None or override.get("episode") is not None:
+            # a hand-picked episode: the stored scene numbering was for another one
+            ctx["alt_season"] = ctx["alt_episode"] = None
 
     if not is_video(src_path):   # can't place a non-video, even on a forced import
         return _reject("Not a video file (%s)" % (ext or "no extension"), bad_release=True)
@@ -263,6 +270,18 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 span_end = parsed.get("episode_end") or parsed.get("episode")
                 numbering_ok = (parsed.get("season") == ctx.get("season")
                                 and parsed.get("episode") <= ctx.get("episode") <= span_end)
+                from core.video.numbering import ctx_alt
+                alt = ctx_alt(ctx)
+                alt_ok = bool(alt and parsed.get("season") == alt[0]
+                              and parsed.get("episode") <= alt[1] <= span_end)
+                if alt and len(alt) > 2 and alt[2]:
+                    # the wished number is another episode in the scene's
+                    # numbering: only the scene number is this one
+                    numbering_ok = alt_ok
+                elif not numbering_ok:
+                    # named by the scene's (TVDB) numbering for this episode:
+                    # still this episode, filed under the number it was wished as
+                    numbering_ok = alt_ok
                 date_ok = bool(ctx.get("air_date")
                                and parsed.get("air_date") == ctx.get("air_date"))
                 if not numbering_ok and not date_ok:
@@ -275,9 +294,11 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 # came via air date (the year token there is the air date, and the
                 # date itself is the stronger identity).
                 if numbering_ok:
+                    from core.video.quality_eval import tv_year_mismatch
+                    from core.video.release_parse import title_region_year
                     want_year = _as_int(ctx.get("year"))
-                    rel_year = parsed.get("year")
-                    if want_year and rel_year and (rel_year < want_year or rel_year > want_year + 1):
+                    rel_year = title_region_year(parsed.get("title"))
+                    if tv_year_mismatch(rel_year, want_year):
                         return _reject("Release is from %s, not %s (%s)"
                                        % (rel_year, ctx.get("title") or "this show", want_year))
     else:

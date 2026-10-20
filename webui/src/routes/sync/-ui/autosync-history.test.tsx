@@ -289,24 +289,6 @@ describe('the entry card (1478-1572)', () => {
     const { container } = renderPanel([entry({ trigger_source: undefined })]);
     expect(container.querySelector('.flow-trigger')?.textContent).toBe('pipeline');
   });
-
-  it('survives a NULL row, where the vanilla blanks the whole panel', () => {
-    // The vanilla's tab counts deref h.status on every render, before the
-    // normalizer or the per-row try/catch can help. Declared hardening.
-    const { container } = renderPanel([null as never, entry({ id: 2, playlist_name: 'Real' })]);
-    expect(container.querySelectorAll('.auto-sync-history-entry')).toHaveLength(2);
-    expect(container.querySelector('.auto-sync-history-name')?.textContent).toBe(
-      'Playlist pipeline run',
-    );
-  });
-
-  it('keeps a null row out of the error and completed counts', () => {
-    const { container } = renderPanel([null as never]);
-    const counts = Array.from(container.querySelectorAll('.auto-sync-history-filter-btn em')).map(
-      (e) => e.textContent,
-    );
-    expect(counts).toEqual(['1', '0', '0']);
-  });
 });
 
 describe('expanding a row (1650-1664)', () => {

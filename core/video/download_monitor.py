@@ -40,6 +40,11 @@ _started = False
 _lock = threading.Lock()
 
 
+def _scene_alt(ctx):
+    from core.video.numbering import ctx_alt
+    return ctx_alt(ctx or {})
+
+
 def _complete_via_file(dl, download_dir, lister, mover, organizer):
     """Locate the finished file in the download dir and post-process it into the
     library. Returns a completed/import_failed patch, or {'progress':100} if the file
@@ -1322,6 +1327,7 @@ def _requery_worker(dl_id) -> None:
                                      want_title=ctx.get("titles") or ctx.get("title"),
                                      want_date=ctx.get("air_date"),
                                      want_absolute=ctx.get("absolute"),
+                                     want_alt=_scene_alt(ctx),
                                      size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
                     accepted.append(hit)
@@ -1444,7 +1450,11 @@ def _tick(db) -> None:
         # server had restarted inside the window. The longer something was stuck, the
         # less likely the old design was to catch it.
         _st = upd.get("status")
-        if stall.tracks_stall(_st):
+        if upd.get("_client_queued"):
+            # waiting in the torrent client's own queue. hold the clock at now so
+            # the half hour starts when it actually begins downloading
+            upd["progress_at"] = _now()
+        elif stall.tracks_stall(_st):
             # A completed-but-unplaceable row carries progress and NO status; the old
             # branch only looked at queued/downloading, so it fell through every guard
             # and spun at 100% forever. That is what a path-mapping failure looks like.

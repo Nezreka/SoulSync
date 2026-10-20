@@ -526,21 +526,6 @@ function stopBeatportDiscoveryAndSyncPolling() {
     });
 }
 
-function resetBeatportSliderInitFlags() {
-    // The four `dataset.initialized = 'false'` writes that stood here are gone.
-    // They targeted #beatport-{rebuild,releases,charts,dj}-slider, ids the sync
-    // flip deleted along with the page — every lookup returned null, so every
-    // write was already a no-op. Removing them is behaviour-neutral and stops
-    // four dead `getElementById` calls tripping the class-as-id guard.
-    //
-    // The state resets below are KEPT: they are plain object writes, not DOM,
-    // and the slider state objects still exist in this file.
-    beatportReleasesSliderState.isInitialized = false;
-    beatportHypePicksSliderState.isInitialized = false;
-    beatportChartsSliderState.isInitialized = false;
-    beatportDJSliderState.isInitialized = false;
-}
-
 function cleanupBeatportContent() {
     const wasLoaded = beatportContentState.loaded || !!beatportContentState.loadingPromise;
     if (!wasLoaded) return;
@@ -552,13 +537,8 @@ function cleanupBeatportContent() {
         beatportContentState.abortController = null;
     }
 
+    // the sliders went with beatport-ui.js; the react tab owns that view now
     stopBeatportDiscoveryAndSyncPolling();
-    cleanupBeatportRebuildSlider();
-    cleanupBeatportReleasesSlider();
-    cleanupBeatportHypePicksSlider();
-    cleanupBeatportChartsSlider();
-    cleanupBeatportDJSlider();
-    resetBeatportSliderInitFlags();
 
     beatportContentState.loadingPromise = null;
     beatportContentState.loaded = false;
@@ -1759,15 +1739,15 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         if (playlistId === 'discover_release_radar') {
             apiEndpoint = '/api/discover/release-radar';
         } else if (playlistId === 'discover_discovery_weekly') {
-            apiEndpoint = '/api/discover/discovery-weekly';
+            apiEndpoint = '/api/discover/weekly';
         } else if (playlistId === 'discover_seasonal_playlist') {
-            apiEndpoint = '/api/discover/seasonal-playlist';
+            apiEndpoint = '/api/discover/seasonal/current/playlist';
         } else if (playlistId === 'discover_popular_picks') {
-            apiEndpoint = '/api/discover/popular-picks';
+            apiEndpoint = '/api/discover/personalized/popular-picks';
         } else if (playlistId === 'discover_hidden_gems') {
-            apiEndpoint = '/api/discover/hidden-gems';
+            apiEndpoint = '/api/discover/personalized/hidden-gems';
         } else if (playlistId === 'discover_discovery_shuffle') {
-            apiEndpoint = '/api/discover/discovery-shuffle';
+            apiEndpoint = '/api/discover/personalized/discovery-shuffle';
         } else if (playlistId === 'build_playlist_custom') {
             apiEndpoint = '/api/discover/build-playlist';
         } else if (playlistId.startsWith('discover_lb_')) {

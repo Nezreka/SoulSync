@@ -45,7 +45,6 @@ SPLIT_MODULES = [
     "api-monitor.js",
     # library-globals.js + manual-library-match.js ported to typescript
     # (src/shell, aug 26) - their globals now flow through the shell bundle
-    "beatport-ui.js",
     "enrichment.js",
     "stats-automations.js",
     "auto-sync.js",
@@ -77,7 +76,6 @@ def _shell_window_exports() -> set[str]:
 # regressions from the split — they should be deduplicated in a follow-up.
 KNOWN_CROSS_FILE_DUPES = {
     "escapeHtml",        # downloads.js, shared-helpers.js
-    "formatDuration",    # sync-spotify.js, wishlist-tools.js, sync-services.js
     "_escAttr",          # downloads.js, stats-automations.js
     "_formatDuration",   # stats-automations.js, wishlist-tools.js
                          # (pages-extra.js declared a THIRD, millisecond-based

@@ -596,6 +596,39 @@ class TestPipelineHappyPath:
         # Pipeline-running flag cleaned up.
         assert deps.state.pipeline_running is False
 
+    def test_failed_sync_is_reported_not_a_clean_completion(self):
+        # A refused server write ends the background sync in 'error'. The
+        # shared helper counted it, but this pipeline dropped the count and
+        # reported a clean completion.
+        manager = _StubManagerWithTracks(
+            tracks_per_kind={'hidden_gems': [{'name': 'A', 'id': 'sp-1'}]},
+        )
+        sync_states_storage = {}
+
+        def fake_run_sync(sync_id, name, tracks, aid, pid, img, **kwargs):
+            sync_states_storage[sync_id] = {
+                'status': 'error',
+                'error': 'Navidrome playlist write failed',
+            }
+
+        deps = _build_deps(
+            build_personalized_manager=lambda: manager,
+            run_sync_task=fake_run_sync,
+            get_sync_states=lambda: sync_states_storage,
+        )
+        import core.automation.handlers._pipeline_shared as shared
+        orig = shared.time.sleep
+        shared.time.sleep = lambda _: None
+        try:
+            result = auto_personalized_pipeline(
+                {'_automation_id': 'auto-1', 'kinds': [{'kind': 'hidden_gems'}]},
+                deps,
+            )
+        finally:
+            shared.time.sleep = orig
+        assert result['sync_errors'] == '1'
+        assert 'Navidrome playlist write failed' in result['error']
+
     def test_pipeline_config_sync_mode_reaches_the_sync(self):
         # #1704: the automation's own sync mode rides config -> sync
         manager = _StubManagerWithTracks(

@@ -268,6 +268,18 @@ class ImageCache:
     def get_url(self, url: str) -> CachedImage:
         return self._healing(lambda: self._get_url(url))
 
+    def get_original_url(self, key: str) -> Optional[str]:
+        """Look up the original registered URL for a cache key (or variant key),
+        without raising. Used to redirect the browser rather than returning a
+        404 if disk serve or upstream fetch fails (#1763)."""
+        try:
+            row = self._get_row(key)
+            if row and row["original_url"]:
+                return str(row["original_url"])
+        except Exception as exc:
+            logger.debug("Failed looking up original URL for %s: %s", key, exc)
+        return None
+
     def _get(self, key: str) -> CachedImage:
         row = self._get_row(key)
         if not row:

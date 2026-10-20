@@ -23,6 +23,7 @@ beforeEach(() => {
   )(document, window, fetcher, localStorage);
   wizard.open();
   wizard.setStep(1);
+  fetcher.mockClear();
 });
 it('waits for a saved step and ignores duplicate Next', async () => {
   let done!: (value: Response) => void;

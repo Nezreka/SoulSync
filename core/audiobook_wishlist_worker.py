@@ -349,6 +349,9 @@ def run_pass(db: Any = None, limit: Optional[int] = None, due_only: bool = True)
 
     if summary["checked"]:
         logger.info("Audiobook wishlist pass: %s", summary)
+        from core.audiobook_events import announce
+
+        announce("audiobook_wishlist_processing_completed", **summary)
     return summary
 
 

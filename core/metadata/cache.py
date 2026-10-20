@@ -1329,6 +1329,7 @@ class MetadataCache:
             fields['duration_ms'] = int(duration) * 1000 if duration else 0
             fields['track_number'] = data.get('position')
             fields['genres'] = json.dumps([data['genre']]) if data.get('genre') else '[]'
+            fields['isrc'] = data.get('isrc') or None
             urls = {}
             if data.get('url'):
                 urls['beatport'] = data['url']

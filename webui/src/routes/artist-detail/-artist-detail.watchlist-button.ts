@@ -24,12 +24,38 @@ export async function checkWatchlistRequest(artistId: unknown): Promise<boolean 
 }
 
 /**
+ * The one /api/watchlist/add request. `source` names the provider that owns
+ * `artistId`; leave it out for a Spotify id or a library row id, which the
+ * server resolves itself. Without it a numeric id is filed under the primary
+ * metadata source, so an iTunes id can land in the Deezer column.
+ */
+export async function addToWatchlistRequest(
+  artistId: unknown,
+  artistName: string,
+  source?: string,
+): Promise<string> {
+  const response = await fetch('/api/watchlist/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      artist_id: artistId,
+      artist_name: artistName,
+      ...(source ? { source } : {}),
+    }),
+  });
+  const data = await response.json();
+  if (!data.success) throw new Error(data.error || 'Failed to add to watchlist');
+  return String(data.message ?? '');
+}
+
+/**
  * Check-then-toggle, exactly the vanilla's two-step (6963-6988): the CURRENT
  * server state decides between add and remove, not the button's belief.
  */
 export async function toggleWatchlistRequest(
   artistId: unknown,
   artistName: string,
+  source?: string,
 ): Promise<{ watching: boolean; message: string }> {
   const checkResponse = await fetch('/api/watchlist/check', {
     method: 'POST',
@@ -42,19 +68,21 @@ export async function toggleWatchlistRequest(
   }
   const isWatching = Boolean(checkData.is_watching);
 
-  const endpoint = isWatching ? '/api/watchlist/remove' : '/api/watchlist/add';
-  const payload = isWatching
-    ? { artist_id: artistId }
-    : { artist_id: artistId, artist_name: artistName };
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await response.json();
-  if (!data.success) throw new Error(data.error || 'Failed to update watchlist');
+  let message: string;
+  if (isWatching) {
+    const response = await fetch('/api/watchlist/remove', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artist_id: artistId }),
+    });
+    const data = await response.json();
+    if (!data.success) throw new Error(data.error || 'Failed to update watchlist');
+    message = String(data.message ?? '');
+  } else {
+    message = await addToWatchlistRequest(artistId, artistName, source);
+  }
 
   // Dashboard badge, when that page's script is loaded (7012).
   if (typeof window.updateWatchlistCount === 'function') window.updateWatchlistCount();
-  return { watching: !isWatching, message: String(data.message ?? '') };
+  return { watching: !isWatching, message };
 }

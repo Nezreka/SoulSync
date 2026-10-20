@@ -395,8 +395,8 @@ class TestUpdateDiscoveryPool:
         called: List[Any] = []
 
         class _Scanner:
-            def update_discovery_pool_incremental(self, profile_id):
-                called.append(profile_id)
+            def update_discovery_pool_incremental(self, profile_id, force=False):
+                called.append((profile_id, force))
 
         deps = _build_deps(
             get_watchlist_scanner=lambda spc: _Scanner(),
@@ -405,7 +405,25 @@ class TestUpdateDiscoveryPool:
         result = auto_update_discovery_pool({}, deps)
         assert result['status'] == 'completed'
         assert result['_manages_own_progress'] is True
-        assert called == [7]
+        # A plain (scheduled/event) run keeps the 6-hour cooldown (#1719).
+        assert called == [(7, False)]
+
+    def test_manual_run_forces_past_cooldown(self):
+        # #1719: a Run Now press injects _manual_run — the refresh must
+        # not be skipped by the scanner's 6-hour "recently updated" check.
+        called: List[Any] = []
+
+        class _Scanner:
+            def update_discovery_pool_incremental(self, profile_id, force=False):
+                called.append((profile_id, force))
+
+        deps = _build_deps(
+            get_watchlist_scanner=lambda spc: _Scanner(),
+            get_current_profile_id=lambda: 7,
+        )
+        result = auto_update_discovery_pool({'_manual_run': True}, deps)
+        assert result['status'] == 'completed'
+        assert called == [(7, True)]
 
     def test_exception_swallowed(self):
         def boom(_):

@@ -346,7 +346,6 @@ describe('the tuning still matches discover.js', () => {
       slowDown: 4,
       inferred: true,
     });
-    expect(SOURCE).toContain('gravity: 1.2, scalingRatio: 3, slowDown: 4');
     expect(SOURCE).toContain(`iterations: ${WEB_SYNC_ITERATIONS}`);
   });
 
@@ -354,7 +353,6 @@ describe('the tuning still matches discover.js', () => {
     expect(webSettleBudget(0)).toBe(1600);
     expect(webSettleBudget(1000)).toBe(3200);
     expect(webSettleBudget(100000)).toBe(11000); //  capped
-    expect(SOURCE).toContain('Math.min(11000, 1600 + graph.order * 1.6)');
   });
 
   it('keeps the sigma settings', () => {
@@ -362,8 +360,7 @@ describe('the tuning still matches discover.js', () => {
       `labelRenderedSizeThreshold: ${WEB_SIGMA_SETTINGS.labelRenderedSizeThreshold}`,
     );
     expect(SOURCE).toContain(`labelGridCellSize: ${WEB_SIGMA_SETTINGS.labelGridCellSize}`);
-    expect(SOURCE).toContain('hideEdgesOnMove: true');
-    expect(SOURCE).toContain('hideLabelsOnMove: true');
+    expect(WEB_SIGMA_SETTINGS).toMatchObject({ hideEdgesOnMove: true, hideLabelsOnMove: true });
   });
 
   it('keeps the camera ratios, including the inverted zoom buttons', () => {
@@ -382,8 +379,6 @@ describe('the tuning still matches discover.js', () => {
     expect(WEB_CAMERA.cameraToRatio).toBe(0.12);
     // The path panel zooms in CLOSER than search focus does.
     expect(WEB_CAMERA.cameraToRatio).toBeLessThan(WEB_CAMERA.focusRatio);
-    expect(SOURCE).toContain('ratio: 0.15');
-    expect(SOURCE).toContain('ratio: 0.12');
   });
 
   it('keeps the expand + legend + card caps', () => {

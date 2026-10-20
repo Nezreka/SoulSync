@@ -49,10 +49,26 @@ import {
   repairJobBadge,
   repairJobCardClass,
   repairJobDot,
+  repairSettingText,
   scoreBar,
   timeAgo,
   linkedJobId,
 } from './-tools.core';
+
+describe('repairSettingText', () => {
+  it.each([
+    [null, ''],
+    [undefined, ''],
+    ['plain text', 'plain text'],
+    [0, '0'],
+    [false, 'false'],
+    [{ limit: 5 }, '{"limit":5}'],
+    [[1, 2], '[1,2]'],
+    [Symbol('unsupported'), ''],
+  ])('formats %s without changing the stored value', (value, expected) => {
+    expect(repairSettingText(value)).toBe(expected);
+  });
+});
 
 describe('prettifyRepairSettingKey', () => {
   it('spells out the ffmpeg cost for deep_audio_verify instead of Title Casing it', () => {
@@ -178,9 +194,9 @@ describe('finding labels', () => {
     // know only `critical`, which nothing has ever emitted. Both map to the
     // same icon and the same CSS class while old rows exist.
     expect(Object.keys(FINDING_SEVERITY_ICONS)).toHaveLength(4);
-    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(24);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(22);
-    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(14);
+    expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(25);
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(23);
+    expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(16);
   });
 
   it('labels known finding types', () => {

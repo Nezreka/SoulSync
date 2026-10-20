@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Optional
 from core.imports.album import build_album_import_context, build_album_import_match_payload, resolve_album_artist_context
 from core.imports.context import get_import_context_artist, get_import_track_info, normalize_import_context
 from core.imports.filename import parse_filename_metadata
-from core.imports.pipeline import import_rejection_reason
+from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
 from core.imports.staging import (
     AUDIO_EXTENSIONS,
     available_import_sources as _available_import_sources,
@@ -1240,6 +1240,7 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         processed = 0
         errors = []
         dispositions = []
+        finished_paths = []   # staged files this import is done with
         summary = {"imported": 0, "skipped_owned": 0, "upgraded": 0}
         album_name = album.get("name", album.get("album_name", "Unknown Album"))
         artist_name = album.get("artist", album.get("artist_name", "Unknown Artist"))
@@ -1317,11 +1318,12 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                     track_name, status["reason"],
                 )
                 _record_disposition(track_name, file_name, "skipped_owned", status["reason"])
-                # Deliberately NOT unlinking the staging file: on the manual
-                # import page these are the user's own files — the pre-check
-                # never deletes user data. Skipped files stay in staging
-                # until the user removes them. (Automated client copies are
-                # working copies and ARE discarded — see client_match.)
+                # NOT unlinking the staging file here: on the manual import
+                # page these are the user's own files. they stay in staging
+                # unless the user turned on "clear finished folders" (below).
+                # (Automated client copies are working copies and ARE
+                # discarded — see client_match.)
+                finished_paths.append(file_path)
                 continue
             # "upgrade" and everything else proceed; the pipeline's existing
             # upgrade/replacement logic decides what the better file replaces.
@@ -1355,12 +1357,19 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
                     errors.append(f"{track_name}: {reject_reason}")
                     runtime.logger.warning("Import rejected: %s — %s", track_name, reject_reason)
                     _record_disposition(track_name, file_name, "error", reject_reason)
+                elif kept_existing_library_file(context):
+                    # already at its library path and the pipeline kept that
+                    # copy: nothing was imported, so don't call it imported.
+                    _record_disposition(track_name, file_name, "skipped_owned",
+                                        "already in library at the same spot, kept the library copy")
+                    finished_paths.append(file_path)
                 else:
                     processed += 1
                     # The gate's decision stands: an "upgrade" routing that
                     # processed cleanly counts as upgraded, the rest imported.
                     final_decision = "upgraded" if gate_decision == DECISION_UPGRADE else "imported"
                     _record_disposition(track_name, file_name, final_decision, status["reason"])
+                    finished_paths.append(file_path)
                     runtime.logger.info("Import processed: %s. %s from %s", track_number, track_name, album_name)
             except Exception as proc_err:
                 err_msg = f"{track_name}: {str(proc_err)}"
@@ -1385,9 +1394,19 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
             )
             runtime.refresh_import_suggestions_cache()
 
+        # opt-in: every track went in or was already owned, so the folder it
+        # came in is done with. a run with errors keeps everything.
+        cleared = False
+        if finished_paths and not errors and _clear_finished_enabled():
+            from core.imports.file_ops import clear_finished_staging
+            try:
+                cleared = bool(clear_finished_staging(runtime.get_staging_path(), finished_paths))
+            except Exception as exc:                        # noqa: BLE001
+                runtime.logger.warning("[Import] could not clear finished staging files: %s", exc)
+
         # Files just left staging — drop the shared scan so the next files/groups/hints
         # reflects reality immediately instead of waiting out the cache TTL.
-        if processed > 0:
+        if processed > 0 or cleared:
             invalidate_staging_scan_cache()
 
         return {"success": True, "processed": processed, "total": len(matches),
@@ -1396,6 +1415,14 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
     except Exception as exc:
         runtime.logger.error("Error processing album import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
+
+
+def _clear_finished_enabled() -> bool:
+    try:
+        from core.settings import config_manager
+        return bool(config_manager.get('import.clear_finished_from_staging', False))
+    except Exception:                                       # noqa: BLE001
+        return False
 
 
 def _import_summary_text(album_name: str, artist_name: str,
@@ -1440,8 +1467,8 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
     if runtime.post_process_matched_download is None:
         return ("error", "Import post-processing not available")
 
-    title = file_info.get("title", "")
-    artist = file_info.get("artist", "")
+    title = file_info.get("title") if isinstance(file_info.get("title"), str) else ""
+    artist = file_info.get("artist") if isinstance(file_info.get("artist"), str) else ""
     manual_match = file_info.get("manual_match")
     if manual_match is not None and not isinstance(manual_match, dict):
         manual_match = None
@@ -1453,6 +1480,16 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
         manual_match_id = str(manual_match.get("id") or "").strip()
         if not manual_match_id or not manual_match_source:
             return ("error", f"Malformed manual match for file: {file_info.get('filename', '?')}")
+
+    # "No track picked: imported from its own tags" (and the inbox's bulk
+    # "from tags" import): the user declined a catalogue match, so the file
+    # must NOT be run through another automatic lookup — that lookup could
+    # rematch it to an unrelated track (#1772). An explicit manual match is
+    # more specific and wins over the flag if both somehow arrive. Only a
+    # real JSON true sets the flag — the string "false" must not turn it on
+    # for raw API callers. (An empty manual_match dict counts as no match
+    # picked, same as it did before this flag existed.)
+    from_own_tags = file_info.get("from_own_tags") is True and not manual_match
 
     if not title and not manual_match:
         parsed = runtime.parse_filename_metadata(file_info.get("filename", ""))
@@ -1466,6 +1503,13 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             artist,
             override_id=manual_match_id,
             override_source=manual_match_source,
+            from_own_tags=from_own_tags,
+            album=file_info.get("album") or "",
+            # raw on purpose: the resolver's tag coercion is the one place
+            # that decides what an unusable number becomes
+            track_number=file_info.get("track_number"),
+            disc_number=file_info.get("disc_number"),
+            duration_ms=file_info.get("duration_ms"),
         )
         context = runtime.normalize_import_context(resolved["context"])
         context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
@@ -1681,6 +1725,7 @@ def _emit_import_completed(
                 "batch_complete",
                 {
                     "playlist_name": playlist_name,
+                    "artist": artist,
                     "total_tracks": str(total_tracks),
                     "completed_tracks": str(track_count),
                     "failed_tracks": str(failed_tracks),

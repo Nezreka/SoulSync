@@ -43,6 +43,7 @@ import { decadeClassicsName, decadeTrackToSpotify } from '../-discover.decade-sh
 import { explanationLine } from '../-discover.explanation';
 import { quickTiles } from '../-discover.greeting';
 import { normalizeTrack } from '../-discover.helpers';
+import { heroPicksForModal, HERO_PICKS_TITLE } from '../-discover.hero';
 import { inboxArtistRef } from '../-discover.inbox';
 import { discoverLimiter } from '../-discover.limiter';
 import {
@@ -273,7 +274,9 @@ export function DiscoverPage() {
     data: GenreDiveData | null;
     phase: 'loading' | 'error' | 'ready';
   } | null>(null);
-  const [recModalKind, setRecModalKind] = useState<'recommended' | 'listening' | null>(null);
+  const [recModalKind, setRecModalKind] = useState<'recommended' | 'listening' | 'picks' | null>(
+    null,
+  );
   // the recipe editor: a new mix, or the one being edited
   const [recipeEditor, setRecipeEditor] = useState<{ editing: RecipeMixCard | null } | null>(null);
   const [addingAll, setAddingAll] = useState(false);
@@ -913,14 +916,30 @@ export function DiscoverPage() {
   const listeningArtists = recommendedVisible(
     okData<{ artists?: RecommendedArtist[] }>(page.sections.listeningRecs?.data)?.artists ?? [],
   );
-  // Whichever shelf opened the View All modal supplies its artists.
+  // Whichever shelf opened the View All modal supplies its artists. the hero
+  // has its own rotation, never the Artists You'll Like list.
   const modalPayload =
-    recModalKind === 'listening'
-      ? okData<{ artists?: RecommendedArtist[]; source?: string }>(
-          page.sections.listeningRecs?.data,
-        )
-      : recPayload;
-  const modalArtists = recModalKind === 'listening' ? listeningArtists : recArtists;
+    recModalKind === 'picks'
+      ? page.hero.data
+      : recModalKind === 'listening'
+        ? okData<{ artists?: RecommendedArtist[]; source?: string }>(
+            page.sections.listeningRecs?.data,
+          )
+        : recPayload;
+  const heroPicks = useMemo(() => heroPicksForModal(heroArtists), [heroArtists]);
+  const modalArtists =
+    recModalKind === 'picks'
+      ? heroPicks
+      : recModalKind === 'listening'
+        ? listeningArtists
+        : recArtists;
+  // the hero picks are not on a shelf, so nothing has checked them yet
+  useEffect(() => {
+    if (recModalKind !== 'picks' || !heroPicks.length) return;
+    void rec.enrichImages(heroPicks, recSource(page.hero.data));
+    void rec.checkWatching(heroPicks);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recModalKind, heroPicks]);
   useEffect(() => {
     if (recArtists.length) {
       void rec.enrichImages(recArtists, recSource(recPayload));
@@ -1510,7 +1529,7 @@ export function DiscoverPage() {
               onJump={hero.jump}
               onToggleWatchlist={() => void hero.toggleWatchlist()}
               onWatchAll={() => void hero.watchAll()}
-              onViewRecommended={() => setRecModalKind('recommended')}
+              onViewRecommended={() => setRecModalKind('picks')}
               onOpenBlacklist={blacklist.openModal}
               artists={hero.artists}
               onPauseChange={hero.setPaused}
@@ -1896,6 +1915,7 @@ export function DiscoverPage() {
       {recModalKind && (
         <RecommendedModal
           artists={modalArtists}
+          title={recModalKind === 'picks' ? HERO_PICKS_TITLE : undefined}
           source={recSource(modalPayload)}
           cachedSource={modalPayload?.source ?? null}
           watchingIds={rec.watchingIds}

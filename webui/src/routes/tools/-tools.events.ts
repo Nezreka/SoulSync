@@ -14,7 +14,7 @@
  * cards and the media-scan card. Those come through here instead.
  */
 
-import { useEffect } from 'react';
+import { useShellEvent } from '@/platform/shell/use-shell-event';
 
 import type { MediaScanStatus, RepairJobProgress, RepairStatus } from './-tools.types';
 
@@ -28,18 +28,6 @@ export const MEDIA_SCAN_EVENT = 'ss:media-scan';
 export interface MediaScanFrame {
   success?: boolean;
   status?: MediaScanStatus;
-}
-
-/** Subscribe to a re-broadcast frame for as long as the component is mounted. */
-function useShellEvent<T>(name: string, onFrame: (frame: T) => void): void {
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<T>).detail;
-      if (detail) onFrame(detail);
-    };
-    window.addEventListener(name, handler);
-    return () => window.removeEventListener(name, handler);
-  }, [name, onFrame]);
 }
 
 export function useRepairStatusEvent(onFrame: (frame: RepairStatus) => void): void {

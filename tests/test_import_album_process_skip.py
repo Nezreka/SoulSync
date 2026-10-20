@@ -257,3 +257,76 @@ def test_manually_reassigned_file_cannot_skip(db_path, tmp_path):
     assert status == 200
     assert len(processed_log) == 1  # proceeded: fail open
     assert payload["dispositions"][0]["decision"] == "imported"
+
+
+def _cleanup_setting(on):
+    return patch("core.imports.routes._clear_finished_enabled", return_value=on)
+
+
+def _owned_album_in_staging(db_path, tmp_path):
+    lib_file = tmp_path / "library" / "owned.mp3"
+    lib_file.parent.mkdir(parents=True)
+    lib_file.write_bytes(b"library copy")
+    _add_owned(db_path, "mbid-owned", str(lib_file))
+    folder = tmp_path / "staging" / "Test Artist" / "Test Album"
+    folder.mkdir(parents=True)
+    (folder / "owned.mp3").write_bytes(b"fake audio")
+    (folder / "cover.jpg").write_bytes(b"jpg")
+    return folder, {"full_path": str(folder / "owned.mp3"), "filename": "owned.mp3"}
+
+
+def _runtime_with_staging(processed_log, tmp_path):
+    runtime = _runtime(processed_log, str(tmp_path))
+    runtime.get_staging_path = lambda: str(tmp_path / "staging")
+    return runtime
+
+
+def test_clear_finished_removes_the_owned_album_folder(db_path, tmp_path, monkeypatch):
+    from core.imports import file_ops
+    monkeypatch.setattr(file_ops, "protected_root_dirs", lambda: set())
+    folder, staged = _owned_album_in_staging(db_path, tmp_path)
+    data = {"album": _album(), "matches": [_match("Owned Song", "mbid-owned", staged)]}
+
+    with patch("core.imports.routes._get_import_db", return_value=_FakeDB(db_path)), \
+            _has_metadata(), _cleanup_setting(True):
+        payload, _ = album_process(_runtime_with_staging([], tmp_path), data)
+
+    assert payload["summary"]["skipped_owned"] == 1
+    assert not (tmp_path / "staging" / "Test Artist").exists()
+    assert (tmp_path / "staging").is_dir()
+
+
+def test_owned_album_stays_in_staging_by_default(db_path, tmp_path):
+    folder, staged = _owned_album_in_staging(db_path, tmp_path)
+    data = {"album": _album(), "matches": [_match("Owned Song", "mbid-owned", staged)]}
+
+    with patch("core.imports.routes._get_import_db", return_value=_FakeDB(db_path)), \
+            _has_metadata(), _cleanup_setting(False):
+        album_process(_runtime_with_staging([], tmp_path), data)
+
+    assert (folder / "owned.mp3").exists()
+
+
+def test_library_copy_the_pipeline_kept_is_not_called_imported(db_path, tmp_path):
+    # fuzzy pair, so the gate lets it through; the pipeline then finds the
+    # track already at its library path and keeps that copy. nothing was
+    # imported, so the summary can't say it was.
+    fuzzy = _match("Maybe Song", "mbid-x", _staging_file(tmp_path, "maybe.mp3"),
+                   match_type=None, confidence=0.72)
+    processed_log = []
+    runtime = _runtime(processed_log, str(tmp_path))
+
+    def _keeps(_key, ctx, path):
+        processed_log.append(path)
+        ctx["_context_failure_msg"] = "Incoming file is not a verified improvement under the quality profile"
+        ctx["_kept_existing_library_file"] = True
+
+    runtime.post_process_matched_download = _keeps
+    with patch("core.imports.routes._get_import_db", return_value=_FakeDB(db_path)), _has_metadata():
+        payload, status = album_process(runtime, {"album": _album(), "matches": [fuzzy]})
+
+    assert status == 200
+    assert payload["dispositions"][0]["decision"] == "skipped_owned"
+    assert payload["summary"]["skipped_owned"] == 1
+    assert payload["summary"]["imported"] == 0
+    assert payload["processed"] == 0

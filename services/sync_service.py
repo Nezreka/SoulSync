@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import threading
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +17,24 @@ logger = get_logger("sync_service")
 # (the largest catalogs in our test libraries sit in the low thousands), low
 # enough to avoid pathological pulls if the DB ever returns garbage.
 _POOL_FETCH_LIMIT = 10000
+
+# Serializes a playlist write together with the readback of the Navidrome
+# guard's drop record (#1754): the record lives on the shared media client,
+# and concurrent playlist syncs (the app syncs several at once through one
+# client) must not reset or replace each other's record between a write
+# and its readback. One lock per server type, so an unrelated server's
+# sync never waits behind this one's (a Navidrome write can ride out a
+# 180s server scan).
+_WRITE_LOCKS: Dict[str, threading.Lock] = {}
+_WRITE_LOCKS_GUARD = threading.Lock()
+
+
+def _playlist_write_lock(server_type: str) -> threading.Lock:
+    with _WRITE_LOCKS_GUARD:
+        lock = _WRITE_LOCKS.get(server_type)
+        if lock is None:
+            lock = _WRITE_LOCKS[server_type] = threading.Lock()
+        return lock
 
 
 def _artist_name(artist) -> str:
@@ -106,6 +125,37 @@ _sync_profile_id: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextV
 # reason as _sync_profile_id.
 _sync_user_initiated: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
     "sync_user_initiated", default=False)
+_sync_is_request_list: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_is_request_list", default=False)
+_sync_auto_remove_fulfilled: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "sync_auto_remove_fulfilled", default=False)
+
+
+def client_for_profile(profile_id, client, server):
+    """the media server client acting as the profile's own server user, when
+    the profile has one saved (#1265). a view, never a change to the shared
+    client. no identity, no profile, a db that will not answer, a client
+    without the hook, or a connection that cannot be made = the client as-is
+    (the last case is logged: the sync then runs as the app account rather
+    than not at all)."""
+    if not profile_id or client is None or not callable(getattr(client, 'user_view', None)):
+        return client
+    try:
+        from database.music_database import MusicDatabase
+        identity = MusicDatabase().get_profile_server_identity(profile_id, server)
+    except Exception as e:
+        logger.error(f"Per-profile: could not read {server} identity for profile {profile_id}: {e}")
+        return client
+    if not identity:
+        return client
+    label = identity.get('label') or ''
+    view = client.user_view(identity)
+    if view is None:
+        logger.error(f"Per-profile: could not connect to {server} as '{label}' for profile {profile_id}; "
+                     f"syncing as the app account")
+        return client
+    logger.info(f"Per-profile: {server} playlist writes run as '{label}' for profile {profile_id}")
+    return view
 
 
 def navidrome_client_for_profile(profile_id, client):
@@ -532,22 +582,31 @@ class PlaylistSyncService:
         )
 
     async def sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool = False, profile_id: int = None, sync_mode: str = 'replace',
-                            user_initiated: bool = False) -> SyncResult:
+                            user_initiated: bool = False, is_request_list: bool = False, auto_remove_fulfilled: bool = False) -> SyncResult:
         # scoped to this task, not the shared instance (see _sync_profile_id).
         # the library scope rides along: "do we own this" is answered through
         # the profile's library, not the app account's (#1199)
         from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
         _profile_token = _sync_profile_id.set(profile_id)
         _user_token = _sync_user_initiated.set(bool(user_initiated))
+        _req_token = _sync_is_request_list.set(bool(is_request_list))
+        _rm_token = _sync_auto_remove_fulfilled.set(bool(auto_remove_fulfilled))
         _scope_token = set_library_scope(library_scope_for_profile(profile_id))
         try:
             return await self._sync_playlist(playlist, download_missing, profile_id, sync_mode)
         finally:
             reset_library_scope(_scope_token)
+            _sync_auto_remove_fulfilled.reset(_rm_token)
+            _sync_is_request_list.reset(_req_token)
             _sync_user_initiated.reset(_user_token)
             _sync_profile_id.reset(_profile_token)
 
-    async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str) -> SyncResult:
+    async def _sync_playlist(self, playlist: SpotifyPlaylist, download_missing: bool, profile_id, sync_mode: str,
+                             is_request_list: bool = None, auto_remove_fulfilled: bool = None) -> SyncResult:
+        if is_request_list is None:
+            is_request_list = _sync_is_request_list.get()
+        if auto_remove_fulfilled is None:
+            auto_remove_fulfilled = _sync_auto_remove_fulfilled.get()
         # Check if THIS specific playlist is already syncing
         syncing = getattr(self, 'syncing_playlists', None)
         if syncing is None:
@@ -665,10 +724,15 @@ class PlaylistSyncService:
             # showed "Creating/updating Plex playlist", playlist write failed, and
             # failed_tracks was computed as total - 0 synced (= entire playlist).
             folds = []
-            if server_type == 'soulsync':
+            # MatchResults (by identity) the server write proves are no
+            # longer on the server (#1754); filled in the write branch below
+            # and read back when the per-track history details are built.
+            server_missing_results: set = set()
+            if is_request_list or server_type == 'soulsync':
+                step_title = "Request list: library check complete" if is_request_list else "Standalone: library check complete"
                 self._update_progress(
                     playlist.name,
-                    "Standalone: library check complete",
+                    step_title,
                     "",
                     80, 5, 4,
                     total_tracks=total_tracks,
@@ -679,9 +743,14 @@ class PlaylistSyncService:
                 synced_tracks = len(matched_tracks)
                 failed_tracks = unmatched_count
                 logger.info(
-                    f"Standalone playlist sync '{playlist.name}': "
+                    f"{'Request list' if is_request_list else 'Standalone'} playlist sync '{playlist.name}': "
                     f"{len(matched_tracks)} in library, {unmatched_count} missing"
                 )
+                if is_request_list and auto_remove_fulfilled and matched_tracks and self.spotify_client:
+                    try:
+                        self._handle_request_list_spotify_removal(playlist, matched_tracks, profile_id)
+                    except Exception as rm_err:
+                        logger.warning(f"Failed to auto-remove fulfilled tracks from Spotify: {rm_err}")
             else:
                 self._update_progress(
                     playlist.name,
@@ -736,6 +805,10 @@ class PlaylistSyncService:
                         f"({len(valid_tracks)} → {len(plex_tracks)} tracks)"
                     )
 
+                # Server IDs the playlist write's guard dropped as no
+                # longer on the server (#1754); the write dispatch below
+                # fills this from its in-thread readback.
+                _write_skipped_ids: list = []
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
                     sync_success = False
@@ -762,8 +835,14 @@ class PlaylistSyncService:
                         logger.info(
                             "No library matches for %r and no server playlist "
                             "exists; creating an empty one", playlist.name)
-                        _created = await asyncio.to_thread(
-                            media_client.create_playlist, playlist.name, [])
+                        def _create_empty():
+                            # a guarded write like any other: it resets
+                            # the guard's drop record, so it takes the
+                            # same write lock as a sync dispatch (#1754)
+                            with _playlist_write_lock(server_type):
+                                return media_client.create_playlist(
+                                    playlist.name, [])
+                        _created = await asyncio.to_thread(_create_empty)
                         if _created:
                             # Link it so the next sync follows the server ID.
                             self._resolve_mirrored_server_playlist_id(
@@ -799,18 +878,29 @@ class PlaylistSyncService:
                         {'playlist_id': server_playlist_id}
                         if server_type == 'navidrome' else {}
                     )
-                    if sync_mode == 'append':
-                        sync_success = await asyncio.to_thread(
-                            media_client.append_to_playlist, playlist.name, plex_tracks,
-                            **_navidrome_id_kw)
-                    elif sync_mode == 'reconcile':
-                        sync_success = await asyncio.to_thread(
-                            self._reconcile_or_replace, media_client, playlist.name,
-                            plex_tracks, **_navidrome_id_kw)
-                    else:
-                        sync_success = await asyncio.to_thread(
-                            media_client.update_playlist, playlist.name, plex_tracks,
-                            **_navidrome_id_kw)
+                    def _dispatch_write():
+                        # The guard's drop record is read back in this same
+                        # thread, under the write lock, so a concurrent
+                        # sync's write cannot reset or replace it between
+                        # this write and its readback (#1754).
+                        with _playlist_write_lock(server_type):
+                            if sync_mode == 'append':
+                                ok = media_client.append_to_playlist(
+                                    playlist.name, plex_tracks, **_navidrome_id_kw)
+                            elif sync_mode == 'reconcile':
+                                ok = self._reconcile_or_replace(
+                                    media_client, playlist.name, plex_tracks,
+                                    **_navidrome_id_kw)
+                            else:
+                                ok = media_client.update_playlist(
+                                    playlist.name, plex_tracks, **_navidrome_id_kw)
+                            skipped = getattr(
+                                media_client, '_last_validated_write_skipped', None)
+                            return bool(ok), (
+                                list(skipped)
+                                if isinstance(skipped, (list, tuple, set)) else [])
+                    sync_success, _write_skipped_ids = await asyncio.to_thread(
+                        _dispatch_write)
 
                     if (sync_success and server_type == 'navidrome'
                             and server_playlist_id is None and media_client is not None):
@@ -820,15 +910,105 @@ class PlaylistSyncService:
                         self._resolve_mirrored_server_playlist_id(
                             playlist, server_type, media_client, profile_id)
 
-                if not sync_success:
-                    return self._create_error_result(playlist.name, [
-                        f"{server_type.title()} playlist write failed or could not be verified; sync is incomplete. Check the server connection and run a library scan."
-                    ])
-                synced_tracks = len(plex_tracks)
+                if sync_success:
+                    synced_tracks = len(plex_tracks)
+                else:
+                    # The write failed, the matching did not. Returning early
+                    # here used to report 0 matched for the run (the dashboard
+                    # read "0% in library" against 2652 owned) and skipped the
+                    # wishlist for every missing track. Keep the counts, record
+                    # the failure, and still wishlist what is missing.
+                    write_error = (
+                        f"{server_type.title()} playlist write failed or could not be verified; "
+                        "sync is incomplete. Check the server connection and run a library scan."
+                    )
+                    logger.error("Playlist '%s': %s", playlist.name, write_error)
+                    errors.append(write_error)
+                    synced_tracks = 0
+                # #1754: the Navidrome guard proves some matched tracks'
+                # server IDs dead (the file was deleted in review or on
+                # the server; its inventory read is verified complete).
+                # On append the write still succeeds without them; on
+                # replace/reconcile the guard may refuse the write over
+                # them. Either way they never reached the playlist, so
+                # they are missing, not matched: move them to unmatched
+                # so the wishlist step below resurfaces them, stop
+                # counting them as matched/synced, and drop the cached
+                # pairing — but only a cache row that actually points at
+                # the dead ID; a row pointing at a live track (e.g. an
+                # ambiguous rekey left the dead ID unresolved while the
+                # pairing targets a live copy) is not evidence against
+                # that pairing and stays.
+                _dead_ids = {str(s) for s in _write_skipped_ids if str(s)}
+                if _dead_ids:
+                    _dead_results = [
+                        r for r in matched_tracks
+                        if r.plex_track is not None
+                        and str(getattr(r.plex_track, 'ratingKey', '')) in _dead_ids]
+                    if _dead_results:
+                        _dead_obj_ids = {id(r) for r in _dead_results}
+                        server_missing_results.update(_dead_obj_ids)
+                        logger.warning(
+                            "Playlist '%s': %d matched track(s) are no longer on the "
+                            "server and did not reach the playlist; treating them as "
+                            "missing so they resurface on the wishlist: %s",
+                            playlist.name, len(_dead_results),
+                            ", ".join(
+                                f"'{getattr(r.plex_track, 'title', '')}' "
+                                f"(server id {getattr(r.plex_track, 'ratingKey', '')})"
+                                for r in _dead_results[:5]))
+                        matched_tracks = [
+                            r for r in matched_tracks if id(r) not in _dead_obj_ids]
+                        unmatched_tracks = unmatched_tracks + _dead_results
+                        unmatched_count = len(unmatched_tracks)
+                        if sync_success:
+                            synced_tracks -= len({
+                                str(getattr(r.plex_track, 'ratingKey', ''))
+                                for r in _dead_results})
+                        folds = [(d, k) for d, k in folds
+                                 if id(d) not in _dead_obj_ids
+                                 and id(k) not in _dead_obj_ids]
+                        try:
+                            from core.sync.match_overrides import (
+                                drop_stale_cached_match, match_lookup_ids)
+                            from database.music_database import MusicDatabase as _MDB
+                            _cache_db = _MDB()
+                            for _r in _dead_results:
+                                _dead_key = str(
+                                    getattr(_r.plex_track, 'ratingKey', ''))
+                                for _mid in match_lookup_ids(_r.spotify_track):
+                                    # scoped delete: lands only when the
+                                    # cached row actually points at the
+                                    # dead server track (#1754)
+                                    drop_stale_cached_match(
+                                        _cache_db, _mid, server_type,
+                                        server_track_id=_dead_key)
+                        except Exception as _drop_err:  # noqa: BLE001 - bookkeeping
+                            logger.warning(
+                                "dead-match cache drop failed: %s", _drop_err)
+                        # the library row has to go too. only a deep scan
+                        # clears rows for songs the server lost, so it stays
+                        # behind and the wishlist's owned-track sweep sees it
+                        # and pulls the track right back off the wishlist.
+                        # same delete the deep scan does.
+                        try:
+                            from database.music_database import MusicDatabase as _MDB
+                            _gone = _MDB().delete_stale_tracks(
+                                {str(getattr(r.plex_track, 'ratingKey', ''))
+                                 for r in _dead_results}, server_type)
+                            if _gone:
+                                logger.info(
+                                    "Playlist '%s': removed %d library row(s) for "
+                                    "songs the server no longer has",
+                                    playlist.name, _gone)
+                        except Exception as _row_err:  # noqa: BLE001 - bookkeeping
+                            logger.warning(
+                                "dead library row cleanup failed: %s", _row_err)
                 # Not in library (for wishlist), not "total minus playlist size".
                 failed_tracks = unmatched_count
-            
-            self._update_progress(playlist.name, "Sync completed", "", 100, 5, 5,
+
+            self._update_progress(playlist.name,
+                                "Sync completed" if not errors else "Playlist write failed", "", 100, 5, 5,
                                 total_tracks=total_tracks,
                                 matched_tracks=len(matched_tracks),
                                 failed_tracks=failed_tracks,
@@ -869,6 +1049,7 @@ class PlaylistSyncService:
                         if imgs and isinstance(imgs, list) and len(imgs) > 0:
                             image_url = imgs[0].get('url', '') if isinstance(imgs[0], dict) else ''
 
+                _is_found = mr.is_match and id(mr) not in server_missing_results
                 detail = {
                     'index': i,
                     'name': t.name if hasattr(t, 'name') else '',
@@ -877,10 +1058,10 @@ class PlaylistSyncService:
                     'duration_ms': getattr(t, 'duration_ms', 0),
                     'source_track_id': getattr(t, 'id', ''),
                     'image_url': image_url,
-                    'status': 'found' if mr.is_match else 'not_found',
+                    'status': 'found' if _is_found else 'not_found',
                     'confidence': round(mr.confidence, 3),
                     'matched_track': None,
-                    'download_status': 'wishlist' if not mr.is_match else None,
+                    'download_status': 'wishlist' if not _is_found else None,
                 }
                 if mr.plex_track:
                     detail['matched_track'] = {
@@ -891,6 +1072,11 @@ class PlaylistSyncService:
                         # the file was deleted (#1417)
                         'id': str(getattr(mr.plex_track, 'ratingKey', '') or ''),
                     }
+                if id(mr) in server_missing_results:
+                    # matched a library row the server no longer has; the
+                    # matched_track id above is that dead id, kept so the
+                    # deletion stays traceable in the history (#1417)
+                    detail['server_missing'] = True
                 keeper = _fold_keepers.get(id(mr))
                 if keeper is not None:
                     # found, but not on the playlist as its own entry: the file
@@ -1134,7 +1320,8 @@ class PlaylistSyncService:
             active_server = config_manager.get_active_media_server()
 
             # --- User-confirmed match fast-path (Find & Add / manual match) ---
-            from core.sync.match_overrides import match_lookup_ids
+            from core.sync.match_overrides import (
+                cached_match_is_stale, drop_stale_cached_match, match_lookup_ids)
             cache_db = MusicDatabase()
 
             def _materialize(server_track_id):
@@ -1169,9 +1356,35 @@ class PlaylistSyncService:
                     if cached:
                         actual_track = _materialize(cached['server_track_id'])
                         if actual_track:
-                            logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
-                            return actual_track, cached['confidence']
-                        logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
+                            # #1721: the row may be an AUTO-match written by an
+                            # older, buggier matcher (the pre-fix #1715 fallback
+                            # cached a same-titled wrong-artist track at 1.0).
+                            # Honoring it unchecked pins the wrong song on the
+                            # playlist forever — the gated matcher below never
+                            # gets a say. Revalidate auto-shaped rows against
+                            # today's matcher; a proven-stale row is dropped
+                            # and matching falls through to the durable manual
+                            # match and then the fresh matcher, like a miss.
+                            if cached_match_is_stale(
+                                cache_db,
+                                title=original_title,
+                                artists=[_artist_name(a) for a in spotify_track.artists],
+                                album=getattr(spotify_track, 'album', None),
+                                server_source=active_server,
+                                cached_track_id=cached['server_track_id'],
+                                cached_track_row=cache_db.get_track_by_id(cached['server_track_id']),
+                                threshold=0.7,
+                            ):
+                                logger.info(
+                                    f"Sync cache stale for '{original_title}' — cached track "
+                                    f"{cached['server_track_id']} no longer matches under "
+                                    f"current rules; dropping the cached pairing")
+                                drop_stale_cached_match(cache_db, _match_id, active_server)
+                            else:
+                                logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                                return actual_track, cached['confidence']
+                        else:
+                            logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
                 except Exception as cache_err:
                     logger.debug(f"Sync cache lookup error: {cache_err}")
 
@@ -1489,3 +1702,48 @@ class PlaylistSyncService:
         except Exception as e:
             logger.error(f"Error generating library comparison: {e}")
             return {"error": str(e)}
+
+    def _handle_request_list_spotify_removal(self, playlist, matched_tracks, profile_id):
+        """Delete fulfilled tracks from the upstream Spotify playlist if collaborative/owned."""
+        from core.playlists.source_refs import extract_mirrored_pk, _parse_spotify_ref, _SPOTIFY_ID_RE
+        from database.music_database import MusicDatabase
+        try:
+            db = MusicDatabase()
+            pk = extract_mirrored_pk(getattr(playlist, 'id', None))
+            pl_row = db.get_mirrored_playlist(pk, profile_id=profile_id) if pk else None
+
+            source = (pl_row.get('source') if pl_row else '') or ''
+            if source not in ('spotify', 'spotify_public'):
+                return
+
+            spotify_playlist_id = None
+            if pl_row:
+                upstream = pl_row.get('upstream_playlist_id')
+                if upstream and _SPOTIFY_ID_RE.match(str(upstream)):
+                    spotify_playlist_id = str(upstream)
+                elif source == 'spotify' and _SPOTIFY_ID_RE.match(str(pl_row.get('source_playlist_id') or '')):
+                    spotify_playlist_id = str(pl_row.get('source_playlist_id'))
+                else:
+                    desc = pl_row.get('description') or ''
+                    parsed = _parse_spotify_ref(desc)
+                    if parsed and parsed.get('type') == 'playlist':
+                        spotify_playlist_id = parsed.get('id')
+
+            if not spotify_playlist_id:
+                logger.debug("Could not resolve Spotify playlist ID for request list removal")
+                return
+
+            spotify_track_ids = []
+            for r in matched_tracks:
+                t = r.spotify_track
+                tid = getattr(t, 'source_track_id', None) or getattr(t, 'id', None)
+                if tid and not str(tid).startswith('file:') and _SPOTIFY_ID_RE.match(str(tid)):
+                    spotify_track_ids.append(str(tid))
+
+            if not spotify_track_ids:
+                return
+
+            logger.info(f"Request list auto-removal: removing {len(spotify_track_ids)} fulfilled tracks from Spotify playlist {spotify_playlist_id}")
+            self.spotify_client.remove_playlist_tracks(spotify_playlist_id, spotify_track_ids)
+        except Exception as e:
+            logger.warning(f"Error during request list Spotify track removal: {e}")
