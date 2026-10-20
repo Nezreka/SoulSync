@@ -739,3 +739,49 @@ Final deployed code: **`11596193ae4a`**, with reuse enabled by default and
 enabled. SoulSync remains under the established feature-review deployment with
 only its Flux Kustomization suspended. The final documentation commit requires
 no additional application rollout. **Milestone 4 is complete.**
+
+## PR integration verification — 2026-10-19
+
+Integrated upstream `dev` at **`55fee15bb2610`**. The only textual merge
+conflict was in shared CSS; both the review modal behavior and upstream playlist
+status styles were retained. Fixed all four Ruff findings, including explicit
+binding of the review case identity in the conflict helper.
+
+Integration review also found two newly added upstream paths that needed the
+existing review protections:
+
+- Automatic album completion now checks review decisions and album intent for
+  every related album in the validated ownership group.
+- Missing download tags now check the actual proposed tag writes against saved
+  review decisions before modifying the file.
+
+Regression tests cover protected and unrelated albums, compatible and conflicting
+tag writes, unchanged file bytes on rejection, and caller-owned database
+connections. Full-suite failures also exposed test fixtures that assumed native
+host paths or reused a connection after callers closed it. The fixtures now
+exercise the production connection contract and explicit environment defaults.
+Repeated parallel scans reproduced exhaustion of the container's 1,024-descriptor
+soft limit; the Python CI step now explicitly sets it to 65,536.
+
+Verification of application code at **`b7e6f6e26`**:
+
+| Check | Result |
+| --- | --- |
+| Full Python suite, Python 3.11.17, eight workers | **26,151 passed, 61 skipped**, 31 warnings |
+| Ruff, dependency consistency, Python compilation | Passed |
+| Full frontend suite, Node 24 | **10,687 passed** across 584 files |
+| Frontend check | Zero errors; 492 existing warnings |
+| Frontend production builds | Passed |
+| Git whitespace check | Passed |
+
+The optional visual job's committed baselines have upstream drift: the initial
+run reported 22 mismatches. To isolate branch effects, all 25 scenarios were
+captured from clean upstream and compared with the branch in the same pinned
+Playwright container. **24 matched exactly**. The remaining modal difference
+was the intended hiding of floating application buttons while the modal is
+open. After inspecting the images, only that baseline was updated; the modal
+test then passed twice. Unrelated upstream baselines were not rewritten, so
+the optional job still needs its upstream baseline refresh.
+
+These checks used disposable source exports and test data. This integration
+verification did not deploy an image or apply live album plans.
