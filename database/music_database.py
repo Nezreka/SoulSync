@@ -11,7 +11,7 @@ import threading
 import time
 from functools import lru_cache
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from dataclasses import dataclass
 from pathlib import Path
 from utils.logging_config import get_logger
@@ -20134,7 +20134,21 @@ class MusicDatabase:
                         a.qobuz_id,
                         a.soul_id,
                         a.amazon_id,
-                        a.server_source
+                        a.server_source,
+                        a.aliases,
+                        a.soul_id_path,
+                        a.discogs_bio,
+                        a.discogs_members,
+                        a.discogs_urls,
+                        a.jiosaavn_id,
+                        a.discogs_match_status,
+                        a.discogs_last_attempted,
+                        a.amazon_match_status,
+                        a.amazon_last_attempted,
+                        a.jiosaavn_match_status,
+                        a.jiosaavn_last_attempted,
+                        a.art_locked,
+                        a.genres_locked
                     FROM artists a
                     WHERE {where_clause}
                         AND a.id = (SELECT MIN(a2.id) FROM artists a2
@@ -20267,6 +20281,20 @@ class MusicDatabase:
                         'qobuz_id': row['qobuz_id'],
                         'soul_id': row['soul_id'],
                         'amazon_id': row['amazon_id'],
+                        'aliases': row['aliases'],
+                        'soul_id_path': row['soul_id_path'],
+                        'discogs_bio': row['discogs_bio'],
+                        'discogs_members': row['discogs_members'],
+                        'discogs_urls': row['discogs_urls'],
+                        'jiosaavn_id': row['jiosaavn_id'],
+                        'discogs_match_status': row['discogs_match_status'],
+                        'discogs_last_attempted': row['discogs_last_attempted'],
+                        'amazon_match_status': row['amazon_match_status'],
+                        'amazon_last_attempted': row['amazon_last_attempted'],
+                        'jiosaavn_match_status': row['jiosaavn_match_status'],
+                        'jiosaavn_last_attempted': row['jiosaavn_last_attempted'],
+                        'art_locked': row['art_locked'],
+                        'genres_locked': row['genres_locked'],
                         'album_count': counts_map.get(row['id'], (0, 0))[0],
                         'track_count': counts_map.get(row['id'], (0, 0))[1],
                         'upgradable_count': upgradable_map.get(row['id'], 0),
@@ -22846,7 +22874,7 @@ class MusicDatabase:
 
     # ── Full-row API query methods (return dicts, not dataclasses) ────────
 
-    def api_get_artist(self, artist_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_artist(self, artist_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get artist by ID with ALL columns as a dict."""
         try:
             conn = self._get_connection()
@@ -22858,7 +22886,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting artist {artist_id}: {e}")
             return None
 
-    def api_get_album(self, album_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_album(self, album_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get album by ID with ALL columns as a dict."""
         try:
             conn = self._get_connection()
@@ -22870,7 +22898,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting album {album_id}: {e}")
             return None
 
-    def api_get_track(self, track_id: int) -> Optional[Dict[str, Any]]:
+    def api_get_track(self, track_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """Get track by ID with ALL columns as a dict, plus artist_name and album_title."""
         try:
             conn = self._get_connection()
@@ -22888,7 +22916,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting track {track_id}: {e}")
             return None
 
-    def api_get_albums_by_artist(self, artist_id: int) -> List[Dict[str, Any]]:
+    def api_get_albums_by_artist(self, artist_id: Union[int, str]) -> List[Dict[str, Any]]:
         """Get all albums for an artist with ALL columns."""
         try:
             conn = self._get_connection()
@@ -22902,7 +22930,7 @@ class MusicDatabase:
             logger.error(f"API: Error getting albums for artist {artist_id}: {e}")
             return []
 
-    def api_get_tracks_by_album(self, album_id: int) -> List[Dict[str, Any]]:
+    def api_get_tracks_by_album(self, album_id: Union[int, str]) -> List[Dict[str, Any]]:
         """Get all tracks for an album with ALL columns, plus artist_name."""
         try:
             conn = self._get_connection()
@@ -22946,7 +22974,10 @@ class MusicDatabase:
         Args:
             table: 'artists', 'albums', or 'tracks'
             provider: 'spotify', 'musicbrainz', 'itunes', 'deezer', 'audiodb',
-                      'tidal', 'qobuz', 'genius' (genius: artists/tracks only)
+                      'tidal', 'qobuz', 'genius', 'discogs', 'amazon',
+                      'jiosaavn', 'bandcamp' (genius: artists/tracks only;
+                      bandcamp: albums/tracks only; discogs: artists/albums
+                      only — tracks carry no Discogs ID)
         """
         column_map = {
             "artists": {
@@ -22958,6 +22989,9 @@ class MusicDatabase:
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
                 "genius": "genius_id",
+                "discogs": "discogs_id",
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
             },
             "albums": {
                 "spotify": "spotify_album_id",
@@ -22967,6 +23001,10 @@ class MusicDatabase:
                 "audiodb": "audiodb_id",
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
+                "discogs": "discogs_id",
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
+                "bandcamp": "bandcamp_id",
             },
             "tracks": {
                 "spotify": "spotify_track_id",
@@ -22977,6 +23015,13 @@ class MusicDatabase:
                 "tidal": "tidal_id",
                 "qobuz": "qobuz_id",
                 "genius": "genius_id",
+                # No "discogs" entry: tracks have no discogs_id column
+                # (Discogs enrichment is artist/album level), so a discogs
+                # track lookup answers not-found instead of erroring on a
+                # missing column.
+                "amazon": "amazon_id",
+                "jiosaavn": "jiosaavn_id",
+                "bandcamp": "bandcamp_id",
             },
         }
         if table not in column_map or provider not in column_map[table]:
@@ -24798,7 +24843,7 @@ class MusicDatabase:
                 return out
         return []
 
-    def api_list_albums(self, search: str = "", artist_id: int = None,
+    def api_list_albums(self, search: str = "", artist_id: Union[int, str] = None,
                         year: int = None, page: int = 1, limit: int = 50) -> Dict[str, Any]:
         """List/search albums with pagination, returning full rows."""
         try:

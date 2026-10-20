@@ -36,6 +36,24 @@ def _parse_genres(raw) -> list:
     return []
 
 
+def _parse_list(raw) -> list:
+    """Parse a list-valued metadata field (aliases, Discogs members/URLs,
+    Bandcamp tags, ...) from a list, JSON string, or comma-separated string.
+
+    Same tolerance as _parse_genres: garbage yields [] rather than raising,
+    so a malformed stored value can never break a response.
+    """
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return [g.strip() for g in raw.split(",") if g.strip()]
+    return []
+
+
 def _isoformat(val) -> Optional[str]:
     """Safely convert datetime or string to ISO format string."""
     if val is None:
@@ -83,6 +101,9 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         # Cross-install identity (soulid_worker). Exposed because it is the
         # only id in the row that means the same thing on another install.
         "soul_id": d.get("soul_id"),
+        # How the soul_id was derived ('canonical' | 'album' | 'name'), so
+        # clients can assess identity confidence.
+        "soul_id_path": d.get("soul_id_path"),
         # External IDs
         "musicbrainz_id": d.get("musicbrainz_id"),
         "spotify_artist_id": d.get("spotify_artist_id"),
@@ -92,6 +113,9 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "tidal_id": d.get("tidal_id"),
         "qobuz_id": d.get("qobuz_id"),
         "genius_id": d.get("genius_id"),
+        "discogs_id": d.get("discogs_id"),
+        "amazon_id": d.get("amazon_id"),
+        "jiosaavn_id": d.get("jiosaavn_id"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
@@ -102,6 +126,9 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "genius_match_status": d.get("genius_match_status"),
         "tidal_match_status": d.get("tidal_match_status"),
         "qobuz_match_status": d.get("qobuz_match_status"),
+        "discogs_match_status": d.get("discogs_match_status"),
+        "amazon_match_status": d.get("amazon_match_status"),
+        "jiosaavn_match_status": d.get("jiosaavn_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
@@ -112,6 +139,18 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
         "genius_last_attempted": _isoformat(d.get("genius_last_attempted")),
         "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
         "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        "discogs_last_attempted": _isoformat(d.get("discogs_last_attempted")),
+        "amazon_last_attempted": _isoformat(d.get("amazon_last_attempted")),
+        "jiosaavn_last_attempted": _isoformat(d.get("jiosaavn_last_attempted")),
+        # Alternate names (MusicBrainz aliases, stored as a JSON array)
+        "aliases": _parse_list(d.get("aliases")),
+        # Discogs metadata
+        "discogs_bio": d.get("discogs_bio"),
+        "discogs_members": _parse_list(d.get("discogs_members")),
+        "discogs_urls": _parse_list(d.get("discogs_urls")),
+        # User locks (hand-set art/genres survive rescans)
+        "art_locked": _bool_or_none(d.get("art_locked")),
+        "genres_locked": _bool_or_none(d.get("genres_locked")),
         # Last.fm metadata
         "lastfm_listeners": d.get("lastfm_listeners"),
         "lastfm_playcount": d.get("lastfm_playcount"),
@@ -139,9 +178,14 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "artist_id": d.get("artist_id"),
         "title": d.get("title"),
         "year": d.get("year"),
+        # Full release date (YYYY-MM-DD when known), unlike the year alone.
+        "release_date": d.get("release_date"),
         "thumb_url": d.get("thumb_url"),
         "genres": _parse_genres(d.get("genres")),
         "track_count": d.get("track_count"),
+        # Expected track count from the matched release, separate from the
+        # observed library track_count above.
+        "api_track_count": d.get("api_track_count"),
         "duration": d.get("duration"),
         "style": d.get("style"),
         "mood": d.get("mood"),
@@ -163,6 +207,11 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "deezer_id": d.get("deezer_id"),
         "tidal_id": d.get("tidal_id"),
         "qobuz_id": d.get("qobuz_id"),
+        "discogs_id": d.get("discogs_id"),
+        "amazon_id": d.get("amazon_id"),
+        "jiosaavn_id": d.get("jiosaavn_id"),
+        "bandcamp_id": d.get("bandcamp_id"),
+        "bandcamp_url": d.get("bandcamp_url"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
@@ -172,6 +221,10 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "lastfm_match_status": d.get("lastfm_match_status"),
         "tidal_match_status": d.get("tidal_match_status"),
         "qobuz_match_status": d.get("qobuz_match_status"),
+        "discogs_match_status": d.get("discogs_match_status"),
+        "amazon_match_status": d.get("amazon_match_status"),
+        "jiosaavn_match_status": d.get("jiosaavn_match_status"),
+        "bandcamp_match_status": d.get("bandcamp_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
@@ -181,12 +234,39 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
         "lastfm_last_attempted": _isoformat(d.get("lastfm_last_attempted")),
         "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
         "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        "discogs_last_attempted": _isoformat(d.get("discogs_last_attempted")),
+        "amazon_last_attempted": _isoformat(d.get("amazon_last_attempted")),
+        "jiosaavn_last_attempted": _isoformat(d.get("jiosaavn_last_attempted")),
+        "bandcamp_last_attempted": _isoformat(d.get("bandcamp_last_attempted")),
         # Last.fm metadata
         "lastfm_listeners": d.get("lastfm_listeners"),
         "lastfm_playcount": d.get("lastfm_playcount"),
         "lastfm_tags": d.get("lastfm_tags"),
         "lastfm_wiki": d.get("lastfm_wiki"),
         "lastfm_url": d.get("lastfm_url"),
+        # Discogs release metadata (edition identification + community rating)
+        "discogs_genres": _parse_list(d.get("discogs_genres")),
+        "discogs_styles": _parse_list(d.get("discogs_styles")),
+        "discogs_label": d.get("discogs_label"),
+        "discogs_catno": d.get("discogs_catno"),
+        "discogs_country": d.get("discogs_country"),
+        "discogs_rating": d.get("discogs_rating"),
+        "discogs_rating_count": d.get("discogs_rating_count"),
+        # Bandcamp metadata
+        "bandcamp_tags": _parse_list(d.get("bandcamp_tags")),
+        "bandcamp_label": d.get("bandcamp_label"),
+        # Canonical release selection: which release SoulSync picked and the
+        # evidence/status behind the pick.
+        "canonical_source": d.get("canonical_source"),
+        "canonical_album_id": d.get("canonical_album_id"),
+        "canonical_score": d.get("canonical_score"),
+        "canonical_resolved_at": _isoformat(d.get("canonical_resolved_at")),
+        "canonical_locked": _bool_or_none(d.get("canonical_locked")),
+        "canonical_track_count": d.get("canonical_track_count"),
+        # User locks (hand-set art/genres/metadata survive rescans)
+        "art_locked": _bool_or_none(d.get("art_locked")),
+        "genres_locked": _bool_or_none(d.get("genres_locked")),
+        "metadata_locked": _bool_or_none(d.get("metadata_locked")),
     }
     return filter_fields(result, fields)
 
@@ -199,9 +279,18 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "album_id": d.get("album_id"),
         "artist_id": d.get("artist_id"),
         "title": d.get("title"),
+        # Per-track performer credit (compilations, featured artists).
+        "track_artist": d.get("track_artist"),
         "track_number": d.get("track_number"),
+        "disc_number": d.get("disc_number"),
         "duration": d.get("duration"),
+        "year": d.get("year"),
         "file_path": d.get("file_path"),
+        # The path the media server reported, before SoulSync's mount
+        # mapping produced file_path — the pair identifies a file across
+        # container mounts.
+        "server_path": d.get("server_path"),
+        "file_size": d.get("file_size"),
         "bitrate": d.get("bitrate"),
         "bpm": d.get("bpm"),
         "explicit": _bool_or_none(d.get("explicit")),
@@ -214,6 +303,9 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "updated_at": _isoformat(d.get("updated_at")),
         "isrc": d.get("isrc"),
         "copyright": d.get("copyright"),
+        # MusicBrainz recording disambiguation ('live', 'acoustic', ...) —
+        # distinguishes versions of the same recording.
+        "recording_disambiguation": d.get("recording_disambiguation"),
         # Cross-install identity (soulid_worker). ``soul_id`` is the song
         # (artist + title); ``album_soul_id`` pins this specific release.
         "soul_id": d.get("soul_id"),
@@ -227,6 +319,10 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "tidal_id": d.get("tidal_id"),
         "qobuz_id": d.get("qobuz_id"),
         "genius_id": d.get("genius_id"),
+        "amazon_id": d.get("amazon_id"),
+        "jiosaavn_id": d.get("jiosaavn_id"),
+        "bandcamp_id": d.get("bandcamp_id"),
+        "bandcamp_url": d.get("bandcamp_url"),
         # Match statuses
         "musicbrainz_match_status": d.get("musicbrainz_match_status"),
         "spotify_match_status": d.get("spotify_match_status"),
@@ -237,6 +333,9 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "genius_match_status": d.get("genius_match_status"),
         "tidal_match_status": d.get("tidal_match_status"),
         "qobuz_match_status": d.get("qobuz_match_status"),
+        "amazon_match_status": d.get("amazon_match_status"),
+        "jiosaavn_match_status": d.get("jiosaavn_match_status"),
+        "bandcamp_match_status": d.get("bandcamp_match_status"),
         # Last attempted timestamps
         "musicbrainz_last_attempted": _isoformat(d.get("musicbrainz_last_attempted")),
         "spotify_last_attempted": _isoformat(d.get("spotify_last_attempted")),
@@ -247,6 +346,14 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
         "genius_last_attempted": _isoformat(d.get("genius_last_attempted")),
         "tidal_last_attempted": _isoformat(d.get("tidal_last_attempted")),
         "qobuz_last_attempted": _isoformat(d.get("qobuz_last_attempted")),
+        "amazon_last_attempted": _isoformat(d.get("amazon_last_attempted")),
+        "jiosaavn_last_attempted": _isoformat(d.get("jiosaavn_last_attempted")),
+        "bandcamp_last_attempted": _isoformat(d.get("bandcamp_last_attempted")),
+        # Bandcamp metadata
+        "bandcamp_tags": _parse_list(d.get("bandcamp_tags")),
+        "bandcamp_label": d.get("bandcamp_label"),
+        # User lock (hand-set metadata survives rescans)
+        "metadata_locked": _bool_or_none(d.get("metadata_locked")),
         # Last.fm metadata
         "lastfm_listeners": d.get("lastfm_listeners"),
         "lastfm_playcount": d.get("lastfm_playcount"),
