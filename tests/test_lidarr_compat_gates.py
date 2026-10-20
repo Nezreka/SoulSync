@@ -7,16 +7,10 @@ they still have to get through, and a read key still has to be stopped.
 from __future__ import annotations
 
 import hashlib
-import os
-import tempfile
 
 import pytest
 
-_TMP = tempfile.mkdtemp(prefix='soulsync-testdb-lidarr-gates-')
-os.environ['DATABASE_PATH'] = os.path.join(_TMP, 'lidarr-gates.db')
-os.environ['SOULSYNC_TEST_DB_READY'] = '1'
-
-from api import auth  # noqa: E402
+from api import auth
 
 web_server = pytest.importorskip('web_server')
 

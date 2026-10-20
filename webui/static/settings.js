@@ -3409,6 +3409,8 @@ async function loadSettingsData() {
         const _lcOn = document.getElementById('lidarr-compat-enabled');
         if (_lcOn) _lcOn.checked = settings.lidarr_compat?.enabled === true;
         loadLidarrCompatProfiles(settings.lidarr_compat?.profile_id ?? 1);
+        const _mcpOn = document.getElementById('mcp-enabled');
+        if (_mcpOn) _mcpOn.checked = settings.mcp?.enabled === true;
         const _wlTtl = document.getElementById('wishlist-ignore-ttl');
         if (_wlTtl) _wlTtl.value = settings.wishlist?.ignore_ttl_days ?? 30;
         const _wlWingIt = document.getElementById('wishlist-wing-it-guesses');
@@ -6601,6 +6603,9 @@ async function saveSettings(quiet = false) {
                 audiobook_path: document.getElementById('template-audiobook-path').value,
                 sample_path: document.getElementById('template-sample-path').value
             }
+        },
+        mcp: {
+            enabled: _cfgBool('mcp-enabled'),
         },
         lidarr_compat: {
             enabled: _cfgBool('lidarr-compat-enabled'),

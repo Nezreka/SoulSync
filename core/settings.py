@@ -665,6 +665,10 @@ class ConfigManager:
                 "enabled": False,
                 "profile_id": 1,
             },
+            # ai clients over /mcp, with an api key. off by default
+            "mcp": {
+                "enabled": False,
+            },
             "lidarr_download": {
                 "url": "",
                 "api_key": "",

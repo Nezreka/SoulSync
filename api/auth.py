@@ -66,6 +66,11 @@ READ_KEY_DENIED_PREFIXES = (
     "/api/v1/video/calendar",
 )
 
+# the mcp endpoint takes a POST from a read key too. it only shows a read key
+# the tools a read key could call here anyway, and each call is replayed
+# through this same check (api/mcp.py).
+READ_KEY_MCP_PATH = "/mcp"
+
 
 def key_scope(record) -> str:
     """The scope of a stored key record: admin, read, or read for anything unknown."""
@@ -73,6 +78,11 @@ def key_scope(record) -> str:
     if scope is None:
         return SCOPE_ADMIN
     return scope if scope in VALID_SCOPES else SCOPE_READ
+
+
+def read_key_reaches_mcp(method: str, path: str) -> bool:
+    """the one route outside /api/v1 a read key may call: POST /mcp, exactly."""
+    return method.upper() == "POST" and path == READ_KEY_MCP_PATH
 
 
 def read_key_may_access(method: str, path: str) -> bool:
@@ -235,6 +245,8 @@ def enforce_read_key_scope():
     if record is None or key_scope(record) != SCOPE_READ:
         return None
     if read_key_may_access(request.method, request.path):
+        return None
+    if read_key_reaches_mcp(request.method, request.path):
         return None
     return api_error("INSUFFICIENT_SCOPE", _READ_KEY_REFUSAL, 403)
 

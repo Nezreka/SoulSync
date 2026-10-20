@@ -74,29 +74,13 @@ def _root_folder():
 def _queue_album(album, artist_row) -> int:
     """put an album's tracks on the request profile's wishlist, through the
     same add the album modal uses (owned-track skip, ignore list, dedupe)."""
-    from core.library_scope import library_scope_for_profile, reset_library_scope, set_library_scope
-    from core.wishlist.routes import WishlistRouteRuntime, add_album_track_to_wishlist
+    from core.wishlist.album_request import queue_album_tracks
 
-    pid = request_profile_id()
-    runtime = WishlistRouteRuntime(
-        get_music_database=get_database, profile_id=pid, download_batches={}, download_tasks={},
-        tasks_lock=threading.Lock(), is_wishlist_actually_processing=lambda: False,
-        reset_wishlist_processing_state=lambda: None,
-        add_activity_item=lambda *a, **k: None,
-        active_server=config_manager.get_active_media_server(), logger=logger)
-    artist = {"id": artist_row.get("mbid") or "", "name": artist_row.get("name") or ""}
-    queued = 0
-    token = set_library_scope(library_scope_for_profile(pid))
-    try:
-        for track in album.get("tracks") or []:
-            payload, status = add_album_track_to_wishlist(
-                runtime, track=track, artist=artist, album=album, source_type="album",
-                source_context={"requested_via": "lidarr_api"})
-            if status == 200 and payload.get("success") and not payload.get("skipped"):
-                queued += 1
-    finally:
-        reset_library_scope(token)
-    return queued
+    return queue_album_tracks(
+        album, {"id": artist_row.get("mbid") or "", "name": artist_row.get("name") or ""},
+        profile_id=request_profile_id(), get_database=get_database,
+        active_server=config_manager.get_active_media_server(), logger=logger,
+        requested_via="lidarr_api")
 
 
 def _ownership(title, artist_name, track_count):

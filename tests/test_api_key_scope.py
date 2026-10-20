@@ -296,6 +296,13 @@ def _concrete(rule):
     return re.sub(r'<[^>]+>', '1', rule.rule)
 
 
+@pytest.mark.parametrize('method,path,ok', [
+    ('POST', '/mcp', True), ('GET', '/mcp', False), ('POST', '/mcp/', False),
+    ('POST', '/mcpx', False), ('POST', '/api/mcp', False), ('DELETE', '/mcp', False)])
+def test_the_mcp_exception_is_exactly_post_mcp(method, path, ok):
+    assert auth.read_key_reaches_mcp(method, path) is ok
+
+
 def test_every_route_a_read_key_should_not_reach_answers_403(client, keys):
     """Walk the whole route table. Anything outside the allowlist, and every
     non-GET, must be refused for scope before a view runs (so none of this
@@ -309,6 +316,8 @@ def test_every_route_a_read_key_should_not_reach_answers_403(client, keys):
             checked += 1
             if read_key_may_access(method, path):
                 continue
+            if auth.read_key_reaches_mcp(method, path):
+                continue  # api/mcp.py narrows it to read tools, tests/test_mcp.py
             resp = client.open(path, method=method, headers=READ, json={})
             assert _refused_for_scope(resp), f'{method} {rule.rule} reached a view with a read key ({resp.status_code})'
             refused += 1
