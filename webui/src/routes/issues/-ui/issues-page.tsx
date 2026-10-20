@@ -47,6 +47,7 @@ import {
 } from '../-issues.types';
 import { Route } from '../route';
 import { IssueDetailModal } from './issue-detail-modal';
+import statusStyles from './issue-status.module.css';
 import styles from './issues-page.module.css';
 
 export function IssuesPage() {
@@ -656,9 +657,11 @@ function IssueBoardCard({
         </div>
       </div>
       <div className={styles.issueCardRight}>
-        <span className={`${styles.issueStatusBadge} ${statusClassName}`}>{statusMeta.label}</span>
+        <span className={`${statusStyles.issueStatusBadge} ${statusClassName}`}>
+          {statusMeta.label}
+        </span>
         <span
-          className={`${styles.issuePriorityDot} ${priorityClass}`}
+          className={`${statusStyles.issuePriorityDot} ${priorityClass}`}
           title={`${issue.priority} priority`}
         />
       </div>
@@ -675,16 +678,16 @@ const EMPTY_ISSUE_COUNTS: IssueCounts = {
 };
 
 const ISSUE_STATUS_CLASS_NAMES: Record<IssueRecord['status'], string> = {
-  open: styles.issueStatusOpen,
-  in_progress: styles.issueStatusProgress,
-  resolved: styles.issueStatusResolved,
-  dismissed: styles.issueStatusDismissed,
+  open: statusStyles.issueStatusOpen,
+  in_progress: statusStyles.issueStatusProgress,
+  resolved: statusStyles.issueStatusResolved,
+  dismissed: statusStyles.issueStatusDismissed,
 };
 
 const ISSUE_PRIORITY_CLASS_NAMES: Record<IssuePriority, string> = {
-  high: styles.issuePriorityHigh,
-  low: styles.issuePriorityLow,
-  normal: styles.issuePriorityNormal,
+  high: statusStyles.issuePriorityHigh,
+  low: statusStyles.issuePriorityLow,
+  normal: statusStyles.issuePriorityNormal,
 };
 
 function getIssueStatusFilterLabel(status: IssuesSearch['status']): string {
@@ -693,11 +696,11 @@ function getIssueStatusFilterLabel(status: IssuesSearch['status']): string {
 }
 
 function getIssueStatusClassName(status: IssueRecord['status']): string {
-  return ISSUE_STATUS_CLASS_NAMES[status] || styles.issueStatusOpen;
+  return ISSUE_STATUS_CLASS_NAMES[status] || statusStyles.issueStatusOpen;
 }
 
 function getIssuePriorityClassName(priority: IssuePriority): string {
-  return ISSUE_PRIORITY_CLASS_NAMES[priority] || styles.issuePriorityNormal;
+  return ISSUE_PRIORITY_CLASS_NAMES[priority] || statusStyles.issuePriorityNormal;
 }
 
 const ISSUE_CATEGORY_FILTER_GROUPS = [

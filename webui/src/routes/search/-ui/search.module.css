@@ -227,18 +227,6 @@
   }
 }
 
-.hint {
-  margin-top: -8px;
-  padding-inline: 4px;
-  color: var(--sp-faint);
-  font-size: 12.5px;
-}
-
-.hint b {
-  color: var(--text-secondary);
-  font-weight: 500;
-}
-
 /* the source menu */
 .menu {
   position: absolute;
