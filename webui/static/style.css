@@ -54855,10 +54855,6 @@ tr.tag-diff-same {
     margin-top: 2px;
 }
 
-.explorer-picker-card-actions {
-    margin-top: 6px;
-}
-
 /* Status badges on picker cards — inline, not absolute */
 .explorer-picker-card-badge {
     margin-left: auto;
@@ -55024,433 +55020,11 @@ tr.tag-diff-same {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a06);
 } */
 
-.explorer-root-glow {
-    position: absolute;
-    width: 200px;
-    height: 200px;
-    background: radial-gradient(circle, rgba(var(--accent-rgb), 0.15) 0%, transparent 70%);
-    top: -80px;
-    left: -40px;
-    pointer-events: none;
-}
-
-.explorer-root-image {
-    width: 72px;
-    height: 72px;
-    border-radius: 14px;
-    object-fit: cover;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
-    border: 2px solid var(--white-a08);
-    flex-shrink: 0;
-    z-index: 1;
-}
-
-.explorer-root-image-placeholder {
-    width: 72px;
-    height: 72px;
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(var(--accent-rgb), 0.15);
-    color: var(--white-a30);
-    font-size: 28px;
-    flex-shrink: 0;
-    z-index: 1;
-}
-
-.explorer-root-info { z-index: 1; }
-
-.explorer-root-label {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1.5px;
-    color: rgba(var(--accent-rgb), 0.8);
-    margin-bottom: 4px;
-}
-
 .explorer-root-name {
     font-size: 22px;
     font-weight: 800;
     color: #fff;
     letter-spacing: -0.3px;
-}
-
-.explorer-root-meta {
-    font-size: 12px;
-    color: var(--white-a40);
-    margin-top: 4px;
-}
-
-/* Trunk — vertical line from root to artists */
-.explorer-trunk {
-    width: 2px;
-    height: 32px;
-    background: linear-gradient(to bottom, rgba(var(--accent-rgb), 0.4), rgba(var(--accent-rgb), 0.15));
-    margin: 0 auto;
-    border-radius: 2px;
-    animation: explorer-trunk-grow 0.4s ease 0.3s both;
-}
-
-@keyframes explorer-trunk-grow {
-    from { height: 0; opacity: 0; }
-    to { height: 32px; opacity: 1; }
-}
-
-/* Artist column — vertical list */
-.explorer-artists-column {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-}
-
-/* Artist row — connector + card + albums */
-.explorer-artist-row {
-    animation: explorer-node-enter 0.5s ease both;
-}
-
-/* Left connector (dot + horizontal line) */
-.explorer-artist-connector {
-    display: flex;
-    align-items: center;
-    padding-left: 48px;
-    height: 0;
-    position: relative;
-}
-
-.explorer-connector-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    background: var(--accent);
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
-    flex-shrink: 0;
-    position: relative;
-    z-index: 2;
-}
-
-.explorer-connector-line {
-    height: 2px;
-    flex: 1;
-    max-width: 32px;
-    background: linear-gradient(to right, rgba(var(--accent-rgb), 0.4), rgba(var(--accent-rgb), 0.1));
-    border-radius: 2px;
-}
-
-/* Artist card — horizontal layout */
-.explorer-artist-card {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 14px 20px;
-    margin: 0 16px;
-    background: var(--white-a03);
-    border: 1px solid var(--white-a06);
-    border-radius: 14px;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-}
-
-.explorer-artist-card:hover {
-    background: var(--white-a06);
-    border-color: rgba(var(--accent-rgb), 0.2);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-.explorer-artist-card.expanded {
-    border-color: rgba(var(--accent-rgb), 0.35);
-    background: rgba(var(--accent-rgb), 0.04);
-    box-shadow: 0 4px 24px rgba(var(--accent-rgb), 0.08);
-    border-bottom-left-radius: 4px;
-    border-bottom-right-radius: 4px;
-}
-
-.explorer-artist-card.error {
-    border-color: rgba(255, 71, 87, 0.15);
-    opacity: 0.6;
-    cursor: default;
-}
-
-.explorer-artist-card.empty {
-    opacity: 0.5;
-    cursor: default;
-}
-
-.explorer-artist-card-left { flex-shrink: 0; }
-
-.explorer-artist-avatar {
-    width: 52px;
-    height: 52px;
-    border-radius: var(--radius-circle);
-    overflow: hidden;
-    border: 2px solid var(--white-a08);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
-}
-
-.explorer-artist-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.explorer-artist-avatar span {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(var(--accent-rgb), 0.12);
-    color: var(--white-a40);
-    font-size: 20px;
-    font-weight: 700;
-}
-
-.explorer-artist-card-center {
-    flex: 1;
-    min-width: 0;
-}
-
-.explorer-artist-card-name {
-    font-size: 15px;
-    font-weight: 700;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.explorer-artist-card-tracks {
-    font-size: 11px;
-    color: var(--white-a35);
-    margin-top: 3px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-style: italic;
-}
-
-.explorer-artist-card-error {
-    font-size: 11px;
-    color: rgba(255, 71, 87, 0.7);
-    margin-top: 3px;
-}
-
-.explorer-artist-card-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-shrink: 0;
-}
-
-.explorer-artist-stat {
-    font-size: 11px;
-    color: var(--white-a35);
-    white-space: nowrap;
-}
-
-.explorer-artist-stat strong {
-    color: var(--white-a70);
-    font-weight: 700;
-}
-
-.explorer-expand-indicator {
-    font-size: 14px;
-    color: var(--white-a30);
-    transition: transform 0.3s;
-    width: 20px;
-    text-align: center;
-}
-
-.explorer-artist-card.expanded .explorer-expand-indicator {
-    color: var(--accent);
-}
-
-/* Albums container (expands below artist card) */
-.explorer-albums-container {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    margin: 0 16px;
-    border-left: 2px solid transparent;
-}
-
-.explorer-albums-container.open {
-    max-height: 4000px;
-    border-left-color: rgba(var(--accent-rgb), 0.15);
-    margin-left: 56px;
-    padding: 12px 0 12px 24px;
-}
-
-/* Album nodes — horizontal flow */
-.explorer-album-nodes {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-}
-
-/* Individual album node */
-.explorer-album-node {
-    display: flex;
-    align-items: stretch;
-    animation: explorer-node-enter 0.4s ease both;
-    position: relative;
-}
-
-.explorer-album-node-connector {
-    width: 20px;
-    display: flex;
-    align-items: center;
-    position: relative;
-}
-
-.explorer-album-node-connector::before {
-    content: '';
-    width: 100%;
-    height: 2px;
-    background: rgba(var(--accent-rgb), 0.15);
-    border-radius: 2px;
-}
-
-.explorer-album-node-connector::after {
-    content: '';
-    position: absolute;
-    right: 0;
-    width: 6px;
-    height: 6px;
-    border-radius: var(--radius-circle);
-    background: rgba(var(--accent-rgb), 0.3);
-    transform: translateX(50%);
-}
-
-.explorer-album-node-card {
-    width: 160px;
-    background: var(--white-a03);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.explorer-album-node:hover .explorer-album-node-card {
-    border-color: rgba(var(--accent-rgb), 0.3);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
-}
-
-.explorer-album-node.selected .explorer-album-node-card {
-    border-color: rgba(var(--accent-rgb), 0.6);
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.2), 0 4px 20px rgba(var(--accent-rgb), 0.12);
-}
-
-.explorer-album-node.owned {
-    opacity: 0.5;
-}
-
-.explorer-album-node.selected .explorer-album-node-connector::before,
-.explorer-album-node.selected .explorer-album-node-connector::after {
-    background: var(--accent);
-}
-
-/* Album node art */
-.explorer-album-node-art {
-    position: relative;
-    width: 100%;
-    aspect-ratio: 1;
-    overflow: hidden;
-    background: rgba(var(--accent-rgb), 0.05);
-}
-
-.explorer-album-node-art img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    transition: transform 0.4s;
-}
-
-.explorer-album-node:hover .explorer-album-node-art img {
-    transform: scale(1.06);
-}
-
-.explorer-album-node-art-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--white-a15);
-    font-size: 32px;
-}
-
-.explorer-album-node-check {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 26px;
-    height: 26px;
-    border-radius: var(--radius-md);
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    border: 2px solid var(--white-a25);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-    opacity: 0;
-}
-
-.explorer-album-node:hover .explorer-album-node-check,
-.explorer-album-node-check.checked {
-    opacity: 1;
-}
-
-.explorer-album-node-check.checked {
-    background: var(--accent);
-    border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.4);
-}
-
-.explorer-album-node-check svg {
-    width: 14px;
-    height: 14px;
-    color: #fff;
-    opacity: 0;
-}
-
-.explorer-album-node-check.checked svg {
-    opacity: 1;
-}
-
-/* Album node info */
-.explorer-album-node-info {
-    padding: 10px 12px 12px;
-}
-
-.explorer-album-node-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a90);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.explorer-album-node-meta {
-    font-size: 10px;
-    color: var(--white-a30);
-    margin-top: 4px;
-}
-
-.explorer-album-node-badges {
-    display: flex;
-    gap: 4px;
-    margin-top: 6px;
-    flex-wrap: wrap;
 }
 
 .explorer-node-badge {
@@ -55472,34 +55046,13 @@ tr.tag-diff-same {
     color: rgba(var(--accent-rgb), 0.9);
 }
 
-/* SVG connection lines */
-.explorer-connection-line {
-    stroke: rgba(var(--accent-rgb), 0.2);
-    stroke-width: 2;
-    fill: none;
-    animation: explorer-line-draw 0.6s ease forwards;
-    filter: drop-shadow(0 0 2px rgba(var(--accent-rgb), 0.1));
-}
-
 /* Responsive */
 @media (max-width: 900px) {
-    .explorer-root-node { padding: 16px 20px; gap: 14px; }
     .explorer-root-name { font-size: 18px; }
-    .explorer-root-image { width: 56px; height: 56px; }
-    .explorer-artist-card { margin: 0 8px; padding: 12px 14px; gap: 12px; }
-    .explorer-artist-card-right { gap: 10px; }
-    .explorer-albums-container.open { margin-left: 40px; padding-left: 16px; }
-    .explorer-album-node-card { width: 130px; }
 }
 
 @media (max-width: 600px) {
     .explorer-action-bar { flex-direction: column; gap: 10px; text-align: center; }
-    .explorer-artist-avatar { width: 40px; height: 40px; }
-    .explorer-artist-card-right { display: none; }
-    .explorer-album-nodes { gap: 8px; }
-    .explorer-album-node-card { width: 110px; }
-    .explorer-connector-dot { display: none; }
-    .explorer-connector-line { display: none; }
 }
 
 /* ==================================================================================
@@ -55546,30 +55099,6 @@ tr.tag-diff-same {
     to { opacity: 1; transform: none; }
 }
 
-.sync-card-delete {
-    position: absolute;
-    top: 6px;
-    right: 8px;
-    width: 20px;
-    height: 20px;
-    border: none;
-    background: var(--white-a06);
-    color: var(--white-a30);
-    border-radius: var(--radius-circle);
-    font-size: 14px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: all 0.2s;
-    z-index: 2;
-    line-height: 1;
-}
-
-.sync-history-card:hover .sync-card-delete { opacity: 1; }
-.sync-card-delete:hover { background: rgba(239, 83, 80, 0.3); color: #EF5350; }
-
 .sync-history-card::before {
     content: '';
     position: absolute;
@@ -55592,101 +55121,9 @@ tr.tag-diff-same {
     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
 
-.sync-card-thumb {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
-    overflow: hidden;
-    flex-shrink: 0;
-    background: var(--white-a04);
-}
-
-.sync-card-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.sync-card-thumb-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--white-a15);
-    font-size: 18px;
-}
-
 .sync-card-info {
     flex: 1;
     min-width: 0;
-}
-
-.sync-card-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--white-a85);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.sync-card-meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-top: 3px;
-}
-
-.sync-card-source {
-    font-size: 10px;
-    font-weight: 700;
-    color: var(--white-a40);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.sync-card-time {
-    font-size: 10px;
-    color: var(--white-a25);
-}
-
-.sync-card-stats {
-    flex-shrink: 0;
-    text-align: right;
-    min-width: 60px;
-}
-
-.sync-card-pct {
-    font-size: 18px;
-    font-weight: 800;
-    color: var(--white-a90);
-    line-height: 1;
-}
-
-.sync-card-bar {
-    width: 60px;
-    height: 3px;
-    background: var(--white-a06);
-    border-radius: 3px;
-    margin: 4px 0;
-    overflow: hidden;
-}
-
-.sync-card-bar-fill {
-    height: 100%;
-    border-radius: 3px;
-    transition: width 0.5s ease;
-}
-
-.health-good .sync-card-bar-fill { background: #4CAF50; }
-.health-warn .sync-card-bar-fill { background: #FFB74D; }
-.health-bad .sync-card-bar-fill { background: #EF5350; }
-
-.sync-card-counts {
-    font-size: 9px;
-    color: var(--white-a30);
-    white-space: nowrap;
 }
 
 /* Sync Detail Modal — wider than default discog modal */
@@ -59408,7 +58845,8 @@ body.max-performance #page-particles-canvas {
 }
 
 /* thin rule between "do something to the library" and "go somewhere". margin
-   auto on neither side, it should sit right where the list breaks. */
+   auto on neither side, it should sit right where the list breaks.
+   No markup renders it now; kept because library-strip-layout.test.ts pins it. */
 .library-status-divider {
     width: 1px;
     align-self: stretch;
@@ -59621,36 +59059,6 @@ body.max-performance #page-particles-canvas {
 /* ═══════════════════════════════════════════════════════════════════
    DASHBOARD TOOLS LINK CARD
    ═══════════════════════════════════════════════════════════════════ */
-
-.dashboard-tools-link {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    background: rgba(255, 255, 255, 0.025);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-lg);
-    cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.dashboard-tools-link:hover {
-    background: var(--white-a05);
-    border-color: rgba(var(--accent-rgb), 0.15);
-    transform: translateY(-1px);
-}
-
-.dashboard-tools-link-content {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.dashboard-tools-link-title {
-    font-size: 14px;
-    color: var(--white-a60);
-    font-weight: 500;
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    TOOLS PAGE
@@ -61043,16 +60451,6 @@ body.max-performance #page-particles-canvas {
     gap: 5px;
 }
 
-.watchlist-page-count {
-    color: rgba(255, 193, 7, 0.8);
-    font-weight: 600;
-}
-
-.watchlist-page-timer {
-    padding-left: 16px;
-    border-left: 1px solid var(--white-a08);
-}
-
 /* ── Action buttons ── */
 .watchlist-page-actions {
     display: flex;
@@ -62172,24 +61570,6 @@ body.max-performance #page-particles-canvas {
         transparent 100%);
 }
 
-.wishlist-page-header-left {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-/* Wishlist actions live in a left-aligned row below the header, matching
-   its sibling Watchlist page (.watchlist-page-actions) instead of sitting
-   inside the header top-right (WL1). */
-.wishlist-page-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-bottom: 20px;
-    padding: 0 4px;
-}
-
 .wishlist-page-title {
     display: flex;
     align-items: center;
@@ -62202,140 +61582,9 @@ body.max-performance #page-particles-canvas {
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-.wishlist-page-title-icon {
-    font-size: 26px;
-}
-
-.wishlist-page-meta {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    font-size: 13px;
-    color: var(--white-a45);
-    font-weight: 500;
-}
-
 .wishlist-page-count {
     color: rgb(var(--accent-light-rgb));
     font-weight: 600;
-}
-
-.wishlist-page-timer {
-    padding-left: 16px;
-    border-left: 1px solid var(--white-a08);
-}
-
-/* ── Stats strip ── */
-.wishlist-stats-strip {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0;
-    padding: 14px 24px;
-    background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.95) 0%,
-        rgba(12, 12, 12, 0.98) 100%);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-lg);
-    margin-bottom: 20px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2),
-                inset 0 1px 0 var(--white-a05);
-}
-
-.wishlist-stat-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    padding: 0 32px;
-}
-
-.wishlist-stat-value {
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.5px;
-    font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-.wishlist-stat-value.wishlist-stat-cycle {
-    font-size: 14px;
-    font-weight: 600;
-    color: rgb(var(--accent-light-rgb));
-}
-
-/* Retry profile select in the stats strip — reads as a stat value. */
-.wishlist-retry-profile-select {
-    background: transparent;
-    border: 0;
-    color: rgb(var(--accent-light-rgb));
-    font-size: 14px;
-    font-weight: 600;
-    font-family: inherit;
-    letter-spacing: inherit;
-    cursor: pointer;
-    max-width: 10rem;
-    text-overflow: ellipsis;
-}
-.wishlist-retry-profile-select:disabled {
-    cursor: wait;
-    opacity: 0.7;
-}
-.wishlist-retry-profile-select option {
-    color: #111;
-    font-weight: 400;
-}
-
-.wishlist-stat-label {
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--white-a35);
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-}
-
-.wishlist-stat-divider {
-    width: 1px;
-    height: 32px;
-    background: var(--white-a08);
-}
-
-/* ── Track search ── */
-.wishlist-track-search-container {
-    position: relative;
-    margin-bottom: 12px;
-}
-
-.wishlist-track-search-icon {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-}
-
-.wishlist-track-search-input {
-    width: 100%;
-    padding: 9px 16px 9px 36px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-md);
-    background: var(--white-a03);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.2s;
-    box-sizing: border-box;
-}
-
-.wishlist-track-search-input:focus {
-    border-color: rgba(var(--accent-rgb), 0.4);
-    background: var(--white-a05);
-    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.1);
-    outline: none;
-}
-
-.wishlist-track-search-input::placeholder {
-    color: var(--white-a30);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -62344,7 +61593,6 @@ body.max-performance #page-particles-canvas {
 .wl-nebula { position: relative; }
 /* ── Wishlist LIST view — the nebula's operational twin. Same data, same
    actions, sortable rows with retry status visible. ── */
-.wl-view-toggle { display: inline-flex; gap: 6px; margin-left: 4px; }
 .wl-list { display: flex; flex-direction: column; gap: 0; padding: 4px 2px 20px;
     max-width: 1500px; margin: 0 auto; width: 100%; }
 .wl-list-sortbar { display: flex; gap: 8px; margin-bottom: 14px; justify-content: space-between; }
@@ -62414,14 +61662,7 @@ body.max-performance #page-particles-canvas {
     .wl-list-track { grid-template-columns: 38px 1fr 80px auto; }
     .wl-list-track--select { grid-template-columns: 22px 38px 1fr 80px auto; }
     .wl-list-last { display: none; }
-    .wl-list-album { margin-left: 0; }
 }
-
-.wl-nebula-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
-.wl-nebula-search { flex: 1; min-width: 200px; padding: 10px 16px; border: 1px solid var(--white-a08); border-radius: 10px; background: var(--white-a03); color: #fff; font-size: 13px; transition: all 0.2s; box-sizing: border-box; }
-.wl-nebula-search:focus { border-color: rgba(var(--accent-rgb),0.4); background: var(--white-a05); box-shadow: 0 0 12px rgba(var(--accent-rgb),0.1); outline: none; }
-.wl-nebula-search::placeholder { color: var(--white-a25); }
-.wl-nebula-bar-actions { display: flex; gap: 8px; }
 
 .wl-nebula-field { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; padding: 10px 0 30px; }
 .wl-nebula-empty { width: 100%; text-align: center; padding: 60px 20px; color: var(--white-a20); font-size: 14px; }
@@ -62697,6 +61938,7 @@ body.max-performance #page-particles-canvas {
     width: 16px; height: 16px; border-radius: var(--radius-circle);
     display: flex; align-items: center; justify-content: center;
 }
+/* No markup uses these; kept because tests/test_wishlist_failing_badge.py pins them. */
 .wl-failing-filter { flex: 0 0 auto; }
 .wl-failing-filter.active {
     color: #fca5a5; background: rgba(239, 68, 68, 0.16);
@@ -62838,9 +62080,6 @@ body.max-performance #page-particles-canvas {
 .wl-moon-remove-btn:hover { transform: scale(1.15); }
 
 @media (max-width: 768px) {
-    .wl-nebula-bar { flex-direction: column; }
-    .wl-nebula-bar-actions { width: 100%; }
-    .wl-nebula-bar-actions button { flex: 1; }
     .wl-orb.orb-lg { width: 80px; height: 80px; }
     .wl-orb.orb-md { width: 70px; height: 70px; }
     .wl-orb.orb-sm { width: 60px; height: 60px; }
@@ -62871,54 +62110,8 @@ body.max-performance #page-particles-canvas {
         inset 0 1px 0 var(--white-a10);
 }
 
-.wishlist-page-container .wishlist-category-card.next-in-queue {
-    border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.35),
-        0 0 16px rgba(var(--accent-rgb), 0.06),
-        inset 0 1px 0 rgba(var(--accent-rgb), 0.1);
-}
-
-/* ── Mosaic background ── */
-.wishlist-mosaic-bg {
-    position: absolute;
-    inset: 0;
-    overflow: hidden;
-    border-radius: inherit;
-    z-index: 0;
-}
-
-.wishlist-mosaic-bg::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0.55));
-    z-index: 1;
-}
-
-/* ── Track list section ── */
-.wishlist-page-container .wishlist-category-tracks {
-    max-height: none;
-    background: rgba(255, 255, 255, 0.015);
-    border: 1px solid var(--white-a05);
-    border-radius: 14px;
-    padding: 16px;
-}
-
 .wishlist-page-container .wishlist-category-header {
     margin-bottom: 12px;
-}
-
-.wishlist-page-container .wishlist-tracks-scroll {
-    max-height: calc(100vh - 320px);
-    overflow-y: auto;
-}
-
-/* Category header right side with download button */
-.wishlist-category-header-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
 }
 
 /* ── Batch bar ── */
@@ -62940,37 +62133,6 @@ body.max-performance #page-particles-canvas {
 
 .wishlist-page-container .wishlist-album-card:hover {
     border-color: var(--white-a10);
-}
-
-/* ── Empty state ── */
-.wishlist-page-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 80px 20px;
-    text-align: center;
-}
-
-.wishlist-page-empty-icon {
-    opacity: 0.15;
-    margin-bottom: 8px;
-}
-
-.wishlist-page-empty h3 {
-    margin: 12px 0 8px;
-    color: var(--white-a70);
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-}
-
-.wishlist-page-empty p {
-    margin: 0 0 24px;
-    font-size: 14px;
-    color: var(--white-a35);
-    max-width: 360px;
-    line-height: 1.5;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -63016,19 +62178,6 @@ body.max-performance #page-particles-canvas {
 
     .watchlist-sort-select {
         width: 100%;
-    }
-
-    .wishlist-page-actions {
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .wishlist-stat-item {
-        padding: 0 16px;
-    }
-
-    .wishlist-stat-value {
-        font-size: 18px;
     }
 }
 
