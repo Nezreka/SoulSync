@@ -20,6 +20,7 @@ import re
 import sqlite3
 import tempfile
 import textwrap
+import threading
 
 import pytest
 from flask import Flask, g
@@ -421,11 +422,24 @@ def test_reachable_gets_write_nothing_when_run(client, keys, monkeypatch):
     reads handler bodies; this catches a helper that writes underneath."""
     real_connect = sqlite3.connect
     writes: list[str] = []
+    # open the databases first. when another test file moved DATABASE_PATH at
+    # import, the first GET would otherwise build a fresh one and the schema
+    # setup would read as that GET writing
+    from api.video import get_video_db
+    from database.music_database import get_database
+    get_database()
+    get_video_db()
+    # the test client runs a request on this thread. background workers
+    # (listening stats cache, credits backfill) keep writing on theirs and
+    # used to get blamed on whatever GET was in flight
+    test_thread = threading.get_ident()
 
     def authorizer(action, arg1, arg2, dbname, source):
         # SQLite builds its own temp tables for some sorts and joins; that is
         # not a write to the data
         if arg1 and str(arg1).startswith('sqlite_temp'):
+            return sqlite3.SQLITE_OK
+        if threading.get_ident() != test_thread:
             return sqlite3.SQLITE_OK
         if action in _SQLITE_WRITES:
             writes.append(f'{action} {arg1}')
