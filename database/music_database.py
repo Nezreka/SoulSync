@@ -2982,7 +2982,7 @@ class MusicDatabase:
             cursor.execute("""
                 UPDATE mirrored_playlists
                 SET upstream_playlist_id = CASE
-                    WHEN source_playlist_id LIKE '%_req_%' THEN
+                    WHEN instr(source_playlist_id, '_req_') > 0 THEN
                         substr(source_playlist_id, 1, instr(source_playlist_id, '_req_') - 1)
                     ELSE source_playlist_id
                 END
