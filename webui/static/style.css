@@ -8255,7 +8255,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     border: none;
     outline: none;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
@@ -8306,13 +8306,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Amber "caution" color (e.g. bulk fix-all). */
 .btn--warning {
-    background: rgba(245, 158, 11, 0.12);
+    background: rgba(var(--warning-strong-rgb), 0.12);
     color: #fbbf24;
-    border: 1px solid rgba(245, 158, 11, 0.3);
+    border: 1px solid rgba(var(--warning-strong-rgb), 0.3);
 }
 .btn--warning:hover:not(:disabled) {
-    background: rgba(245, 158, 11, 0.22);
-    border-color: rgba(245, 158, 11, 0.45);
+    background: rgba(var(--warning-strong-rgb), 0.22);
+    border-color: rgba(var(--warning-strong-rgb), 0.45);
 }
 
 /* Compact toolbar size — the second button tier used in headers, bulk-action
@@ -8353,7 +8353,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 .tab:hover:not(.active) { color: var(--white-a80); }
 .tab.active {
@@ -8372,13 +8372,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a06);
     background: rgba(18, 18, 22, 0.9);
     backdrop-filter: blur(12px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a15);
-    transition: all 0.2s ease;
+    box-shadow: 0 4px 16px var(--black-a30), inset 0 1px 0 var(--white-a15);
+    transition: all var(--dur-base) ease;
 }
 .card:hover {
     transform: translateY(-2px);
     border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--white-a15);
+    box-shadow: 0 8px 28px var(--black-a40), inset 0 1px 0 var(--white-a15);
 }
 
 
@@ -8519,13 +8519,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 150px;
     border-radius: var(--radius-circle);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     background: linear-gradient(135deg,
             rgba(26, 26, 26, 0.95) 0%,
             rgba(18, 18, 18, 0.98) 100%);
     border: 2px solid var(--white-a10);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 4px 12px var(--black-a40),
         0 0 0 1px rgba(var(--accent-rgb), 0.05),
         inset 0 1px 0 var(--white-a06);
     overflow: hidden;
@@ -8535,7 +8535,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     transform: translateY(-3px) scale(1.05);
     border-color: rgba(var(--accent-rgb), 0.3);
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 8px 20px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.2),
         0 0 15px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a10);
@@ -8548,7 +8548,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .dashboard-discover-bubble.completed:hover {
     border-color: rgba(var(--accent-rgb), 0.6);
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 8px 20px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.3),
         0 0 15px rgba(var(--accent-rgb), 0.15),
         inset 0 1px 0 var(--white-a10);
@@ -8567,8 +8567,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     position: absolute;
     inset: 0;
     background: linear-gradient(135deg,
-            rgba(0, 0, 0, 0.3) 0%,
-            rgba(0, 0, 0, 0.6) 100%);
+            var(--black-a30) 0%,
+            var(--black-a60) 100%);
     border-radius: var(--radius-circle);
 }
 
@@ -8595,7 +8595,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 3px var(--black-a80);
 }
 
 .dashboard-discover-bubble-status {
@@ -8603,7 +8603,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     color: rgba(var(--accent-rgb), 0.9);
     margin-top: 4px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 3px var(--black-a80);
 }
 
 .dashboard-discover-bubble.completed .dashboard-discover-bubble-status {
@@ -8697,7 +8697,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     object-fit: contain;
     flex-shrink: 0;
     filter: drop-shadow(0 2px 8px rgba(var(--accent-rgb), 0.3));
-    transition: transform 0.3s ease, filter 0.3s ease;
+    transition: transform var(--dur-slow) ease, filter var(--dur-slow) ease;
 }
 
 /* Dashboard is the one page that keeps the large hero illustration. */
@@ -8776,7 +8776,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: none; border: none; padding: 0; margin: 0;
     font-family: inherit; font-size: 13px; font-weight: 600;
     color: var(--white-a55); letter-spacing: 0.2px;
-    cursor: pointer; transition: color 0.15s ease;
+    cursor: pointer; transition: color var(--dur-fast) ease;
 }
 .hello-stat:hover { color: #fff; }
 .hello-stat + .hello-stat::before {
@@ -8885,13 +8885,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ── Worker Orbs ── */
 .worker-orb-canvas {
-    transition: opacity 0.4s ease;
+    transition: opacity var(--dur-slower) ease;
 }
 
 .worker-orb-hidden {
     opacity: 0 !important;
     pointer-events: none !important;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--dur-moderate) ease;
 }
 
 .worker-orb-reveal {
@@ -8914,7 +8914,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     padding: 12px 24px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
     user-select: none;
@@ -8926,15 +8926,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     backdrop-filter: blur(8px) saturate(1.2);
     border: 1px solid var(--white-a10);
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.3),
+        0 8px 20px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
 }
 
 .header-button:hover {
     transform: translateY(-1px);
     box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 6px 20px var(--black-a40),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
 }
 
@@ -9007,20 +9007,20 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Outer glow */
 .watchlist-button {
-    box-shadow: 0 0 14px rgba(255, 193, 7, 0.12), 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 14px rgba(255, 193, 7, 0.12), 0 4px 16px var(--black-a30);
 }
 
 .wishlist-button {
-    box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.12), 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.12), 0 4px 16px var(--black-a30);
 }
 
 .watchlist-button:hover {
-    box-shadow: 0 0 24px rgba(255, 193, 7, 0.25), 0 4px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 24px rgba(255, 193, 7, 0.25), 0 4px 20px var(--black-a40);
     transform: translateY(-1px);
 }
 
 .wishlist-button:hover {
-    box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.25), 0 4px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 24px rgba(var(--accent-rgb), 0.25), 0 4px 20px var(--black-a40);
     transform: translateY(-1px);
 }
 
@@ -9057,7 +9057,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 11px;
     font-weight: 800;
     line-height: 1;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .watchlist-button .hero-btn-badge {
@@ -9137,7 +9137,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* ── Wishlist inactive state ── */
 .wishlist-button.wishlist-inactive {
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
 }
 
 .wishlist-button.wishlist-inactive::before {
@@ -9162,7 +9162,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .wishlist-button.wishlist-inactive:hover {
-    box-shadow: 0 0 12px var(--white-a08), 0 4px 20px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 0 12px var(--white-a08), 0 4px 20px var(--black-a40);
 }
 
 /* Active wishlist just uses the normal accent styles above */
@@ -9186,11 +9186,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 20px 22px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), inset 0 1px 0 var(--white-a15);
+    box-shadow: 0 4px 16px var(--black-a30), inset 0 1px 0 var(--white-a15);
     display: flex;
     flex-direction: column;
     gap: 8px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     transform: translateZ(0);
 }
 
@@ -9203,13 +9203,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     right: 20%;
     height: 2px;
     background: linear-gradient(90deg, transparent, var(--white-a10), transparent);
-    transition: all 0.3s;
+    transition: all var(--dur-slow);
 }
 
 .service-card:hover {
     transform: translateY(-2px);
     border-color: rgba(var(--accent-rgb), 0.15);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+    box-shadow: 0 8px 32px var(--black-a40), 0 0 20px rgba(var(--accent-rgb), 0.06);
 }
 
 .service-card:hover::before {
@@ -9325,7 +9325,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-height: 85dvh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 32px 80px var(--black-a70);
     overflow: hidden;
     border: 1px solid var(--white-a06);
 }
@@ -9369,8 +9369,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .rate-modal-chart-wrap {
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 14px;
+    background: var(--black-a30);
+    border-radius: var(--radius-card);
     padding: 16px;
     margin-bottom: 20px;
     border: 1px solid var(--white-a03);
@@ -9449,7 +9449,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .rate-modal-ep-fill {
     height: 100%;
     border-radius: var(--radius-xs);
-    transition: width 0.5s ease, background 0.3s ease;
+    transition: width var(--dur-slowest) ease, background var(--dur-slow) ease;
     box-shadow: 0 0 8px var(--white-a05);
 }
 
@@ -9497,11 +9497,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 20px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
     display: flex;
     flex-direction: column;
     gap: 4px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 
 /* Top accent line */
@@ -9514,13 +9514,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 2px;
     background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
     border-radius: 2px;
-    transition: all 0.3s;
+    transition: all var(--dur-slow);
 }
 
 .stat-card-dashboard:hover {
     transform: translateY(-2px);
     border-color: rgba(var(--accent-rgb), 0.15);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+    box-shadow: 0 8px 32px var(--black-a40), 0 0 20px rgba(var(--accent-rgb), 0.06);
 }
 
 .stat-card-dashboard:hover::before {
@@ -9564,11 +9564,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 22px 24px;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
     display: flex;
     flex-direction: column;
     gap: 14px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 
 /* Top accent line */
@@ -9581,13 +9581,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 2px;
     background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
     border-radius: 2px;
-    transition: all 0.3s;
+    transition: all var(--dur-slow);
 }
 
 .tool-card:hover {
     transform: translateY(-2px);
     border-color: rgba(var(--accent-rgb), 0.15);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px rgba(var(--accent-rgb), 0.06);
+    box-shadow: 0 8px 32px var(--black-a40), 0 0 20px rgba(var(--accent-rgb), 0.06);
 }
 
 .tool-card:hover::before {
@@ -9622,12 +9622,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 9px 14px;
     background: var(--white-a04);
     border: 1px solid var(--white-a08);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a80);
     font-size: 13px;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     cursor: pointer;
 }
 
@@ -9649,12 +9649,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .tool-card-controls button {
     padding: 10px 20px;
     border: 1px solid var(--white-a10);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 13px;
     font-weight: 600;
     letter-spacing: 0.01em;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     outline: none;
     user-select: none;
@@ -9670,10 +9670,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
     opacity: 0;
-    transition: opacity 0.3s ease;
+    transition: opacity var(--dur-slow) ease;
 }
 
 .tool-card-controls button:hover:not(:disabled)::before {
@@ -9712,7 +9712,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 14px;
     box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.2);
     width: 100%;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
 }
 
 .media-scan-btn:hover:not(:disabled) {
@@ -9780,10 +9780,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--black-a25);
     border-radius: var(--radius-md);
     padding: 8px 10px;
-    transition: background 0.2s ease;
+    transition: background var(--dur-base) ease;
 }
 
 .backup-list-item:hover {
@@ -9827,11 +9827,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: var(--white-a08);
     border: none;
     border-radius: var(--radius-sm);
-    color: #b3b3b3;
+    color: var(--text-soft);
     font-size: 11px;
     padding: 4px 8px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .backup-list-actions .backup-dl-btn:hover {
@@ -9872,12 +9872,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .activity-subtitle {
     font-size: 11px;
-    color: #b3b3b3;
+    color: var(--text-soft);
 }
 
 .activity-time {
     font-size: 11px;
-    color: #b3b3b3;
+    color: var(--text-soft);
     white-space: nowrap;
 }
 
@@ -10002,7 +10002,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-sm);
     padding: 4px 10px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .library-history-btn:hover {
@@ -10015,7 +10015,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 #library-history-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--black-a70);
     backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
@@ -10039,7 +10039,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 24px 80px var(--black-a60);
 }
 
 .library-history-modal-header {
@@ -10065,7 +10065,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     padding: 0 4px;
     line-height: 1;
-    transition: color 0.2s ease;
+    transition: color var(--dur-base) ease;
 }
 
 .library-history-modal-close:hover {
@@ -10088,7 +10088,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-md);
     padding: 7px 16px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -10111,7 +10111,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: var(--white-a08);
     color: var(--white-a40);
     padding: 1px 7px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     min-width: 20px;
     text-align: center;
 }
@@ -10149,7 +10149,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-left: 3px solid rgba(var(--accent-rgb), 0.15);
     border-bottom: 1px solid var(--white-a03);
     border-radius: var(--radius-md);
-    transition: all 0.15s ease;
+    transition: all var(--dur-fast) ease;
 }
 
 .library-history-entry:hover {
@@ -10242,7 +10242,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 14px;
     padding: 0 4px;
     flex-shrink: 0;
-    transition: color 0.2s, transform 0.25s;
+    transition: color var(--dur-base), transform var(--dur-moderate);
     line-height: 1;
 }
 .library-history-entry.lh-expandable:hover .lh-expand-btn {
@@ -10390,7 +10390,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-sm);
     padding: 5px 12px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .library-history-page-btn:hover:not(:disabled) {
@@ -10421,7 +10421,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 500;
     cursor: pointer;
     margin-left: 8px;
-    transition: background 0.15s, border-color 0.15s;
+    transition: background var(--dur-fast), border-color var(--dur-fast);
 }
 .lh-audit-btn:hover {
     background: rgba(var(--accent-rgb), 0.22);
@@ -10439,7 +10439,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 32px 96px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 32px 96px var(--black-a70);
     position: relative;
 }
 .download-audit-close {
@@ -10455,7 +10455,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 18px;
     line-height: 1;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background var(--dur-fast), color var(--dur-fast);
     z-index: 2;
 }
 .download-audit-close:hover {
@@ -10475,10 +10475,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .download-audit-hero-art {
     width: 88px;
     height: 88px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     object-fit: cover;
     background: var(--white-a04);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 8px 22px var(--black-a45);
 }
 .download-audit-hero-art-placeholder {
     display: grid;
@@ -10575,7 +10575,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     position: relative;
     border-bottom: 2px solid transparent;
-    transition: color 0.15s;
+    transition: color var(--dur-fast);
 }
 .download-audit-tab:hover {
     color: var(--white-a80);
@@ -10613,7 +10613,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 500;
     padding: 0;
     flex: 0 0 auto;
-    transition: color 0.15s;
+    transition: color var(--dur-fast);
 }
 .download-audit-stepper-node:hover { color: var(--white-a85); }
 .download-audit-stepper-node.active { color: #fff; }
@@ -10633,7 +10633,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: var(--white-a05);
     border: 1.5px solid var(--white-a12);
     color: var(--white-a60);
-    transition: transform 0.15s, box-shadow 0.15s;
+    transition: transform var(--dur-fast), box-shadow var(--dur-fast);
 }
 .download-audit-stepper-node.active .download-audit-stepper-circle {
     transform: scale(1.08);
@@ -10698,8 +10698,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .download-audit-final-path {
     margin-top: 4px;
     padding: 14px 16px;
-    background: rgba(0, 0, 0, 0.25);
-    border-radius: 10px;
+    background: var(--black-a25);
+    border-radius: var(--radius-control);
 }
 .download-audit-final-path-label {
     text-transform: uppercase;
@@ -10879,7 +10879,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .download-audit-source-card {
     border: 1px solid var(--white-a05);
     background: rgba(255, 255, 255, 0.025);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 12px 14px;
     min-width: 0;  /* allow flex/grid children to shrink + wrap */
 }
@@ -10929,7 +10929,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 24px 80px var(--black-a60);
 }
 .sync-history-modal-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -10938,7 +10938,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-history-modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--white-a90); }
 .sync-history-modal-close {
     background: none; border: none; color: var(--white-a50);
-    font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; transition: color 0.2s ease;
+    font-size: 22px; cursor: pointer; padding: 0 4px; line-height: 1; transition: color var(--dur-base) ease;
 }
 .sync-history-modal-close:hover { color: #fff; }
 .sync-history-tabs {
@@ -10947,14 +10947,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-history-tab {
     font-size: 12px; font-weight: 500; color: var(--white-a45);
     background: var(--white-a04); border: 1px solid var(--white-a06);
-    border-radius: var(--radius-md); padding: 6px 12px; cursor: pointer; transition: all 0.2s ease;
+    border-radius: var(--radius-md); padding: 6px 12px; cursor: pointer; transition: all var(--dur-base) ease;
     display: flex; align-items: center; gap: 6px;
 }
 .sync-history-tab:hover { color: var(--white-a70); background: var(--white-a08); }
 .sync-history-tab.active { color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.12); border-color: rgba(var(--accent-rgb), 0.3); }
 .sync-history-tab-count {
     font-size: 10px; font-weight: 600; background: var(--white-a08);
-    color: var(--white-a40); padding: 1px 6px; border-radius: 10px; min-width: 18px; text-align: center;
+    color: var(--white-a40); padding: 1px 6px; border-radius: var(--radius-control); min-width: 18px; text-align: center;
 }
 .sync-history-tab.active .sync-history-tab-count { background: rgba(var(--accent-rgb), 0.2); color: rgb(var(--accent-rgb)); }
 .sync-history-list { flex: 1; overflow-y: auto; padding: 8px 16px; min-height: 200px; }
@@ -10965,7 +10965,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex; align-items: center; gap: 12px; padding: 10px 12px;
     border-left: 3px solid rgba(var(--accent-rgb), 0.15);
     border-bottom: 1px solid var(--white-a03); border-radius: var(--radius-md);
-    transition: background 0.15s ease; cursor: default;
+    transition: background var(--dur-fast) ease; cursor: default;
 }
 .sync-history-entry:hover { background: var(--white-a03); }
 .sync-history-thumb {
@@ -11017,7 +11017,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-history-resync-btn {
     font-size: 11px; font-weight: 600; color: rgb(var(--accent-rgb));
     background: rgba(var(--accent-rgb), 0.1); border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; transition: all 0.2s ease;
+    border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; transition: all var(--dur-base) ease;
     flex-shrink: 0; white-space: nowrap;
 }
 .sync-history-resync-btn:hover {
@@ -11026,7 +11026,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-history-delete-btn {
     font-size: 14px; line-height: 1; color: var(--white-a20);
     background: none; border: none; cursor: pointer; padding: 2px 4px;
-    border-radius: var(--radius-xs); transition: all 0.15s ease; flex-shrink: 0;
+    border-radius: var(--radius-xs); transition: all var(--dur-fast) ease; flex-shrink: 0;
 }
 .sync-history-delete-btn:hover { color: #f44336; background: rgba(244, 67, 54, 0.1); }
 .sync-history-resync-btn:disabled {
@@ -11039,7 +11039,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: rgba(var(--accent-rgb), 0.03);
 }
 .sync-history-live-progress {
-    padding: 10px 14px; background: rgba(0, 0, 0, 0.15);
+    padding: 10px 14px; background: var(--black-a15);
     border-top: 1px solid var(--white-a05);
     animation: syncHistoryFadeIn 0.2s ease;
 }
@@ -11050,7 +11050,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .sync-history-progress-bar-fill {
     height: 100%; background: rgb(var(--accent-rgb)); border-radius: var(--radius-xs);
-    transition: width 0.3s ease; width: 0%;
+    transition: width var(--dur-slow) ease; width: 0%;
 }
 .sync-history-progress-text {
     display: flex; align-items: center; justify-content: space-between;
@@ -11069,7 +11069,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 10px; font-weight: 600; color: #f44336;
     background: rgba(244, 67, 54, 0.1); border: 1px solid rgba(244, 67, 54, 0.25);
     border-radius: var(--radius-xs); padding: 3px 8px; cursor: pointer; margin-left: 8px;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 .sync-history-cancel-btn:hover {
     background: rgba(244, 67, 54, 0.2); border-color: rgba(244, 67, 54, 0.5);
@@ -11094,7 +11094,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .modal-sync-progress-bar-fill {
     height: 100%; background: #42a5f5; border-radius: var(--radius-xs);
-    transition: width 0.3s ease; width: 0%;
+    transition: width var(--dur-slow) ease; width: 0%;
 }
 .modal-sync-progress-info {
     display: flex; align-items: center; gap: 10px; font-size: 11px;
@@ -11125,7 +11125,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .sync-history-page-btn {
     font-size: 12px; font-weight: 500; color: var(--white-a50);
     background: var(--white-a05); border: 1px solid var(--white-a08);
-    border-radius: var(--radius-sm); padding: 5px 12px; cursor: pointer; transition: all 0.2s ease;
+    border-radius: var(--radius-sm); padding: 5px 12px; cursor: pointer; transition: all var(--dur-base) ease;
 }
 .sync-history-page-btn:hover:not(:disabled) { color: rgb(var(--accent-rgb)); background: rgba(var(--accent-rgb), 0.1); }
 .sync-history-page-btn:disabled { opacity: 0.3; cursor: default; }
@@ -11207,7 +11207,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    transition: background var(--dur-base), color var(--dur-base), border-color var(--dur-base);
 }
 
 .auto-sync-refresh:hover {
@@ -11317,8 +11317,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-monitor-card.finished {
-    border-color: rgba(34, 197, 94, 0.22);
-    background: rgba(34, 197, 94, 0.055);
+    border-color: rgba(var(--success-strong-rgb), 0.22);
+    background: rgba(var(--success-strong-rgb), 0.055);
 }
 
 .auto-sync-monitor-card-main {
@@ -11372,7 +11372,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 100%;
     border-radius: inherit;
     background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    transition: width 0.25s ease;
+    transition: width var(--dur-moderate) ease;
 }
 
 .auto-sync-monitor-card small {
@@ -11575,7 +11575,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     letter-spacing: 0.3px;
     cursor: pointer;
     font-family: inherit;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .auto-sync-source-bulk-btn:hover {
@@ -11596,10 +11596,10 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 8px;
     padding: 11px 14px;
     border: 1px solid var(--white-a07);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(22, 22, 22, 0.95);
     cursor: pointer;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease;
 }
 
 .auto-sync-kind-group-head:hover {
@@ -11615,7 +11615,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-shrink: 0;
     font-size: 9px;
     color: var(--white-a40);
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
 }
 
 .auto-sync-kind-group.expanded .auto-sync-kind-group-chevron {
@@ -11920,7 +11920,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-scheduled-timing small {
     max-width: 100%;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 10px;
     font-weight: 600;
     line-height: 1.5;
@@ -11950,7 +11950,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-xl);
     background: rgba(255, 255, 255, 0.025);
     transition: border-color 0.22s ease, background 0.22s ease,
-                box-shadow 0.22s ease, transform 0.18s ease;
+                box-shadow 0.22s ease, transform var(--dur-quick) ease;
 }
 
 .auto-sync-lane.empty {
@@ -12192,7 +12192,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background var(--dur-base), border-color var(--dur-base);
 }
 
 .auto-sync-error-retry:hover {
@@ -12238,7 +12238,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     flex-shrink: 0;
     font-size: 12px;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .auto-sync-scheduled-card button.run {
@@ -12302,8 +12302,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 4px;
     padding: 3px;
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.25);
+    border-radius: var(--radius-control);
+    background: var(--black-a25);
 }
 
 .auto-sync-history-filter-btn {
@@ -12320,7 +12320,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 11px;
     font-weight: 600;
     font-family: inherit;
-    transition: color 0.15s ease, background 0.15s ease;
+    transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 
 .auto-sync-history-filter-btn:hover {
@@ -12375,7 +12375,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.2px;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     font-family: inherit;
 }
 
@@ -12430,7 +12430,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     letter-spacing: 0.3px;
     text-transform: uppercase;
     font-family: inherit;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .auto-sync-history-run-again:hover {
@@ -12493,7 +12493,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-weekly-editor-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--black-a60);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     z-index: 1050;
@@ -12617,7 +12617,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
-    transition: all 0.15s ease;
+    transition: all var(--dur-fast) ease;
 }
 
 .auto-sync-weekly-editor-save {
@@ -12662,7 +12662,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 12px;
     padding: 12px 14px;
     border: 1px solid var(--white-a07);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(22, 22, 22, 0.95);
     overflow: hidden;
 }
@@ -12722,7 +12722,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-card-flow .flow-notify {
     font-size: 11px;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     white-space: nowrap;
 }
 
@@ -12756,7 +12756,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-status.enabled {
-    background: rgba(34, 197, 94, 0.14);
+    background: rgba(var(--success-strong-rgb), 0.14);
     color: #4ade80;
 }
 
@@ -12826,8 +12826,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-history-entry {
     background: rgba(22, 22, 22, 0.95);
     border: 1px solid var(--white-a07);
-    border-radius: 10px;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    border-radius: var(--radius-control);
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease;
 }
 
 .auto-sync-history-entry:hover {
@@ -12855,7 +12855,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-history-row:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb), 0.45);
     outline-offset: -2px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
 }
 
 .auto-sync-history-info {
@@ -12887,7 +12887,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-history-flow .flow-notify {
     font-size: 11px;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     white-space: nowrap;
 }
 
@@ -12921,7 +12921,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 10px;
     font-weight: 700;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a05);
     color: var(--white-a60);
     margin-left: auto;
@@ -12948,7 +12948,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     justify-content: center;
     cursor: pointer;
     color: var(--white-a45);
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .auto-sync-history-expand-btn:hover {
@@ -12959,7 +12959,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .auto-sync-history-expand-icon {
     font-size: 9px;
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
     display: inline-block;
 }
 
@@ -12972,7 +12972,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .auto-sync-history-detail {
     max-height: 0;
     overflow: hidden;
-    transition: max-height 0.3s ease;
+    transition: max-height var(--dur-slow) ease;
     border-top: 1px solid transparent;
 }
 
@@ -12989,7 +12989,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .auto-sync-history-stat {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--black-a25);
     border-radius: var(--radius-md);
     padding: 8px 12px;
 }
@@ -13071,7 +13071,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     align-items: center;
     gap: 5px;
     padding: 3px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(var(--accent-rgb), 0.10);
     border: 1px solid rgba(var(--accent-rgb), 0.18);
     color: rgb(var(--accent-light-rgb));
@@ -13316,7 +13316,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
             rgb(var(--accent-neon-rgb)) 100%);
     border-radius: var(--radius-xs);
     width: 0%;
-    transition: width 0.3s ease;
+    transition: width var(--dur-slow) ease;
     position: relative;
 }
 
@@ -13345,7 +13345,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 10px 12px;
     background: var(--white-a02);
     border: 1px solid var(--white-a04);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
 }
 
 .manual-library-match-stats .stat-item-value {
