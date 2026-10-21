@@ -73,6 +73,33 @@ def _album_art_by_id(conn, album_ids: set[str]) -> dict[str, str]:
         "AND thumb_url IS NOT NULL AND thumb_url != ''", ids)}
 
 
+def _album_consistency_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
+    """Explain an unresolved album disagreement before offering group approval."""
+    labels = {'album': 'album title', 'musicbrainz_release_id': 'MusicBrainz release ID'}
+    fields, count = set(), 0
+    for row in rows:
+        details = row.get('details') if isinstance(row.get('details'), dict) else {}
+        if row.get('review_tier') == 'ready' or not details.get('metadata_review_reason'):
+            continue
+        changes = details.get('changes') or {}
+        affected = {field for field in labels
+                    if field in (details.get('album_consistency') or {}) and field in changes
+                    and _change_value(changes[field], 'old') != _change_value(changes[field], 'new')}
+        if affected:
+            fields.update(affected)
+            count += 1
+    if not count:
+        return None
+    subject = ' and '.join(label for field, label in labels.items() if field in fields)
+    summary = (f'Files disagree on {subject}. Proposed corrections affect '
+               f'{count} track{"s" if count != 1 else ""}')
+    other = len(rows) - count
+    if other:
+        summary += (f'; this group also includes metadata changes on '
+                    f'{other} other track{"s" if other != 1 else ""}')
+    return 'Resolve conflicting album metadata', summary + '.'
+
+
 def _uniform_change_summary(rows: list[dict[str, Any]]) -> tuple[str, str] | None:
     """Describe one identical metadata field change across an album."""
     changes = [
@@ -249,12 +276,13 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         risk = ('destructive' if 'destructive' in tiers else
                 'manual' if 'manual' in tiers else
                 'blocked' if 'blocked' in tiers else 'ready')
+        consistency = _album_consistency_summary(rows)
         if category == 'numbering':
             decision_label, summary = _numbering_change_summary(rows)
         elif category == 'title_conventions':
             summary = f'{len(rows)} title wording changes preserve the identified recordings.'
         elif category == 'metadata':
-            uniform = _uniform_change_summary(rows)
+            uniform = consistency or _uniform_change_summary(rows)
             if uniform:
                 decision_label, summary = uniform
             else:
@@ -300,6 +328,9 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'risk': risk, 'summary': summary,
             'finding_ids': [row.get('id') for row in rows],
             'action_count': len(rows),
+            **({'additional_metadata_summary':
+                f'Also resolve conflicting album metadata. {consistency[1]}'}
+               if consistency and category != 'metadata' else {}),
         })
     category_rank = {
         'release_conflicts': 0, 'album_completeness': 1,

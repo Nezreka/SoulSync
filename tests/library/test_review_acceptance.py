@@ -33,7 +33,7 @@ ALBUM = 'Northbound'
 SCENARIOS = (
     'supported', 'metadata_only', 'recording_conflict', 'compatible_qualifier',
     'different_performance', 'repeated_recording', 'missing_metadata',
-    'contradictory_metadata', 'duplicate', 'companion', 'unmatched_companion',
+    'contradictory_metadata', 'numbering_metadata_conflict', 'duplicate', 'companion', 'unmatched_companion',
     'partial',
 )
 
@@ -87,8 +87,10 @@ def build_album(tmp_path, monkeypatch, scenario):
         if scenario == 'missing_metadata' and i == 2:
             tags.pop('album')
             tags.pop('musicbrainz_albumid')
-        if scenario == 'contradictory_metadata' and i == 2:
+        if scenario in ('contradictory_metadata', 'numbering_metadata_conflict') and i == 2:
             tags.update(album='Northbound (Deluxe)', musicbrainz_albumid=OTHER_RELEASE)
+            if scenario == 'numbering_metadata_conflict':
+                tags['tracknumber'] = '7'
         _minimal_flac(path, tags)
         paths.append(path)
         slot = slots[i - 1]
@@ -234,9 +236,11 @@ def assert_recommendation(scenario, album, case):
         if scenario == 'missing_metadata' and i == 2:
             expected_changes.update(album={'old': '', 'new': ALBUM},
                                     musicbrainz_release_id={'old': '', 'new': RELEASE})
-        if scenario == 'contradictory_metadata' and i == 2:
+        if scenario in ('contradictory_metadata', 'numbering_metadata_conflict') and i == 2:
             expected_changes.update(album={'old': 'Northbound (Deluxe)', 'new': ALBUM},
                                     musicbrainz_release_id={'old': OTHER_RELEASE, 'new': RELEASE})
+            if scenario == 'numbering_metadata_conflict':
+                expected_changes['track_number'] = {'old': '7', 'new': '2'}
             assert row['action_state'] == 'manual'
         assert (row.get('changes') or {}) == expected_changes
 
@@ -377,6 +381,25 @@ def test_duplicate_keeper_is_a_saved_plan_not_a_file_mutation(tmp_path, monkeypa
     assert saved_duplicate['planned_file_action'] == action['description']
     assert {path: path.read_bytes() for path in album.paths} == original
     assert_snapshot('duplicate_saved', saved, tmp_path, album)
+
+
+def test_keeping_numbering_does_not_approve_remaining_metadata(tmp_path, monkeypatch):
+    album = build_album(tmp_path, monkeypatch, 'numbering_metadata_conflict')
+    case = scan_case(album)
+    before = {path: path.read_bytes() for path in album.paths}
+    result = album.worker.apply_review_decision_group(case['case_id'], 'numbering', action='dismiss')
+    assert result['success']
+    kept = album.worker.get_review_case(case['case_id'])
+    assert not kept['plan']['can_apply_ready']
+    row = next(row for row in kept['album_plan']['assignments'] if row['file_path'] == str(album.paths[1]))
+    assert row['action_state'] == 'manual'
+    assert row['planned_choice']['category'] == 'numbering'
+    assert not row.get('numbering_preview')
+    assert 'track_number' not in row['changes']
+    assert row['changes']['musicbrainz_release_id'] == {'old': OTHER_RELEASE, 'new': RELEASE}
+    assert kept['decisions'][0]['label'] == 'Resolve conflicting album metadata'
+    assert {path: path.read_bytes() for path in album.paths} == before
+    assert_snapshot('numbering_kept_metadata_conflict', kept, tmp_path, album)
 
 
 @pytest.mark.parametrize('scenario', ['supported', 'metadata_only', 'missing_metadata',

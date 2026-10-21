@@ -23,6 +23,7 @@ export interface ReviewDecision {
   label: string;
   risk: 'ready' | 'manual' | 'destructive' | 'blocked';
   summary: string;
+  additional_metadata_summary?: string;
   finding_ids: number[];
   action_count: number;
 }

@@ -56,6 +56,25 @@ it('groups metadata decisions by action state while preserving matching confiden
   expect(statusLabel(rows[6].status, rows[6])).toBe('Numbering proposal');
 });
 
+it('keeps remaining metadata in review after a numbering choice is saved', () => {
+  const row = {
+    status: 'change',
+    confidence: 'clear',
+    action_state: 'manual',
+    planned_choice: { category: 'numbering', action: 'dismiss' },
+  } as AlbumAssignment;
+  const model = buildAlbumModel({
+    items: [],
+    album_plan: { assignments: [row] },
+  } as unknown as ReviewCase);
+  expect(model.attentionAssignments).toEqual([row]);
+  expect(model.changeAssignments).toEqual([]);
+  expect(model.metadataDecisionCount).toBe(1);
+  expect(statusLabel(row.status, row)).toBe('Review metadata · numbering kept');
+  expect(metadataNeedsReview({ ...row, action_state: 'ready' })).toBe(false);
+  expect(statusLabel(row.status, { ...row, action_state: 'ready' })).toBe('Keep numbering planned');
+});
+
 function idFinding(id: number, old: unknown, next: unknown, libraryOld = old): ReviewFinding {
   return {
     id,

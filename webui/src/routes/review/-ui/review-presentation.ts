@@ -41,7 +41,6 @@ export function evidenceLabel(evidence: unknown): string {
 export function metadataNeedsReview(row: AlbumAssignment): boolean {
   return (
     row.status === 'change' &&
-    !row.planned_choice &&
     !row.numbering_preview &&
     ['manual', 'destructive', 'blocked'].includes(row.action_state || row.review_tier || '')
   );
@@ -49,6 +48,10 @@ export function metadataNeedsReview(row: AlbumAssignment): boolean {
 
 export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.fulfillment_state === 'downloaded') return 'Checking download';
+  if (row && metadataNeedsReview(row))
+    return row.planned_choice?.category === 'numbering' && row.planned_choice.action === 'dismiss'
+      ? 'Review metadata · numbering kept'
+      : 'Review metadata';
   if (row?.planned_choice?.action === 'dismiss')
     return row.planned_choice.category === 'numbering'
       ? 'Keep numbering planned'
@@ -67,7 +70,6 @@ export function statusLabel(status: string, row?: AlbumAssignment) {
   if (row?.numbering_preview && status === 'change') return 'Numbering proposal';
   if (row?.audio_conflict === 'different_recording') return 'Wrong audio';
   if (row?.relationship === 'version_conflict') return 'Compare versions';
-  if (row && metadataNeedsReview(row)) return 'Review metadata';
   if (row?.companion_of && status === 'confirmed') return 'Intentional companion';
   return (
     {

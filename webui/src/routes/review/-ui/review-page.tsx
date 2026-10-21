@@ -1900,6 +1900,9 @@ export function ReviewPage() {
                                       {decision.summary && decision.summary !== instruction && (
                                         <small>{decision.summary}</small>
                                       )}
+                                      {decision.additional_metadata_summary && (
+                                        <small>{decision.additional_metadata_summary}</small>
+                                      )}
                                       {hasGroupActions && <small>Inspect affected tracks →</small>}
                                     </span>
                                     {reviewDecisions.length > 1 && (
@@ -1925,17 +1928,20 @@ export function ReviewPage() {
                                       >
                                         {busyDecision === decision.category
                                           ? `Saving ${decision.action_count} choices…`
-                                          : decision.category === 'numbering'
-                                            ? !releaseHasMultipleDiscs
-                                              ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                              : reviewCase.album_plan?.numbering_mode === 'digital'
-                                                ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                                : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                            : decision.category === 'title_conventions'
-                                              ? 'Use proposed title conventions'
-                                              : decision.label === 'Confirm album artist'
-                                                ? 'Use proposed album artist'
-                                                : `Use ${decision.action_count} proposed changes`}
+                                          : decision.additional_metadata_summary
+                                            ? `Plan ${decision.category === 'numbering' ? 'numbering' : 'title changes'} and album metadata for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                            : decision.category === 'numbering'
+                                              ? !releaseHasMultipleDiscs
+                                                ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                                : reviewCase.album_plan?.numbering_mode ===
+                                                    'digital'
+                                                  ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                                  : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                              : decision.category === 'title_conventions'
+                                                ? 'Use proposed title conventions'
+                                                : decision.label === 'Confirm album artist'
+                                                  ? 'Use proposed album artist'
+                                                  : `Use ${decision.action_count} proposed changes`}
                                       </Button>
                                       <Button
                                         type="button"

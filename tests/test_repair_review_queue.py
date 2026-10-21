@@ -841,6 +841,46 @@ def test_recording_id_summary_distinguishes_replace_remove_and_mixed_without_dou
         'Add on 1 track; Replace on 1 track; Remove on 1 track; Mixed edits on 1 track.')
 
 
+def test_album_consistency_question_explains_the_conflict_and_preserves_group_scope():
+    conflict = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'clear',
+        'metadata_review_reason': 'Choose consistent embedded album metadata for this album',
+        'album_consistency': {
+            'album': [{'value': 'Album', 'files': 1}, {'value': 'Album Deluxe', 'files': 1}],
+            'musicbrainz_release_id': [{'value': 'old', 'files': 1}, {'value': 'new', 'files': 1}],
+        },
+        'changes': {'album': {'old': 'Album Deluxe', 'new': 'Album'},
+                    'musicbrainz_release_id': {'old': 'old', 'new': 'new'}},
+    }}
+    ready = {'finding_type': 'reconciliation_metadata', 'details': {
+        'confidence': 'clear',
+        'changes': {'musicbrainz_recording_id': {'old': '', 'new': 'recording'}},
+    }}
+    plan = classify_case([conflict, ready])
+    decision = plan['decisions'][0]
+    assert decision['label'] == 'Resolve conflicting album metadata'
+    assert decision['summary'] == (
+        'Files disagree on album title and MusicBrainz release ID. '
+        'Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.')
+    assert decision['action_count'] == 2
+    assert not plan['can_apply_ready']
+
+    conflict['details']['changes']['track_number'] = {'old': '7', 'new': '2'}
+    numbering = classify_case([conflict])['decisions'][0]
+    assert numbering['category'] == 'numbering'
+    assert numbering['additional_metadata_summary'] == (
+        'Also resolve conflicting album metadata. Files disagree on album title and MusicBrainz release ID. '
+        'Proposed corrections affect 1 track.')
+    del conflict['details']['changes']['track_number']
+
+    # Saved decisions and unrelated edits must not revive a resolved album question.
+    conflict['details']['plan_approved'] = True
+    assert classify_case([conflict, ready])['decisions'][0]['label'] != decision['label']
+    conflict['details'].pop('plan_approved')
+    conflict['details']['changes'] = {'musicbrainz_recording_id': {'old': '', 'new': 'recording'}}
+    assert classify_case([conflict])['decisions'][0]['label'] == 'Add MusicBrainz recording IDs'
+
+
 def test_stale_plan_retirement_handles_more_than_sqlite_parameter_limit():
     db = _Database()
     ensure_schema(db.conn)

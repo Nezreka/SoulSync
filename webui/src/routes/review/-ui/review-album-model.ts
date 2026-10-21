@@ -55,7 +55,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
     ...pendingAssignments
       .filter(
         (row) =>
-          !row.planned_choice &&
+          (!row.planned_choice || metadataNeedsReview(row)) &&
           row.relationship !== 'version_conflict' &&
           (row.status !== 'change' || metadataNeedsReview(row)) &&
           row.status !== 'missing' &&
@@ -74,7 +74,7 @@ export function buildAlbumModel(reviewCase: ReviewCase | null) {
       }),
   ];
   const changeAssignments = pendingAssignments.filter(
-    (row) => (row.status === 'change' && !metadataNeedsReview(row)) || Boolean(row.planned_choice),
+    (row) => !metadataNeedsReview(row) && (row.status === 'change' || Boolean(row.planned_choice)),
   );
   const missingAssignments = pendingAssignments.filter(
     (row) => row.status === 'missing' && row.relationship !== 'version_conflict',

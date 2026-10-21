@@ -1,5 +1,87 @@
 # UI reuse and consistency implementation
 
+## Reverification against the original assessment — 2026-10-20
+
+Baseline: `e80e4a1da`; deployed application `336c7cf68c1e`. Recovered the full
+historical assessment from the conversation and checked its numbered findings
+against source, production-generated acceptance fixtures, current live cases and
+the Stage 1–3 record below. The earlier completion statements were too broad:
+this pass found three connected omissions in album-conflict presentation.
+
+### Additional corrections
+
+1. Plan still described contradictory album tags as generic metadata changes
+   with ready/manual totals. It now names the conflicting album title and/or
+   release ID, counts the affected tracks, and discloses other edits in the same
+   group. Saved decisions and unrelated identifier edits cannot revive this
+   question. The original regression test failed before the correction.
+2. Album conflicts sharing a finding with numbering were hidden behind a
+   numbering-only explanation and approval label. The decision now explains
+   both effects before approval; its acceptance button names numbering and album
+   metadata. The live Matchbox Twenty collection exposed this combined case.
+3. After **Keep current numbering**, the backend correctly retained conflicting
+   metadata as manual, but Tracks treated any saved choice as settled. Attention
+   grouping, amber styling and the status now follow the remaining action state:
+   **Review metadata · numbering kept**. The remaining proposal is reachable;
+   numbering is preserved, files remain unchanged, and the album stays ineligible
+   for apply until its other decisions are resolved.
+
+These are explanation/state-projection corrections. Matching, readiness policy,
+group membership, saved-choice authority and file-writing behavior are unchanged.
+
+### Original findings crosswalk
+
+Numbers below refer to the recovered historical assessment, not the later
+acceptance checklist.
+
+| Original finding | Current assessment and evidence |
+| --- | --- |
+| 3.1 Compatible named-performance detail rejected | Corrected in Stage 1. Planner/end-to-end tests retain compatible dates/location detail and reject distinct dates, mixes, venues and conflicting audio; acceptance renders both positive and negative cases. |
+| 3.2 Missing metadata treated as contradictory; coherent IDs removed | Corrected in Stage 1. Blank and contradictory tag fixtures have independently asserted exact edits. Authority tests retain coherent identities and explicit release choices. |
+| 3.3 Unmatched companion disappears | Corrected in Stage 1. Inventory/queue tests and both companion acceptance states account for every file without consuming extra release slots or manufacturing duplicate removals. |
+| 3.4 Add/replace/remove summaries; album-wide conflict explanation | Identifier operations were corrected in Stage 1. The album-level part was incomplete until this pass, including mixed numbering decisions. New backend, Plan and Tracks tests cover it. |
+| 3.5 Repeated original/deluxe occurrences remain ambiguous | **Open behavior, not established as a new solver regression.** Current motionblur still has 18 ambiguous and eight clear assignments. Acceptance protects all intended occurrences and files; it does not solve the repeated-occurrence ambiguity. Historical/current catalogue evidence differs. |
+| 3.6 Additive guest credits treated as artist replacement | **Open inherited policy gap.** A changed nonempty credit still requires manual review, including a guest addition. A current direct policy probe confirmed this. Stage 1–3 did not redesign artist-credit equivalence or broaden automatic approval. |
+| 4.1 Reason after controls/audio | Stage 2 places the issue and proposed effects before approval and playback. Browser checks cover conflicts, ambiguity, duplicates and missing-track intent; this pass adds the album-level mixed-decision case. |
+| 4.2 Consequential identity changes collapsed | Replacements/removals remain expanded with actual old/new values and operation labels. Only explicit additions can be secondary. Review and the shared Library comparison are checked. |
+| 4.3 Excessive comparison stacking | Compact side-by-side current/planned presentation retains strikethrough and direction, with wrapping for long values. Desktop, tablet, phone and 320px checks pass. |
+| 4.4 Selection/success and matching/readiness conflated | Distinct selection, severity, evidence and decision labels are present. The partial saved-numbering exception was missed and is fixed in this pass; real worker output now feeds its browser test. |
+| 4.5 Readiness overclaims audio verification | Aggregate readiness describes plan decisions; audio, metadata and user-supported assignments keep distinct evidence labels. Positive and fallback cases are covered by presentation/backend tests. |
+| 4.6 Internal mobile header clipping | Existing checks measure header tools, not only document overflow, at 320/390px and wider viewports. All layout checks pass. |
+| 4.7 Excessive generic/navigation structure | Stage 2 consolidates the ready apply/field summary and uses a compact album browser on narrow screens. Stage 3 also corrects the optional organization button squeezing the ready explanation. |
+| 4.8 Capability reachability | Tests retain selective missing-track requests, saved choice editing, duplicates, assignment alternatives, navigation, cancellation and stale/relocated cases. Read-only live checks supplement disposable mutation tests. |
+| 5 Preserve architectural/shared-component improvements | Authority, signed apply, whole-album eligibility, relocation, cache, fulfillment, player, inspector, artwork provenance and shared-control suites pass. No authority or matching contracts are broadened by this pass. |
+| 6 Layered CSS and incomplete presentation semantics | Conflict semantics are now carried into Plan and partial-choice state. **CSS organization remains debt**: Review still has layered/responsive selectors. This pass does not claim a complete stylesheet consolidation. |
+| 7 Durable acceptance was absent/narrow | Backend-generated fixtures assert recommendations independently; pinned-browser checks cover meaning, workflows and pixels. This pass exposes why inspecting Tracks alone missed a Plan requirement and adds both views and the transition between them. |
+
+The earlier screenshot feedback is also represented: shared exact-file playback
+and record inspection; no local player for absent audio; release artwork
+provenance and compact edition/label details; semantic track colors; opaque
+completion guidance; selective acquisition; secondary saved-choice controls;
+whole-album apply eligibility; no-op organization suppression; and staged file
+choices followed by a consequential apply confirmation. Existing shared UI and
+Review tests were rerun, not inferred from component reuse alone.
+
+### Verification in this pass
+
+- **668 backend tests passed** across planner, end-to-end, authority, cache,
+  inventory, catalogue, fulfillment, Tools, acceptance, queue/group, finding
+  lifecycle, recording-ID repair and fetch behavior.
+- **263 Review/shared UI/Library tests and 60 additional shared player/control
+  tests passed.** Type/format check: zero errors and 485 existing warnings;
+  production build passed.
+- **69 pinned-browser comparisons/workflow checks and 14 layout/navigation
+  checks passed.** Changed/new screenshots were inspected; all final comparisons
+  ran without baseline updates. The corpus now has 13 initial scenarios and
+  eight derived states, 21 backend tests and 52 acceptance screenshots.
+- The combined-numbering fixture saves a choice through the real worker and
+  checks remaining exact edits, manual state and unchanged file bytes. Its
+  browser transition checks the exact request, amber row, unavailable apply and
+  reachable metadata decision on desktop and phone.
+
+The open inherited policy/ambiguity findings and CSS debt above are not closed
+by a passing finite corpus. Deployment results follow after live verification.
+
 ## Stage 3 recovery — completed 2026-10-20
 
 Baseline: `0235284ad`; deployed application `1283b55b6502`.

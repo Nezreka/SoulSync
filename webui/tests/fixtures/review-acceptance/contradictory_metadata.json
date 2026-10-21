@@ -392,9 +392,9 @@
         {
           "id": "metadata",
           "category": "metadata",
-          "label": "Metadata changes",
+          "label": "Resolve conflicting album metadata",
           "risk": "manual",
-          "summary": "1 ready; 1 need review.",
+          "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
           "finding_ids": [
             1,
             2
@@ -691,9 +691,9 @@
       {
         "id": "metadata",
         "category": "metadata",
-        "label": "Metadata changes",
+        "label": "Resolve conflicting album metadata",
         "risk": "manual",
-        "summary": "1 ready; 1 need review.",
+        "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
         "finding_ids": [
           1,
           2
@@ -737,9 +737,9 @@
             {
               "id": "metadata",
               "category": "metadata",
-              "label": "Metadata changes",
+              "label": "Resolve conflicting album metadata",
               "risk": "manual",
-              "summary": "1 ready; 1 need review.",
+              "summary": "Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.",
               "finding_ids": [
                 null,
                 null

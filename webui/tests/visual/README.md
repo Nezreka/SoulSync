@@ -36,6 +36,7 @@ availability or fingerprint extraction from actual audio.
 | Compatible performance detail / different performance | Preserve useful wording; reject a different date even with the same recording ID |
 | Repeated original/bonus recording | Retain both intended occurrences and all files; no duplicate-removal recommendation |
 | Missing / conflicting metadata | Fill blanks without erasing coherent IDs; keep actual contradictions manual |
+| Conflicting metadata combined with numbering | Explain both effects before group approval; keeping numbering leaves other metadata visibly undecided |
 | Duplicates / companions / unmatched companions | Complete inventory, keeper choice, visible companion role, no file mutation while planning |
 | Partial / selected / waiting / cancelled | Request exactly the selected source slot, preserve partial intent and cancellation |
 | Saved / relocated / stale | Preserve valid decisions across verified moves; reject stale evidence and signed apply |
@@ -57,11 +58,14 @@ Interaction tests check exact request bodies, cancellation before submission,
 saved choices, relocation redirects, stale apply and selective acquisition.
 Unexpected repair requests fail the test.
 
-There are 19 captured states, 44 reviewed screenshots and six interaction tests
-(three workflows on desktop and phone). Three screenshots additionally exercise
-the organization-preview response at 1800/1280/390px: the optional second apply
-button must not squeeze the explanation into a narrow column. Screenshot
-comparisons never update their baselines during a normal run.
+There are 21 captured states and 52 reviewed screenshots. Six interaction tests
+cover three lifecycle workflows on desktop and phone. Four additional Plan
+checks cover album conflicts alone and combined with numbering; the combined
+checks also save a numbering-only choice and verify that the remaining metadata
+decision is reachable. Three screenshots exercise the organization-preview
+response at 1800/1280/390px: the optional second apply button must not squeeze the
+explanation into a narrow column. Screenshot comparisons never update their
+baselines during a normal run.
 
 Run from the repository root, using the project's Python environment:
 

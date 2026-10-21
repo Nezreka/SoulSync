@@ -58,6 +58,20 @@ const scenarios = [
     reason: 'Album metadata differs between files',
   },
   {
+    name: 'numbering_metadata_conflict',
+    ready: false,
+    title: 'Open Water',
+    status: 'change',
+    reason: 'Album metadata differs between files',
+  },
+  {
+    name: 'numbering_kept_metadata_conflict',
+    ready: false,
+    title: 'Open Water',
+    status: 'uncertain',
+    reason: 'Album metadata differs between files',
+  },
+  {
     name: 'duplicate',
     ready: false,
     title: 'Home',
@@ -126,6 +140,88 @@ async function openAcceptance(
   await page.goto(`${ORIGIN}/review?mode=all`);
   await expect(page.getByRole('heading', { name: 'Northbound', exact: true })).toBeVisible();
   return { errors, missing };
+}
+
+for (const width of [1800, 390]) {
+  for (const numbering of [false, true]) {
+    test(`album metadata conflict on Plan ${numbering ? 'with numbering ' : ''}${width}px`, async ({
+      page,
+    }) => {
+      const api = acceptanceApi(
+        numbering ? 'numbering_metadata_conflict' : 'contradictory_metadata',
+      );
+      const requests: unknown[] = [];
+      const { errors, missing } = await openAcceptance(page, width, api, [
+        http.post(
+          '*/api/repair/review-queue/:id/decisions/numbering/apply',
+          async ({ request }) => {
+            requests.push(await request.json());
+            api.setCase('numbering_kept_metadata_conflict');
+            return HttpResponse.json({ success: true, saved: 1 });
+          },
+        ),
+      ]);
+      const board = page.getByLabel('Album decisions', { exact: true });
+      const explanation = board.getByText(
+        numbering
+          ? 'Also resolve conflicting album metadata. Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track.'
+          : 'Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.',
+        { exact: true },
+      );
+      const approval = board.getByRole('button', {
+        name: numbering
+          ? 'Plan numbering and album metadata for 1 track'
+          : 'Use 2 proposed changes',
+        exact: true,
+      });
+      await expect(explanation).toBeVisible();
+      expect(
+        await explanation.evaluate(
+          (element, action) =>
+            Boolean(element.compareDocumentPosition(action!) & Node.DOCUMENT_POSITION_FOLLOWING),
+          await approval.elementHandle(),
+        ),
+      ).toBe(true);
+      await board.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+      await settle(page);
+      await expect(board).toHaveScreenshot([
+        'review-acceptance',
+        `album-conflict-plan-${numbering ? 'numbering-' : ''}${width}.png`,
+      ]);
+      await board
+        .getByRole('button', {
+          name: numbering
+            ? /Renumber tracks to match the selected release/
+            : /Resolve conflicting album metadata/,
+        })
+        .click();
+      await expect(page.getByRole('tab', { name: /^Tracks/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+      await expect(page.getByLabel('Show tracks')).toHaveValue(
+        numbering ? 'decision:numbering' : 'decision:metadata',
+      );
+      await expect(page.locator('[data-review-assignment]')).toHaveCount(numbering ? 1 : 2);
+      if (numbering) {
+        await page.getByRole('tab', { name: /^Plan/ }).click();
+        await board.getByRole('button', { name: 'Keep current numbering', exact: true }).click();
+        await board.getByRole('button', { name: /Resolve conflicting album metadata/ }).click();
+        const pending = page.locator('[data-review-assignment][data-status="uncertain"]');
+        await expect(pending).toHaveCount(1);
+        await expect(pending).toContainText('Review metadata · numbering kept');
+        await expect(page.getByRole('button', { name: /Apply \d+ ready change/ })).toHaveCount(0);
+        await pending.click();
+        await expect(
+          page.getByRole('button', { name: 'Use proposed change', exact: true }),
+        ).toBeVisible();
+        expect(requests).toEqual([{ action: 'dismiss' }]);
+      }
+      expect(errors).toEqual([]);
+      expect(missing).toEqual([]);
+      expect(api.unexpected).toEqual([]);
+    });
+  }
 }
 
 for (const width of [1800, 1280, 390]) {
