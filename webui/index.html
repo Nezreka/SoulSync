@@ -102,7 +102,6 @@
     <!-- Automations navigation overhaul — sidebar + overview + library; loaded
          after the redesign so it wins where they meet (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-overhaul.css', v=static_v) }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
@@ -157,14 +156,6 @@
 
 <body
     class="{% if initial_reduce_effects %}reduce-effects {% endif %}{% if initial_max_performance %}max-performance{% endif %}">
-    <!-- Setup Wizard Overlay -->
-    <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
-        <div class="setup-wizard-container">
-            <div class="setup-stepper" id="setup-wizard-stepper"></div>
-            <div id="setup-wizard-content"></div>
-        </div>
-    </div>
-
     <!-- Launch PIN Lock Screen -->
     <div id="launch-pin-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container" id="launch-pin-container">
@@ -10364,6 +10355,37 @@
                                                 <label>Status:</label>
                                                 <span id="sw-preview-status" class="readonly-field">Live weather</span>
                                             </div>
+                                            <div class="form-group">
+                                                <label for="ob-preview-step">Setup preview:</label>
+                                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                                    <select id="ob-preview-step" aria-label="Start at">
+                                                        <option value="welcome">Start at Welcome</option>
+                                                        <option value="account">Your account</option>
+                                                        <option value="purpose">What it's for</option>
+                                                        <option value="server">Media server</option>
+                                                        <option value="folders">Folders</option>
+                                                        <option value="sources">Download sources</option>
+                                                        <option value="metadata">Metadata and accounts</option>
+                                                        <option value="video">Movies and TV</option>
+                                                        <option value="library">Make it yours</option>
+                                                        <option value="ready">Ready</option>
+                                                    </select>
+                                                    <select id="ob-preview-env" aria-label="Pretend environment">
+                                                        <option value="real">Detect for real</option>
+                                                        <option value="docker">Pretend Docker</option>
+                                                        <option value="bare">Pretend bare metal</option>
+                                                        <option value="empty">Pretend nothing found</option>
+                                                    </select>
+                                                    <button class="test-button" id="ob-preview-open" type="button">Open preview</button>
+                                                </div>
+                                                <div class="help-text">
+                                                    Runs the real first-run setup over the app. Nothing is saved:
+                                                    settings, the profile, follows and sign-ins stay in the preview
+                                                    and are thrown away when you close it. Connection checks still
+                                                    talk to the real services, read only. A Preview tag stays in the
+                                                    corner the whole time.
+                                                </div>
+                                            </div>
                                         </div>
                                     </div><!-- end Developer body -->
 
@@ -12679,7 +12701,6 @@
     <script src="{{ url_for('static', filename='scrollbar-fade.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='vendor/socket.io.min.js', v=static_v) }}"></script>
     {{ vite_assets('body')|safe }}
-    <script src="{{ url_for('static', filename='setup-wizard.js', v=static_v) }}"></script>
     <!-- Split modules (was: script.js) — core.js must load first, init.js before shell-bridge.js -->
     <script src="{{ url_for('static', filename='core.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='shared-helpers.js', v=static_v) }}"></script>

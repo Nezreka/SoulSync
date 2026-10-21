@@ -19,7 +19,8 @@ _DOCS = " ".join(
     p.read_text(encoding="utf-8")
     for p in sorted((_ROOT / "webui" / "static" / "docs-content").glob("*.js"))
 )
-_WIZ = (_ROOT / "webui" / "static" / "setup-wizard.js").read_text(encoding="utf-8")
+# the setup flow (react since oct 2026) names the folders in one place
+_SETUP = (_ROOT / "webui" / "src" / "features" / "onboarding" / "plan.ts").read_text(encoding="utf-8")
 
 
 def test_pipeline_explained_on_the_folder_fields():
@@ -50,9 +51,11 @@ def test_extra_libraries_section_stops_being_a_red_herring():
     assert "you don't need to repeat it here" in _INDEX
 
 
-def test_docs_and_wizard_tell_the_same_story():
+def test_docs_and_setup_tell_the_same_story():
     assert "Additional Music Libraries" in _DOCS
-    assert "Music Library Folder" in _WIZ and "Download Folder" in _WIZ
+    # setup says downloads and music library, never the old transfer words
+    assert "name: 'Downloads'" in _SETUP and "name: 'Music library'" in _SETUP
+    assert "Transfer" not in _SETUP.split("FOLDER_INFO", 1)[1].split("};", 1)[0]
 
 
 def test_podcasts_folder_field_present():

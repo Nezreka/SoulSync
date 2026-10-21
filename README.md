@@ -449,7 +449,7 @@ Behind Docker or a remote host? See [Support/DOCKER-OAUTH-FIX.md](Support/DOCKER
 
 ### 3. Configure SoulSync
 
-Open `http://localhost:8008`. The setup wizard walks you through the basics; everything else lives in **Settings**:
+Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and download clients on its own, signs in to Plex, Tidal and Qobuz, checks every folder and connection for real, and leaves a **Finish setting up** checklist on the dashboard for anything you skip. Everything else lives in **Settings**:
 
 - **Sources / Downloads**: pick a source or build your hybrid chain.
 - **Quality**: pick a preset or build a quality profile.
