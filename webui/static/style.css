@@ -23574,7 +23574,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     min-height: 70vh;
     padding: 40px 20px;
     opacity: 1;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slower) var(--ease-standard);
     gap: 32px;
 }
 
@@ -23598,7 +23598,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 400;
     min-height: 20px;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .artists-search-status.searching {
@@ -23623,7 +23623,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: 20px;
     overflow: hidden;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 
     /* Premium glassmorphic foundation */
     background: linear-gradient(135deg,
@@ -23634,7 +23634,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     /* Elegant shadow system */
     box-shadow:
-        0 10px 20px rgba(0, 0, 0, 0.5),
+        0 10px 20px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.05),
         inset 0 1px 0 var(--white-a06);
 }
@@ -23644,7 +23644,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     z-index: 10;
 
     box-shadow:
-        0 12px 15px rgba(0, 0, 0, 0.4),
+        0 12px 15px var(--black-a40),
         0 0 0 1px rgba(var(--accent-rgb), 0.15),
         0 0 20px rgba(var(--accent-rgb), 0.08),
         inset 0 1px 0 var(--white-a10);
@@ -23653,8 +23653,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* Dynamic glow effects based on image colors */
 .artist-card.has-dynamic-glow {
     position: relative;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        filter 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard),
+        filter var(--dur-slowest) var(--ease-standard);
 }
 
 .artist-card.has-dynamic-glow:hover {
@@ -23672,7 +23672,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background-position: center;
     background-repeat: no-repeat;
     opacity: 0.6;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .artist-card:hover .artist-card-background {
@@ -23704,13 +23704,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     gap: 8px;
     padding: 10px 16px;
     border: none;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a08);
     color: #e0e0e0;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     width: 100%;
     justify-content: center;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -23840,7 +23840,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     margin: 0;
     line-height: 1.1;
     letter-spacing: -1px;
-    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+    text-shadow: 0 2px 12px var(--black-a40);
 }
 
 .artists-hero-stats {
@@ -23852,7 +23852,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* Mobile responsive */
 @media (max-width: 768px) {
     .artists-hero-section {
-        border-radius: 14px;
+        border-radius: var(--radius-card);
         min-height: 0;
     }
 
@@ -23885,7 +23885,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a12);
     border-radius: var(--radius-xl);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     outline: none;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
 }
@@ -23907,9 +23907,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #aaa;
     background: var(--white-a08);
     border: 1px solid var(--white-a12);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     outline: none;
     flex-shrink: 0;
 }
@@ -23942,7 +23942,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid rgba(var(--accent-rgb), 0.25);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.25s ease;
+    transition: all var(--dur-moderate) ease;
     outline: none;
     font-family: inherit;
     overflow: hidden;
@@ -23962,7 +23962,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .library-artist-watchlist-btn .watchlist-icon {
     font-size: 13px;
-    transition: transform 0.25s ease;
+    transition: transform var(--dur-moderate) ease;
     position: relative;
     z-index: 1;
 }
@@ -24016,7 +24016,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.25s ease;
+    transition: all var(--dur-moderate) ease;
     outline: none;
     font-family: inherit;
 }
@@ -24060,7 +24060,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid rgba(79, 195, 247, 0.3);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.25s ease;
+    transition: all var(--dur-moderate) ease;
     outline: none;
     font-family: inherit;
     overflow: hidden;
@@ -24080,7 +24080,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .library-artist-enhance-btn .enhance-icon {
     font-size: 13px;
-    transition: transform 0.25s ease;
+    transition: transform var(--dur-moderate) ease;
     position: relative;
     z-index: 1;
 }
@@ -24112,7 +24112,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a12);
     border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
     outline: none;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
     backdrop-filter: blur(8px);
@@ -24148,7 +24148,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid rgba(139, 92, 246, 0.3);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.25s ease;
+    transition: all var(--dur-moderate) ease;
     outline: none;
     font-family: inherit;
     overflow: hidden;
@@ -24168,7 +24168,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .library-artist-radio-btn .radio-icon {
     font-size: 13px;
-    transition: transform 0.25s ease;
+    transition: transform var(--dur-moderate) ease;
     position: relative;
     z-index: 1;
 }
@@ -24187,13 +24187,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .enhance-modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.75);
+    background: var(--black-a75);
     z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 1;
-    transition: opacity 0.3s ease;
+    transition: opacity var(--dur-slow) ease;
 }
 
 .enhance-modal-overlay.hidden {
@@ -24202,7 +24202,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .enhance-modal {
-    background: linear-gradient(135deg, #1a1a1a 0%, #121212 100%);
+    background: linear-gradient(135deg, var(--bg-raised) 0%, var(--bg-surface) 100%);
     border: 1px solid rgba(79, 195, 247, 0.2);
     border-radius: var(--radius-xl);
     width: 90%;
@@ -24211,7 +24211,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     max-height: 85dvh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 24px 80px var(--black-a60);
     animation: enhanceModalIn 0.3s ease-out;
 }
 
@@ -24246,7 +24246,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     padding: 4px 8px;
     border-radius: var(--radius-md);
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 
 .enhance-modal-close:hover {
@@ -24267,7 +24267,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex-direction: column;
     align-items: center;
     padding: 10px 16px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     min-width: 70px;
     background: var(--white-a04);
     border: 1px solid var(--white-a06);
@@ -24342,7 +24342,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-sm);
     font-size: 12px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 
 .enhance-select-btn:hover {
@@ -24370,7 +24370,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .enhance-track-table thead th {
     position: sticky;
     top: 0;
-    background: #1a1a1a;
+    background: var(--bg-raised);
     padding: 10px 12px;
     font-size: 11px;
     font-weight: 600;
@@ -24388,7 +24388,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .enhance-track-table tbody tr {
     border-bottom: 1px solid var(--white-a03);
-    transition: background 0.15s;
+    transition: background var(--dur-fast);
 }
 
 .enhance-track-table tbody tr:hover {
@@ -24480,11 +24480,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .enhance-btn {
     padding: 10px 20px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     border: none;
     font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif;
 }
@@ -24534,7 +24534,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 24px var(--black-a40);
 
     /* Fallback gradient if no image */
     background-image: linear-gradient(135deg,
@@ -24563,7 +24563,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: none;
     opacity: 0;
     transform: translateY(10px);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .tab-content.active {
@@ -24583,34 +24583,34 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .album-card {
     position: relative;
     background: rgba(18, 18, 18, 1);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     border: 1px solid var(--white-a06);
     overflow: hidden;
     cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    transition: transform var(--dur-slow) var(--ease-standard),
+                box-shadow var(--dur-slow) var(--ease-standard),
+                border-color var(--dur-slow) var(--ease-standard);
+    box-shadow: 0 4px 16px var(--black-a30);
     aspect-ratio: 1;
 }
 
 .album-card:hover {
     transform: translateY(-5px) scale(1.02);
     border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+    box-shadow: 0 12px 40px var(--black-a50),
                 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
 .album-card.has-dynamic-glow {
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--dur-slow) var(--ease-standard),
+                box-shadow var(--dur-slow) var(--ease-standard);
 }
 
 .album-card.has-dynamic-glow:hover {
     filter: none;
     border-color: color-mix(in srgb, var(--glow-color-1) 30%, transparent);
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
+        0 12px 40px var(--black-a50),
         0 0 20px color-mix(in srgb, var(--glow-color-1) 15%, transparent);
 }
 
@@ -24620,9 +24620,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     position: absolute;
     inset: 0;
     background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.95) 0%,
-        rgba(0, 0, 0, 0.7) 25%,
-        rgba(0, 0, 0, 0.2) 50%,
+        var(--black-a95) 0%,
+        var(--black-a70) 25%,
+        var(--black-a20) 50%,
         transparent 70%);
     pointer-events: none;
     z-index: 1;
@@ -24630,9 +24630,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .album-card:hover::after {
     background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.95) 0%,
-        rgba(0, 0, 0, 0.6) 30%,
-        rgba(0, 0, 0, 0.15) 55%,
+        var(--black-a95) 0%,
+        var(--black-a60) 30%,
+        var(--black-a15) 55%,
         transparent 75%);
 }
 
@@ -24645,7 +24645,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background-position: center;
     background-repeat: no-repeat;
     background-color: var(--white-a03);
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--dur-slower) var(--ease-standard);
     z-index: 0;
 }
 
@@ -24677,7 +24677,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     overflow: hidden;
     text-overflow: ellipsis;
     letter-spacing: -0.2px;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 1px 4px var(--black-a50);
 }
 
 .album-card-year {
@@ -24685,7 +24685,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: var(--white-a60);
     font-weight: 500;
     margin-bottom: 0;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 1px 3px var(--black-a50);
 }
 
 .album-card-type {
@@ -24708,7 +24708,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     }
 
     .album-card {
-        border-radius: 10px;
+        border-radius: var(--radius-control);
     }
 
     .album-card-content {
@@ -24738,7 +24738,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     /* Smooth entrance animation */
     animation: completionOverlayFadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--black-a30);
 }
 
 /* Completion status variants */
@@ -24749,7 +24749,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(46, 204, 64, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(46, 204, 64, 0.2),
         inset 0 1px 0 var(--white-a20);
 }
@@ -24761,7 +24761,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(255, 193, 7, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(255, 193, 7, 0.2),
         inset 0 1px 0 var(--white-a20);
 }
@@ -24773,7 +24773,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(255, 111, 97, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(255, 111, 97, 0.2),
         inset 0 1px 0 var(--white-a20);
 }
@@ -24785,7 +24785,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: var(--white-a90);
     border-color: rgba(108, 117, 125, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(108, 117, 125, 0.2),
         inset 0 1px 0 var(--white-a10);
 }
@@ -24797,7 +24797,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(255, 165, 0, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(255, 165, 0, 0.2),
         inset 0 1px 0 var(--white-a20);
     animation: downloadingPulse 2s ease-in-out infinite;
@@ -24809,7 +24809,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     100% {
         transform: scale(1);
         box-shadow:
-            0 4px 12px rgba(0, 0, 0, 0.3),
+            0 4px 12px var(--black-a30),
             0 0 0 1px rgba(255, 165, 0, 0.2),
             inset 0 1px 0 var(--white-a20);
     }
@@ -24817,7 +24817,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     50% {
         transform: scale(1.02);
         box-shadow:
-            0 6px 16px rgba(0, 0, 0, 0.4),
+            0 6px 16px var(--black-a40),
             0 0 0 1px rgba(255, 165, 0, 0.4),
             inset 0 1px 0 var(--white-a30),
             0 0 12px rgba(255, 165, 0, 0.3);
@@ -24831,7 +24831,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(40, 167, 69, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(40, 167, 69, 0.2),
         inset 0 1px 0 var(--white-a20);
 }
@@ -24843,7 +24843,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #ffffff;
     border-color: rgba(220, 53, 69, 0.6);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         0 0 0 1px rgba(220, 53, 69, 0.2),
         inset 0 1px 0 var(--white-a20);
 }
@@ -24853,7 +24853,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .artist-card:hover .completion-overlay {
     transform: scale(1.05);
     box-shadow:
-        0 6px 16px rgba(0, 0, 0, 0.4),
+        0 6px 16px var(--black-a40),
         0 0 0 1px currentColor,
         inset 0 1px 0 var(--white-a25);
 }
@@ -24984,7 +24984,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 150px;
     border-radius: var(--radius-circle);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 
     background: linear-gradient(135deg,
             rgba(26, 26, 26, 0.95) 0%,
@@ -24992,7 +24992,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 2px solid var(--white-a10);
 
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.4),
+        0 4px 12px var(--black-a40),
         0 0 0 1px rgba(var(--accent-rgb), 0.05),
         inset 0 1px 0 var(--white-a06);
 }
@@ -25002,7 +25002,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-color: rgba(var(--accent-rgb), 0.3);
 
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 8px 20px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.2),
         0 0 15px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a10);
@@ -25015,7 +25015,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .artist-bubble-card.all-completed:hover {
     border-color: rgba(var(--accent-rgb), 0.6);
     box-shadow:
-        0 8px 20px rgba(0, 0, 0, 0.5),
+        0 8px 20px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.3),
         0 0 15px rgba(var(--accent-rgb), 0.15),
         inset 0 1px 0 var(--white-a10);
@@ -25035,8 +25035,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     position: absolute;
     inset: 0;
     background: linear-gradient(135deg,
-            rgba(0, 0, 0, 0.3) 0%,
-            rgba(0, 0, 0, 0.6) 100%);
+            var(--black-a30) 0%,
+            var(--black-a60) 100%);
     border-radius: var(--radius-circle);
 }
 
@@ -25090,7 +25090,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     justify-content: center;
     cursor: pointer;
     z-index: 3;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 
     box-shadow:
         0 2px 8px rgba(var(--accent-rgb), 0.4),
@@ -25153,14 +25153,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
     /* Premium shadow effect */
     box-shadow:
-        0 25px 80px rgba(0, 0, 0, 0.7),
-        0 10px 40px rgba(0, 0, 0, 0.5),
+        0 25px 80px var(--black-a70),
+        0 10px 40px var(--black-a50),
         0 0 50px rgba(var(--accent-rgb), 0.15),
         inset 0 1px 0 var(--white-a15);
 
     /* Smooth animation */
     transform: scale(1);
-    transition: transform 0.4s ease-in-out;
+    transition: transform var(--dur-slower) ease-in-out;
     animation: modalFadeIn 0.4s ease-out;
 }
 
@@ -25195,8 +25195,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     right: 0;
     bottom: 0;
     background: linear-gradient(135deg,
-            rgba(0, 0, 0, 0.7) 0%,
-            rgba(0, 0, 0, 0.3) 100%);
+            var(--black-a70) 0%,
+            var(--black-a30) 100%);
 }
 
 .artist-download-modal-hero-content {
@@ -25214,19 +25214,19 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-circle);
     object-fit: cover;
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 4px 12px rgba(0, 0, 0, 0.2),
+        0 8px 24px var(--black-a40),
+        0 4px 12px var(--black-a20),
         inset 0 1px 0 var(--white-a10);
     border: 1px solid var(--white-a10);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     flex-shrink: 0;
 }
 
 .artist-download-modal-hero-image:hover {
     transform: scale(1.05);
     box-shadow:
-        0 12px 32px rgba(0, 0, 0, 0.5),
-        0 6px 16px rgba(0, 0, 0, 0.3),
+        0 12px 32px var(--black-a50),
+        0 6px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
 }
 
@@ -25250,8 +25250,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: #999;
     border: 1px solid var(--white-a10);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 4px 12px rgba(0, 0, 0, 0.2),
+        0 8px 24px var(--black-a40),
+        0 4px 12px var(--black-a20),
         inset 0 1px 0 var(--white-a10);
 }
 
@@ -25277,7 +25277,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 700;
     margin: 0;
     line-height: 1.2;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    text-shadow: 0 2px 8px var(--black-a30);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -25297,7 +25297,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     padding: 4px;
     border-radius: var(--radius-sm);
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     line-height: 1;
 }
 
@@ -25333,12 +25333,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid var(--white-a10);
     border-top: 1px solid var(--white-a15);
     border-radius: var(--radius-xl);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 
     /* Premium shadow with subtle glow */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
-        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 8px 32px var(--black-a40),
+        0 4px 16px var(--black-a20),
         0 0 20px rgba(var(--accent-rgb), 0.08),
         inset 0 1px 0 var(--white-a10);
 }
@@ -25350,8 +25350,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
             rgba(30, 30, 30, 0.9) 100%);
     border-color: var(--white-a15);
     box-shadow:
-        0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(0, 0, 0, 0.3),
+        0 12px 40px var(--black-a50),
+        0 6px 20px var(--black-a30),
         0 0 25px rgba(var(--accent-rgb), 0.12),
         inset 0 1px 0 var(--white-a15);
 }
@@ -25368,18 +25368,18 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-lg);
     object-fit: cover;
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        0 2px 6px rgba(0, 0, 0, 0.2),
+        0 4px 12px var(--black-a30),
+        0 2px 6px var(--black-a20),
         inset 0 1px 0 var(--white-a10);
     border: 1px solid var(--white-a10);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .artist-download-item:hover .download-item-image {
     transform: scale(1.05);
     box-shadow:
-        0 6px 16px rgba(0, 0, 0, 0.4),
-        0 3px 8px rgba(0, 0, 0, 0.3),
+        0 6px 16px var(--black-a40),
+        0 3px 8px var(--black-a30),
         inset 0 1px 0 var(--white-a15);
 }
 
@@ -25397,7 +25397,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border: 1px solid rgba(var(--accent-rgb), 0.3);
     font-size: 18px;
     color: rgba(var(--accent-rgb), 0.8);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .artist-download-item:hover .download-item-fallback {
@@ -25441,7 +25441,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     min-width: 100px;
 }
 
@@ -25479,8 +25479,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 /* Dynamic glow effects for artist bubble cards */
 .artist-bubble-card.has-dynamic-glow {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        filter 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard),
+        filter var(--dur-slower) var(--ease-standard);
 }
 
 .artist-bubble-card.has-dynamic-glow:hover {
@@ -25715,7 +25715,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 12px 16px;
     border: 1px solid rgba(255, 176, 32, 0.28);
     border-left: 3px solid rgba(255, 176, 32, 0.75);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(255, 176, 32, 0.07);
 }
 
@@ -25761,7 +25761,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 0.82rem;
     font-weight: 600;
     text-decoration: none;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
 .library-unmatched-btn:hover {
@@ -25807,13 +25807,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 36px;
     padding: 0 34px 0 36px;
     border: 1px solid var(--white-a10);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a05);
     color: #ffffff;
     font-size: 13.5px;
     font-weight: 500;
     font-family: inherit;
-    transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease, box-shadow var(--dur-base) ease;
     outline: none;
 }
 
@@ -25864,7 +25864,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 15px;
     line-height: 1;
     cursor: pointer;
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast);
 }
 
 .library-search-clear-btn:hover {
@@ -25880,7 +25880,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 3px;
     height: 36px;
     border: 1px solid var(--white-a08);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a04);
 }
 
@@ -25903,9 +25903,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 12px;
     font-weight: 500;
     font-family: inherit;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
-    transition: border-color 0.2s, color 0.2s;
+    transition: border-color var(--dur-base), color var(--dur-base);
     min-width: 140px;
 }
 .library-source-filter-select:hover {
@@ -25933,7 +25933,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
     border-radius: 7px;
-    transition: color 0.15s ease-out, background 0.15s ease-out;
+    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
 }
 
 .watchlist-filter-btn:hover {
@@ -25960,7 +25960,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
     border-radius: 20px;
-    transition: all 0.2s ease-out;
+    transition: all var(--dur-base) ease-out;
     margin-left: 4px;
 }
 
@@ -25992,7 +25992,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: 20px;
     border: 1px solid var(--white-a10);
     border-top: 1px solid var(--white-a15);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 8px 32px rgba(0,0,0,0.4),
+    box-shadow: 0 20px 60px var(--black-a60), 0 8px 32px var(--black-a40),
                 0 0 40px rgba(var(--accent-rgb), 0.08), inset 0 1px 0 var(--white-a10);
     display: flex; flex-direction: column; overflow: hidden;
 }
@@ -26012,7 +26012,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .watch-all-close {
     background: var(--white-a08); border: none; color: var(--white-a50);
     width: 36px; height: 36px; border-radius: var(--radius-circle); font-size: 20px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; transition: all var(--dur-base);
 }
 .watch-all-close:hover { background: var(--white-a15); color: #fff; transform: scale(1.1); }
 .watch-all-body {
@@ -26025,11 +26025,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex; justify-content: flex-end; gap: 10px;
     padding: 16px 24px;
     border-top: 1px solid var(--white-a06);
-    background: rgba(0,0,0,0.2);
+    background: var(--black-a20);
 }
 .watch-all-btn {
-    padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600;
-    border: none; cursor: pointer; transition: all 0.2s;
+    padding: 10px 24px; border-radius: var(--radius-control); font-size: 14px; font-weight: 600;
+    border: none; cursor: pointer; transition: all var(--dur-base);
 }
 .watch-all-btn-cancel {
     background: var(--white-a08); color: var(--white-a70);
@@ -26070,7 +26070,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     flex: 1; padding: 12px 16px; border-radius: var(--radius-lg);
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
-    text-align: center; transition: all 0.2s;
+    text-align: center; transition: all var(--dur-base);
 }
 .watch-all-stat-card:hover { border-color: var(--white-a10); background: var(--white-a05); }
 .watch-all-stat-card.eligible { border-color: rgba(var(--accent-rgb), 0.2); }
@@ -26082,9 +26082,9 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 /* Search */
 .watch-all-search-wrap { padding: 8px 20px 4px; position: sticky; top: 78px; z-index: 2; background: rgba(16,16,16,0.95); }
 .watch-all-search {
-    width: 100%; padding: 10px 16px; border-radius: 10px;
+    width: 100%; padding: 10px 16px; border-radius: var(--radius-control);
     background: var(--white-a06); border: 1px solid var(--white-a08);
-    color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s;
+    color: #fff; font-size: 14px; outline: none; transition: border-color var(--dur-base);
     box-sizing: border-box;
 }
 .watch-all-search:focus { border-color: rgba(var(--accent-rgb), 0.4); }
@@ -26103,8 +26103,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .watch-all-cell {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px 12px; border-radius: 10px;
-    transition: background 0.15s;
+    padding: 8px 12px; border-radius: var(--radius-control);
+    transition: background var(--dur-fast);
 }
 .watch-all-cell:hover { background: var(--white-a04); }
 .watch-all-cell.dimmed { opacity: 0.4; }
@@ -26131,12 +26131,12 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 .watch-all-ineligible-header {
     display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 20px; cursor: pointer; transition: background 0.15s;
+    padding: 12px 20px; cursor: pointer; transition: background var(--dur-fast);
 }
 .watch-all-ineligible-header:hover { background: var(--white-a03); }
 .watch-all-ineligible-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,180,80,0.7); }
 .watch-all-ineligible-icon { font-size: 14px; }
-.watch-all-chevron { font-size: 10px; color: var(--white-a30); transition: transform 0.25s; }
+.watch-all-chevron { font-size: 10px; color: var(--white-a30); transition: transform var(--dur-moderate); }
 .watch-all-ineligible.expanded .watch-all-chevron { transform: rotate(180deg); }
 .watch-all-ineligible-body {
     max-height: 0; overflow: hidden; transition: max-height 0.35s ease;
@@ -26201,7 +26201,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
-    transition: all 0.2s ease-out;
+    transition: all var(--dur-base) ease-out;
     min-width: 20px;
     height: 32px;
     text-align: center;
@@ -26292,15 +26292,15 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     content-visibility: auto;
     contain-intrinsic-size: auto 240px;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--dur-slow) var(--ease-standard),
+                box-shadow var(--dur-slow) var(--ease-standard),
+                border-color var(--dur-slow) var(--ease-standard);
     display: flex;
     flex-direction: column;
     position: relative;
     overflow: hidden;
     aspect-ratio: 0.8;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
     will-change: transform;
     contain: layout style paint;
 }
@@ -26308,7 +26308,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .library-artist-card:hover {
     transform: translateY(-5px) scale(1.02);
     border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+    box-shadow: 0 12px 40px var(--black-a50),
         0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
@@ -26340,14 +26340,14 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s ease-out;
+    transition: transform var(--dur-slower) var(--ease-standard), opacity var(--dur-slowest) ease-out;
 }
 
 /* ease in from the dark tile once the bytes have arrived, not a pop */
 .library-artist-image img.is-loading { opacity: 0; }
 .library-artist-image img.is-loaded { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-    .library-artist-image img { transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+    .library-artist-image img { transition: transform var(--dur-slower) var(--ease-standard); }
 }
 
 .library-artist-card:hover .library-artist-image img {
@@ -26374,8 +26374,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     position: absolute;
     inset: 0;
     background: linear-gradient(0deg,
-            rgba(0, 0, 0, 0.85) 0%,
-            rgba(0, 0, 0, 0.4) 35%,
+            var(--black-a85) 0%,
+            var(--black-a40) 35%,
             transparent 60%);
     pointer-events: none;
     z-index: 1;
@@ -26383,8 +26383,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .library-artist-card:hover::after {
     background: linear-gradient(0deg,
-            rgba(0, 0, 0, 0.9) 0%,
-            rgba(0, 0, 0, 0.3) 40%,
+            var(--black-a90) 0%,
+            var(--black-a30) 40%,
             transparent 65%);
 }
 
@@ -26408,7 +26408,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     cursor: pointer;
     opacity: 0;
     transform: translateY(8px) scale(0.94);
-    transition: opacity 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+    transition: opacity var(--dur-base) ease, transform var(--dur-base) ease, filter var(--dur-base) ease;
 }
 
 .library-artist-card:hover .library-artist-play-btn,
@@ -26449,8 +26449,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 100%;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8),
-        0 1px 3px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 2px 8px var(--black-a80),
+        0 1px 3px var(--black-a90);
 }
 
 .library-artist-stats {
@@ -26460,7 +26460,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 4px var(--black-a80);
 }
 
 .library-artist-stat {
@@ -26479,7 +26479,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     height: 36px;
     padding: 0 14px;
     border: 1px solid rgba(100, 181, 246, 0.25);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(100, 181, 246, 0.06);
     color: var(--white-a75);
     font-size: 12.5px;
@@ -26534,13 +26534,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     padding: 12px 20px;
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.08));
     border: 1px solid rgba(var(--accent-rgb), 0.35);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: rgb(var(--accent-light-rgb));
     font-family: inherit;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .library-empty-search-cta:hover {
     transform: translateY(-1px);
@@ -26551,7 +26551,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .library-empty-search-cta-icon { font-size: 16px; }
 .library-empty-search-cta-arrow {
     font-weight: 700;
-    transition: transform 0.15s ease;
+    transition: transform var(--dur-fast) ease;
 }
 .library-empty-search-cta:hover .library-empty-search-cta-arrow { transform: translateX(3px); }
 #library-empty-search-cta-query { color: #fff; }
@@ -26575,7 +26575,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .pagination-btn:hover:not(:disabled) {
@@ -26697,7 +26697,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
     text-decoration: none;
     display: flex;
     align-items: center;
@@ -26709,7 +26709,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: linear-gradient(135deg, rgba(40, 40, 40, 0.95) 0%, rgba(30, 30, 30, 0.98) 100%);
     border-color: var(--white-a15);
     transform: translateY(-1px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 25px var(--black-a40);
 }
 
 .artist-detail-title {
@@ -26775,7 +26775,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .artist-detail-error p {
-    color: #b3b3b3;
+    color: var(--text-soft);
     margin: 0 0 20px 0;
 }
 
@@ -26789,7 +26789,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .retry-btn:hover {
@@ -26872,7 +26872,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .stat-label {
     font-size: 14px;
-    color: #b3b3b3;
+    color: var(--text-soft);
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -26919,7 +26919,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
     cursor: pointer;
     border-radius: var(--radius-xl);
-    transition: all 0.2s ease-out;
+    transition: all var(--dur-base) ease-out;
 }
 
 .discography-filter-btn:hover {
@@ -26966,7 +26966,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .section-stats {
     display: flex;
     gap: 16px;
-    color: #b3b3b3;
+    color: var(--text-soft);
     font-size: 14px;
     font-weight: 500;
 }
@@ -26986,7 +26986,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-xl);
     padding: 14px;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -27002,7 +27002,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: linear-gradient(135deg, rgba(40, 40, 40, 0.95) 0%, rgba(30, 30, 30, 0.98) 100%);
     border-color: var(--white-a15);
     transform: translateY(-4px);
-    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 12px 35px var(--black-a40);
 }
 
 .release-card.missing {
@@ -27054,7 +27054,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .release-year {
     font-size: 14px;
-    color: #b3b3b3;
+    color: var(--text-soft);
     margin: 0 0 8px 0;
 }
 
@@ -27069,7 +27069,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .completion-text {
-    color: #b3b3b3;
+    color: var(--text-soft);
 }
 
 .completion-text.complete {
@@ -27083,7 +27083,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .completion-text.missing {
-    color: #ff6b6b;
+    color: var(--danger-soft);
     font-weight: 600;
 }
 
@@ -27100,7 +27100,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 .completion-fill.missing {
-    background: linear-gradient(90deg, #ff6b6b, #ff8e8e);
+    background: linear-gradient(90deg, var(--danger-soft), #ff8e8e);
     width: 0%;
 }
 
@@ -27202,7 +27202,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     border-radius: var(--radius-xl);
     margin: 20px;
     padding: 28px 32px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px var(--black-a30);
 }
 
 .artist-hero-content {
@@ -27244,20 +27244,20 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 .artist-image {
     width: 160px;
     height: 160px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     object-fit: cover;
     border: 2px solid rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 8px 28px var(--black-a40);
     display: block;
 }
 
 .artist-image-fallback {
     width: 160px;
     height: 160px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-light-rgb), 0.1) 100%);
     border: 2px solid rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -27313,7 +27313,7 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
 }
 .artist-hero-badge img {
     width: 20px;
@@ -27335,7 +27335,7 @@ a.artist-hero-badge:hover {
     background: var(--white-a12);
     border-color: var(--white-a20);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--black-a30);
 }
 a.artist-hero-badge:hover img {
     opacity: 1;
@@ -27392,7 +27392,7 @@ div.artist-hero-badge {
     align-items: center;
     gap: 5px;
     cursor: default;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--dur-moderate) var(--ease-standard);
 }
 
 .artist-enrich-circle:hover {
@@ -27412,7 +27412,7 @@ div.artist-hero-badge {
     width: 48px;
     height: 48px;
     filter: drop-shadow(0 0 0px transparent);
-    transition: filter 0.3s ease;
+    transition: filter var(--dur-slow) ease;
 }
 
 .artist-enrich-circle:hover .artist-enrich-ring {
@@ -27446,7 +27446,7 @@ div.artist-hero-badge {
     font-size: 11px;
     font-weight: 700;
     color: var(--white-a50);
-    transition: color 0.25s ease;
+    transition: color var(--dur-moderate) ease;
 }
 
 .artist-enrich-label {
@@ -27455,7 +27455,7 @@ div.artist-hero-badge {
     font-weight: 500;
     text-align: center;
     line-height: 1.1;
-    transition: color 0.25s ease;
+    transition: color var(--dur-moderate) ease;
 }
 
 @keyframes ringFillIn {
@@ -27509,7 +27509,7 @@ div.artist-hero-badge {
 .completion-fill {
     height: 100%;
     background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgb(var(--accent-light-rgb)) 100%);
-    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: width 0.8s var(--ease-standard);
     border-radius: 2px;
     position: relative;
 }
@@ -27531,13 +27531,13 @@ div.artist-hero-badge {
     margin-bottom: 14px;
     padding: 10px 14px;
     background: var(--white-a02);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--white-a04);
     padding: 16px 20px 32px;
     max-height: 8em;
     overflow: hidden;
     position: relative;
-    transition: max-height 0.4s ease;
+    transition: max-height var(--dur-slower) ease;
 }
 .artist-hero-bio.expanded {
     /* was 500px — a long biography simply clipped again at the taller cap,
@@ -27595,9 +27595,9 @@ div.artist-hero-badge {
     padding: 10px 18px;
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     min-width: 80px;
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-base);
 }
 .artist-hero-stat:hover {
     border-color: var(--white-a10);
@@ -27647,7 +27647,7 @@ div.artist-hero-badge {
     gap: 8px;
     padding: 5px 8px;
     border-radius: var(--radius-sm);
-    transition: background 0.15s;
+    transition: background var(--dur-fast);
 }
 .hero-top-track:hover {
     background: var(--white-a04);
@@ -27666,7 +27666,7 @@ div.artist-hero-badge {
     justify-content: center;
     flex-shrink: 0;
     opacity: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .hero-top-track:hover .hero-top-track-play {
     opacity: 1;
@@ -27717,7 +27717,7 @@ div.artist-hero-badge {
     justify-content: center;
     flex-shrink: 0;
     opacity: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .hero-top-track:hover .hero-top-track-download,
 .hero-top-track:hover .hero-top-track-add,
@@ -27746,7 +27746,7 @@ div.artist-hero-badge {
     letter-spacing: 0.04em;
     text-transform: uppercase;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .hero-top-tracks-download-all:hover {
     background: rgba(var(--accent-rgb), 0.18);
@@ -27807,16 +27807,16 @@ div.artist-hero-badge {
     max-width: 90vw;
     max-height: 85vh;
     max-height: 85dvh;
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
     overflow: hidden;
     position: relative;
     background: rgba(16, 16, 20, 0.96);
     backdrop-filter: blur(20px);
     border: 1px solid var(--white-a08);
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 20px 60px var(--black-a60);
     transform: scale(0.9);
     opacity: 0;
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slower) var(--ease-standard);
 }
 
 #add-to-wishlist-modal-overlay:not(.hidden) .add-to-wishlist-modal {
@@ -27890,17 +27890,17 @@ div.artist-hero-badge {
     border-radius: var(--radius-lg);
     object-fit: cover;
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 8px 24px var(--black-a40),
+        0 4px 12px var(--black-a30),
         inset 0 1px 0 var(--white-a10);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 
 .add-to-wishlist-modal-hero-image:hover {
     transform: scale(1.05);
     box-shadow:
-        0 12px 32px rgba(0, 0, 0, 0.5),
-        0 6px 16px rgba(0, 0, 0, 0.3),
+        0 12px 32px var(--black-a50),
+        0 6px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
 }
 
@@ -27961,7 +27961,7 @@ div.artist-hero-badge {
     border-radius: var(--radius-sm);
     border: 1px solid rgba(var(--accent-rgb), 0.2);
     box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.1);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 /* Header Actions */
@@ -27973,18 +27973,18 @@ div.artist-hero-badge {
 }
 
 .add-to-wishlist-modal-close {
-    color: #b3b3b3;
+    color: var(--text-soft);
     font-size: 28px;
     font-weight: 300;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     width: 36px;
     height: 36px;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-circle);
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--black-a30);
     border: 1px solid var(--white-a10);
     backdrop-filter: blur(10px);
 }
@@ -27993,7 +27993,7 @@ div.artist-hero-badge {
     color: #ffffff;
     background: var(--white-a15);
     transform: scale(1.1);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 12px var(--black-a30);
 }
 
 /* Modal Content */
@@ -28008,7 +28008,7 @@ div.artist-hero-badge {
     flex: 1;
     padding: 24px 28px;
     overflow-y: auto;
-    background: #121212;
+    background: var(--bg-surface);
 }
 
 .add-to-wishlist-modal-body::-webkit-scrollbar {
@@ -28088,7 +28088,7 @@ div.artist-hero-badge {
             var(--white-a02) 100%);
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-lg);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     gap: 12px;
 }
 
@@ -28373,7 +28373,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #ffffff;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px var(--black-a50);
 }
 
 .beatport-top10-subtitle {
@@ -28409,8 +28409,8 @@ div.artist-hero-badge {
     /* Allow shrinking */
     overflow: hidden;
     /* Prevent content overflow */
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        filter 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard),
+        filter var(--dur-slowest) var(--ease-standard);
     cursor: pointer;
 }
 
@@ -28418,7 +28418,7 @@ div.artist-hero-badge {
 .beatport-top10-list {
     border-left: 4px solid #00ff88;
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 20px 40px var(--black-a50),
         0 0 20px rgba(0, 255, 136, 0.15),
         inset 0 1px 0 var(--white-a10);
 }
@@ -28426,7 +28426,7 @@ div.artist-hero-badge {
 .beatport-hype10-list {
     border-left: 4px solid #ff3366;
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 20px 40px var(--black-a50),
         0 0 20px rgba(255, 51, 102, 0.15),
         inset 0 1px 0 var(--white-a10);
 }
@@ -28465,7 +28465,7 @@ div.artist-hero-badge {
     font-weight: 600;
     color: #ffffff;
     margin-bottom: 5px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 1px 3px var(--black-a50);
 }
 
 .beatport-top10-list-subtitle,
@@ -28495,7 +28495,7 @@ div.artist-hero-badge {
     padding: 16px;
     border: 1px solid var(--white-a08);
     backdrop-filter: blur(10px);
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     cursor: pointer;
     position: relative;
     overflow: hidden;
@@ -28517,7 +28517,7 @@ div.artist-hero-badge {
     border-color: rgba(0, 255, 136, 0.3);
     transform: translateY(-3px);
     box-shadow:
-        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 12px 32px var(--black-a50),
         0 0 20px rgba(0, 255, 136, 0.2);
 }
 
@@ -28528,7 +28528,7 @@ div.artist-hero-badge {
     border-color: rgba(255, 51, 102, 0.3);
     transform: translateY(-3px);
     box-shadow:
-        0 12px 32px rgba(0, 0, 0, 0.5),
+        0 12px 32px var(--black-a50),
         0 0 20px rgba(255, 51, 102, 0.2);
 }
 
@@ -28570,7 +28570,7 @@ div.artist-hero-badge {
     margin-right: 16px;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 6px 16px var(--black-a40);
     border: 2px solid var(--white-a10);
 }
 
@@ -28579,7 +28579,7 @@ div.artist-hero-badge {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.4s ease;
+    transition: transform var(--dur-slower) ease;
 }
 
 .beatport-top10-card:hover .beatport-top10-card-artwork img,
@@ -28623,7 +28623,7 @@ div.artist-hero-badge {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 3px var(--black-a80);
     max-width: 100%;
     width: 100%;
 }
@@ -28718,7 +28718,7 @@ div.artist-hero-badge {
     font-size: 18px;
     color: #ffffff;
     margin-bottom: 8px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 3px var(--black-a80);
 }
 
 .beatport-top10-loading-content p,
@@ -28903,7 +28903,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #ffffff;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px var(--black-a50);
 }
 
 .beatport-releases-top10-subtitle {
@@ -28928,7 +28928,7 @@ div.artist-hero-badge {
     backdrop-filter: blur(25px);
     border: 1px solid var(--white-a12);
     box-shadow:
-        0 25px 50px rgba(0, 0, 0, 0.6),
+        0 25px 50px var(--black-a60),
         0 0 25px rgba(138, 43, 226, 0.1),
         inset 0 1px 0 var(--white-a15);
     border-left: 4px solid #8a2be2;
@@ -28953,11 +28953,11 @@ div.artist-hero-badge {
     padding: 20px;
     border: 1px solid var(--white-a10);
     backdrop-filter: blur(15px);
-    transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+    transition: all var(--dur-slowest) cubic-bezier(0.23, 1, 0.32, 1);
     cursor: pointer;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 20px var(--black-a30);
     min-height: 120px;
     max-height: 120px;
     width: 100%;
@@ -28973,7 +28973,7 @@ div.artist-hero-badge {
     border-color: rgba(138, 43, 226, 0.4);
     transform: translateY(-5px) scale(1.02);
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.6),
+        0 20px 40px var(--black-a60),
         0 0 30px rgba(138, 43, 226, 0.25);
 }
 
@@ -29001,7 +29001,7 @@ div.artist-hero-badge {
     margin-right: 20px;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 20px var(--black-a50);
     border: 3px solid var(--white-a15);
     backdrop-filter: blur(5px);
 }
@@ -29010,7 +29010,7 @@ div.artist-hero-badge {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.5s ease;
+    transition: transform var(--dur-slowest) ease;
 }
 
 .beatport-releases-top10-card:hover .beatport-releases-top10-card-artwork img {
@@ -29048,7 +29048,7 @@ div.artist-hero-badge {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 2px 4px var(--black-a90);
     max-width: 100%;
     width: 100%;
 }
@@ -29075,12 +29075,12 @@ div.artist-hero-badge {
     letter-spacing: 0.8px;
     max-width: 100%;
     width: 100%;
-    transition: .5s;
+    transition: var(--dur-slowest);
 }
 
 .beatport-releases-top10-card:hover .beatport-releases-top10-card-label {
     color: rgba(138, 43, 226, 0.95);
-    transition: .5s;
+    transition: var(--dur-slowest);
 }
 
 
@@ -29105,7 +29105,7 @@ div.artist-hero-badge {
     font-size: 20px;
     color: #ffffff;
     margin-bottom: 10px;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 3px var(--black-a80);
 }
 
 .beatport-releases-top10-loading-content p {
@@ -29290,7 +29290,7 @@ div.artist-hero-badge {
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    text-shadow: 0 2px 4px var(--black-a30);
 }
 
 .beatport-releases-subtitle {
@@ -29309,7 +29309,7 @@ div.artist-hero-badge {
     backdrop-filter: blur(20px);
     border: 1px solid var(--white-a10);
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 20px 40px var(--black-a50),
         inset 0 1px 0 var(--white-a10);
 }
 
@@ -29403,12 +29403,12 @@ div.artist-hero-badge {
     padding: 16px;
     border: 1px solid var(--white-a10);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slow) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     position: relative;
     overflow: hidden;
     backdrop-filter: blur(10px);
     box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a10);
     width: 100%;
     height: 160px;
@@ -29442,7 +29442,7 @@ div.artist-hero-badge {
             rgba(40, 40, 40, 0.95));
     border-color: rgba(var(--accent-rgb), 0.4);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 8px 24px var(--black-a40),
         0 0 16px rgba(var(--accent-rgb), 0.3),
         inset 0 1px 0 var(--white-a15);
     z-index: 10;
@@ -29469,7 +29469,7 @@ div.artist-hero-badge {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    transition: transform var(--dur-slow) ease;
 }
 
 .beatport-release-card:hover .beatport-release-artwork img {
@@ -29562,7 +29562,7 @@ div.artist-hero-badge {
     justify-content: center;
     backdrop-filter: blur(10px);
     box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.4);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     border: 2px solid var(--white-a20);
 }
 
@@ -29597,7 +29597,7 @@ div.artist-hero-badge {
     background: var(--white-a30);
     border: 2px solid var(--white-a10);
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .beatport-releases-indicator.active {
@@ -29676,12 +29676,12 @@ div.artist-hero-badge {
 .beatport-hype-picks-title {
     font-size: 32px;
     font-weight: bold;
-    background: linear-gradient(135deg, #ff6b6b, #ff8787, #ffa8a8);
+    background: linear-gradient(135deg, var(--danger-soft), #ff8787, #ffa8a8);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    text-shadow: 0 2px 4px var(--black-a30);
 }
 
 .beatport-hype-picks-subtitle {
@@ -29700,7 +29700,7 @@ div.artist-hero-badge {
     backdrop-filter: blur(20px);
     border: 1px solid var(--white-a10);
     box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.5),
+        0 20px 40px var(--black-a50),
         inset 0 1px 0 var(--white-a10);
 }
 
@@ -29720,10 +29720,10 @@ div.artist-hero-badge {
     justify-content: center;
     min-height: 400px;
     background: linear-gradient(135deg,
-            rgba(255, 107, 107, 0.1),
+            rgba(var(--danger-soft-rgb), 0.1),
             rgba(255, 135, 135, 0.05));
     border-radius: var(--radius-xl);
-    border: 2px dashed rgba(255, 107, 107, 0.3);
+    border: 2px dashed rgba(var(--danger-soft-rgb), 0.3);
 }
 
 .beatport-hype-picks-loading-content {
@@ -29732,7 +29732,7 @@ div.artist-hero-badge {
 
 .beatport-hype-picks-loading-content h3 {
     font-size: 24px;
-    color: #ff6b6b;
+    color: var(--danger-soft);
     margin-bottom: 8px;
     font-weight: 600;
 }
@@ -29794,12 +29794,12 @@ div.artist-hero-badge {
     padding: 16px;
     border: 1px solid var(--white-a10);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slow) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     position: relative;
     overflow: hidden;
     backdrop-filter: blur(10px);
     box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a10);
     width: 100%;
     height: 160px;
@@ -29829,12 +29829,12 @@ div.artist-hero-badge {
 .beatport-hype-pick-card:hover {
     transform: translateY(-2px) scale(1.05);
     background: linear-gradient(145deg,
-            rgba(255, 107, 107, 0.15),
+            rgba(var(--danger-soft-rgb), 0.15),
             rgba(40, 40, 40, 0.95));
-    border-color: rgba(255, 107, 107, 0.4);
+    border-color: rgba(var(--danger-soft-rgb), 0.4);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
-        0 0 16px rgba(255, 107, 107, 0.3),
+        0 8px 24px var(--black-a40),
+        0 0 16px rgba(var(--danger-soft-rgb), 0.3),
         inset 0 1px 0 var(--white-a15);
     z-index: 10;
 }
@@ -29860,7 +29860,7 @@ div.artist-hero-badge {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.3s ease;
+    transition: transform var(--dur-slow) ease;
 }
 
 .beatport-hype-pick-card:hover .beatport-hype-pick-artwork img {
@@ -29893,7 +29893,7 @@ div.artist-hero-badge {
 
 .beatport-hype-pick-label {
     font-size: 10px;
-    color: rgba(255, 107, 107, 0.8);
+    color: rgba(var(--danger-soft-rgb), 0.8);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -29938,7 +29938,7 @@ div.artist-hero-badge {
 .beatport-hype-picks-nav-btn {
     pointer-events: all;
     background: linear-gradient(135deg,
-            rgba(255, 107, 107, 0.9),
+            rgba(var(--danger-soft-rgb), 0.9),
             rgba(255, 135, 135, 0.8));
     border: none;
     border-radius: var(--radius-circle);
@@ -29952,17 +29952,17 @@ div.artist-hero-badge {
     align-items: center;
     justify-content: center;
     backdrop-filter: blur(10px);
-    box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
-    transition: all 0.3s ease;
+    box-shadow: 0 6px 20px rgba(var(--danger-soft-rgb), 0.4);
+    transition: all var(--dur-slow) ease;
     border: 2px solid var(--white-a20);
 }
 
 .beatport-hype-picks-nav-btn:hover {
     transform: scale(1.1);
     background: linear-gradient(135deg,
-            rgba(255, 107, 107, 1),
+            var(--danger-soft),
             rgba(255, 135, 135, 0.9));
-    box-shadow: 0 8px 25px rgba(255, 107, 107, 0.6);
+    box-shadow: 0 8px 25px rgba(var(--danger-soft-rgb), 0.6);
 }
 
 .beatport-hype-picks-prev-btn {
@@ -29988,13 +29988,13 @@ div.artist-hero-badge {
     background: var(--white-a30);
     border: 2px solid var(--white-a10);
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .beatport-hype-picks-indicator.active {
-    background: linear-gradient(135deg, #ff6b6b, #ff8787);
-    border-color: rgba(255, 107, 107, 0.6);
-    box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
+    background: linear-gradient(135deg, var(--danger-soft), #ff8787);
+    border-color: rgba(var(--danger-soft-rgb), 0.6);
+    box-shadow: 0 0 15px rgba(var(--danger-soft-rgb), 0.5);
     transform: scale(1.2);
 }
 
@@ -30070,7 +30070,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #ffffff;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px var(--black-a50);
 }
 
 .beatport-charts-subtitle {
@@ -30158,10 +30158,10 @@ div.artist-hero-badge {
     max-height: 200px;
     border-radius: var(--radius-xl);
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     overflow: hidden;
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 8px 32px var(--black-a40),
         inset 0 1px 0 var(--white-a10);
 }
 
@@ -30187,9 +30187,9 @@ div.artist-hero-badge {
     right: 0;
     bottom: 0;
     background: linear-gradient(135deg,
-            rgba(0, 0, 0, 0.2) 0%,
-            rgba(0, 0, 0, 0.4) 50%,
-            rgba(0, 0, 0, 0.7) 100%);
+            var(--black-a20) 0%,
+            var(--black-a40) 50%,
+            var(--black-a70) 100%);
     border-radius: var(--radius-xl);
     z-index: 2;
 }
@@ -30197,7 +30197,7 @@ div.artist-hero-badge {
 .beatport-chart-card:hover {
     transform: translateY(-12px) scale(1.08);
     box-shadow:
-        0 25px 50px rgba(0, 0, 0, 0.7),
+        0 25px 50px var(--black-a70),
         0 0 40px rgba(var(--accent-rgb), 0.5),
         inset 0 1px 0 var(--white-a30);
     z-index: 20;
@@ -30206,19 +30206,19 @@ div.artist-hero-badge {
 .beatport-chart-card:hover::after {
     background: linear-gradient(135deg,
             rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(0, 0, 0, 0.2) 50%,
-            rgba(0, 0, 0, 0.5) 100%);
+            var(--black-a20) 50%,
+            var(--black-a50) 100%);
 }
 
 .beatport-chart-card:hover .beatport-chart-name {
     color: rgba(var(--accent-rgb), 0.95);
-    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 2px 12px var(--black-a90);
     transform: translateY(-2px);
 }
 
 .beatport-chart-card:hover .beatport-chart-creator {
     color: #ffffff;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 1px 8px var(--black-a90);
     transform: translateY(-1px);
 }
 
@@ -30238,22 +30238,22 @@ div.artist-hero-badge {
     color: #ffffff;
     margin-bottom: 8px;
     line-height: 1.2;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 2px 8px var(--black-a80);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .beatport-chart-creator {
     font-size: 12px;
     color: var(--white-a90);
     font-weight: 500;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 4px var(--black-a80);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 /* Charts Loading State */
@@ -30312,11 +30312,11 @@ div.artist-hero-badge {
     height: 50px;
     border-radius: var(--radius-circle);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slow) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     backdrop-filter: blur(10px);
     border: 2px solid var(--white-a20);
     box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
     pointer-events: auto;
     display: flex;
@@ -30330,7 +30330,7 @@ div.artist-hero-badge {
             rgba(24, 160, 72, 0.9));
     transform: scale(1.1);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 8px 24px var(--black-a40),
         0 0 20px rgba(var(--accent-rgb), 0.5),
         inset 0 1px 0 var(--white-a30);
 }
@@ -30357,7 +30357,7 @@ div.artist-hero-badge {
     background: var(--white-a40);
     border: none;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .beatport-charts-indicator.active {
@@ -30439,7 +30439,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #ffffff;
     margin-bottom: 8px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px var(--black-a50);
 }
 
 .beatport-dj-subtitle {
@@ -30526,13 +30526,13 @@ div.artist-hero-badge {
     max-height: 220px;
     border-radius: 20px;
     cursor: pointer;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     overflow: hidden;
     background: linear-gradient(135deg,
             rgba(147, 51, 234, 0.8),
             rgba(79, 70, 229, 0.6));
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 8px 32px var(--black-a40),
         inset 0 1px 0 var(--white-a10);
 }
 
@@ -30559,8 +30559,8 @@ div.artist-hero-badge {
     bottom: 0;
     background: linear-gradient(180deg,
             rgba(147, 51, 234, 0.3) 0%,
-            rgba(0, 0, 0, 0.4) 50%,
-            rgba(0, 0, 0, 0.8) 100%);
+            var(--black-a40) 50%,
+            var(--black-a80) 100%);
     border-radius: 20px;
     z-index: 2;
 }
@@ -30568,7 +30568,7 @@ div.artist-hero-badge {
 .beatport-dj-card:hover {
     transform: translateY(-15px) scale(1.1);
     box-shadow:
-        0 30px 60px rgba(0, 0, 0, 0.8),
+        0 30px 60px var(--black-a80),
         0 0 50px rgba(147, 51, 234, 0.6),
         inset 0 1px 0 var(--white-a30);
     z-index: 25;
@@ -30577,19 +30577,19 @@ div.artist-hero-badge {
 .beatport-dj-card:hover::after {
     background: linear-gradient(180deg,
             rgba(147, 51, 234, 0.4) 0%,
-            rgba(0, 0, 0, 0.2) 50%,
-            rgba(0, 0, 0, 0.6) 100%);
+            var(--black-a20) 50%,
+            var(--black-a60) 100%);
 }
 
 .beatport-dj-card:hover .beatport-dj-name {
     color: rgba(147, 51, 234, 0.95);
-    text-shadow: 0 2px 15px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 2px 15px var(--black-a90);
     transform: translateY(-3px);
 }
 
 .beatport-dj-card:hover .beatport-dj-creator {
     color: #ffffff;
-    text-shadow: 0 1px 10px rgba(0, 0, 0, 0.9);
+    text-shadow: 0 1px 10px var(--black-a90);
     transform: translateY(-2px);
 }
 
@@ -30609,11 +30609,11 @@ div.artist-hero-badge {
     color: #ffffff;
     margin-bottom: 10px;
     line-height: 1.2;
-    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 2px 10px var(--black-a80);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .beatport-dj-creator {
@@ -30621,11 +30621,11 @@ div.artist-hero-badge {
     font-size: 16px;
     color: var(--white-a90);
     font-weight: 500;
-    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+    text-shadow: 0 1px 6px var(--black-a80);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slower) cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 /* DJ Loading State */
@@ -30684,11 +30684,11 @@ div.artist-hero-badge {
     height: 50px;
     border-radius: var(--radius-circle);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition: all var(--dur-slow) cubic-bezier(0.25, 0.46, 0.45, 0.94);
     backdrop-filter: blur(10px);
     border: 2px solid var(--white-a20);
     box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a20);
     pointer-events: auto;
     display: flex;
@@ -30702,7 +30702,7 @@ div.artist-hero-badge {
             rgba(79, 70, 229, 0.9));
     transform: scale(1.1);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 8px 24px var(--black-a40),
         0 0 20px rgba(147, 51, 234, 0.5),
         inset 0 1px 0 var(--white-a30);
 }
@@ -30729,7 +30729,7 @@ div.artist-hero-badge {
     background: var(--white-a40);
     border: none;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .beatport-dj-indicator.active {
@@ -30845,7 +30845,7 @@ div.artist-hero-badge {
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -30865,7 +30865,7 @@ div.artist-hero-badge {
             transparent,
             rgba(1, 255, 149, 0.1),
             transparent);
-    transition: left 0.5s ease;
+    transition: left var(--dur-slowest) ease;
 }
 
 .beatport-nav-button:hover {
@@ -30894,7 +30894,7 @@ div.artist-hero-badge {
     background-repeat: no-repeat;
     background-position: center;
     flex-shrink: 0;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .beatport-nav-text {
@@ -30967,7 +30967,7 @@ div.artist-hero-badge {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--black-a85);
     backdrop-filter: blur(10px);
     display: none;
     justify-content: center;
@@ -30986,7 +30986,7 @@ div.artist-hero-badge {
             rgba(20, 20, 20, 0.95) 50%,
             rgba(25, 25, 25, 0.95) 100%);
     border-radius: 20px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+    box-shadow: 0 20px 60px var(--black-a80);
     width: 95vw;
     height: 90vh;
     max-width: 1600px;
@@ -31013,7 +31013,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #ffffff;
     margin: 0;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    text-shadow: 0 2px 4px var(--black-a50);
 }
 
 .genre-browser-modal-close {
@@ -31026,7 +31026,7 @@ div.artist-hero-badge {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     backdrop-filter: blur(10px);
 }
 
@@ -31069,7 +31069,7 @@ div.artist-hero-badge {
     color: #ffffff;
     font-size: 16px;
     outline: none;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     backdrop-filter: blur(10px);
 }
 
@@ -31135,7 +31135,7 @@ div.artist-hero-badge {
     border-radius: var(--radius-xl);
     overflow: hidden;
     border: 1px solid var(--white-a10);
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     cursor: pointer;
     position: relative;
     height: 200px;
@@ -31144,7 +31144,7 @@ div.artist-hero-badge {
 
 .genre-browser-card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 15px 40px var(--black-a60);
     border-color: rgba(var(--accent-rgb), 0.5);
 }
 
@@ -31152,7 +31152,7 @@ div.artist-hero-badge {
     width: 100%;
     height: 120px;
     object-fit: cover;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
 }
 
 .genre-browser-card:hover .genre-browser-card-image {
@@ -31170,7 +31170,7 @@ div.artist-hero-badge {
     font-weight: 600;
     color: #ffffff;
     margin: 0 0 8px 0;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
+    text-shadow: 0 2px 4px var(--black-a70);
 }
 
 .genre-browser-card-subtitle {
@@ -31298,11 +31298,11 @@ div.artist-hero-badge {
             rgba(30, 30, 30, 0.8) 0%,
             rgba(20, 20, 20, 0.9) 100%);
     border: 1px solid var(--white-a15);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a90);
     font-size: 14px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .genre-back-button:hover {
@@ -31315,7 +31315,7 @@ div.artist-hero-badge {
 
 .back-icon {
     font-size: 16px;
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
 }
 
 .genre-back-button:hover .back-icon {
@@ -31371,7 +31371,7 @@ div.artist-hero-badge {
 
 .genre-error-text {
     font-size: 18px;
-    color: #ff6b6b;
+    color: var(--danger-soft);
     margin: 0 0 10px 0;
 }
 
@@ -31387,11 +31387,11 @@ div.artist-hero-badge {
             rgba(30, 30, 30, 0.8) 0%,
             rgba(20, 20, 20, 0.9) 100%);
     border: 1px solid var(--white-a15);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a90);
     font-size: 14px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .genre-retry-button:hover {
@@ -31449,14 +31449,14 @@ div.artist-hero-badge {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.85);
+    background: var(--black-a85);
     backdrop-filter: blur(8px);
     display: flex;
     justify-content: center;
     align-items: center;
     z-index: 1000;
     /* Above parent modal content */
-    transition: opacity 0.2s ease;
+    transition: opacity var(--dur-base) ease;
 }
 
 .discovery-fix-modal-overlay.hidden {
@@ -31473,7 +31473,7 @@ div.artist-hero-badge {
     max-height: 85vh;
     max-height: 85dvh;
     overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
+    box-shadow: 0 8px 32px var(--black-a60),
         0 0 1px var(--white-a10) inset;
     border: 1px solid var(--white-a10);
     display: flex;
@@ -31585,7 +31585,7 @@ div.artist-hero-badge {
     color: var(--white-a90);
     font-size: 14px;
     font-family: inherit;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .fix-modal-input:focus {
@@ -31608,7 +31608,7 @@ div.artist-hero-badge {
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     white-space: nowrap;
 }
 
@@ -31643,10 +31643,10 @@ div.artist-hero-badge {
 .fix-result-card {
     background: var(--white-a03);
     border: 1px solid var(--white-a08);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 14px 16px;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
 }
 
 .fix-result-card:hover {
@@ -31703,7 +31703,7 @@ div.artist-hero-badge {
     font-size: 14px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     border: none;
     font-family: inherit;
 }
@@ -31734,7 +31734,7 @@ div.artist-hero-badge {
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     white-space: nowrap;
 }
 
@@ -31869,13 +31869,13 @@ div.artist-hero-badge {
 
 .similar-artists-bubbles-container::-webkit-scrollbar-track {
     background: var(--white-a05);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
 }
 
 .similar-artists-bubbles-container::-webkit-scrollbar-thumb {
     background: var(--white-a20);
-    border-radius: 10px;
-    transition: background 0.2s ease;
+    border-radius: var(--radius-control);
+    transition: background var(--dur-base) ease;
 }
 
 .similar-artists-bubbles-container::-webkit-scrollbar-thumb:hover {
@@ -31887,13 +31887,13 @@ div.artist-hero-badge {
     display: block;
     position: relative;
     overflow: hidden;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--dur-slow) var(--ease-standard),
+                box-shadow var(--dur-slow) var(--ease-standard);
     background: rgba(18, 18, 18, 1);
     border: 1px solid var(--white-a06);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 16px var(--black-a30);
     aspect-ratio: 0.8;
 
     /* Progressive load animation */
@@ -31909,7 +31909,7 @@ div.artist-hero-badge {
 .similar-artist-bubble:hover {
     transform: translateY(-5px) scale(1.02);
     border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+    box-shadow: 0 12px 40px var(--black-a50),
                 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
@@ -31919,8 +31919,8 @@ div.artist-hero-badge {
     position: absolute;
     inset: 0;
     background: linear-gradient(0deg,
-        rgba(0, 0, 0, 0.85) 0%,
-        rgba(0, 0, 0, 0.3) 40%,
+        var(--black-a85) 0%,
+        var(--black-a30) 40%,
         transparent 65%);
     pointer-events: none;
     z-index: 1;
@@ -31936,7 +31936,7 @@ div.artist-hero-badge {
     overflow: hidden;
     border: none;
     box-shadow: none;
-    transition: transform 0.3s ease;
+    transition: transform var(--dur-slow) ease;
 }
 
 .similar-artist-bubble:hover .similar-artist-bubble-image {
@@ -31956,7 +31956,7 @@ div.artist-hero-badge {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);
+    background: linear-gradient(135deg, var(--bg-raised) 0%, var(--bg-raised-2) 100%);
     font-size: 40px;
     color: var(--white-a20);
 }
@@ -31974,7 +31974,7 @@ div.artist-hero-badge {
     font-weight: 700;
     color: #fff;
     line-height: 1.25;
-    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    text-shadow: 0 1px 4px var(--black-a60);
     width: auto;
 
     /* Truncate long names */
@@ -32076,7 +32076,7 @@ div.artist-hero-badge {
     align-items: center;
     justify-content: center;
     padding: 0;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
     flex-shrink: 0;
 }
 
@@ -32096,7 +32096,7 @@ div.artist-hero-badge {
     width: 32px;
     height: 32px;
     font-size: 16px;
-    background-color: rgba(0, 0, 0, 0.6);
+    background-color: var(--black-a60);
     border: 2px solid var(--white-a30);
     backdrop-filter: blur(10px);
 }
@@ -32115,7 +32115,7 @@ div.artist-hero-badge {
     top: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.6);
+    background-color: var(--black-a60);
     backdrop-filter: blur(4px);
     animation: fadeIn 0.2s ease;
 }
@@ -32127,14 +32127,14 @@ div.artist-hero-badge {
 }
 
 .tool-help-modal-content {
-    background-color: #1a1a1a;
+    background-color: var(--bg-raised);
     border-radius: var(--radius-lg);
     max-width: 600px;
     width: 90%;
     max-height: 80vh;
     max-height: 80dvh;
     overflow-y: auto;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 10px 40px var(--black-a50);
     animation: slideUp 0.3s ease;
 }
 
@@ -32177,7 +32177,7 @@ div.artist-hero-badge {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: color 0.2s ease;
+    transition: color var(--dur-base) ease;
     line-height: 1;
 }
 
@@ -32216,7 +32216,7 @@ div.artist-hero-badge {
 }
 
 .tool-help-modal-body code {
-    background-color: #2a2a2a;
+    background-color: var(--bg-raised-2);
     padding: 2px 6px;
     border-radius: var(--radius-xs);
     font-family: 'Courier New', monospace;
@@ -32250,8 +32250,8 @@ div.artist-hero-badge {
     display: flex;
     flex-direction: column;
     box-shadow:
-        0 20px 60px rgba(0, 0, 0, 0.6),
-        0 8px 32px rgba(0, 0, 0, 0.4),
+        0 20px 60px var(--black-a60),
+        0 8px 32px var(--black-a40),
         0 0 40px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a15);
     overflow: hidden;
@@ -32276,13 +32276,13 @@ div.artist-hero-badge {
 .retag-clear-all-btn {
     background: none;
     border: 1px solid rgba(255, 59, 48, 0.3);
-    color: #ff6b6b;
+    color: var(--danger-soft);
     padding: 6px 14px;
     border-radius: var(--radius-md);
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
 .retag-clear-all-btn:hover {
@@ -32300,7 +32300,7 @@ div.artist-hero-badge {
 .retag-empty,
 .retag-error {
     text-align: center;
-    color: #b3b3b3;
+    color: var(--text-soft);
     padding: 60px 0;
     font-size: 15px;
 }
@@ -32314,7 +32314,7 @@ div.artist-hero-badge {
     margin: 0 32px 16px;
     background: rgba(255, 59, 48, 0.1);
     border: 1px solid rgba(255, 59, 48, 0.25);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     animation: batchBarSlideIn 0.2s ease-out;
 }
 
@@ -32346,7 +32346,7 @@ div.artist-hero-badge {
     border-radius: var(--radius-lg);
     margin-bottom: 10px;
     border: 1px solid var(--white-a06);
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease;
 }
 
 .retag-group-card:hover {
@@ -32386,7 +32386,7 @@ div.artist-hero-badge {
     border: 2px solid var(--white-a20);
     border-radius: var(--radius-xs);
     background: var(--white-a03);
-    transition: all 0.15s ease;
+    transition: all var(--dur-fast) ease;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -32457,7 +32457,7 @@ div.artist-hero-badge {
     font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .retag-group-btn:hover {
@@ -32479,7 +32479,7 @@ div.artist-hero-badge {
     cursor: pointer;
     padding: 4px 8px;
     line-height: 1;
-    transition: color 0.15s ease;
+    transition: color var(--dur-fast) ease;
 }
 
 .retag-group-delete-btn:hover {
@@ -32503,13 +32503,13 @@ div.artist-hero-badge {
 .retag-confirm-yes {
     background: rgba(255, 59, 48, 0.2);
     border: 1px solid rgba(255, 59, 48, 0.4);
-    color: #ff6b6b;
+    color: var(--danger-soft);
     padding: 3px 10px;
     border-radius: var(--radius-sm);
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .retag-confirm-yes:hover {
@@ -32525,7 +32525,7 @@ div.artist-hero-badge {
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .retag-confirm-no:hover {
@@ -32594,12 +32594,12 @@ div.artist-hero-badge {
     padding: 12px 16px;
     background: var(--white-a05);
     border: 1px solid var(--white-a10);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: #fff;
     font-size: 14px;
     font-family: inherit;
     outline: none;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
     box-sizing: border-box;
 }
 
@@ -32618,7 +32618,7 @@ div.artist-hero-badge {
 .retag-no-results,
 .retag-search-error {
     text-align: center;
-    color: #b3b3b3;
+    color: var(--text-soft);
     padding: 24px 0;
     font-size: 14px;
 }
@@ -32628,9 +32628,9 @@ div.artist-hero-badge {
     align-items: center;
     gap: 14px;
     padding: 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
     border: 1px solid transparent;
 }
 
@@ -32676,7 +32676,7 @@ div.artist-hero-badge {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .retag-result-confirm-yes:hover {
@@ -32692,7 +32692,7 @@ div.artist-hero-badge {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .retag-result-confirm-cancel:hover {
@@ -32734,7 +32734,7 @@ div.artist-hero-badge {
 
 .retag-result-artist {
     font-size: 13px;
-    color: #b3b3b3;
+    color: var(--text-soft);
 }
 
 .retag-result-meta {
