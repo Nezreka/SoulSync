@@ -64,7 +64,7 @@
     position: relative; display: flex; align-items: center; gap: 7px;
     font: inherit; font-size: 13px; font-weight: 700; padding: 0 14px;
     background: transparent; border: none; cursor: pointer; color: var(--ink-2);
-    transition: color .15s ease; white-space: nowrap;
+    transition: color var(--dur-fast) ease; white-space: nowrap;
 }
 .vce-nav-item svg { width: 15px; height: 15px; opacity: .8; }
 .vce-nav-item:hover { color: #fff; }
@@ -88,7 +88,7 @@
 .vce-menu {
     position: absolute; top: 44px; right: 0; z-index: 30; min-width: 200px; padding: 6px;
     background: #16171f; border: 1px solid var(--white-a12); border-radius: 13px;
-    box-shadow: 0 18px 44px rgba(0,0,0,.6), inset 0 1px 0 var(--line-lit);
+    box-shadow: 0 18px 44px var(--black-a60), inset 0 1px 0 var(--line-lit);
 }
 .vce-menu button {
     display: flex; align-items: center; gap: 10px; width: 100%;
@@ -119,8 +119,8 @@
 .vce-x {
     flex: 0 0 auto; width: 36px; height: 36px; border-radius: var(--radius-circle); cursor: pointer; margin-left: 4px;
     font-size: 22px; line-height: 1; color: var(--white-a70);
-    background: rgba(0,0,0,.4); border: 1px solid var(--white-a16);
-    backdrop-filter: blur(6px); transition: all .15s ease; display: grid; place-items: center;
+    background: var(--black-a40); border: 1px solid var(--white-a16);
+    backdrop-filter: blur(6px); transition: all var(--dur-fast) ease; display: grid; place-items: center;
 }
 .vce-x:hover { color: #fff; background: rgba(0,0,0,.68); border-color: var(--white-a40); }
 
@@ -131,7 +131,7 @@
     color: var(--white-a85); background: var(--s2);
     border: 1px solid var(--white-a12);
     box-shadow: inset 0 1px 0 var(--line-lit);
-    transition: background .15s ease, color .15s ease, border-color .15s ease, transform .12s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-xfast) ease;
     white-space: nowrap;
 }
 .vce-btn svg { width: 15px; height: 15px; }
@@ -187,7 +187,7 @@
 .vce-tab {
     font: inherit; font-size: 12.5px; font-weight: 700; padding: 7px 16px; border-radius: 9px;
     cursor: pointer; border: none; background: transparent; color: var(--ink-2);
-    transition: color .15s ease, background .15s ease;
+    transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 .vce-tab:hover { color: #fff; }
 .vce-tab--on {
@@ -215,9 +215,9 @@
 
 /* ── inputs ──────────────────────────────────────────────────────────────── */
 .vce-input {
-    width: 100%; font: inherit; font-size: 13.5px; padding: 9px 12px; border-radius: 10px;
+    width: 100%; font: inherit; font-size: 13.5px; padding: 9px 12px; border-radius: var(--radius-control);
     background: rgba(0, 0, 0, 0.28); border: 1px solid var(--white-a10); color: #fff;
-    transition: border-color .15s ease, box-shadow .15s ease;
+    transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .vce-input:focus { outline: none; border-color: rgba(var(--a), 0.65); box-shadow: 0 0 0 3px rgba(var(--a), 0.16); }
 .vce-input::placeholder { color: rgba(255,255,255,.28); }
@@ -230,18 +230,18 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-card {
     position: relative; border-radius: var(--radius-xl); overflow: hidden; cursor: pointer;
     border: 1px solid var(--vce-line); background: var(--s1);
-    transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+    transition: border-color var(--dur-quick) ease, transform var(--dur-quick) ease, box-shadow var(--dur-quick) ease;
 }
 .vce-card:hover {
     border-color: rgba(var(--a), 0.55); transform: translateY(-3px);
-    box-shadow: 0 22px 44px -16px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(var(--a), 0.12);
+    box-shadow: 0 22px 44px -16px var(--black-a75), 0 0 0 1px rgba(var(--a), 0.12);
 }
 .vce-card-thumb { position: relative; aspect-ratio: 2 / 3; overflow: hidden; }
 .vce-card-art {
     position: absolute; inset: 0;
     background: linear-gradient(160deg, #191b26, #0e0f15) center/cover;
     background-size: cover; background-position: center;
-    transition: transform .5s cubic-bezier(.2, .6, .2, 1);
+    transition: transform var(--dur-slowest) cubic-bezier(.2, .6, .2, 1);
 }
 .vce-card:hover .vce-card-art { transform: scale(1.045); }
 .vce-card-mono {
@@ -267,23 +267,23 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-toggle {
     position: absolute; top: 10px; right: 10px; width: 34px; height: 19px; border-radius: var(--radius-pill);
     background: rgba(8, 9, 14, 0.6); border: 1px solid rgba(255,255,255,.24); cursor: pointer;
-    backdrop-filter: blur(6px); transition: background .15s ease, border-color .15s ease; padding: 0;
+    backdrop-filter: blur(6px); transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease; padding: 0;
 }
 .vce-toggle::after {
     content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: var(--radius-circle);
-    background: var(--white-a55); transition: left .15s ease, background .15s ease;
+    background: var(--white-a55); transition: left var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 .vce-toggle--on { background: rgba(var(--a), 0.9); border-color: transparent; }
 .vce-toggle--on::after { left: 17px; background: #fff; }
 /* shelf label — name/meta ON the art */
 .vce-card-body {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 13px 12px;
-    transition: opacity .18s ease, transform .18s ease;
+    transition: opacity var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
 .vce-card-name {
     font-size: 14.5px; font-weight: 800; letter-spacing: -.01em; color: #fff;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    text-shadow: 0 1px 8px rgba(0,0,0,.6);
+    text-shadow: 0 1px 8px var(--black-a60);
 }
 .vce-card-meta {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
@@ -297,7 +297,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-card-acts {
     position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 6px; padding: 11px;
     background: linear-gradient(180deg, transparent, rgba(5, 6, 10, 0.94) 46%);
-    opacity: 0; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease;
+    opacity: 0; transform: translateY(8px); transition: opacity var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
 .vce-card:hover .vce-card-acts { opacity: 1; transform: none; }
 .vce-card:hover .vce-card-body { transform: translateY(-46px); }   /* lift the label above the actions */
@@ -332,7 +332,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     aspect-ratio: 2 / 3; cursor: pointer; font: inherit;
     border: 1px dashed var(--white-a16); border-radius: var(--radius-xl);
     color: var(--ink-2); background: transparent;
-    transition: color .15s ease, border-color .15s ease, background .15s ease;
+    transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 .vce-card--new:hover { color: #fff; border-color: rgba(var(--a), 0.6); background: rgba(var(--a), 0.05); transform: none; box-shadow: none; }
 .vce-card--new svg { width: 26px; height: 26px; color: rgb(var(--a)); }
@@ -346,7 +346,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-hero-fan i {
     position: absolute; left: 50%; bottom: 0; width: 74px; height: 108px; border-radius: 9px;
     border: 1px solid var(--white-a12);
-    box-shadow: 0 16px 34px -12px rgba(0,0,0,.7), inset 0 1px 0 var(--white-a10);
+    box-shadow: 0 16px 34px -12px var(--black-a70), inset 0 1px 0 var(--white-a10);
 }
 .vce-hero-fan i:nth-child(1) {
     transform: translateX(-50%) translateX(-58px) rotate(-9deg);
@@ -376,11 +376,11 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     padding: 18px; border-radius: var(--radius-xl); cursor: pointer;
     background: var(--s1); border: 1px solid var(--vce-line); color: inherit;
     box-shadow: inset 0 1px 0 var(--line-lit);
-    transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+    transition: border-color var(--dur-quick) ease, transform var(--dur-quick) ease, box-shadow var(--dur-quick) ease;
 }
 .vce-pack:hover:not(:disabled) {
     border-color: rgba(var(--a), 0.5); transform: translateY(-3px);
-    box-shadow: 0 20px 40px -18px rgba(0,0,0,.7), inset 0 1px 0 var(--line-lit);
+    box-shadow: 0 20px 40px -18px var(--black-a70), inset 0 1px 0 var(--line-lit);
 }
 .vce-pack:disabled { opacity: .4; cursor: default; }
 .vce-pack--loading { cursor: default; }
@@ -448,7 +448,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-servnote { font-size: 12px; line-height: 1.6; color: var(--ink-2); margin: 0 0 18px; max-width: 700px; }
 .vce-prog { flex: 1; min-width: 160px; height: 8px; border-radius: var(--radius-pill); background: var(--white-a08); overflow: hidden; }
 .vce-prog-fill {
-    height: 100%; width: 0%; border-radius: var(--radius-pill); transition: width .4s ease;
+    height: 100%; width: 0%; border-radius: var(--radius-pill); transition: width var(--dur-slower) ease;
     background: linear-gradient(90deg, rgba(var(--a), 0.7), rgb(var(--a)));
     box-shadow: 0 0 10px rgba(var(--a), 0.5);
 }
@@ -457,7 +457,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     margin-top: 18px; padding: 14px 16px; border-radius: 15px;
     background: rgba(15, 16, 22, 0.9); border: 1px solid var(--white-a10);
-    box-shadow: 0 -14px 34px -18px rgba(0,0,0,.8), inset 0 1px 0 var(--line-lit);
+    box-shadow: 0 -14px 34px -18px var(--black-a80), inset 0 1px 0 var(--line-lit);
     backdrop-filter: blur(10px);
 }
 .vce-wl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: rgba(255,255,255,.78); cursor: pointer; }
@@ -510,7 +510,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-rule-x:hover { background: rgba(255,70,70,.16); color: #ff8a8a; }
 .vce-addrule {
     margin-top: 10px; display: inline-flex; align-items: center; gap: 7px; font: inherit;
-    font-size: 12.5px; font-weight: 700; padding: 8px 15px; border-radius: 10px; cursor: pointer;
+    font-size: 12.5px; font-weight: 700; padding: 8px 15px; border-radius: var(--radius-control); cursor: pointer;
     background: rgba(var(--a), 0.12); border: 1px solid rgba(var(--a), 0.3); color: rgb(var(--a));
     transition: background .13s ease;
 }
@@ -579,7 +579,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 .vce-ovr-results {
     position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; padding: 5px;
     background: #16171f; border: 1px solid var(--white-a12); border-radius: var(--radius-lg);
-    box-shadow: 0 16px 40px rgba(0,0,0,.6); max-height: 240px; overflow-y: auto;
+    box-shadow: 0 16px 40px var(--black-a60); max-height: 240px; overflow-y: auto;
 }
 .vce-ovr-row {
     display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left;
@@ -597,7 +597,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     flex: 0 0 92px; aspect-ratio: 2 / 3; border-radius: 11px; overflow: hidden; position: relative;
     background: linear-gradient(160deg, #191b26, #0e0f15) center/cover;
     border: 1px solid rgba(255,255,255,.11);
-    box-shadow: 0 10px 24px -10px rgba(0,0,0,.6);
+    box-shadow: 0 10px 24px -10px var(--black-a60);
 }
 .vce-poster-thumb .vce-card-mono { font-size: 26px; }
 .vce-poster-side { flex: 1; min-width: 0; }
@@ -622,7 +622,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     position: sticky; bottom: 14px; z-index: 5; display: flex; gap: 9px; flex-wrap: wrap;
     padding: 12px 14px; border-radius: 15px; margin-top: 4px;
     background: rgba(15, 16, 22, 0.9); border: 1px solid var(--white-a10);
-    box-shadow: 0 -14px 34px -18px rgba(0,0,0,.8), inset 0 1px 0 var(--line-lit);
+    box-shadow: 0 -14px 34px -18px var(--black-a80), inset 0 1px 0 var(--line-lit);
     backdrop-filter: blur(10px);
 }
 
@@ -632,7 +632,7 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
     background: rgba(19, 21, 29, 0.97); border: 1px solid var(--white-a14); color: #fff;
     padding: 11px 20px; border-radius: var(--radius-lg); font-size: 13px; font-weight: 600; opacity: 0;
     transition: opacity .22s ease, transform .22s ease;
-    box-shadow: 0 14px 44px rgba(0,0,0,.55), inset 0 1px 0 var(--line-lit);
+    box-shadow: 0 14px 44px var(--black-a55), inset 0 1px 0 var(--line-lit);
     max-width: min(520px, 90vw);
 }
 .vce-toast--on { opacity: 1; transform: translate(-50%, 0); }
