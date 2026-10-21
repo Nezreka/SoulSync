@@ -10,6 +10,8 @@ import type { ShellProfileContext, ShellRouteDefinition, ShellPageId } from './b
 declare global {
   interface Window {
     showToast?: (message: string, type?: string, durationOrContext?: number | string) => void;
+    /** core.js: the latest server-side active music download count from the status push. */
+    __soulsyncMusicActiveDownloads?: number;
     /** core.js: repaints the music Requests nav badge (admin: waiting, member: news). */
     refreshMusicRequestsBadge?: () => void;
     /** core.js: after a wishlist add, tells a profile that asks first it went out as a

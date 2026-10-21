@@ -75,6 +75,16 @@ export interface AdlDownload {
   download_source?: string;
   /** In-flight rows only — what the engine is doing right now (#1156). */
   live_detail?: AdlLiveDetail;
+
+  /** The artist's photo from the library or watchlist (core/downloads/row_art.py). */
+  artist_image?: string;
+  /** History rows only: 'download' | 'podcast' (library_history.event_type). */
+  event_type?: string;
+  /** History rows only: what acoustid said about the file. */
+  acoustid_result?: string;
+  /** History rows only: what we asked for, to show beside what we got. */
+  expected_title?: string;
+  expected_artist?: string;
 }
 
 /**
@@ -132,6 +142,18 @@ export interface AdlTaskDetail {
   thumb_url: string;
   expected: { title?: string; artist?: string };
   downloaded: { title?: string; artist?: string; album?: string };
+  /** why the search took what it took, or why nothing passed. */
+  decision?: AdlDecision | null;
+}
+
+/** core/downloads/track_detail.py _decision_payload. */
+export interface AdlDecision {
+  outcome?: string;
+  accepted_total?: number;
+  rejected_total?: number;
+  rejected_counts?: Record<string, number>;
+  search_mode?: string;
+  searched_at?: string;
 }
 
 /** One live batch. `album_bundle` is present only for release downloads. */

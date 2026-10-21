@@ -5235,32 +5235,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vdl-active, .vdl-active--active { animation: none !important; }
 }
 
-/* ── Downloads page — reuses the music .adl-* layout; these are the video-only bits ── */
-/* Phones: the video page adds History + Blocklist to the controls row, which
-   pushed Retry Failed / Clear Finished clean off-screen — wrap the row. And the
-   fixed-width status column starved the row title down to a few characters:
-   let the row wrap so art+title own the first line and status+actions drop to
-   a second line underneath. */
-@media (max-width: 520px) {
-    .vdpg-card.adl-row { flex-wrap: wrap; }
-    .vdpg-card .adl-row-info { flex: 1 1 200px; }
-    .vdpg-card .adl-row-status { min-width: 0; text-align: left; }
-    .vdpg-card .vdpg-rowact { margin-left: auto; }
-}
-.vdpg-art { font-size: 22px; }                       /* emoji inside the .adl-row-art tile */
-.vdpg-art.vdpg-has-poster { background-size: cover; background-position: center; background-repeat: no-repeat; }
-.vdpg-rowact { flex-shrink: 0; display: flex; align-items: center; gap: 2px; }
-/* slim progress line inside the row (music rows have none; video files are big/slow) */
-.vdpg-prog { margin-top: 7px; height: 4px; border-radius: var(--radius-pill); background: var(--white-a08); overflow: hidden; }
-.vdpg-prog-fill { height: 100%; width: 0; border-radius: var(--radius-pill);
-    background: linear-gradient(90deg, rgba(var(--accent-rgb),0.7), rgb(var(--accent-rgb)));
-    transition: width 1.4s cubic-bezier(0.3,0.8,0.3,1); }
-/* quality chip + context in the meta line */
-.vdpg-qchip { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
-    padding: 2px 7px; border-radius: 5px; vertical-align: middle; margin-right: 8px; color: #fff;
-    background: rgba(var(--accent-rgb), 0.16); border: 1px solid rgba(var(--accent-rgb), 0.32); }
-.vdpg-mctx { vertical-align: middle; }
-.vdpg-dest { color: #8fe7af; font-family: 'JetBrains Mono', ui-monospace, monospace; }
 /* ── Library cards: rating · watched tick · show status chip · progress line ── */
 .vlib-rate { color: #fbbf24; font-weight: 700; white-space: nowrap; }
 .vlib-watched { color: #2bd17e; font-weight: 800; }
@@ -5278,33 +5252,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vlib-prog-fill { height: 100%; border-radius: var(--radius-pill); background: linear-gradient(90deg, rgba(164, 114, 245, 0.65), rgb(164, 114, 245)); }
 .vlib-prog-fill--full { background: linear-gradient(90deg, rgba(34, 197, 94, 0.65), #2bd17e); }
 
-/* channel name prefix on collapsed YouTube rows */
-.vdpg-mchan { vertical-align: middle; margin-right: 8px; padding-right: 8px; font-weight: 600;
-    color: rgba(255, 255, 255, 0.62); border-right: 1px solid var(--white-a16); }
-/* completed-but-below-cutoff: still on the wishlist, hunting a better copy */
-.vdpg-upchip { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
-    padding: 2px 7px; border-radius: 5px; vertical-align: middle; margin-right: 8px; cursor: help;
-    color: #fbbf24; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.32); }
-/* open the movie/show page */
-.vdpg-open { flex-shrink: 0; width: 30px; height: 30px; display: inline-grid; place-items: center;
-    border-radius: var(--radius-md); cursor: pointer; background: var(--white-a06); border: 1px solid var(--white-a14);
-    color: var(--white-a70); transition: all 0.15s ease; }
-.vdpg-open:hover { background: rgba(var(--accent-rgb), 0.2); border-color: rgba(var(--accent-rgb), 0.5); color: #fff; transform: translateY(-1px); }
-/* retry button — mirrors .adl-row-cancel's hover-reveal, accent themed */
-.vdpg-row-retry { flex-shrink: 0; width: 28px; height: 28px; margin-left: 8px; padding: 0; display: inline-flex;
-    align-items: center; justify-content: center; border-radius: var(--radius-circle); cursor: pointer; color: #fff;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.85), rgba(var(--accent-rgb),0.7));
-    border: 1px solid rgba(var(--accent-rgb),0.55); box-shadow: 0 0 10px rgba(var(--accent-rgb),0.25);
-    opacity: 0; pointer-events: none; transform: translateX(8px) scale(0.72);
-    transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.34,1.56,0.64,1); }
-.adl-row:hover .vdpg-row-retry, .adl-row:focus-within .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: translateX(0) scale(1); }
-.vdpg-row-retry:hover { transform: translateX(0) scale(1.12) rotate(-40deg); }
-.vdpg-row-retry:disabled { opacity: 0.5 !important; pointer-events: none; }
-@media (hover: none) { .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: none; } }
-/* Manual Import (import_failed rows) — same hover-reveal, green so it reads as "file it" not "retry" */
-.vdpg-row-import { background: linear-gradient(135deg, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.65));
-    border-color: rgba(34, 197, 94, 0.55); box-shadow: 0 0 10px rgba(34, 197, 94, 0.25); }
-.vdpg-row-import:hover { transform: translateX(0) scale(1.12); }
 
 /* first-visit loading skeleton (removed on the first render) */
 .vdpg-skel-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 10px;
@@ -5324,115 +5271,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vdpg-empty-t { font-size: 1.02rem; font-weight: 700; color: var(--white-a85); }
 .vdpg-empty-s { font-size: 0.85rem; color: var(--white-a50); max-width: 46ch; text-align: center; line-height: 1.5; }
 .vdpg-empty-s strong { color: var(--white-a75); }
-
-/* ───────────────────────── Downloads — Cinema per-type theming ───────────────────
-   movie = azure · TV = violet · youtube = red. --vt is the type's RGB triplet, used for
-   the left accent bar, status pill, progress fill + quality chip. Scoped to .vdpg-card so
-   the music downloads page (.adl-row) is byte-untouched. */
-.vdpg-card[data-vtype="movie"]   { --vt: 79, 143, 247; }
-.vdpg-card[data-vtype="tv"]      { --vt: 164, 114, 245; }
-.vdpg-card[data-vtype="youtube"] { --vt: 240, 69, 75; }
-.vdpg-card { position: relative; overflow: hidden; padding-left: 16px;
-    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease; }
-.vdpg-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: rgb(var(--vt, 255, 255, 255)); opacity: 0.9; }
-.vdpg-card:hover { transform: translateY(-1px); background: rgba(var(--vt, 255, 255, 255), 0.05);
-    box-shadow: 0 7px 24px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(var(--vt, 255, 255, 255), 0.14); }
-
-/* bigger poster art + a type corner badge (so the type reads even with a poster) */
-.vdpg-artwrap { position: relative; flex-shrink: 0; }
-.vdpg-card .adl-row-art { width: 50px; height: 74px; border-radius: var(--radius-md); }
-.vdpg-tbadge { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: var(--radius-sm);
-    display: grid; place-items: center; font-size: 11px; line-height: 1; color: #fff;
-    background: rgb(var(--vt, 90, 90, 90));
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 0, 0, 0.4); }
-
-/* status as a colored pill */
-.vdpg-card .adl-row-status { padding: 4px 11px; border-radius: var(--radius-pill); min-width: 0; gap: 6px;
-    border: 1px solid transparent; font-weight: 700; font-size: 0.72rem; }
-.vdpg-card .adl-row-status.active { color: rgb(var(--vt)); background: rgba(var(--vt), 0.14); border-color: rgba(var(--vt), 0.4); }
-.vdpg-card .adl-row-status.queued { color: var(--white-a55); background: var(--white-a06); border-color: var(--white-a12); }
-.vdpg-card .adl-row-status.completed { color: #2bd17e; background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.36); }
-.vdpg-card .adl-row-status.failed { color: #f87171; background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.36); }
-.vdpg-card .adl-row-status.cancelled { background: var(--white-a05); border-color: var(--white-a10); }
-.vdpg-card .adl-row-status .adl-status-dot { width: 6px; height: 6px; background: currentColor; }
-.vdpg-card.adl-row-active .adl-row-status .adl-status-dot { animation: vdpg-pulse 1.4s ease-in-out infinite; }
-
-/* progress in the type color; queued/searching/importing get an indeterminate sweep */
-.vdpg-card .vdpg-prog-fill { background: linear-gradient(90deg, rgba(var(--vt), 0.6), rgb(var(--vt))); }
-.vdpg-card .vdpg-prog-indet .vdpg-prog-fill { width: 100% !important; transition: none;
-    background: linear-gradient(90deg, transparent, rgb(var(--vt)), transparent);
-    background-size: 38% 100%; background-repeat: no-repeat; animation: vdpg-indet 1.3s ease-in-out infinite; }
-@keyframes vdpg-indet { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
-@keyframes vdpg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-/* quality chip follows the type color */
-.vdpg-card .vdpg-qchip { background: rgba(var(--vt), 0.16); border-color: rgba(var(--vt), 0.36); }
-
-/* ── click-to-expand detail drawer (wraps full-width below the row) ── */
-.vdpg-card { flex-wrap: wrap; cursor: pointer; }
-.vdpg-drawer { flex: 0 0 100%; width: 100%; margin-top: 12px; position: relative; cursor: default;
-    border-top: 1px solid var(--white-a08); border-radius: 10px; overflow: hidden; background: rgba(0, 0, 0, 0.2); }
-.vdpg-dr-back { position: absolute; inset: 0; background-size: cover; background-position: center 20%; opacity: 0.16;
-    -webkit-mask-image: linear-gradient(180deg, #000, transparent 78%); mask-image: linear-gradient(180deg, #000, transparent 78%); }
-.vdpg-dr-body { position: relative; padding: 16px 18px 18px; }
-.vdpg-dr-syn { font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.82); margin: 0 0 10px; max-width: 80ch; }
-.vdpg-dr-muted { color: var(--white-a40); font-style: italic; }
-.vdpg-dr-genres { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vt)); margin-bottom: 2px; }
-.vdpg-dr-head { margin-bottom: 12px; }
-.vdpg-dr-logo { max-height: 54px; max-width: 62%; object-fit: contain; display: block; margin-bottom: 7px;
-    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55)); }
-.vdpg-dr-title { font-size: 20px; font-weight: 800; color: #fff; line-height: 1.15; margin-bottom: 5px; }
-.vdpg-dr-metaline { font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.62); }
-.vdpg-dr-tagline { font-size: 12.5px; font-style: italic; color: var(--white-a50); margin-top: 5px; }
-.vdpg-dr-watch { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0 2px; }
-.vdpg-dr-trailer { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
-.vdpg-dr-provs { display: inline-flex; align-items: center; gap: 7px; }
-.vdpg-dr-provs-t { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--white-a40); }
-.vdpg-prov { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
-.vdpg-prov-txt { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 7px;
-    font-size: 10px; font-weight: 700; background: var(--white-a10); color: var(--white-a80); }
-/* youtube: big 16:9 thumbnail in the header */
-.vdpg-dr-ytthumb { width: 100%; max-width: 340px; aspect-ratio: 16 / 9; border-radius: 10px; margin-bottom: 10px;
-    background-size: cover; background-position: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); }
-/* episode block: still + the specific episode's meta */
-.vdpg-dr-ep { display: flex; gap: 16px; margin-bottom: 6px; }
-.vdpg-dr-epstill { flex: 0 0 auto; width: 200px; aspect-ratio: 16 / 9; border-radius: 9px;
-    background-size: cover; background-position: center; background-color: var(--white-a05);
-    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45); }
-.vdpg-dr-epbody { min-width: 0; }
-.vdpg-dr-epnum { font-size: 11px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: rgb(var(--vt)); }
-.vdpg-dr-eptitle { font-size: 15px; font-weight: 700; color: #fff; margin: 3px 0 6px; }
-.vdpg-dr-epov { font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.78); margin: 0; }
-@media (max-width: 620px) { .vdpg-dr-ep { flex-direction: column; } .vdpg-dr-epstill { width: 100%; max-width: 320px; } }
-.vdpg-dr-st { font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
-    color: var(--white-a40); margin: 16px 0 9px; }
-.vdpg-dr-cast { display: flex; flex-wrap: wrap; gap: 12px; }
-.vdpg-cast { width: 82px; text-align: center; }
-.vdpg-cast-pic { display: block; width: 56px; height: 56px; margin: 0 auto 5px; border-radius: var(--radius-circle); background-size: cover;
-    background-position: center; background-color: var(--white-a08); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
-.vdpg-cast-none { display: grid; place-items: center; font-size: 20px; font-weight: 800; color: var(--white-a50); }
-.vdpg-cast-nm { display: block; font-size: 11.5px; font-weight: 700; color: #fff; line-height: 1.25;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdpg-cast-ch { display: block; font-size: 10.5px; color: var(--white-a45); line-height: 1.2;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdpg-dr-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 26px; }
-.vdpg-f { display: flex; gap: 10px; font-size: 12.5px; min-width: 0; align-items: baseline; }
-.vdpg-f-wide { grid-column: 1 / -1; }
-.vdpg-fk { flex: 0 0 92px; color: rgba(255, 255, 255, 0.42); font-weight: 600; }
-.vdpg-fv { color: rgba(255, 255, 255, 0.88); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.vdpg-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; word-break: break-all; }
-.vdpg-f-err .vdpg-fv { color: #f8a0a0; }
-.vdpg-copy { flex: 0 0 auto; margin-left: auto; width: 24px; height: 22px; border-radius: var(--radius-sm); cursor: pointer;
-    background: var(--white-a06); border: 1px solid var(--white-a14); color: var(--white-a70); }
-.vdpg-copy:hover { background: rgba(var(--vt), 0.22); border-color: rgba(var(--vt), 0.5); color: #fff; }
-.vdpg-dr-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.vdpg-dr-btn { padding: 8px 16px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; text-decoration: none;
-    background: var(--white-a06); border: 1px solid var(--white-a14); color: var(--white-a85); transition: all 0.15s; }
-.vdpg-dr-btn:hover { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
-.vdpg-dr-accent { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
-.vdpg-dr-danger:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
-@media (max-width: 620px) { .vdpg-dr-facts { grid-template-columns: 1fr; } }
 
 /* Global "Retry all failed" — a text button in the worker modal topbar (overrides
    the round .em-icon-btn sizing + its rotate-on-hover; amber = retry/failed). */
@@ -5587,15 +5425,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
 .vimp-ep-field--wide input { width: 100%; }
 .vimp-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px 18px; border-top: 1px solid var(--white-a06); margin-top: 8px; }
 
-/* ── Download History modal (.vdh-*) — permanent timeline of every grab ───── */
-.adl-history-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 13px;
-    border-radius: 10px; cursor: pointer; font-size: 12.5px; font-weight: 700;
-    color: var(--white-a75); background: var(--white-a05);
-    border: 1px solid var(--white-a10); transition: all 0.18s ease; }
-.adl-history-btn:hover { color: #fff; border-color: rgba(var(--accent-rgb), 0.5);
-    background: rgba(var(--accent-rgb), 0.1); }
-.adl-history-n { font-size: 10.5px; font-weight: 800; min-width: 16px; text-align: center; padding: 1px 5px;
-    border-radius: var(--radius-pill); background: rgba(var(--accent-rgb), 0.28); color: #fff; }
 
 body.vdh-locked { overflow: hidden; }
 .vdh-overlay { position: fixed; inset: 0; z-index: 4000; display: none; align-items: center; justify-content: center;
@@ -5843,32 +5672,6 @@ body[data-side="video"] #gsearch-aura {
 .vdl-res-grab--override { color: #fbbf24; border-color: rgba(251,191,36,0.55); }
 .vdl-res-grab--override:hover { color: #fde68a; background: rgba(251,191,36,0.12); }
 
-/* ── Downloads page: same-show+season episode batches grouped into one card ── */
-.vdpg-group {
-    border: 1px solid var(--white-a08); border-radius: var(--radius-lg); margin-bottom: 10px;
-    background: var(--white-a02); overflow: hidden;
-}
-.vdpg-group-head {
-    display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer;
-    transition: background .15s;
-}
-.vdpg-group-head:hover { background: var(--white-a04); }
-.vdpg-group-caret { color: var(--white-a50); font-size: 12px; flex: 0 0 auto; width: 12px; }
-.vdpg-group-art {
-    flex: 0 0 auto; width: 40px; height: 56px; border-radius: var(--radius-sm); background-size: cover; background-position: center;
-    display: flex; align-items: center; justify-content: center; font-size: 20px;
-    background-color: var(--white-a06);
-}
-.vdpg-group-info { flex: 1 1 auto; min-width: 0; }
-.vdpg-group-title { font-size: 14px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vdpg-group-sub { font-size: 12px; color: var(--white-a55); margin-top: 2px; }
-.vdpg-group-prog { margin-top: 7px; max-width: 320px; }
-.vdpg-group-status { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--white-a60); white-space: nowrap; }
-.vdpg-group-act { flex: 0 0 auto; }
-.vdpg-group-body { padding: 0 8px 8px 34px; display: flex; flex-direction: column; gap: 6px; }
-.vdpg-group--collapsed .vdpg-group-body { display: none; }
-/* nested episode cards read as children of the group */
-.vdpg-group-body .vdpg-card { background: rgba(255,255,255,0.015); }
 
 /* ── Library bulk select mode + action bar ─────────────────────────────────
    Select N cards → floating action bar (bulk metadata via /api/video/bulk —

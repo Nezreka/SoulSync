@@ -2009,20 +2009,25 @@ const HELPER_CONTENT = {
     },
     '#adl-filter-pills': {
         title: 'Download Filters',
-        description: 'Filter downloads by status. "All" shows everything, "Active" shows currently downloading/searching tracks, "Queued" shows waiting tracks, "Completed" and "Failed" show finished items.',
+        description: 'Filter downloads by status. Each filter shows how many downloads it holds, so the numbers double as the page\'s totals. A grey one is empty.',
+    },
+    '#adl-count': {
+        title: 'Live Activity',
+        description: 'While anything downloads: the combined speed, what\'s on now, time left, and a graph of the last minute. When nothing moves it says when the last download finished.',
     },
     '#adl-list': {
         title: 'Download List',
-        description: 'Each row shows track title, artist, album, which batch it belongs to (playlist name or album), and current status. Active downloads show a spinner, completed show green, failed show red with error details.',
+        description: 'Live batches sit on top, each with its rows underneath (an album reads like a tracklist). Finished downloads below are grouped by day. Status lives on the art: a ring while it downloads, a spinner while it searches, a play button once it\'s done.',
         tips: [
-            'Track position (e.g. "3 of 19") shows progress within album/playlist batches',
-            'Section headers group downloads by status category',
+            'Click any row to open its detail sheet: what happened step by step (found, downloaded, verified, imported) and where the file went',
+            'A failed track gets a Search button that shows what every source has, so you can pick the file yourself',
+            'The shield next to a finished track is AcoustID: green verified, amber means it\'s waiting in Review',
             'List updates every 2 seconds while you\'re on this page'
         ]
     },
-    '#adl-clear-btn': {
-        title: 'Clear Completed',
-        description: 'Remove all completed, failed, and cancelled downloads from the list. Only affects the tracker display — does not delete any downloaded files.',
+    '#adl-actions': {
+        title: 'History and Actions',
+        description: 'History opens every download SoulSync has done. The ⋯ menu holds Clear finished (tidies the list, never deletes files), Retry failed on the video side, and Cancel all.',
     },
 
     // ─── PLAYLIST EXPLORER PAGE ──────────────────────────────────────

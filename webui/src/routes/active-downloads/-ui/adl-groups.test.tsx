@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AdlBatch, AdlBatchHistoryEntry, AdlDownload } from '../-adl.types';
@@ -69,41 +69,100 @@ const groupProps = (over: Record<string, unknown> = {}) => ({
 });
 
 describe('AdlGroup', () => {
-  it('promotes the batch card into a header with name, phase and stat line', () => {
+  it('heads the group with what it is, its name, where it is at and what failed', () => {
     const { container } = render(<AdlGroup {...groupProps()} />);
-    expect(container.querySelector('.adl-group-name')?.textContent).toBe('My Batch');
-    expect(container.querySelector('.adl-group-source')?.textContent).toBe('wishlist');
-    expect(container.querySelector('.adl-group-phase')?.textContent).toContain('3/10 tracks');
-    expect(container.querySelector('.adl-group-stats')?.textContent).toBe(
-      '3 done · 1 failed · 1 active · 5 queued',
+    expect(container.querySelector('.dlc-gtitle')?.textContent).toBe('My Batch');
+    // one album across the rows reads as an album, and says where it came from
+    expect(container.querySelector('.dlc-eyebrow')?.textContent).toBe('Album · from wishlist');
+    expect(container.querySelector('.dlc-gphase')?.textContent).toContain('3/10 tracks');
+    expect(container.querySelector('.dlc-gbad')?.textContent).toBe('1 failed');
+  });
+
+  it('numbers an album batch like a tracklist, and only an album batch', () => {
+    const two = [
+      row({ task_id: 'a', batch_position: 1 }),
+      row({ task_id: 'b', batch_position: 2 }),
+    ];
+    const { container } = render(<AdlGroup {...groupProps({ rows: two, allBatchRows: two })} />);
+    expect(container.querySelector('.dlc-num')).not.toBeNull();
+    cleanup();
+    const mixed = [row({ task_id: 'a' }), row({ task_id: 'b', album: 'Other' })];
+    const playlist = render(<AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />);
+    expect(playlist.container.querySelector('.dlc-num')).toBeNull();
+  });
+
+  it('badges the cover with the artist photo, or uses the photo when there is no cover', () => {
+    const withArt = [row({ task_id: 'a', artwork: '/c.jpg', artist_image: '/a.jpg' })];
+    const { container } = render(
+      <AdlGroup {...groupProps({ rows: withArt, allBatchRows: withArt })} />,
     );
+    expect(container.querySelector('img.dlc-gart')?.getAttribute('src')).toBe('/c.jpg');
+    expect(container.querySelector('.dlc-gart-badge .dlc-avatar')?.getAttribute('src')).toBe(
+      '/a.jpg',
+    );
+    cleanup();
+    const bare = [row({ task_id: 'a', artwork: '', artist_image: '/a.jpg' })];
+    const noCover = render(<AdlGroup {...groupProps({ rows: bare, allBatchRows: bare })} />);
+    expect(noCover.container.querySelector('img.dlc-gart')?.getAttribute('src')).toBe('/a.jpg');
+    expect(noCover.container.querySelector('.dlc-gart-badge')).toBeNull();
+  });
+
+  it('tiles four covers for a playlist batch', () => {
+    const mixed = ['1', '2', '3', '4'].map((n) =>
+      row({ task_id: n, album: `Album ${n}`, artist: `Artist ${n}`, artwork: `/${n}.jpg` }),
+    );
+    const { container } = render(
+      <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
+    );
+    expect(container.querySelectorAll('.dlc-mosaic img')).toHaveLength(4);
+    cleanup();
+    // one album is one cover, never a mosaic of the same image
+    const album = ['1', '2', '3', '4'].map((n) => row({ task_id: n, artwork: `/${n}.jpg` }));
+    const one = render(<AdlGroup {...groupProps({ rows: album, allBatchRows: album })} />);
+    expect(one.container.querySelector('.dlc-mosaic')).toBeNull();
+  });
+
+  it('never offers the music search on an audiobook batch', () => {
+    const failed = [row({ status: 'failed', error: 'No releases found' })];
+    const { container } = render(
+      <AdlGroup
+        {...groupProps({
+          batch: batch({ batch_type: 'audiobook', playlist_id: 'audiobooks' }),
+          rows: failed,
+          allBatchRows: failed,
+        })}
+      />,
+    );
+    expect(container.querySelector('.dlc-eyebrow')?.textContent).toContain('Audiobook');
+    expect(container.querySelector('.dlc-row .dlc-btn-primary')).toBeNull();
   });
 
   it('starts open for a live batch and folded for a terminal one', () => {
     const live = render(<AdlGroup {...groupProps()} />);
-    expect(live.container.querySelectorAll('.adl-group-rows .adl-row')).toHaveLength(1);
+    expect(live.container.querySelectorAll('.dlc-group-rows .dlc-row')).toHaveLength(1);
     cleanup();
     const done = render(
       <AdlGroup {...groupProps({ batch: batch({ phase: 'complete', active: 0, queued: 0 }) })} />,
     );
-    expect(done.container.querySelector('.adl-group-rows')).toBeNull();
+    expect(done.container.querySelector('.dlc-group-rows')).toBeNull();
   });
 
   it('toggles on header click and via keyboard', () => {
     const { container } = render(<AdlGroup {...groupProps()} />);
-    const header = container.querySelector('.adl-group-header') as HTMLElement;
+    const header = container.querySelector('.dlc-ghead') as HTMLElement;
     fireEvent.click(header);
-    expect(container.querySelector('.adl-group-rows')).toBeNull();
+    expect(container.querySelector('.dlc-group-rows')).toBeNull();
     fireEvent.keyDown(header, { key: 'Enter' });
-    expect(container.querySelector('.adl-group-rows')).not.toBeNull();
+    expect(container.querySelector('.dlc-group-rows')).not.toBeNull();
   });
 
-  it('renders group rows compact, without the redundant batch line', () => {
+  it('renders group rows compact, without the redundant batch fact', () => {
     const { container } = render(<AdlGroup {...groupProps()} />);
-    const groupRow = container.querySelector('.adl-group-rows .adl-row') as HTMLElement;
-    expect(groupRow.className).toContain('adl-row-compact');
+    const groupRow = container.querySelector('.dlc-group-rows .dlc-row') as HTMLElement;
+    expect(groupRow.className).toContain('dlc-row-compact');
+    fireEvent.click(groupRow);
     // the group header already says which batch this is
-    expect(groupRow.querySelector('.adl-row-batch')).toBeNull();
+    expect(container.querySelector('.dlc-facts')?.textContent ?? '').not.toContain('My Batch');
   });
 
   it('says when the status filter is hiding rows instead of lying about size', () => {
@@ -111,36 +170,44 @@ describe('AdlGroup', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ rows: [row()], allBatchRows: seven })} />,
     );
-    expect(container.querySelector('.adl-group-note')?.textContent).toBe(
+    expect(container.querySelector('.dlc-note')?.textContent).toBe(
       '6 more hidden by the current filter.',
     );
   });
 
-  it('runs the batch Download Next action without toggling', () => {
+  const pick = (container: HTMLElement, label: string) => {
+    fireEvent.click(container.querySelector('.dlc-ghead .dlc-more') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitem', { name: label }));
+  };
+
+  it('runs the batch Download Next action from the menu without toggling', () => {
     const props = groupProps();
     const { container } = render(<AdlGroup {...props} />);
-    fireEvent.click(container.querySelector('.adl-group-next') as HTMLElement);
+    pick(container, 'Download this batch next');
     expect(props.onDownloadBatchNext).toHaveBeenCalledWith(props.batch);
-    expect(container.querySelector('.adl-group-rows')).not.toBeNull();
-  });
-  it('keeps modal-open, filter and cancel as header actions that do not toggle', () => {
-    const props = groupProps();
-    const { container } = render(<AdlGroup {...props} />);
-    fireEvent.click(container.querySelector('.adl-group-name') as HTMLElement);
-    expect(props.onOpenModal).toHaveBeenCalled();
-    fireEvent.click(container.querySelector('.adl-group-filter') as HTMLElement);
-    expect(props.onFilter).toHaveBeenCalled();
-    fireEvent.click(container.querySelector('.adl-group-cancel') as HTMLElement);
-    expect(props.onCancel).toHaveBeenCalled();
-    // none of those clicks may have collapsed the group
-    expect(container.querySelector('.adl-group-rows')).not.toBeNull();
+    expect(container.querySelector('.dlc-group-rows')).not.toBeNull();
   });
 
-  it('has no cancel action on a terminal batch', () => {
+  it('keeps open, filter and cancel as header actions that do not toggle', () => {
+    const props = groupProps();
+    const { container } = render(<AdlGroup {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(props.onOpenModal).toHaveBeenCalled();
+    pick(container, 'Show only this batch');
+    expect(props.onFilter).toHaveBeenCalled();
+    pick(container, 'Cancel batch');
+    expect(props.onCancel).toHaveBeenCalled();
+    // none of those clicks may have collapsed the group
+    expect(container.querySelector('.dlc-group-rows')).not.toBeNull();
+  });
+
+  it('has no cancel or download-next on a terminal batch', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ batch: batch({ phase: 'complete' }) })} />,
     );
-    expect(container.querySelector('.adl-group-cancel')).toBeNull();
+    fireEvent.click(container.querySelector('.dlc-ghead .dlc-more') as HTMLElement);
+    expect(screen.queryByRole('menuitem', { name: 'Cancel batch' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Download this batch next' })).toBeNull();
   });
 });
 
@@ -161,17 +228,17 @@ describe('bucketed group rows', () => {
       row({ task_id: 'q1', status: 'queued', title: 'First', batch_position: 4 }),
     ];
     const { container } = render(<AdlGroup {...groupProps({ rows, allBatchRows: rows })} />);
-    const fold = container.querySelector('.adl-bucket-fold') as HTMLElement;
+    const fold = container.querySelector('.dlc-fold') as HTMLElement;
     expect(fold.textContent).toContain('next: First');
   });
   it('shows moving + broken rows in full and folds queued/done to one line each', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
     );
-    const titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    const titles = [...container.querySelectorAll('.dlc-title')].map((t) => t.textContent);
     // in-flight first, then the broken ones (cancelled folds into broken)
     expect(titles).toEqual(['Moving', 'Broke', 'Bailed']);
-    const folds = [...container.querySelectorAll('.adl-bucket-fold')].map((f) => f.textContent);
+    const folds = [...container.querySelectorAll('.dlc-fold')].map((f) => f.textContent);
     expect(folds[0]).toContain('2 queued');
     expect(folds[0]).toContain('next: Next Up');
     expect(folds[1]).toContain('2 done');
@@ -181,15 +248,15 @@ describe('bucketed group rows', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed })} />,
     );
-    const queuedFold = container.querySelector('.adl-bucket-fold') as HTMLElement;
+    const queuedFold = container.querySelector('.dlc-fold') as HTMLElement;
     fireEvent.click(queuedFold);
-    let titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    let titles = [...container.querySelectorAll('.dlc-title')].map((t) => t.textContent);
     expect(titles).toContain('Next Up');
     expect(titles).toContain('After That');
     // done stays folded independently
     expect(titles).not.toContain('Finished');
     fireEvent.click(queuedFold);
-    titles = [...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent);
+    titles = [...container.querySelectorAll('.dlc-title')].map((t) => t.textContent);
     expect(titles).toEqual(['Moving', 'Broke', 'Bailed']);
   });
 
@@ -197,8 +264,8 @@ describe('bucketed group rows', () => {
     const { container } = render(
       <AdlGroup {...groupProps({ rows: mixed, allBatchRows: mixed, bucketed: false })} />,
     );
-    expect(container.querySelectorAll('.adl-bucket-fold')).toHaveLength(0);
-    expect(container.querySelectorAll('.adl-row')).toHaveLength(mixed.length);
+    expect(container.querySelectorAll('.dlc-fold')).toHaveLength(0);
+    expect(container.querySelectorAll('.dlc-row')).toHaveLength(mixed.length);
   });
 });
 
@@ -225,17 +292,62 @@ describe('AdlEarlierGroup', () => {
       <AdlEarlierGroup rows={[...albumRun, single]} onCancelRow={vi.fn()} />,
     );
     // the run is one line; the singleton stays a plain row
-    const header = container.querySelector('.adl-earlier-album-header') as HTMLElement;
+    const header = container.querySelector('.dlc-sub-head') as HTMLElement;
     expect(header.textContent).toContain('Romance (Deluxe Edition)');
     expect(header.textContent).toContain('4 done · 1 failed');
-    expect([...container.querySelectorAll('.adl-row-title')].map((t) => t.textContent)).toEqual([
+    expect([...container.querySelectorAll('.dlc-title')].map((t) => t.textContent)).toEqual([
       'Lone Single',
     ]);
 
+    // five rows start folded; a short run (three or fewer) starts open
     fireEvent.click(header);
-    expect(container.querySelectorAll('.adl-earlier-album .adl-row')).toHaveLength(5);
+    expect(container.querySelectorAll('.dlc-sub-group .dlc-row')).toHaveLength(5);
     fireEvent.click(header);
-    expect(container.querySelectorAll('.adl-earlier-album .adl-row')).toHaveLength(0);
+    expect(container.querySelectorAll('.dlc-sub-group .dlc-row')).toHaveLength(0);
+  });
+
+  it('splits history into days with real labels, newest first', () => {
+    const stamp = (msAgo: number) =>
+      new Date(Date.now() - msAgo).toISOString().slice(0, 19).replace('T', ' ');
+    const rows = [
+      row({
+        task_id: 'h1',
+        batch_id: '',
+        status: 'completed',
+        album: 'A',
+        is_persistent_history: true,
+        created_at: stamp(60_000),
+      }),
+      row({
+        task_id: 'h2',
+        batch_id: '',
+        status: 'completed',
+        album: 'B',
+        is_persistent_history: true,
+        created_at: stamp(30 * 3_600_000),
+      }),
+    ];
+    const { container } = render(<AdlEarlierGroup rows={rows} onCancelRow={vi.fn()} />);
+    const labels = [...container.querySelectorAll('.dlc-section-label')].map((l) => l.textContent);
+    expect(labels[0]).toBe('Today');
+    expect(labels).toHaveLength(2);
+  });
+
+  it('labels a podcast run as a podcast', () => {
+    const eps = [1, 2].map((i) =>
+      row({
+        task_id: `p${i}`,
+        batch_id: '',
+        status: 'completed',
+        album: 'Show',
+        artist: 'NPR',
+        event_type: 'podcast',
+      }),
+    );
+    const { container } = render(<AdlEarlierGroup rows={eps} onCancelRow={vi.fn()} />);
+    expect(container.querySelector('.dlc-sub-head .dlc-eyebrow')?.textContent).toBe('Podcast');
+    // a short run starts open
+    expect(container.querySelectorAll('.dlc-sub-group .dlc-row')).toHaveLength(2);
   });
 
   it('keeps batchless in-flight rows plain and on top, never inside a fold', () => {
@@ -246,8 +358,10 @@ describe('AdlEarlierGroup', () => {
     ];
     const { container } = render(<AdlEarlierGroup rows={rows} onCancelRow={vi.fn()} />);
     // the live row renders in full; the two settled ones fold
-    expect(container.querySelectorAll(':scope > .adl-earlier > .adl-row')).toHaveLength(1);
-    expect(container.querySelector('.adl-earlier-album-summary')?.textContent).toBe('2 done');
+    expect(container.querySelectorAll(':scope > .dlc-earlier > .dlc-list > .dlc-row')).toHaveLength(
+      1,
+    );
+    expect(container.querySelector('.dlc-sub-summary')?.textContent).toBe('2 done');
   });
 
   it('folds past the item cap counting albums as one item', () => {
@@ -255,11 +369,11 @@ describe('AdlEarlierGroup', () => {
       row({ task_id: `h${i}`, batch_id: '', album: `Album ${i}`, status: 'completed' }),
     );
     const { container } = render(<AdlEarlierGroup rows={many} onCancelRow={vi.fn()} />);
-    expect(container.querySelectorAll('.adl-row')).toHaveLength(EARLIER_FOLD);
-    const more = container.querySelector('.adl-earlier-more') as HTMLElement;
+    expect(container.querySelectorAll('.dlc-row')).toHaveLength(EARLIER_FOLD);
+    const more = container.querySelector('.dlc-more-link') as HTMLElement;
     expect(more.textContent).toBe('Show 5 more');
     fireEvent.click(more);
-    expect(container.querySelectorAll('.adl-row')).toHaveLength(many.length);
+    expect(container.querySelectorAll('.dlc-row')).toHaveLength(many.length);
   });
 
   it('renders nothing at all when empty', () => {
@@ -294,9 +408,8 @@ describe('AdlGroupedList', () => {
     const { container } = render(
       <AdlGroupedList {...listProps({ rows: [row(), loose], allRows: [row(), loose] })} />,
     );
-    expect(container.querySelectorAll('.adl-group')).toHaveLength(1);
-    expect(container.querySelector('.adl-earlier .adl-row-title')?.textContent).toBe('Xtal');
-    expect(container.querySelector('.adl-section-header')?.textContent).toBe('Earlier (1)');
+    expect(container.querySelectorAll('.dlc-group')).toHaveLength(1);
+    expect(container.querySelector('.dlc-earlier .dlc-title')?.textContent).toBe('Xtal');
   });
 
   it('rows referencing a dead batch fall back to Earlier instead of vanishing', () => {
@@ -304,8 +417,8 @@ describe('AdlGroupedList', () => {
     const { container } = render(
       <AdlGroupedList {...listProps({ rows: [orphan], allRows: [orphan], batches: [] })} />,
     );
-    expect(container.querySelectorAll('.adl-group')).toHaveLength(0);
-    expect(container.querySelectorAll('.adl-earlier .adl-row')).toHaveLength(1);
+    expect(container.querySelectorAll('.dlc-group')).toHaveLength(0);
+    expect(container.querySelectorAll('.dlc-earlier .dlc-row')).toHaveLength(1);
   });
 
   it('a batch filter narrows to that group and hides the tail sections', () => {
@@ -321,7 +434,7 @@ describe('AdlGroupedList', () => {
         })}
       />,
     );
-    const groups = [...container.querySelectorAll('.adl-group-name')].map((g) => g.textContent);
+    const groups = [...container.querySelectorAll('.dlc-gtitle')].map((g) => g.textContent);
     expect(groups).toEqual(['Other']);
     expect(container.querySelector('#adl-batch-history-section')).toBeNull();
   });
@@ -339,7 +452,7 @@ describe('AdlGroupedList', () => {
         })}
       />,
     );
-    const groups = [...container.querySelectorAll('.adl-group-name')].map((g) => g.textContent);
+    const groups = [...container.querySelectorAll('.dlc-gtitle')].map((g) => g.textContent);
     expect(groups).toEqual(['Other']);
   });
 

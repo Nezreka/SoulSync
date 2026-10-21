@@ -443,6 +443,10 @@ window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
  * caps at 300 rows and would under-report a bigger queue.
  */
 function _updateDlNavBadge(count) {
+    // the downloads page's Music | Video switch shows this same number while
+    // you're on the video side, so hand it over too
+    window.__soulsyncMusicActiveDownloads = count;
+    document.dispatchEvent(new CustomEvent('soulsync:music-active-downloads', { detail: count }));
     const badge = document.getElementById('dl-nav-badge');
     if (badge) {
         if (count > 0) {

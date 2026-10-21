@@ -12,7 +12,7 @@
  */
 
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HttpResponse, http } from 'msw';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -173,6 +173,18 @@ const videoRows = [
     }),
   },
   {
+    // a youtube video grabbed from the download panel is saved as kind 'movie'
+    id: 502,
+    kind: 'movie',
+    title: 'How Pixar Lights a Scene',
+    status: 'completed',
+    poster_url: YT_THUMB,
+    media_id: 'abc123xyz00',
+    media_source: 'youtube',
+    quality_label: '1080p',
+    search_ctx: JSON.stringify({ channel: 'Pixar', channel_id: 'UCpixar' }),
+  },
+  {
     id: 601,
     kind: 'movie',
     title: 'Past Lives',
@@ -213,34 +225,316 @@ const duneMeta = {
   ],
 };
 
+/** utc "YYYY-MM-DD HH:MM:SS", the shape library_history.created_at has. */
+function utcStamp(msAgo: number): string {
+  return new Date(Date.now() - msAgo).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+const COVER_MARCOS = svgURI(300, 300, '#7c2d12', '#fcd34d', 'MH');
+const COVER_SF = svgURI(300, 300, '#991b1b', '#fde68a', 'SF');
+const COVER_NPR = svgURI(300, 300, '#1e3a8a', '#bfdbfe', 'NPR');
+const COVER_BOOK = svgURI(300, 300, '#4c0519', '#fecdd3', 'LF');
+const PHOTO_MARCOS = svgURI(200, 200, '#78350f', '#fde68a', 'M');
+const PHOTO_LEO = svgURI(200, 200, '#7f1d1d', '#fecaca', 'L');
+const PHOTO_NPR = svgURI(200, 200, '#172554', '#bfdbfe', 'N');
+const mixCover = (bg: string, t: string) => svgURI(300, 300, bg, '#fff', t);
+
+const album = (over: Record<string, unknown>) => ({
+  artist: 'MARCØS',
+  album: "Marco's House",
+  batch_id: 'b1',
+  batch_name: "Marco's House",
+  batch_total: 6,
+  playlist_id: 'p1',
+  artwork: COVER_MARCOS,
+  artist_image: PHOTO_MARCOS,
+  quality: '',
+  progress: 0,
+  timestamp: Date.now() / 1000 - 60,
+  ...over,
+});
+
 const musicRows = [
-  {
+  album({
     task_id: 't1',
-    title: 'Xtal',
-    artist: 'Aphex Twin',
-    album: 'Selected Ambient Works 85–92',
+    title: 'Saudade',
     status: 'downloading',
-    progress: 40,
-    batch_id: 'b1',
-    batch_name: 'Aphex Twin — SAW 85–92',
-    playlist_id: 'p1',
+    progress: 62,
+    track_index: 5,
+    batch_position: 6,
+    download_source: 'Soulseek',
+    live_detail: {
+      source: 'Soulseek',
+      username: 'dj_marrow',
+      filename: '@@dj_marrow\\Music\\MARCOS\\06 Saudade.flac',
+      candidate_index: 0,
+      candidate_count: 6,
+      picked: { quality: 'flac', confidence: 0.96, free_upload_slots: 2, queue_length: 0 },
+      speed: 1_900_000,
+      size: 43_200_000,
+      bytes: 26_800_000,
+    },
+  }),
+  album({
+    task_id: 't2',
+    title: 'Night Bus',
+    status: 'searching',
+    track_index: 6,
+    batch_position: 5,
+    live_detail: {
+      source: 'Tidal',
+      query: 'MARCØS Night Bus',
+      query_index: 1,
+      query_count: 4,
+      results: 14,
+    },
+  }),
+  album({
+    task_id: 't3',
+    title: 'Rua Escura',
+    status: 'not_found',
+    track_index: 3,
+    batch_position: 4,
+    error: 'Not found on 4 sources',
+  }),
+  album({ task_id: 't4', title: 'Lado B', status: 'queued', track_index: 7, batch_position: 7 }),
+  album({
+    task_id: 't5',
+    title: 'Intro',
+    status: 'completed',
+    progress: 100,
     track_index: 0,
-    artwork: '',
-    quality: 'FLAC',
+    batch_position: 1,
+    quality: 'FLAC 24/48',
+    verification_status: 'verified',
+    download_source: 'Soulseek',
+  }),
+  album({
+    task_id: 't6',
+    title: 'Casa',
+    status: 'completed',
+    progress: 100,
+    track_index: 1,
+    batch_position: 2,
+    quality: 'FLAC 24/48',
+    verification_status: 'verified',
+    download_source: 'Soulseek',
+  }),
+  ...[
+    ['Blue', 'Sault', '#1d4ed8'],
+    ['Nights', 'Frank Ocean', '#a16207'],
+    ['Runaway', 'Kanye West', '#be123c'],
+    ['Pyramids', 'Frank Ocean', '#047857'],
+  ].map(([title, artist, bg], i) => ({
+    task_id: `m${i}`,
+    title,
+    artist,
+    album: `${title} (single)`,
+    artwork: mixCover(bg, title.slice(0, 2).toUpperCase()),
+    status: i === 0 ? 'downloading' : 'completed',
+    progress: i === 0 ? 30 : 100,
+    quality: i === 0 ? '' : 'FLAC 16/44.1',
+    verification_status: i === 0 ? null : 'verified',
+    download_source: 'Tidal',
+    batch_id: 'b3',
+    batch_name: 'Late Night Drive',
+    batch_total: 4,
+    batch_position: i + 1,
+    playlist_id: 'p3',
+    track_index: i,
+    timestamp: Date.now() / 1000 - 30,
+  })),
+  {
+    task_id: 'ab1',
+    title: 'Los fuegos de Diciembre',
+    artist: 'Brandon Sanderson',
+    album: 'Audiobooks',
+    status: 'failed',
+    error: 'No releases found',
+    batch_id: 'b2',
+    batch_name: 'Audiobooks',
+    playlist_id: 'audiobooks',
+    track_index: 0,
+    batch_total: 1,
+    artwork: COVER_BOOK,
+    progress: 0,
+    timestamp: Date.now() / 1000 - 300,
   },
   {
-    task_id: 't2',
-    title: 'Tha',
-    artist: 'Aphex Twin',
-    album: 'Selected Ambient Works 85–92',
-    status: 'queued',
-    progress: 0,
-    batch_id: 'b1',
-    batch_name: 'Aphex Twin — SAW 85–92',
-    playlist_id: 'p1',
-    track_index: 1,
-    artwork: '',
-    quality: 'FLAC',
+    task_id: 'history-901',
+    title: 'Prologue',
+    artist: 'MARCØS',
+    album: "Marco's House (Bonus)",
+    artwork: COVER_MARCOS,
+    status: 'completed',
+    progress: 100,
+    is_persistent_history: true,
+    batch_id: '',
+    batch_name: 'Deezer',
+    download_source: 'Deezer',
+    quality: 'FLAC 16/44.1',
+    verification_status: 'unverified',
+    file_path: "H:\\Music\\MARCØS\\MARCØS - 2026 Marco's House\\01 - Prologue.flac",
+    created_at: utcStamp(40 * 60_000),
+    event_type: 'download',
+  },
+  {
+    task_id: 'history-902',
+    title: 'Chun-Li Theme',
+    artist: 'Leo Birenberg & Zach Robinson',
+    album: 'Street Fighter (Original Motion Picture Soundtrack)',
+    artwork: COVER_SF,
+    artist_image: PHOTO_LEO,
+    status: 'completed',
+    progress: 100,
+    is_persistent_history: true,
+    batch_id: '',
+    batch_name: 'Deezer',
+    download_source: 'Deezer',
+    quality: 'FLAC 16/44.1',
+    verification_status: 'unverified',
+    acoustid_result: 'matched a different title',
+    expected_title: 'Chun-Li: Woman of Vengeance',
+    expected_artist: 'Leo Birenberg',
+    file_path:
+      'H:\\Music\\Leo Birenberg & Zach Robinson\\Street Fighter\\03 - Chun-Li_ Woman of Vengeance.flac',
+    created_at: utcStamp(65 * 60_000),
+    event_type: 'download',
+  },
+  {
+    task_id: 'history-903',
+    title: 'Where did U.S. support for Ukraine go?',
+    artist: 'NPR',
+    album: 'Consider This from NPR',
+    artwork: COVER_NPR,
+    artist_image: PHOTO_NPR,
+    status: 'completed',
+    progress: 100,
+    is_persistent_history: true,
+    batch_id: '',
+    batch_name: 'Podcast',
+    download_source: 'Podcast',
+    quality: 'audio/mpeg',
+    created_at: utcStamp(26 * 3_600_000),
+    event_type: 'podcast',
+  },
+  {
+    task_id: 'history-904',
+    title: "How will the riots in France affect the country's politics?",
+    artist: 'NPR',
+    album: 'Consider This from NPR',
+    artwork: COVER_NPR,
+    artist_image: PHOTO_NPR,
+    status: 'completed',
+    progress: 100,
+    is_persistent_history: true,
+    batch_id: '',
+    batch_name: 'Podcast',
+    download_source: 'Podcast',
+    quality: 'audio/mpeg',
+    created_at: utcStamp(26.2 * 3_600_000),
+    event_type: 'podcast',
+  },
+];
+
+/** naive local isoformat, the shape datetime.now().isoformat() writes. */
+function localIso(msAgo: number): string {
+  const d = new Date(Date.now() - msAgo);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.123456`;
+}
+
+const quarantineEntries = [
+  ...[0, 1, 2].map((i) => ({
+    id: `q${i}`,
+    filename: `2026_Saudade_${i}.flac.quarantined`,
+    original_filename: i === 2 ? '06 Saudade (Preview).mp3' : '06 Saudade.flac',
+    reason:
+      i === 2
+        ? 'AcoustID matched a different recording'
+        : 'Duration mismatch: file is 0:31, expected 4:02',
+    expected_track: 'Saudade',
+    expected_artist: 'MARCØS',
+    group_key: 'marcos|saudade',
+    timestamp: localIso((i + 1) * 3_600_000),
+    size_bytes: 9_000_000,
+    has_full_context: true,
+    trigger: i === 2 ? 'acoustid' : 'integrity',
+    source_username: ['dj_marrow', 'cassette_k', 'lofi_vault'][i],
+    source_filename: `@@user\\Music\\MARCOS\\06 Saudade.${i === 2 ? 'mp3' : 'flac'}`,
+    thumb_url: COVER_MARCOS,
+    quality: i === 2 ? 'MP3 320' : 'FLAC 24/48',
+    library_status: 'present',
+    library_match: {
+      album: "Marco's House",
+      filename: '06 - Saudade.flac',
+      quality: 'FLAC 16/44.1',
+      verification_status: 'verified',
+    },
+  })),
+  {
+    id: 'q9',
+    filename: 'Night_Bus.mp3.quarantined',
+    original_filename: 'Night Bus (Radio Edit).mp3',
+    reason: 'AcoustID: no fingerprint match',
+    expected_track: 'Night Bus',
+    expected_artist: 'MARCØS',
+    group_key: 'marcos|nightbus',
+    timestamp: localIso(5 * 3_600_000),
+    size_bytes: 7_400_000,
+    has_full_context: true,
+    trigger: 'acoustid_unverified',
+    source_username: 'cassette_k',
+    source_filename: '@@cassette_k\\mp3\\Night Bus (Radio Edit).mp3',
+    thumb_url: '',
+    quality: 'MP3 320',
+    library_status: 'missing',
+  },
+];
+
+const torrents = [
+  {
+    id: 'h1',
+    name: 'Big.Brother.2023.S04E14.1080p.ITVX.WEB-DL.AAC2.0.H.264-RAWR',
+    state: 'downloading',
+    progress: 0.35,
+    size: 2_250_000_000,
+    downloaded: 790_000_000,
+    download_speed: 316_000,
+    upload_speed: 42_000,
+    seeders: 14,
+    peers: 3,
+    eta: 3960,
+    ratio: 0.02,
+    category: 'soulsync-tv',
+    save_path: '/downloads/incomplete',
+    soulsync: { kind: 'episode', title: 'Big Brother (2023) · S04E14' },
+  },
+  {
+    id: 'h2',
+    name: 'Radiohead - Kid A (2000) [FLAC]',
+    state: 'seeding',
+    progress: 1,
+    size: 432_000_000,
+    downloaded: 432_000_000,
+    download_speed: 0,
+    upload_speed: 120_000,
+    ratio: 3.2,
+    category: 'music',
+    save_path: '/downloads/music',
+  },
+  {
+    id: 'h3',
+    name: 'Good.Mythical.Evening.2021.720p',
+    state: 'error',
+    progress: 0.12,
+    size: 1_400_000_000,
+    downloaded: 168_000_000,
+    download_speed: 0,
+    upload_speed: 0,
+    error: 'Tracker unreachable for 2 hours',
+    category: 'soulsync-movies',
+    soulsync: { kind: 'movie', title: 'Good Mythical Evening (2021)' },
   },
 ];
 
@@ -253,14 +547,61 @@ function stubAll() {
         batches: [
           {
             batch_id: 'b1',
-            batch_name: 'Aphex Twin — SAW 85–92',
+            batch_name: "Marco's House",
+            source_page: 'discover',
             phase: 'downloading',
-            active: 1,
+            total: 6,
+            completed: 2,
+            failed: 1,
+            active: 2,
             queued: 1,
             playlist_id: 'p1',
           },
+          {
+            batch_id: 'b3',
+            batch_name: 'Late Night Drive',
+            source_page: 'sync',
+            phase: 'downloading',
+            total: 4,
+            completed: 3,
+            failed: 0,
+            active: 1,
+            queued: 0,
+            playlist_id: 'p3',
+          },
+          {
+            batch_id: 'b2',
+            batch_name: 'Audiobooks',
+            batch_type: 'audiobook',
+            playlist_id: 'audiobooks',
+            phase: 'downloading',
+            total: 1,
+            completed: 0,
+            failed: 1,
+            active: 0,
+            queued: 0,
+          },
         ],
       }),
+    ),
+    http.get('/api/downloads/task/:id/detail', () =>
+      HttpResponse.json({
+        success: true,
+        detail: {
+          status: 'not_found',
+          status_kind: 'not_found',
+          reason: 'Not found on 4 sources',
+          decision: {
+            outcome: 'nothing_passed',
+            accepted_total: 0,
+            rejected_total: 9,
+            rejected_counts: { duration_mismatch: 5, match_weak: 4 },
+          },
+        },
+      }),
+    ),
+    http.get('/api/library/history', () =>
+      HttpResponse.json({ success: true, entries: [], total: 4835 }),
     ),
     http.get('/api/downloads/batch-history', () =>
       HttpResponse.json({ success: true, history: [] }),
@@ -269,9 +610,63 @@ function stubAll() {
       HttpResponse.json({ success: true, acoustid_enabled: true, require_verified: false }),
     ),
     http.get('/api/review-queue/summary', () =>
-      HttpResponse.json({ success: true, quarantine: 0, unverified: 0, total: 0 }),
+      HttpResponse.json({ success: true, quarantine: 4, unverified: 2, total: 6 }),
     ),
-    http.get('/api/quarantine/list', () => HttpResponse.json({ success: true, entries: [] })),
+    http.get('/api/quarantine/list', () =>
+      HttpResponse.json({
+        success: true,
+        entries: quarantineEntries,
+        total: quarantineEntries.length,
+      }),
+    ),
+    http.get('/api/deleted-files', () =>
+      HttpResponse.json({
+        success: true,
+        entries: [
+          {
+            id: 'deleted:a',
+            name: '03 - Pyramids.flac',
+            rel: 'Frank Ocean/Channel Orange/03 - Pyramids.flac',
+            size: 50_500_000,
+            deleted_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+            source: 'duplicate-cleaner',
+            original_path: 'H:\\Music\\Frank Ocean\\Channel Orange\\03 - Pyramids.flac',
+          },
+        ],
+        total_size: 50_500_000,
+        count: 1,
+        keep_days: 30,
+      }),
+    ),
+    http.get('/api/clients/links', () =>
+      HttpResponse.json({
+        success: true,
+        slskd: 'http://slskd',
+        torrent: 'http://qbit',
+        usenet: '',
+      }),
+    ),
+    http.get('/api/clients/torrent', () =>
+      HttpResponse.json({
+        success: true,
+        configured: true,
+        connected: true,
+        type: 'qbittorrent',
+        items: torrents,
+      }),
+    ),
+    http.get('/api/clients/usenet', () =>
+      HttpResponse.json({ success: true, configured: false, connected: false, items: [] }),
+    ),
+    http.get('/api/clients/slskd', () =>
+      HttpResponse.json({
+        success: true,
+        configured: true,
+        connected: true,
+        items: [],
+        uploads: [],
+      }),
+    ),
     http.get('/api/video/downloads/active', () => HttpResponse.json({ downloads: videoRows })),
     http.get('/api/video/downloads/recycle', () =>
       HttpResponse.json({
@@ -318,6 +713,14 @@ function stubAll() {
   );
 }
 
+/** a row by its title (the header's live strip names the same titles). */
+async function rowNamed(name: string | RegExp): Promise<HTMLElement> {
+  const hits = await screen.findAllByText(name);
+  const row = hits.map((h) => h.closest('.dlc-row')).find(Boolean);
+  expect(row).toBeTruthy();
+  return row as HTMLElement;
+}
+
 function renderRoute(path: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
@@ -328,6 +731,16 @@ function renderRoute(path: string) {
 
 beforeEach(() => {
   window.SoulSyncWebShellBridge = createShellBridge();
+  // the real grouper lives in wishlist-tools.js; group by group_key the same way
+  window._groupQuarantineEntries = (entries: unknown[]) => {
+    const groups = new Map<string, { key: string; members: unknown[] }>();
+    for (const e of entries as { group_key?: string }[]) {
+      const k = e.group_key || String(Math.random());
+      if (!groups.has(k)) groups.set(k, { key: k, members: [] });
+      groups.get(k)!.members.push(e);
+    }
+    return [...groups.values()];
+  };
   stubAll();
 });
 
@@ -338,15 +751,95 @@ afterEach(() => {
 describe('unified downloads fixtures', () => {
   it('writes the music view', async () => {
     const container = renderRoute('/active-downloads');
-    await screen.findByText('Xtal');
+    await rowNamed('Saudade');
     const root = container.querySelector('.adl-unified');
     expect(root).not.toBeNull();
     emit('unified-downloads-music.fixture.txt', root!.innerHTML);
   });
 
+  it('writes the music view with rows expanded', async () => {
+    const container = renderRoute('/active-downloads');
+    for (const title of ['Saudade', 'Rua Escura', 'Prologue']) {
+      fireEvent.click(await rowNamed(title));
+    }
+    // the not-found row's fetched decision lands
+    await screen.findByText(/wrong length/);
+    const root = container.querySelector('.adl-unified');
+    expect(root).not.toBeNull();
+    emit('unified-downloads-music-expanded.fixture.txt', root!.innerHTML);
+  });
+
+  it('writes the review and clients views', async () => {
+    const container = renderRoute('/active-downloads');
+    await rowNamed('Saudade');
+    fireEvent.click(
+      container.querySelector('#adl-view-tabs [data-filter="unverified"]') as HTMLElement,
+    );
+    fireEvent.click(await rowNamed('Chun-Li Theme'));
+    fireEvent.click((await rowNamed('Prologue')).querySelector('.dlc-check') as HTMLElement);
+    emit(
+      'unified-downloads-review.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+
+    fireEvent.click(container.querySelector('[data-seg="quarantine"]') as HTMLElement);
+    const head = await waitFor(() => {
+      const h = container.querySelector('.dlc-qhead') as HTMLElement;
+      expect(h).not.toBeNull();
+      return h;
+    });
+    fireEvent.click(head);
+    fireEvent.click(container.querySelector('[data-quarantine-id="q0"]') as HTMLElement);
+    emit(
+      'unified-downloads-quarantine.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+
+    fireEvent.click(container.querySelector('[data-seg="deleted"]') as HTMLElement);
+    await screen.findByText('03 - Pyramids.flac');
+    emit(
+      'unified-downloads-deleted.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+
+    fireEvent.click(
+      container.querySelector('#adl-view-tabs [data-filter="clients"]') as HTMLElement,
+    );
+    fireEvent.click(
+      await waitFor(() => container.querySelector('[data-seg="torrent"]') as HTMLElement),
+    );
+    fireEvent.click(await rowNamed('Big Brother (2023) · S04E14'));
+    emit(
+      'unified-downloads-clients.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+
+    fireEvent.click(container.querySelector('[data-seg="usenet"]') as HTMLElement);
+    await screen.findByText(/No usenet client connected/);
+    emit(
+      'unified-downloads-usenet.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+  });
+
+  it('writes the video review view', async () => {
+    const container = renderRoute('/active-downloads?media=video');
+    await rowNamed(/Dune: Part Two/);
+    fireEvent.click(
+      container.querySelector('#adl-view-tabs [role="tab"]:nth-child(2)') as HTMLElement,
+    );
+    await screen.findAllByText(/Old.Movie.2020/);
+    emit(
+      'unified-downloads-vreview.fixture.txt',
+      container.querySelector('.adl-unified')!.innerHTML,
+    );
+    // the video view's tab is kept across mounts: leave it on Downloads
+    fireEvent.click(container.querySelector('#adl-view-tabs [role="tab"]') as HTMLElement);
+  });
+
   it('writes the video view', async () => {
     const container = renderRoute('/active-downloads?media=video');
-    await screen.findByText(/Dune: Part Two/);
+    await rowNamed(/Dune: Part Two/);
     const root = container.querySelector('.adl-unified');
     expect(root).not.toBeNull();
     emit('unified-downloads-video.fixture.txt', root!.innerHTML);
@@ -354,11 +847,8 @@ describe('unified downloads fixtures', () => {
 
   it('writes the expanded video card with cast info', async () => {
     const container = renderRoute('/active-downloads?media=video');
-    const card = await screen.findByText(/Dune: Part Two/);
     // click the card body (not a control) to open the drawer
-    const row = card.closest('.vdpg-card') as HTMLElement;
-    expect(row).not.toBeNull();
-    fireEvent.click(row);
+    fireEvent.click(await rowNamed(/Dune: Part Two/));
     // the lazy meta fetch lands: cast names paint
     await screen.findByText('Timothée Chalamet');
     await screen.findByText('Paul Atreides');

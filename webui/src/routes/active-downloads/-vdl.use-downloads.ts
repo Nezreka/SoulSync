@@ -28,7 +28,7 @@ import {
   vdlIsRetryable,
   vdlMatchesFilter,
   vdlMetaURL,
-  vdlType,
+  vdlRowType,
 } from './-vdl.helpers';
 import { VDL_POLL_ACTIVE_MS, VDL_POLL_IDLE_MS } from './-vdl.types';
 
@@ -259,7 +259,7 @@ export function useVideoDownloads(): VdlDownloadsController {
       return;
     }
     setMeta((prev) => ({ ...prev, [d.id]: null }));
-    const isYt = vdlType(d.kind) === 'youtube';
+    const isYt = vdlRowType(d) === 'youtube';
     void (isYt ? fetchVideoYtMeta(d.media_id) : fetchVideoMeta(url)).then((m) => {
       setMeta((prev) => ({ ...prev, [d.id]: (m ?? {}) as VdlMeta | VdlYtMeta }));
     });
