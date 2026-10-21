@@ -152,6 +152,7 @@ def plex_signin_check():
     try:
         import requests as _requests
         from core.security import plex_signin
+        from core.security.signup_defaults import signup_access
         cid = plex_signin.client_identifier(config_manager)
         try:
             account_token = plex_signin.check_pin(cid, pin_id)
@@ -179,6 +180,7 @@ def plex_signin_check():
             database, account,
             allow_create=bool(config_manager.get('security.plex_signin_auto_create', True)),
             default_can_download=bool(config_manager.get('security.plex_signin_default_can_download', False)),
+            access=signup_access(config_manager.get),
         )
         if result.error:
             return jsonify({'success': False, 'error': result.error}), 403

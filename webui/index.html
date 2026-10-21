@@ -9590,8 +9590,8 @@
                                                         with access to your Plex server signs in with their Plex account
                                                         (SoulSync never sees their password), and their playlists sync to
                                                         their own Plex account. The server's owner signs in as the admin.
-                                                        New Plex profiles start with Discover, Search, Library, Wishlist,
-                                                        Stats, Help and Issues; widen them per person under Profiles.
+                                                        New Plex profiles start with what New sign-ups below sets;
+                                                        widen them per person under Profiles.
                                                         Needs Plex as a media server and internet access to plex.tv.
                                                     </div>
                                                     <label class="toggle-label" style="margin-top: 8px;">
@@ -9603,6 +9603,40 @@
                                                         <input type="checkbox" id="security-plex-signin-can-download">
                                                         <span>New Plex profiles can download (off: request-only)</span>
                                                     </label>
+                                                </div>
+
+                                                <div class="form-group" id="security-signup-defaults">
+                                                    <label for="security-signup-sides">New sign-ups start on</label>
+                                                    <select id="security-signup-sides" class="form-select">
+                                                        <option value="music">Music</option>
+                                                        <option value="video">Movies &amp; TV</option>
+                                                        <option value="both">Music and Movies &amp; TV</option>
+                                                    </select>
+                                                    <div class="setting-help-text">
+                                                        What a profile made by sign-in can open. Music: Discover, Search,
+                                                        Library, Wishlist and Stats. Movies &amp; TV: Discover, Search and
+                                                        Library on the video side. Request-only profiles also get Requests.
+                                                        Help and Issues are always there; widen anyone further under
+                                                        Profiles.
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group" id="security-signup-request-limit-row">
+                                                    <label for="security-signup-request-limit">Request limit for new
+                                                        sign-ups</label>
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <input type="number" id="security-signup-request-limit" min="0"
+                                                            max="1000" value="0" style="width: 6em;">
+                                                        <span class="settings-unit">requests every</span>
+                                                        <input type="number" id="security-signup-request-limit-days" min="1"
+                                                            max="365" value="7" style="width: 5em;">
+                                                        <span class="settings-unit">days</span>
+                                                    </div>
+                                                    <div class="setting-help-text">
+                                                        0 means no limit. A request is one movie, show, album or track.
+                                                        Applies to profiles made after you save; change existing ones
+                                                        under Profiles.
+                                                    </div>
                                                 </div>
                                             </div>
 

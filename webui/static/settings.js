@@ -3642,6 +3642,15 @@ async function loadSettingsData() {
             if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
             const plexDl = document.getElementById('security-plex-signin-can-download');
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
+            const signupSides = document.getElementById('security-signup-sides');
+            if (signupSides) {
+                const sides = settings.security?.signup_sides;
+                signupSides.value = ['music', 'video', 'both'].includes(sides) ? sides : 'music';
+            }
+            const signupLimit = document.getElementById('security-signup-request-limit');
+            if (signupLimit) signupLimit.value = settings.security?.signup_request_limit ?? 0;
+            const signupDays = document.getElementById('security-signup-request-limit-days');
+            if (signupDays) signupDays.value = settings.security?.signup_request_limit_days ?? 7;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -6795,6 +6804,9 @@ async function saveSettings(quiet = false) {
             plex_signin: _cfgBool('security-plex-signin'),
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
+            signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
+            signup_request_limit: _cfgInt('security-signup-request-limit', 0),
+            signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),
         }
     };
 
