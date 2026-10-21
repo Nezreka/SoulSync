@@ -48,8 +48,8 @@
 .voe-x {
     flex: 0 0 auto; width: 36px; height: 36px; border-radius: var(--radius-circle); cursor: pointer; margin-left: 4px;
     font-size: 22px; line-height: 1; color: var(--white-a70);
-    background: rgba(0,0,0,.4); border: 1px solid var(--white-a16);
-    backdrop-filter: blur(6px); transition: all .15s ease; display: grid; place-items: center;
+    background: var(--black-a40); border: 1px solid var(--white-a16);
+    backdrop-filter: blur(6px); transition: all var(--dur-fast) ease; display: grid; place-items: center;
 }
 .voe-x:hover { color: #fff; background: rgba(0,0,0,.68); border-color: var(--white-a40); }
 
@@ -58,7 +58,7 @@
     display: inline-flex; align-items: center; gap: 8px; font: inherit;
     font-size: 13px; font-weight: 700; padding: 10px 18px; border-radius: 11px; cursor: pointer;
     color: rgba(255,255,255,.82); background: var(--white-a06);
-    border: 1px solid var(--white-a12); transition: all .15s ease;
+    border: 1px solid var(--white-a12); transition: all var(--dur-fast) ease;
 }
 .voe-btn:hover { color: #fff; background: var(--white-a12); border-color: var(--white-a20); }
 .voe-btn svg { width: 15px; height: 15px; }
@@ -109,27 +109,27 @@
     transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
 }
 .voe-card:hover { transform: translateY(-4px); border-color: rgba(var(--a),.5);
-    box-shadow: 0 20px 44px -18px rgba(0,0,0,.8); }
+    box-shadow: 0 20px 44px -18px var(--black-a80); }
 .voe-card-canvas {
     aspect-ratio: 2 / 3; background: #0e0e13 center/cover;
     display: grid; place-items: center; position: relative;
     background-image: radial-gradient(120% 90% at 50% 0%, #23232e, #0e0e13 70%);
 }
 .voe-card-canvas img { width: 100%; height: 100%; object-fit: cover; }
-.voe-card-thumb { position: absolute; inset: 0; opacity: 0; transition: opacity .25s ease; }
+.voe-card-thumb { position: absolute; inset: 0; opacity: 0; transition: opacity var(--dur-moderate) ease; }
 .voe-card-thumb--on { opacity: 1; }
 .voe-card-empty-ic { font-size: 30px; opacity: .3; }
 .voe-card-meta { padding: 12px 14px 14px; }
 .voe-card-name { font-size: 14px; font-weight: 700; color: #f2f4fa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voe-card-info { font-size: 11.5px; color: rgba(255,255,255,.42); margin-top: 3px; }
-.voe-card-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; opacity: 0; transition: opacity .15s; }
+.voe-card-actions { position: absolute; top: 10px; right: 10px; display: flex; gap: 6px; opacity: 0; transition: opacity var(--dur-fast); }
 .voe-card:hover .voe-card-actions { opacity: 1; }
 .voe-card-act {
     width: 30px; height: 30px; border-radius: var(--radius-md); display: grid; place-items: center; cursor: pointer;
-    background: rgba(0,0,0,.6); border: 1px solid var(--white-a14); color: #fff; backdrop-filter: blur(6px);
+    background: var(--black-a60); border: 1px solid var(--white-a14); color: #fff; backdrop-filter: blur(6px);
     transition: all .13s ease;
 }
-.voe-card-act:hover { background: rgba(0,0,0,.85); }
+.voe-card-act:hover { background: var(--black-a85); }
 .voe-card-act--danger:hover { background: rgba(239,68,68,.85); border-color: rgba(239,68,68,.6); }
 .voe-card-act svg { width: 14px; height: 14px; }
 .voe-card--new .voe-card-canvas {
@@ -147,7 +147,7 @@
 .voe-name-input {
     font: inherit; font-size: 14px; font-weight: 700; color: #fff;
     background: transparent; border: 1px solid transparent; border-radius: var(--radius-md);
-    padding: 6px 10px; min-width: 180px; max-width: 340px; transition: all .15s;
+    padding: 6px 10px; min-width: 180px; max-width: 340px; transition: all var(--dur-fast);
 }
 .voe-name-input:hover { background: var(--white-a05); }
 .voe-name-input:focus { outline: none; background: var(--white-a08); border-color: rgba(var(--a),.5); }
@@ -212,7 +212,7 @@
 
 /* logo-pack installer popup */
 .voe-lp { width: min(460px, 92vw); background: #17171e; border: 1px solid var(--white-a10);
-    border-radius: var(--radius-xl); padding: 22px 22px 18px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
+    border-radius: var(--radius-xl); padding: 22px 22px 18px; box-shadow: 0 30px 80px var(--black-a60); }
 .voe-lp-t { display: flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 800; color: #fff; }
 .voe-lp-t svg { width: 19px; height: 19px; color: rgb(var(--a)); }
 .voe-lp-m { font-size: 13px; color: var(--white-a60); line-height: 1.55; margin: 10px 0 4px; }
@@ -242,7 +242,7 @@
 .voe-stage {
     position: relative; height: min(80vh, 740px); aspect-ratio: 2 / 3;
     background: #16161d center/cover no-repeat;
-    border-radius: var(--radius-md); box-shadow: 0 30px 80px -20px rgba(0,0,0,.85), 0 0 0 1px var(--white-a06);
+    border-radius: var(--radius-md); box-shadow: 0 30px 80px -20px var(--black-a85), 0 0 0 1px var(--white-a06);
     overflow: hidden; user-select: none;
 }
 /* episode templates design on a 16:9 still, so the stage goes landscape */
@@ -254,9 +254,9 @@
 }
 /* selection frame — corner resize handles + a rotate handle */
 .voe-selbox { position: absolute; z-index: 38; box-sizing: border-box; pointer-events: none;
-    border: 1.5px solid rgb(var(--a)); box-shadow: 0 0 0 1px rgba(0,0,0,.35); }
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 0 0 1px var(--black-a35); }
 .voe-sel-h { position: absolute; width: 11px; height: 11px; border-radius: 3px; pointer-events: auto;
-    background: #fff; border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+    background: #fff; border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 3px var(--black-a50); }
 .voe-sel-h--tl { left: -6px; top: -6px; cursor: nwse-resize; }
 .voe-sel-h--tr { right: -6px; top: -6px; cursor: nesw-resize; }
 .voe-sel-h--br { right: -6px; bottom: -6px; cursor: nwse-resize; }
@@ -265,7 +265,7 @@
     background: rgb(var(--a)); transform: translateX(-50%); pointer-events: none; }
 .voe-sel-rot { position: absolute; left: 50%; top: -30px; width: 15px; height: 15px; border-radius: var(--radius-circle);
     transform: translateX(-50%); pointer-events: auto; cursor: grab; background: #fff;
-    border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+    border: 1.5px solid rgb(var(--a)); box-shadow: 0 1px 4px var(--black-a50); }
 .voe-sel-rot:active { cursor: grabbing; }
 
 .voe-guide { position: absolute; z-index: 35; display: none; background: rgb(var(--a)); pointer-events: none;
@@ -288,7 +288,7 @@
 .voe-layer--sel { outline-color: rgb(var(--a)); cursor: move; }
 .voe-layer--sel::after {
     content: ""; position: absolute; inset: -2px; border-radius: var(--radius-xs); pointer-events: none;
-    box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+    box-shadow: 0 0 0 1px var(--black-a40);
 }
 .voe-layer--hidden { display: none; }
 .voe-layer-row--locked .voe-lr-grip { opacity: .3; pointer-events: none; }
@@ -314,7 +314,7 @@
     position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 30;
     display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: var(--radius-lg);
     background: rgba(16,16,22,.82); border: 1px solid var(--white-a10); backdrop-filter: blur(10px);
-    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    box-shadow: 0 8px 24px var(--black-a40);
 }
 .voe-canvas-bar .voe-btn { padding: 7px 12px; font-size: 12px; }
 .voe-canvas-bar .voe-icon-btn { padding: 7px 9px; }
@@ -345,8 +345,8 @@
 .voe-side-count { font-weight: 700; color: rgba(255,255,255,.32); }
 .voe-layers { flex: 1; overflow-y: auto; padding: 4px 10px 14px; }
 .voe-layer-row {
-    display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 10px; cursor: pointer;
-    border: 1px solid transparent; margin-bottom: 3px; transition: background .12s, border-color .12s;
+    display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: var(--radius-control); cursor: pointer;
+    border: 1px solid transparent; margin-bottom: 3px; transition: background var(--dur-xfast), border-color var(--dur-xfast);
 }
 .voe-layer-row:hover { background: var(--white-a04); }
 .voe-layer-row--sel { background: rgba(var(--a),.15); border-color: rgba(var(--a),.4); }
@@ -357,7 +357,7 @@
 .voe-lr-ic svg { width: 14px; height: 14px; }
 .voe-lr-name { flex: 1; min-width: 0; font-size: 13px; color: #e9ecf3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voe-lr-btn { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center;
-    cursor: pointer; color: var(--white-a40); background: transparent; border: none; transition: all .12s; }
+    cursor: pointer; color: var(--white-a40); background: transparent; border: none; transition: all var(--dur-xfast); }
 .voe-lr-btn:hover { color: #fff; background: var(--white-a10); }
 .voe-lr-btn svg { width: 15px; height: 15px; }
 .voe-lr-btn--off { color: var(--white-a25); }
@@ -376,7 +376,7 @@
 .voe-insp-sec-h { display: flex; align-items: center; justify-content: space-between; width: 100%;
     font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em;
     color: rgba(255,255,255,.42); margin-bottom: 12px; padding: 0; background: none; border: none;
-    cursor: pointer; font-family: inherit; transition: color .12s; }
+    cursor: pointer; font-family: inherit; transition: color var(--dur-xfast); }
 .voe-insp-sec-h:hover { color: var(--white-a70); }
 .voe-insp-chev { display: inline-flex; transition: transform .16s ease; }
 .voe-insp-chev svg { width: 13px; height: 13px; stroke: currentColor; }
@@ -407,7 +407,7 @@ select.voe-input option { background: #17171d; }
 /* 9-point anchor picker */
 .voe-anchor-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
 .voe-anchor-cell { aspect-ratio: 1; border-radius: var(--radius-sm); cursor: pointer; position: relative;
-    background: var(--white-a05); border: 1px solid var(--white-a09); transition: all .12s; }
+    background: var(--white-a05); border: 1px solid var(--white-a09); transition: all var(--dur-xfast); }
 .voe-anchor-cell::after { content: ""; position: absolute; inset: 0; margin: auto; width: 5px; height: 5px;
     border-radius: var(--radius-circle); background: var(--white-a30); }
 .voe-anchor-cell:hover { background: var(--white-a10); }
@@ -418,9 +418,9 @@ select.voe-input option { background: #17171d; }
 .voe-place { display: flex; flex-direction: column; gap: 9px; }
 .voe-place-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 96px; }
 .voe-place-cell { aspect-ratio: 1; border-radius: var(--radius-sm); cursor: pointer; position: relative; padding: 0;
-    background: var(--white-a05); border: 1px solid var(--white-a09); transition: all .12s; }
+    background: var(--white-a05); border: 1px solid var(--white-a09); transition: all var(--dur-xfast); }
 .voe-place-cell i { position: absolute; width: 5px; height: 5px; border-radius: var(--radius-circle);
-    background: var(--white-a35); top: 50%; left: 50%; transform: translate(-50%, -50%); transition: background .12s; }
+    background: var(--white-a35); top: 50%; left: 50%; transform: translate(-50%, -50%); transition: background var(--dur-xfast); }
 .voe-place-cell:hover { background: var(--white-a12); border-color: var(--white-a18); }
 .voe-place-cell:hover i { background: var(--white-a70); }
 .voe-place-cell--on { background: rgba(var(--a),.28); border-color: rgb(var(--a)); }
@@ -456,7 +456,7 @@ select.voe-input option { background: #17171d; }
 .voe-seg { display: inline-flex; background: var(--white-a05); border: 1px solid var(--white-a10);
     border-radius: 9px; padding: 2px; gap: 2px; }
 .voe-seg-btn { border: none; background: transparent; color: var(--white-a55); cursor: pointer;
-    padding: 6px 10px; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 700; transition: all .12s; display: grid; place-items: center; }
+    padding: 6px 10px; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 700; transition: all var(--dur-xfast); display: grid; place-items: center; }
 .voe-seg-btn svg { width: 15px; height: 15px; }
 .voe-seg-btn:hover { color: #fff; }
 .voe-seg-btn--on { background: rgba(var(--a),.25); color: #fff; }
@@ -472,14 +472,14 @@ select.voe-input option { background: #17171d; }
 .voe-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 3px;
     background: var(--white-a14); outline: none; cursor: pointer; }
 .voe-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: var(--radius-circle);
-    background: rgb(var(--a)); box-shadow: 0 2px 6px rgba(0,0,0,.4); cursor: pointer; }
+    background: rgb(var(--a)); box-shadow: 0 2px 6px var(--black-a40); cursor: pointer; }
 .voe-slider::-moz-range-thumb { width: 15px; height: 15px; border: none; border-radius: var(--radius-circle); background: rgb(var(--a)); }
 
 /* toggle switch */
 .voe-toggle { flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; cursor: pointer; position: relative;
-    background: var(--white-a14); border: none; transition: background .15s; }
+    background: var(--white-a14); border: none; transition: background var(--dur-fast); }
 .voe-toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: var(--radius-circle);
-    background: #fff; transition: transform .16s; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+    background: #fff; transition: transform .16s; box-shadow: 0 1px 3px var(--black-a40); }
 .voe-toggle--on { background: rgb(var(--a)); }
 .voe-toggle--on::after { transform: translateX(16px); }
 .voe-sec-collapsed .voe-insp-body { display: none; }
@@ -493,7 +493,7 @@ select.voe-input option { background: #17171d; }
 .voe-pop {
     position: fixed; z-index: 9420; width: 320px; max-height: 60vh; display: flex; flex-direction: column;
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid var(--white-a12);
-    border-radius: 14px; box-shadow: 0 24px 60px -12px rgba(0,0,0,.75);
+    border-radius: var(--radius-card); box-shadow: 0 24px 60px -12px var(--black-a75);
     opacity: 0; transform: translateY(-6px); transition: opacity .14s ease, transform .14s ease;
 }
 .voe-pop--on { opacity: 1; transform: none; }
@@ -521,13 +521,13 @@ select.voe-input option { background: #17171d; }
 /* ── little confirm dialog (delete) ──────────────────────────────────────── */
 .voe-confirm-back {
     position: fixed; inset: 0; z-index: 9400; display: grid; place-items: center;
-    background: rgba(4,4,7,.6); backdrop-filter: blur(4px); opacity: 0; transition: opacity .15s;
+    background: rgba(4,4,7,.6); backdrop-filter: blur(4px); opacity: 0; transition: opacity var(--dur-fast);
 }
 .voe-confirm-back--on { opacity: 1; }
 .voe-confirm {
     width: min(400px, 92vw); padding: 24px; border-radius: var(--radius-xl);
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid var(--white-a10);
-    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s;
+    box-shadow: 0 30px 80px var(--black-a70); transform: scale(.96); transition: transform .16s;
 }
 .voe-confirm-back--on .voe-confirm { transform: none; }
 .voe-confirm-t { font-size: 17px; font-weight: 800; margin-bottom: 8px; }
@@ -537,9 +537,9 @@ select.voe-input option { background: #17171d; }
 .voe-btn--danger:hover { background: #dc2626; }
 
 /* ── starter-template picker ─────────────────────────────────────────────── */
-.voe-starter-modal { width: min(560px, 94vw); padding: 24px; border-radius: 18px;
+.voe-starter-modal { width: min(560px, 94vw); padding: 24px; border-radius: var(--radius-sheet);
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid var(--white-a10);
-    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+    box-shadow: 0 30px 80px var(--black-a70); transform: scale(.96); transition: transform .16s; }
 .voe-confirm-back--on .voe-starter-modal { transform: none; }
 .voe-starter-h { font-size: 19px; font-weight: 800; }
 .voe-starter-sub { font-size: 13px; color: var(--white-a55); line-height: 1.5; margin: 6px 0 18px; }
@@ -567,9 +567,9 @@ select.voe-input option { background: #17171d; }
 .voe-type-sub { font-size: 10.5px; color: var(--white-a50); text-align: center; line-height: 1.35; }
 
 /* ── shortcuts dialog ────────────────────────────────────────────────────── */
-.voe-shortcuts-modal { width: min(440px, 94vw); padding: 24px; border-radius: 18px;
+.voe-shortcuts-modal { width: min(440px, 94vw); padding: 24px; border-radius: var(--radius-sheet);
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid var(--white-a10);
-    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+    box-shadow: 0 30px 80px var(--black-a70); transform: scale(.96); transition: transform .16s; }
 .voe-confirm-back--on .voe-shortcuts-modal { transform: none; }
 .voe-shortcuts-list { margin: 16px 0 4px; }
 .voe-shortcut-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--white-a06); }
@@ -583,7 +583,7 @@ select.voe-input option { background: #17171d; }
     margin: 16px 0 6px; max-height: 62vh; overflow-y: auto; padding: 2px; }
 .voe-fs-card { margin: 0; }
 .voe-fs-card img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: var(--radius-md); display: block;
-    background: #16161d; box-shadow: 0 8px 20px rgba(0,0,0,.5); }
+    background: #16161d; box-shadow: 0 8px 20px var(--black-a50); }
 .voe-fs-card figcaption { margin-top: 6px; font-size: 11px; color: var(--white-a60); text-align: center;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voe-fs-loading { grid-column: 1 / -1; text-align: center; color: var(--white-a50); padding: 46px 0; font-size: 13px; }
@@ -595,9 +595,9 @@ select.voe-input option { background: #17171d; }
 @keyframes voe-pop-in { from { transform: scale(.6); opacity: 0; } to { opacity: 1; } }
 
 /* ── apply-to-library dialog ─────────────────────────────────────────────── */
-.voe-apply-modal { width: min(500px, 94vw); padding: 24px; border-radius: 18px;
+.voe-apply-modal { width: min(500px, 94vw); padding: 24px; border-radius: var(--radius-sheet);
     background: linear-gradient(180deg, #1a1a22, #141419); border: 1px solid var(--white-a10);
-    box-shadow: 0 30px 80px rgba(0,0,0,.7); transform: scale(.96); transition: transform .16s; }
+    box-shadow: 0 30px 80px var(--black-a70); transform: scale(.96); transition: transform .16s; }
 .voe-confirm-back--on .voe-apply-modal { transform: none; }
 .voe-apply-t { font-size: 19px; font-weight: 800; }
 .voe-apply-sub { font-size: 13px; color: var(--white-a55); line-height: 1.55; margin: 6px 0 18px; }
@@ -605,7 +605,7 @@ select.voe-input option { background: #17171d; }
 .voe-apply-prog { margin: 16px 0 6px; }
 .voe-apply-prog[hidden] { display: none; }
 .voe-apply-bar { height: 8px; border-radius: 5px; background: var(--white-a10); overflow: hidden; }
-.voe-apply-bar-fill { height: 100%; width: 0; border-radius: 5px; background: rgb(var(--a)); transition: width .25s ease; }
+.voe-apply-bar-fill { height: 100%; width: 0; border-radius: 5px; background: rgb(var(--a)); transition: width var(--dur-moderate) ease; }
 .voe-apply-prog-txt { font-size: 12px; color: var(--white-a60); margin-top: 8px; }
 .voe-apply-foot { display: flex; align-items: center; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
 .voe-apply-foot .voe-spacer { flex: 1; min-width: 8px; }
