@@ -1,6 +1,6 @@
 # UI reuse and consistency implementation
 
-## Stage 3 recovery — authorized 2026-10-20
+## Stage 3 recovery — completed 2026-10-20
 
 Baseline: `0235284ad`; deployed application `1283b55b6502`.
 The original assessment defines this stage as **durable acceptance evidence**,
@@ -104,8 +104,46 @@ authority or file-writing policy.
   paging, focus, identity-edit visibility and acquisition status. A missing local
   browser path was corrected in the temporary runner; no app change was needed.
 
-Deployment verification will be recorded after the final correction is rolled
-out. No live plan, wishlist request or music file is used as mutation test data.
+### Final deployed verification
+
+Application commits: `b846eafe2` (acceptance corpus and exposed defects) and
+`336c7cf68` (organization-card correction and coverage). The final code image is
+`localhost/soulsync:test-336c7cf68c1e`, deployed through the maintained test-rollout
+script and **Ready 1/1**. The subsequent documentation commit changes no runtime
+code. Music automation was paused after an idle check and restored to its prior
+enabled state; video automation remained enabled. SoulSync Flux remains suspended
+for the existing feature-review deployment. GitOps manifests were unchanged.
+
+- Compared six real albums before and after deployment: Stone Sour, Split Chain,
+  Joep Beving, Queen, Jeff Buckley and Bastille. All **193 assignment rows**,
+  proposed changes, decisions, readiness and plan signatures were unchanged.
+  The sole intentional addition was Queen finding 51777's `planned_file_action`,
+  describing its existing saved replacement choice. No unexpected differences.
+- Repeated Plan/Tracks checks for all six albums at 1800px, Stone Sour's Release
+  view, and Plan/Tracks for Stone Sour, Split Chain and Bastille at 390px. The
+  completed matrix produced 19 screenshots with no JavaScript exceptions,
+  header overflow or checked comparison-table overflow. Screenshots were
+  inspected, including the final desktop/phone organization layout. The ready
+  explanation measured 272px on desktop and 260px on the phone with both buttons
+  present.
+- A separate settled-artwork check confirmed four exact release covers loaded;
+  two image-proxy requests returned 502 and displayed neutral fallback artwork.
+  This check waited for every candidate request to finish instead of treating
+  loading placeholders as unavailable covers.
+- All 44 new acceptance baselines were inspected. The final three organization
+  captures were centered away from fixed shell controls and compared again
+  without updates. Existing Review/Library baselines were not regenerated.
+
+Initial host-browser attempts over `kubectl port-forward` stalled while loading
+static assets. Completed live checks used the pinned Playwright browser over an
+SSH tunnel; this pass does not establish the cause of the earlier runner/transport
+failure. Remote image failures, deliberately blocked notification writes and
+navigation-aborted background requests are distinct from JavaScript exceptions.
+No live repair plan, wishlist request, scan or music-file mutation was executed
+as a test. Mutating acceptance checks used disposable libraries and databases.
+
+All A1–A10 requirements have implementation and repeatable acceptance evidence.
+No known Stage 3 implementation task remains open within the scope below.
 
 ### Coverage boundaries
 
