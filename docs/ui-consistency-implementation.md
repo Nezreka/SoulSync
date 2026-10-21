@@ -18,7 +18,9 @@ this pass found three connected omissions in album-conflict presentation.
 2. Album conflicts sharing a finding with numbering were hidden behind a
    numbering-only explanation and approval label. The decision now explains
    both effects before approval; its acceptance button names numbering and album
-   metadata. The live Matchbox Twenty collection exposed this combined case.
+   metadata. Stored Matchbox Twenty findings exposed this presentation gap;
+   the fresh run below removed their obsolete conflict reason. The Essential
+   Cheap Trick provides the post-scan live example of genuine combined conflicts.
 3. After **Keep current numbering**, the backend correctly retained conflicting
    metadata as manual, but Tracks treated any saved choice as settled. Attention
    grouping, amber styling and the status now follow the remaining action state:
@@ -39,7 +41,7 @@ acceptance checklist.
 | 3.1 Compatible named-performance detail rejected | Corrected in Stage 1. Planner/end-to-end tests retain compatible dates/location detail and reject distinct dates, mixes, venues and conflicting audio; acceptance renders both positive and negative cases. |
 | 3.2 Missing metadata treated as contradictory; coherent IDs removed | Corrected in Stage 1. Blank and contradictory tag fixtures have independently asserted exact edits. Authority tests retain coherent identities and explicit release choices. |
 | 3.3 Unmatched companion disappears | Corrected in Stage 1. Inventory/queue tests and both companion acceptance states account for every file without consuming extra release slots or manufacturing duplicate removals. |
-| 3.4 Add/replace/remove summaries; album-wide conflict explanation | Identifier operations were corrected in Stage 1. The album-level part was incomplete until this pass, including mixed numbering decisions. New backend, Plan and Tracks tests cover it. |
+| 3.4 Add/replace/remove summaries; album-wide conflict explanation | Identifier operations were corrected in Stage 1. This pass adds missing album-conflict explanations, including mixed numbering decisions. The fresh live run below exposed a broader remaining gap: numbering approval can also approve artist/identifier edits when there is no album-conflict reason. |
 | 3.5 Repeated original/deluxe occurrences remain ambiguous | **Open behavior, not established as a new solver regression.** Current motionblur still has 18 ambiguous and eight clear assignments. Acceptance protects all intended occurrences and files; it does not solve the repeated-occurrence ambiguity. Historical/current catalogue evidence differs. |
 | 3.6 Additive guest credits treated as artist replacement | **Open inherited policy gap.** A changed nonempty credit still requires manual review, including a guest addition. A current direct policy probe confirmed this. Stage 1–3 did not redesign artist-credit equivalence or broaden automatic approval. |
 | 4.1 Reason after controls/audio | Stage 2 places the issue and proposed effects before approval and playback. Browser checks cover conflicts, ambiguity, duplicates and missing-track intent; this pass adds the album-level mixed-decision case. |
@@ -87,29 +89,141 @@ sessions and is outside the seven-album live sample.
 ### Deployment status and live baseline
 
 The corrections are committed as `3e68dd2c3`. The maintained deployment script
-built and loaded `localhost/soulsync:test-3e68dd2c3f50`. Its pre-rollout idle check
-then found Lyrics Filler running at approximately 37%, so it stopped before
-changing the image or automation settings. The existing `336c7cf68c1e` deployment
-remains healthy at 1/1; Flux remains in its prior feature-review suspension.
-The user has been asked whether to leave the scan running and hold the rollout,
-or stop it gracefully and restart it after deployment. A restart retains its
-existing findings but begins the scan again. **The new image is not yet deployed
-or verified against live data.**
+built and loaded `localhost/soulsync:test-3e68dd2c3f50`. The initial idle check
+held the rollout because Lyrics Filler was running. The user subsequently
+explicitly authorized deployment regardless of running jobs. The maintained
+script then deployed the image successfully: **Ready 1/1, zero pod restarts**.
+Flux remains in its prior feature-review suspension; GitOps manifests and
+automation settings are unchanged.
 
-Read-only live inspection of the existing deployment completed 21 Plan/Tracks/
+Read-only live inspection before this rollout completed 21 Plan/Tracks/
 Release views: seven albums on desktop, three of those on phone, and Stone Sour's
 release comparison. No browser exceptions, failed static assets or measured
 header/comparison overflows occurred. Artwork requests were allowed to settle;
 available exact-release covers and neutral fallbacks remain distinct. The
-Matchbox Twenty Plan visibly confirms the missing combined-conflict explanation
-on desktop and phone. This is baseline evidence, not a claim that the corrections
-have already reached production.
+Matchbox Twenty Plan confirmed the missing combined-conflict explanation on
+desktop and phone. This baseline preceded both the rollout and the fresh scan.
 
-The saved before-deployment API sample covers seven albums and 250 assignments.
-After rollout, compare complete assignment/edits/choice/readiness/signature
-payloads, allowing only the intentional decision-explanation differences, then
-repeat the browser checks. No live review choice, repair apply, wishlist request,
-library scan or music-file mutation was performed for verification.
+The before/after-deployment API sample covers seven albums and 250 assignments.
+Complete assignment, proposed-edit, saved-choice, readiness and signature
+payloads are unchanged. Only the intended decision explanations differ:
+Split Chain's five-action metadata group identifies the two tracks with album
+conflicts and three other edits; Matchbox Twenty's 53-track numbering group now
+discloses the 40 tracks with conflicting release IDs and 13 other tracks.
+
+### Completed reconciliation run and results
+
+Full-library run **886** completed on 2026-10-20 local time (2026-10-21
+02:02:41–02:14:11 UTC), after capturing all 894 queue albums and their decision
+plans. It checked **13,835 files across 1,602 album folders in 11 minutes
+30 seconds**, created 16 finding rows, reported **zero errors**, and did not
+report incomplete catalogue evidence. **Zero automatic fixes** occurred. No
+live review choice, repair apply or wishlist request was submitted. This scan
+updated reconciliation evidence/findings without applying music-file edits.
+
+| Queue measure | Before scan | After scan |
+| --- | ---: | ---: |
+| All albums | 894 | 895 |
+| Needs input | 760 | 761 |
+| Ready albums | 131 | 131 |
+| File-action albums | 3 | 3 |
+| Waiting albums | 0 | 0 |
+| Actions in fully ready albums | 526 | 526 |
+
+Across the entire queue, **889 existing album decision summaries were
+unchanged**, five changed, one album appeared, and none disappeared. No existing
+album crossed the ready/manual eligibility boundary, and no case reported a
+last error. Queue modes sum correctly. The signed batch preview contains
+**exactly the same 131 eligible case IDs and 526 actions**, with **zero file
+actions** and no album with unresolved decisions. This checks summary and batch
+eligibility across the whole queue; it does not claim an exact field comparison
+for all 895 albums.
+
+The deeper seven-album comparison covers 250 track rows. All file/slot
+relationships and assignment confidence classifications were preserved. Stone
+Sour, Split Chain, Joep Beving, Jeff Buckley and Bastille retained their exact
+proposals, choices and signatures. Queen and Matchbox changed as described below.
+
+| Changed/new case | Result and interpretation |
+| --- | --- |
+| Matchbox Twenty collection | The old conflict consisted of 40 blank release IDs and 17 copies of one nonempty ID. The scan correctly removed this false conflict; actual proposed edits and assignments stayed unchanged. This revealed the broader approval-scope gap below. |
+| Queen — Platinum Collection | Two local live titles, “The Show Must Go On (live)” and “Somebody to Love (live),” now retain useful local wording instead of being expanded to long catalogue descriptions. Their title/filename proposals were removed; remaining album/disc edits persist. Because the actual proposals changed, those two prior approvals reopened: 33 saved choices became 31. The other 31, including the “Who Wants to Live Forever” replacement, were retained. Ready/manual actions changed from 50/1 to 48/3; the album was already ineligible for bulk apply. |
+| The Truman Show | Another false blank-ID conflict disappeared. Ready/manual actions changed from 10/3 to 11/2. One uncertain assignment and a proposed additive orchestra/conductor credit still require review. The latter confirms the inherited artist-credit policy gap. |
+| Cream — Wheels of Fire | Three old actions became one manual recording-ID removal and one completeness decision. The selected Apple/iTunes release has 10 local files for 14 slots. “Passing the Time” carries an ID resolving to Cream’s “Sitting on Top of the World”; the proposed removal explicitly exposes that disagreement and stays manual. The full old selected-release payload was not captured, so this is not proof of the cause of the provider-selection change. |
+| Soul Asylum — Grave Dancers Union | An old release-choice finding became ten manual title proposals plus completeness for two absent tracks. The selected MusicBrainz edition explicitly says “2022 Remaster,” yet the title proposals remove that qualifier. This is a remaining recommendation-quality gap, detailed below. |
+| ABBA — Gold, 40th anniversary edition | Four new manual disc-tag corrections account for the one new queue album. Read-only inspection of the actual FLAC tags confirmed disc values 2, 2, 2 and 3 while the library rows say 1. These are real remaining file/library differences. Earlier resolved numbering findings exist, but the available history does not establish whether an old apply left the tags behind or something later rewrote them. |
+
+The previous full run was on October 19, before the recovery stages. Consequently
+the fresh scan exercises the broader Stage 1–3 corrections as well as the latest
+presentation fix. Deployment alone preserved all sampled recommendation data;
+it is important not to attribute every subsequent scan difference to `3e68dd2c3`.
+
+The prior full scan took 8 minutes 16 seconds versus 11 minutes 30 seconds now.
+This is not a controlled performance comparison: this run performed 1,014
+catalogue cache misses, 314 audio lookups and 54 fingerprints, and used a new
+matching-policy cache signature. Catalogue time rose from 52.3 to 195.4 seconds,
+while candidate matching fell from 304.7 to 221.3 seconds. Fresh external work
+and changed cache eligibility preclude a simple speed-regression conclusion.
+
+### Remaining gaps exposed by this run
+
+1. **Numbering approval still understates its full scope when other edits are
+   attached without an album-conflict reason.** Matchbox now says “Plan continuous
+   numbering for 53 tracks.” Forty of those proposals also change the artist
+   from Various Artists to Matchbox Twenty and include library album/identifier
+   edits. A local projection of the captured real proposal, using the production
+   choice projector, confirmed that accepting numbering sets `plan_approved`
+   for the entire proposal and leaves all those edits included. No live choice
+   was saved. The latest correction addresses explicit album conflicts, not
+   every mixed proposal. A follow-up must either disclose the complete approval
+   scope before submission or separate approval by field, with matching tests
+   for accepting and keeping numbering.
+2. **Edition-supported remaster wording is still proposed for removal.** Soul
+   Asylum’s selected release `f580b3a0-6bb4-40dd-a989-aa7f62137b5c` is itself
+   disambiguated as “2022 Remaster,” but ten title/filename proposals strip
+   “(2022 Remaster)” and describe a potential recording-version difference.
+   Keeping these manual prevents unattended changes but does not make the
+   recommendation useful. Follow-up should preserve supported local edition
+   detail while retaining negative controls for conflicting remasters/versions.
+   The historical release preview included a 25-slot deluxe alternative absent
+   from the current six displayed candidates; those bounded snapshots do not
+   establish why the release-choice finding disappeared. Discovery/ranking and
+   refreshed evidence must be traced before calling that a solver regression.
+
+These are open findings, not claims of completed recovery. The repeated original/
+deluxe ambiguity, additive-credit policy, historical Evanescence case and CSS
+debt recorded above also remain outside the completed corrections.
+
+### Post-scan browser verification and retained evidence
+
+The final live browser pass completed **33 desktop/mobile views** across twelve
+albums: desktop Plan/Tracks for each, Stone Sour Release, and Plan/Tracks for
+four of them at 390px. It recorded zero JavaScript exceptions, zero failed static
+assets, and no measured header/comparison overflow. Changed and representative
+screenshots were visually inspected, including genuine conflicts, remaster
+proposals, wrong-ID removal, Queen, ABBA and the phone numbering decision.
+
+The Essential Cheap Trick demonstrates the corrected genuine conflict after
+the fresh scan: numbering names 18 affected tracks, title conventions name
+three, and both approval labels disclose album metadata alongside their primary
+operation. The explanation is visible before approval on desktop and phone.
+Track severity colors, current/planned direction, local evidence and shared
+playback remain visible in the inspected states.
+
+An earlier browser attempt during the active scan stopped when its stale
+Matchbox-conflict expectation ceased to match the refreshed data. The final pass
+used post-scan evidence and completed all views. Browser guards blocked an
+incidental notification-log POST; no repair mutation was attempted.
+
+Raw local evidence is retained under `/tmp/soulsync-postdeploy-run/` (before/after
+queue, seven detailed cases, six changed/new cases, signed preview, historical
+findings and file tags), `/tmp/soulsync-reverify-live/` (33 screenshots and browser
+report), and `/tmp/soulsync-reverify-parity-verified.json` (deployment-only parity).
+These temporary artifacts are not committed; this ledger preserves the findings
+and limits. Final deployment status remains **Ready 1/1** on the requested test
+image, with the existing feature-review Flux suspension preserved. Only this
+documentation changed after the rollout; no additional runtime changes were
+made during the run analysis.
 
 ## Stage 3 recovery — completed 2026-10-20
 
