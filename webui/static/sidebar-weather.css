@@ -27,7 +27,7 @@
     padding: 4px 7px;
     margin: 2px -7px -2px 0;
     border-radius: 7px;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 #sidebar-weather-line:hover {
@@ -70,7 +70,7 @@ html[data-sidebar="collapsed"] #sidebar-weather-line {
     background: rgba(17, 17, 21, 0.96);
     border: 1px solid var(--white-a12);
     border-radius: var(--radius-lg);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 14px 34px var(--black-a55);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     color: #e9e9ee;
