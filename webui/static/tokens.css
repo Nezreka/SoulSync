@@ -59,6 +59,26 @@
     --white-a85: rgba(255, 255, 255, 0.85);
     --white-a90: rgba(255, 255, 255, 0.9);
 
+    /* ── Black-alpha ramp (shadows, scrims, backdrops) ──────────────── */
+    --black-a10: rgba(0, 0, 0, 0.1);
+    --black-a15: rgba(0, 0, 0, 0.15);
+    --black-a20: rgba(0, 0, 0, 0.2);
+    --black-a25: rgba(0, 0, 0, 0.25);
+    --black-a30: rgba(0, 0, 0, 0.3);
+    --black-a35: rgba(0, 0, 0, 0.35);
+    --black-a40: rgba(0, 0, 0, 0.4);
+    --black-a45: rgba(0, 0, 0, 0.45);
+    --black-a50: rgba(0, 0, 0, 0.5);
+    --black-a55: rgba(0, 0, 0, 0.55);
+    --black-a60: rgba(0, 0, 0, 0.6);
+    --black-a65: rgba(0, 0, 0, 0.65);
+    --black-a70: rgba(0, 0, 0, 0.7);
+    --black-a75: rgba(0, 0, 0, 0.75);
+    --black-a80: rgba(0, 0, 0, 0.8);
+    --black-a85: rgba(0, 0, 0, 0.85);
+    --black-a90: rgba(0, 0, 0, 0.9);
+    --black-a95: rgba(0, 0, 0, 0.95);
+
     /* ── Surfaces, lines, text ──────────────────────────────────────── */
     --surface-1: var(--white-a03);
     --surface-2: var(--white-a05);
@@ -79,6 +99,18 @@
        as its fallback before anything defined it. */
     --bg-secondary: #1e1e2e;
 
+    /* Solid neutral surfaces, darkest first: a page panel, a raised card, a
+       control or divider on that card. */
+    --bg-surface: #121212;
+    --bg-raised: #1a1a1a;
+    --bg-raised-2: #2a2a2a;
+
+    /* Text: an off-white headline colour (with an -rgb triplet for alpha
+       variants) and a soft grey for secondary copy. */
+    --text-bright-rgb: 244, 245, 247;
+    --text-bright: #f4f5f7;
+    --text-soft: #b3b3b3;
+
     /* ── Status ─────────────────────────────────────────────────────── */
     --danger-rgb: 239, 68, 68;
     --danger: #ef4444;
@@ -89,28 +121,53 @@
     --success: #4ade80;
     --info-rgb: 56, 189, 248;
     --info: #38bdf8;
+    /* Second shades some features use next to (not instead of) the above. */
+    --danger-soft-rgb: 255, 107, 107;
+    --danger-soft: #ff6b6b;
+    --warning-strong-rgb: 245, 158, 11;
+    --warning-strong: #f59e0b;
+    --success-strong-rgb: 34, 197, 94;
+    --success-strong: #22c55e;
+    --gold-rgb: 245, 185, 66;
+    --gold: #f5b942;
 
     /* ── Radius ─────────────────────────────────────────────────────── */
     --radius-xs: 4px;
     --radius-sm: 6px;
     --radius-md: 8px;
+    --radius-control: 10px;  /* buttons, inputs, small cards */
     --radius-lg: 12px;
+    --radius-card: 14px;
     --radius-xl: 16px;
+    --radius-sheet: 18px;    /* large panels and sheets */
     --radius-pill: 999px;
     --radius-circle: 50%;
 
     /* ── Motion ─────────────────────────────────────────────────────── */
+    --dur-xfast: 0.12s;
     --dur-fast: 0.15s;
+    --dur-quick: 0.18s;
     --dur-base: 0.2s;
+    --dur-moderate: 0.25s;
     --dur-slow: 0.3s;
+    --dur-slower: 0.4s;
+    --dur-slowest: 0.5s;
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
     --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-decelerate: cubic-bezier(0.2, 0, 0, 1);
+    --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
     /* ── Z-index (mapped onto the values the app already uses) ──────── */
     --z-sticky: 10;
     --z-dropdown: 100;
     --z-overlay: 1000;
     --z-modal: 10000;
+    /* DialogFrame's own backdrop and popup sit just above --z-modal, and a
+       menu opened from inside a dialog sits above both. */
+    --z-dialog-backdrop: 10999;
+    --z-dialog: 11000;
+    --z-menu: 11050;
     --z-toast: 99999;
     --z-tooltip: 100000;
 
