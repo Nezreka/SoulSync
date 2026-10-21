@@ -44,8 +44,9 @@
   border: 1px solid var(--white-a09);
   background:
     linear-gradient(135deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.015) 55%, rgba(var(--accent-rgb), 0.05) 100%);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  /* no backdrop-filter on purpose. the hero sits on the flat page background,
+     so the blur never showed (pixel diff under 8/255), but it was the biggest
+     blurred area on the page and the browser redid it every frame (#1816). */
   box-shadow: 0 24px 60px var(--black-a35), inset 0 1px 0 var(--white-a07);
   overflow: hidden;
 }

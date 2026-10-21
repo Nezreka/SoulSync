@@ -22841,7 +22841,8 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     background: linear-gradient(135deg,
             rgba(35, 35, 35, 0.7) 0%,
             rgba(25, 25, 25, 0.8) 100%);
-    backdrop-filter: blur(10px) saturate(1.1);
+    /* no backdrop-filter: it only ever blurred the modal's own flat surface,
+       which looks the same blurred or not, at a per-frame cost (#1816) */
     border: 1px solid var(--white-a10);
     border-top: 1px solid var(--white-a15);
     border-radius: var(--radius-xl);
@@ -65026,8 +65027,11 @@ body.em-scroll-lock { overflow: hidden; }
     position: relative;
     background:
         linear-gradient(165deg, rgba(24, 24, 32, 0.97) 0%, rgba(13, 13, 18, 0.985) 60%, rgba(10, 10, 14, 0.99) 100%);
-    backdrop-filter: blur(24px) saturate(1.35);
-    -webkit-backdrop-filter: blur(24px) saturate(1.35);
+    /* no backdrop-filter on purpose. this surface is 97-99% opaque, so a blur
+       behind it never shows (pixel diff: identical), but the browser still
+       re-blurred a 1500x900 area every frame the row pulses ticked. that pegged
+       the gpu while a sync or wishlist download ran (#1816). the overlay
+       behind the modal keeps its blur, that's the frosted look you see. */
     border: 1px solid var(--white-a07);
     border-radius: 24px;
     box-shadow:
@@ -65227,7 +65231,7 @@ body.em-scroll-lock { overflow: hidden; }
 .download-missing-modal-footer {
     background: rgba(12, 12, 17, 0.85);
     border-top: 1px solid var(--white-a05);
-    backdrop-filter: blur(10px);
+    /* no backdrop-filter, same reason as .download-tracks-section (#1816) */
 }
 
 .download-control-btn {
