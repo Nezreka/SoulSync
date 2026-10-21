@@ -125,6 +125,26 @@ class TestTrackArtistMatches:
         assert track_artist_matches(['Drakeo the Ruler'], 'Drake') is False
         assert track_artist_matches(['Drake & Future'], 'Drake') is True
 
+    def test_underscore_library_name_matches_slash_credit(self):
+        """discord (Chung Man): the K/DA page sent the name as 'K_DA' while the
+        source credits 'K/DA', so wishlist + watchlist skipped every track as
+        'by other artists'. punctuation is not part of who the artist is."""
+        assert track_artist_matches(['K/DA'], 'K_DA') is True
+        assert track_artist_matches([{'name': 'K/DA'}], 'K_DA') is True
+        assert track_artist_matches(['AC/DC'], 'ACDC') is True
+
+    def test_slash_name_survives_inside_a_combined_credit(self):
+        """'K/DA, Madison Beer' used to split on the slash first, so K/DA never
+        came out as a component and the real artist got dropped."""
+        assert track_artist_matches(['K/DA, Madison Beer, (G)I-DLE'], 'K/DA') is True
+        assert track_artist_matches(['K/DA, Madison Beer'], 'K_DA') is True
+        assert track_artist_matches(['Lil Nas X / Billy Ray Cyrus'], 'Billy Ray Cyrus') is True
+
+    def test_punctuation_blind_match_still_drops_absent_artist(self):
+        assert track_artist_matches(['Madison Beer, (G)I-DLE'], 'K_DA') is False
+        assert track_artist_matches(['!!!'], '!!!') is True
+        assert track_artist_matches(['!!!'], '???') is False
+
 
 # ---------------------------------------------------------------------------
 # content_type_skip_reason
