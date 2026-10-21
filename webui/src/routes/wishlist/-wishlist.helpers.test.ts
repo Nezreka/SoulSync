@@ -10,9 +10,14 @@ import {
   groupWishlistArtists,
   orbImage,
   orbRingCovers,
+  orbMeta,
   orbSizeClass,
   parseWishlistTrack,
+  describeTrouble,
+  shortStamp,
   trackCountLabel,
+  troubleKind,
+  wishlistZones,
 } from './-wishlist.helpers';
 
 const row = (overrides: Record<string, unknown> = {}) => ({
@@ -268,5 +273,139 @@ describe('trackCountLabel', () => {
     expect(trackCountLabel(0)).toBe('0 tracks');
     expect(trackCountLabel(1)).toBe('1 track');
     expect(trackCountLabel(2)).toBe('2 tracks');
+  });
+});
+
+// failure_reason strings copied from a real wishlist, so the wording is
+// pinned against what the backend actually writes.
+const REAL = {
+  notFound: 'No matching track found',
+  integrity:
+    'File integrity check failed: Lossless file holds only 7% of the data its 234s runtime needs (105kbps) and Incomplete audio: only ~30s actually decodes of a 234s file (13%) — truncated/broken download',
+  acoustid:
+    "AcoustID verification failed: Audio mismatch: 'HOW DO I DO IT' by 'REZZ × Dillon Francis × BRVMES' — expected artist not found",
+  postProcessing: 'post-processing failed: [WinError 3] The system cannot find the path specified',
+  addedBy: 'Missing from library (found by watchlist scan)',
+};
+
+function stuckTrack(over: Partial<ParsedWishlistTrack> = {}): ParsedWishlistTrack {
+  return {
+    track: 'Xtal',
+    artist: 'Aphex Twin',
+    album: 'SAW',
+    image: '',
+    type: 'album',
+    id: 't1',
+    retry: 4,
+    failing: true,
+    lastTried: '2026-10-17 02:08:33',
+    failReason: REAL.notFound,
+    ...over,
+  };
+}
+
+describe('troubleKind', () => {
+  it('reads post-download rejections, no-matches and the rest', () => {
+    expect(troubleKind(stuckTrack({ failReason: REAL.integrity }))).toBe('rejected');
+    expect(troubleKind(stuckTrack({ failReason: REAL.acoustid }))).toBe('rejected');
+    expect(troubleKind(stuckTrack({ failReason: REAL.postProcessing }))).toBe('rejected');
+    expect(troubleKind(stuckTrack({ failReason: REAL.notFound }))).toBe('notfound');
+    expect(troubleKind(stuckTrack({ failReason: 'Download failed' }))).toBe('failed');
+  });
+
+  it('never reads the reason a track was ADDED as the cause', () => {
+    // failure_reason also holds why a track landed on the wishlist
+    expect(troubleKind(stuckTrack({ failReason: REAL.addedBy }))).toBe('failed');
+    expect(describeTrouble(stuckTrack({ failReason: REAL.addedBy })).headline).toBe(
+      'Download keeps failing',
+    );
+  });
+
+  it('a track under the threshold is still hunting, whatever its reason says', () => {
+    expect(troubleKind(stuckTrack({ retry: 2, failing: false, failReason: REAL.integrity }))).toBe(
+      'hunting',
+    );
+  });
+});
+
+describe('describeTrouble', () => {
+  it('turns the integrity log into a sentence', () => {
+    expect(describeTrouble(stuckTrack({ failReason: REAL.integrity })).detail).toMatch(
+      /^Only ~30s of 3:54 actually played\./,
+    );
+  });
+
+  it('names the song the fingerprint heard', () => {
+    expect(describeTrouble(stuckTrack({ failReason: REAL.acoustid })).detail).toBe(
+      'The audio fingerprint says it was "HOW DO I DO IT" by REZZ × Dillon Francis × BRVMES, not this track.',
+    );
+  });
+
+  it('explains a windows path failure without the error code', () => {
+    const { headline, detail } = describeTrouble(stuckTrack({ failReason: REAL.postProcessing }));
+    expect(headline).toBe('Downloaded, then failed to save');
+    expect(detail).not.toMatch(/WinError/);
+  });
+});
+
+describe('wishlistZones', () => {
+  const group = (name: string, tracks: ParsedWishlistTrack[]) => ({
+    name,
+    albums: [{ name: 'LP', image: '', tracks }],
+    singles: [],
+    total: tracks.length,
+    failingCount: tracks.filter((t) => t.failing).length,
+  });
+
+  it('files each artist under its worst track, worst zone first, order kept inside', () => {
+    const zones = wishlistZones([
+      group('Calm', [stuckTrack({ id: 'c', retry: 0, failing: false })]),
+      group('Lost', [stuckTrack({ id: 'l' })]),
+      group('Mixed', [
+        stuckTrack({ id: 'm1', retry: 0, failing: false }),
+        stuckTrack({ id: 'm2', failReason: REAL.acoustid }),
+      ]),
+      group('Also lost', [stuckTrack({ id: 'a' })]),
+    ]);
+    expect(zones.map((z) => [z.kind, z.groups.map((g) => g.name)])).toEqual([
+      ['rejected', ['Mixed']],
+      ['notfound', ['Lost', 'Also lost']],
+      ['hunting', ['Calm']],
+    ]);
+    // retry only ever touches stuck tracks
+    expect(zones[0].stuckIds).toEqual(['m2']);
+    expect(zones[2].stuckIds).toEqual([]);
+    expect(zones[1].sub).toBe('2 artists · nothing on your sources yet');
+  });
+});
+
+describe('orbMeta', () => {
+  const now = Date.UTC(2026, 9, 21, 12);
+  it('shows tries for a lone stuck track, a stuck count for a bigger artist', () => {
+    const one = { name: 'A', albums: [], singles: [stuckTrack()], total: 1, failingCount: 1 };
+    expect(orbMeta(one)).toMatch(/^4 tries · /);
+    const many = {
+      name: 'B',
+      albums: [],
+      singles: [stuckTrack(), stuckTrack({ id: 't2', retry: 0, failing: false })],
+      total: 2,
+      failingCount: 1,
+    };
+    expect(orbMeta(many)).toMatch(/^1 of 2 stuck · /);
+    const calm = {
+      name: 'C',
+      albums: [],
+      singles: [stuckTrack({ retry: 0, failing: false })],
+      total: 1,
+      failingCount: 0,
+    };
+    expect(orbMeta(calm)).toBe('1 track');
+  });
+
+  it('reads bare sqlite stamps as utc and says today / yesterday', () => {
+    expect(shortStamp('2026-10-21 08:00:00', now)).toBe('today');
+    expect(shortStamp('2026-10-20 08:00:00', now)).toBe('yesterday');
+    expect(shortStamp('', now)).toBe('');
+    expect(shortStamp('garbage', now)).toBe('');
   });
 });
