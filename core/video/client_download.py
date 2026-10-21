@@ -110,6 +110,7 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
         if str(dl.get("source") or "").lower() == "usenet" and save and name \
                 and not _scoped_content(save, name):
             name = None
+    job_dir = _usenet_job_dir(dl, save, name, job_name=getattr(status, "name", None))
     # A season pack is a FOLDER of episodes. Falling through to find_video here would pick
     # its largest file, hand that one episode to the importer, and leave the rest on disk —
     # and since a pack row carries no single episode identity, the importer then rejects it
@@ -117,15 +118,59 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     if save and import_pack is not None and is_pack_download(dl):
         packed = import_pack(dl, save, name)
         if packed is not None:
-            return packed
+            return _with_job_dir(packed, job_dir)
     src = find_video(save, name) if save else None
     if not src:
         if dl.get("dest_path"):
             return {"status": "completed", "progress": 100.0, "dest_path": dl.get("dest_path")}
         return {"progress": 100.0}   # complete but the file isn't visible yet — keep polling
     if organizer is not None:
-        return organizer(dl, src)
+        return _with_job_dir(organizer(dl, src), job_dir, src)
     return {"status": "completed", "progress": 100.0, "dest_path": src}
+
+
+def _usenet_job_dir(dl: dict, save, name, job_name=None) -> Optional[str]:
+    """The usenet job's OWN download folder, or None.
+
+    What the client reports varies: a folder (nzbget's FinalDir, sab for a
+    multi-file job), the shared parent (scoped to ``<save>/<name>``), or -- sab
+    for a single-file job -- the finished FILE itself. For a file the job folder
+    is its parent, but only when that folder is named after the job
+    (``job_name``, case-insensitive): a category set up without job folders
+    puts the file straight in the category folder, which must never be
+    treated as the job's own. torrents never get one (the client is still
+    seeding). None unless it really is a folder."""
+    if str(dl.get("source") or "").lower() != "usenet" or not save:
+        return None
+    path = _scoped_content(save, name) if name else save
+    if path and os.path.isdir(path):
+        return str(path)
+    if path and os.path.isfile(path) and job_name:
+        parent = os.path.dirname(os.path.abspath(str(path)))
+        if os.path.basename(parent).casefold() == str(job_name).strip().casefold() \
+                and os.path.isdir(parent):
+            return parent
+    return None
+
+
+def _with_job_dir(patch, job_dir: Optional[str], src=None):
+    """Tag a completed import with its usenet job folder (transient
+    ``_cleanup_dir``, stripped like the other underscore keys). The monitor
+    removes the folder once the row is persisted and it is empty, so a grab no
+    longer leaves an empty release folder behind in the client's completed
+    folder. Only when the imported file came from inside that folder."""
+    if not job_dir or not isinstance(patch, dict) or patch.get("status") != "completed":
+        return patch
+    if src is not None:
+        try:
+            inside = os.path.commonpath([os.path.abspath(str(src)), os.path.abspath(job_dir)]) \
+                == os.path.abspath(job_dir)
+        except ValueError:
+            inside = False
+        if not inside:
+            return patch
+    patch["_cleanup_dir"] = job_dir
+    return patch
 
 
 # ── production seams ──────────────────────────────────────────────────────────
