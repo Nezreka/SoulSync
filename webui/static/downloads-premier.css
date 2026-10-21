@@ -16,7 +16,7 @@
     position: relative;
     background: rgba(255, 255, 255, 0.022);
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     overflow: hidden;
 }
 
@@ -63,7 +63,7 @@
     height: 56px;
     border-radius: 8px;
     object-fit: cover;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 18px var(--black-a45);
     flex-shrink: 0;
 }
 
@@ -144,7 +144,7 @@
 }
 
 .dlc-chev {
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
 }
 
 .dlc-chev-open {
@@ -160,7 +160,7 @@
 .dlc-gbar i {
     display: block;
     height: 100%;
-    transition: width 0.5s ease;
+    transition: width var(--dur-slowest) ease;
 }
 
 .dlc-gbar-done { background: var(--white-a40); }
@@ -222,7 +222,7 @@
 
 .dlc-fold-chev {
     display: inline-flex;
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
 }
 
 .dlc-fold-open .dlc-fold-chev,
@@ -249,7 +249,7 @@
     border-top: 1px solid var(--white-a05);
     cursor: pointer;
     outline: none;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 
 .dlc-row:hover {
@@ -288,8 +288,8 @@
     border-radius: 6px;
     object-fit: cover;
     background: var(--white-a05);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    transition: opacity 0.2s ease;
+    box-shadow: 0 2px 8px var(--black-a30);
+    transition: opacity var(--dur-base) ease;
 }
 
 .dlc-lead-poster .dlc-art {
@@ -342,7 +342,7 @@
 .dlc-ring-fill {
     stroke: rgb(var(--accent-rgb));
     stroke-linecap: round;
-    transition: stroke-dashoffset 0.5s ease;
+    transition: stroke-dashoffset var(--dur-slowest) ease;
 }
 
 .dlc-spin {
@@ -385,7 +385,7 @@
     cursor: pointer;
     opacity: 0;
     transform: scale(0.85);
-    transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+    transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 
 .dlc-row:hover .dlc-play,
@@ -530,7 +530,7 @@
     background: none;
     color: var(--white-a55);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease, opacity var(--dur-fast) ease;
 }
 
 .dlc-icon-btn:hover {
@@ -594,7 +594,7 @@
     height: 100%;
     border-radius: 2px;
     background: rgb(var(--accent-rgb));
-    transition: width 0.5s ease;
+    transition: width var(--dur-slowest) ease;
 }
 
 .dlc-rowbar-indet i {
@@ -639,7 +639,7 @@
     white-space: nowrap;
     text-decoration: none;
     cursor: pointer;
-    transition: background 0.15s ease, filter 0.15s ease;
+    transition: background var(--dur-fast) ease, filter var(--dur-fast) ease;
 }
 
 .dlc-btn:hover {
@@ -900,7 +900,7 @@
     border-radius: 8px;
     background-size: cover;
     background-position: center;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 24px var(--black-a50);
 }
 
 .dlc-still-poster {
@@ -1110,7 +1110,7 @@
     width: 26px;
     height: 26px;
     margin: 0;
-    box-shadow: 0 0 0 2px rgba(18, 18, 22, 1), 0 3px 8px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 2px rgba(18, 18, 22, 1), 0 3px 8px var(--black-a50);
 }
 
 .dlc-mosaic {
@@ -1138,7 +1138,7 @@
     height: 104px;
     border-radius: 8px;
     object-fit: cover;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 10px 28px var(--black-a55);
 }
 
 .dlc-mhero-cover.dlc-art-empty {
@@ -1391,7 +1391,7 @@
     font-size: 13.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .dlh-side:hover {
@@ -1401,7 +1401,7 @@
 .dlh-side-on {
     background: rgba(255, 255, 255, 0.08);
     color: #fff;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px var(--black-a45);
 }
 
 .dlh-side:focus-visible {
@@ -1485,7 +1485,7 @@
     font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: color 0.15s ease;
+    transition: color var(--dur-fast) ease;
 }
 
 .dlh-tab:hover {
@@ -1574,7 +1574,7 @@
     align-items: center;
     margin-top: 16px;
     padding: 14px 18px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     border: 1px solid rgba(var(--accent-rgb), 0.22);
     background:
         linear-gradient(90deg, rgba(var(--accent-rgb), 0.1), rgba(var(--accent-rgb), 0.02) 60%),
@@ -1635,7 +1635,7 @@
 .dlh-bar i {
     display: block;
     height: 100%;
-    transition: width 0.5s ease;
+    transition: width var(--dur-slowest) ease;
 }
 
 /* done is muted, not green: with the default green accent, green done and
@@ -1793,7 +1793,7 @@
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .dlc-seg-btn:hover {
@@ -1810,7 +1810,7 @@
 .dlc-seg-on {
     background: rgba(255, 255, 255, 0.08);
     color: #fff;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 6px var(--black-a45);
 }
 
 .dlc-seg-on b {
@@ -1852,7 +1852,7 @@
     gap: 22px;
     align-items: center;
     padding: 14px 18px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: rgba(255, 255, 255, 0.022);
     border: 1px solid var(--white-a06);
 }
@@ -1955,7 +1955,7 @@
     height: 40px;
     display: grid;
     place-items: center;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a05);
     color: var(--white-a65);
 }
@@ -1994,7 +1994,7 @@
     color: #fff;
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--dur-fast) ease;
 }
 
 .dlc-row:hover .dlc-check,
@@ -2030,10 +2030,10 @@
     align-items: center;
     gap: 8px;
     padding: 8px 8px 8px 16px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: rgba(29, 29, 35, 0.97);
     border: 1px solid var(--white-a12);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 16px 40px var(--black-a60);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
 }
@@ -2116,7 +2116,7 @@
     gap: 6px 14px;
     margin-top: 14px;
     padding: 12px 14px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--white-a06);
     font-size: 13px;
@@ -2145,7 +2145,7 @@
     align-items: flex-start;
     margin-top: 14px;
     padding: 12px 14px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(74, 222, 128, 0.07);
     border: 1px solid rgba(74, 222, 128, 0.22);
     color: #4ade80;
@@ -2268,7 +2268,7 @@
     padding: 0 12px;
     border-radius: 8px;
     border: 1px solid var(--white-a08);
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--black-a25);
     color: #fff;
     font: inherit;
     font-size: 13px;
@@ -2322,7 +2322,7 @@
     gap: 18px;
     align-items: start;
     padding: 24px 26px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: rgba(255, 255, 255, 0.022);
     border: 1px solid var(--white-a06);
 }
@@ -2330,7 +2330,7 @@
 .dlc-emptycard .dlc-glyph {
     width: 52px;
     height: 52px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
 }
 
 .dlc-emptycard h3 {
