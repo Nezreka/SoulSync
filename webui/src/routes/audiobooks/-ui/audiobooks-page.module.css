@@ -827,7 +827,7 @@
   font-weight: 680;
   letter-spacing: 0.01em;
   color: #08130c;
-  background: rgba(74, 222, 128, 0.94);
+  background: rgba(var(--success-rgb), 0.94);
   backdrop-filter: blur(6px);
 }
 
@@ -1335,8 +1335,8 @@
   font-weight: 650;
   letter-spacing: 0.01em;
   color: rgb(134, 239, 172);
-  background: rgba(74, 222, 128, 0.14);
-  border: 1px solid rgba(74, 222, 128, 0.32);
+  background: rgba(var(--success-rgb), 0.14);
+  border: 1px solid rgba(var(--success-rgb), 0.32);
 }
 
 .detailTitle {
@@ -1942,7 +1942,7 @@
 /* owned: a green tick, and a faint green edge so a row of them reads as
    "done" at a glance; the current book's accent border still wins */
 .seriesLinkOwned:not(.seriesLinkCurrent) {
-  border-color: rgba(74, 222, 128, 0.22);
+  border-color: rgba(var(--success-rgb), 0.22);
 }
 
 .seriesOwned,
@@ -1960,12 +1960,12 @@
 
 .seriesOwned {
   color: #08130c;
-  background: rgba(74, 222, 128, 0.94);
+  background: rgba(var(--success-rgb), 0.94);
 }
 
 .seriesEdition {
-  color: rgba(74, 222, 128, 0.9);
-  border: 1px solid rgba(74, 222, 128, 0.35);
+  color: rgba(var(--success-rgb), 0.9);
+  border: 1px solid rgba(var(--success-rgb), 0.35);
 }
 
 .seriesCurrentTag {
@@ -2344,8 +2344,8 @@
 
 .quality_standard,
 .quality_good {
-  background: rgba(74, 222, 128, 0.14);
-  border-color: rgba(74, 222, 128, 0.32);
+  background: rgba(var(--success-rgb), 0.14);
+  border-color: rgba(var(--success-rgb), 0.32);
   color: rgb(134, 239, 172);
 }
 

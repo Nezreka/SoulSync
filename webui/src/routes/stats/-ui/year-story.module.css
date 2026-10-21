@@ -472,8 +472,8 @@
 }
 
 .countdownRow:nth-child(1) .countdownRank {
-  color: #fbbf24;
-  text-shadow: 0 0 10px rgba(251, 191, 36, 0.4);
+  color: var(--warning);
+  text-shadow: 0 0 10px rgba(var(--warning-rgb), 0.4);
 }
 
 .countdownRow:nth-child(2) .countdownRank {
@@ -1127,7 +1127,7 @@
 }
 
 .cardError {
-  color: #f87171;
+  color: var(--danger-light);
   font-size: 0.82rem;
   font-weight: 600;
   margin-top: 4px;

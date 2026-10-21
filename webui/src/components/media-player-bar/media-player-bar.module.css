@@ -13,7 +13,7 @@
   bottom: auto;
   left: calc(var(--sidebar-w, 240px) + 24px);
   right: 24px;
-  z-index: 10000;
+  z-index: var(--z-modal);
   background: rgba(16, 16, 24, 0.94);
   backdrop-filter: blur(28px);
   -webkit-backdrop-filter: blur(28px);
