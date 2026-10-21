@@ -4749,8 +4749,13 @@ def setup_status_endpoint():
 @app.route('/api/setup/complete', methods=['POST'])
 def setup_complete_endpoint():
     """Mark first-run setup as completed."""
+    data = request.get_json(silent=True) or {}
+    purposes = data.get('purposes')
     config_manager.set('setup.completed', True)
     config_manager.set('setup.in_progress', False)
+    # what setup was told soulsync is for, the dashboard checklist reads it
+    if isinstance(purposes, list):
+        config_manager.set('setup.purposes', [str(p) for p in purposes][:10])
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -23475,6 +23480,12 @@ app.register_blueprint(_create_stats_blueprint())
 from api.media_servers import configure as _configure_media_servers_api, create_blueprint as _create_media_servers_blueprint
 _configure_media_servers_api(config_manager_=config_manager, engine_getter=lambda: media_server_engine)
 app.register_blueprint(_create_media_servers_blueprint())
+
+# First-run setup flow: discovery, folder checks, save-free connection probes.
+from api.onboarding import configure as _configure_onboarding_api, create_blueprint as _create_onboarding_blueprint
+_configure_onboarding_api(config_manager_=config_manager, get_database_=get_database,
+                          docker_resolve_url=lambda url: docker_resolve_url(url))
+app.register_blueprint(_create_onboarding_blueprint())
 
 # Quality profiles / auto-import watcher / metadata-cache browser - three
 # self-contained clusters lifted to their own api/ modules.

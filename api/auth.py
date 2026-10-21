@@ -208,6 +208,11 @@ def require_api_key(f):
             from . import key_store
             key_store.record_use(config_mgr, key_hash, matched["last_used_at"])
 
+        # the companion extension calls from its own origin; seeing it ticks
+        # "get the browser extension" on the setup checklist
+        from core.onboarding.checklist import note_api_client
+        note_api_client(request.headers.get("Origin"), config_mgr.get, config_mgr.set)
+
         # a key is minted by an admin and acts with admin rights. the session
         # gates ran first and may have left no profile (login/pin mode, or a
         # multi-profile install with nothing picked), which made v1 admin
