@@ -60,8 +60,8 @@
   padding: 18px;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    background var(--dur-fast),
+    border-color var(--dur-fast);
 }
 
 .labelCard:hover {
@@ -109,7 +109,7 @@
 }
 
 .labelActions button {
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--black-a35);
   border: none;
   color: #cfd3da;
   width: 26px;
@@ -123,7 +123,7 @@
 }
 
 .labelActions button:hover {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--black-a60);
   color: #fff;
 }
 
@@ -145,14 +145,14 @@
   position: relative;
   background: var(--white-a03);
   border: 1px solid var(--white-a08);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   overflow: visible;
   cursor: pointer;
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+    background var(--dur-base) ease,
+    border-color var(--dur-base) ease,
+    transform var(--dur-base) ease,
+    box-shadow var(--dur-base) ease;
   display: flex;
   flex-direction: column;
 }
@@ -161,7 +161,7 @@
   background: var(--white-a06);
   border-color: rgba(var(--accent-rgb), 0.45);
   transform: translateY(-2px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px var(--black-a40);
 }
 
 .podcastArtWrapper {
@@ -177,7 +177,7 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transition: transform 0.3s ease;
+  transition: transform var(--dur-slow) ease;
 }
 
 .podcastCard:hover .podcastArt {
@@ -218,9 +218,9 @@
   font-weight: bold;
   letter-spacing: 1px;
   transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
+    background var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 
 .podcastMenuBtn:hover {
@@ -235,8 +235,8 @@
   right: 0;
   background: #181d26;
   border: 1px solid var(--white-a15);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-control);
+  box-shadow: 0 12px 32px var(--black-a60);
   min-width: 190px;
   padding: 6px;
   display: flex;
@@ -272,8 +272,8 @@
   text-align: left;
   width: 100%;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast),
+    color var(--dur-fast);
 }
 
 .podcastDropdownItem:hover {
@@ -347,9 +347,9 @@
   font-weight: 600;
   padding: 2px 7px;
   border-radius: var(--radius-sm);
-  background: rgba(245, 158, 11, 0.14);
+  background: rgba(var(--warning-strong-rgb), 0.14);
   color: var(--warning);
-  border: 1px solid rgba(245, 158, 11, 0.28);
+  border: 1px solid rgba(var(--warning-strong-rgb), 0.28);
 }
 
 .podcastBadgeCount {
@@ -425,9 +425,9 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background var(--dur-fast),
+    border-color var(--dur-fast),
+    color var(--dur-fast);
 }
 
 .retentionPresetBtn:hover {
@@ -461,7 +461,7 @@
 }
 
 .retentionInput {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--black-a30);
   border: 1px solid var(--white-a15);
   border-radius: var(--radius-md);
   color: #fff;
@@ -494,7 +494,7 @@
   background: rgba(var(--danger-rgb), 0.06);
   border: 1px solid rgba(var(--danger-rgb), 0.2);
   padding: 14px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   margin-top: 10px;
 }
 
