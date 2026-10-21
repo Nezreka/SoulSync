@@ -64,14 +64,14 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     padding: 8px;
     border-radius: 24px;
     cursor: pointer;
-    transition: transform 0.25s var(--pf-ease);
+    transition: transform var(--dur-moderate) var(--pf-ease);
 }
 
 .pf-tile:hover { transform: translateY(-3px); }
 .pf-tile:focus-visible { outline: none; }
 
 .pf-tile .pf-avatar--tile {
-    transition: box-shadow 0.25s var(--pf-ease), transform 0.25s var(--pf-ease);
+    transition: box-shadow var(--dur-moderate) var(--pf-ease), transform var(--dur-moderate) var(--pf-ease);
 }
 
 .pf-tile:hover .pf-avatar--tile,
@@ -110,7 +110,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     border-radius: 28px;
     border: 2px dashed var(--white-a16);
     color: rgba(var(--text-bright-rgb), 0.62);
-    transition: border-color 0.2s ease, color 0.2s ease;
+    transition: border-color var(--dur-base) ease, color var(--dur-base) ease;
 }
 
 .pf-tile--add:hover .pf-add-square,
@@ -138,7 +138,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     font-weight: 500;
     color: rgba(var(--text-bright-rgb), 0.62);
     cursor: pointer;
-    transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    transition: color var(--dur-base) ease, border-color var(--dur-base) ease, background var(--dur-base) ease;
 }
 
 .pf-pill:hover { color: var(--text-bright); border-color: var(--white-a40); }
@@ -198,7 +198,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     border-radius: 24px;
     border: 1px solid var(--line);
     background: var(--pf-surface);
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 30px 80px var(--black-a55);
     color: var(--text-bright);
     animation: pfRise 0.28s var(--pf-ease);
 }
@@ -262,7 +262,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     border-radius: var(--radius-lg);
     color: rgba(var(--text-bright-rgb), 0.62);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .pf-icon-btn:hover { background: var(--white-a07); color: var(--text-bright); }
@@ -284,7 +284,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     color: var(--text-bright);
     background: var(--white-a07);
     cursor: pointer;
-    transition: background 0.15s ease, opacity 0.15s ease;
+    transition: background var(--dur-fast) ease, opacity var(--dur-fast) ease;
 }
 
 .pf-btn:hover { background: var(--white-a12); }
@@ -319,7 +319,7 @@ body.pf-modal-open .toast-container { z-index: 150000; }
     font: inherit;
     font-size: 15px;
     outline: none;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 
 .pf-input:focus { border-color: var(--pf-accent-line); box-shadow: 0 0 0 3px var(--pf-accent-soft); }
@@ -391,7 +391,7 @@ select.pf-input { appearance: auto; }
     height: 28px;
     border-radius: var(--radius-pill);
     background: var(--white-a16);
-    transition: background 0.2s ease;
+    transition: background var(--dur-base) ease;
 }
 
 .pf-switch-thumb {
@@ -402,7 +402,7 @@ select.pf-input { appearance: auto; }
     height: 22px;
     border-radius: var(--radius-circle);
     background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 1px 3px var(--black-a35);
     transition: transform 0.22s var(--pf-ease);
 }
 
@@ -476,7 +476,7 @@ select.pf-input { appearance: auto; }
     height: 32px;
     border-radius: var(--radius-circle);
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 
 .pf-swatch:hover { transform: scale(1.08); }
@@ -496,10 +496,10 @@ select.pf-input { appearance: auto; }
     flex-direction: column;
     gap: 4px;
     padding: 14px 12px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     border: 1px solid var(--white-a16);
     cursor: pointer;
-    transition: border-color 0.15s ease, background 0.15s ease;
+    transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 
 .pf-preset:hover { border-color: var(--white-a30); }
@@ -523,7 +523,7 @@ select.pf-input { appearance: auto; }
 }
 
 .pf-details > summary::-webkit-details-marker { display: none; }
-.pf-details > summary::before { content: '›'; display: inline-block; font-size: 18px; transition: transform 0.2s ease; }
+.pf-details > summary::before { content: '›'; display: inline-block; font-size: 18px; transition: transform var(--dur-base) ease; }
 .pf-details[open] > summary::before { transform: rotate(90deg); }
 .pf-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 
@@ -556,7 +556,7 @@ select.pf-input { appearance: auto; }
     background: var(--white-a04);
 }
 
-.pf-note--warn { color: #fcd9a8; background: rgba(245, 158, 11, 0.10); }
+.pf-note--warn { color: #fcd9a8; background: rgba(var(--warning-strong-rgb), 0.10); }
 
 .pf-form-error {
     margin: 12px 0 0;
@@ -584,7 +584,7 @@ select.pf-input { appearance: auto; }
     border-radius: var(--radius-sheet);
     border: 1px solid var(--line);
     background: var(--pf-surface-2);
-    transition: border-color 0.15s ease;
+    transition: border-color var(--dur-fast) ease;
 }
 
 .pf-card:hover { border-color: var(--white-a16); }
@@ -628,7 +628,7 @@ select.pf-input { appearance: auto; }
     gap: 14px;
     margin-bottom: 18px;
     padding: 14px 16px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: var(--white-a04);
     font-size: 13.5px;
     line-height: 1.45;
@@ -650,7 +650,7 @@ select.pf-input { appearance: auto; }
     border-radius: var(--radius-xl);
     border: 1px solid var(--white-a16);
     background: rgba(24, 27, 33, 0.98);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 18px 50px var(--black-a55);
     color: var(--text-bright);
     animation: pfPop 0.16s var(--pf-ease);
 }
@@ -674,7 +674,7 @@ select.pf-input { appearance: auto; }
     width: 100%;
     min-height: 40px;
     padding: 8px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 14px;
     color: var(--text-bright);
     cursor: pointer;
@@ -733,7 +733,7 @@ select.pf-input { appearance: auto; }
     gap: 16px;
     padding: 6px 4px 14px;
     border-bottom: 2px solid transparent;
-    transition: border-color 0.2s ease;
+    transition: border-color var(--dur-base) ease;
 }
 
 .pf-pin-dot {
@@ -741,7 +741,7 @@ select.pf-input { appearance: auto; }
     height: 14px;
     border-radius: var(--radius-circle);
     border: 2px solid var(--white-a45);
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 
 .pf-pin-dot.is-filled { background: #fff; border-color: #fff; transform: scale(1.05); }
@@ -797,7 +797,7 @@ select.pf-input { appearance: auto; }
     font-weight: 500;
     color: var(--text-bright);
     cursor: pointer;
-    transition: background 0.12s ease, transform 0.08s ease;
+    transition: background var(--dur-xfast) ease, transform 0.08s ease;
     -webkit-tap-highlight-color: transparent;
 }
 
@@ -850,7 +850,7 @@ select.pf-input { appearance: auto; }
     min-width: 76px;
     height: 36px;
     padding: 0 10px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 14px;
 }
 
