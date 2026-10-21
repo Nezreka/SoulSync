@@ -101,7 +101,9 @@ function pill(container: HTMLElement, key: string) {
 /** pause, resume, remove and cancel live behind each card's ⋯ menu. */
 async function menuItem(title: string, item: string) {
   fireEvent.click(screen.getByRole('button', { name: `More actions for ${title}` }));
-  return screen.findByRole('menuitem', { name: item });
+  // the 1s default ran out on a loaded ci runner (oct 20, "Cancel transfer"),
+  // the menu opens fine locally every time
+  return screen.findByRole('menuitem', { name: item }, { timeout: 5000 });
 }
 
 beforeEach(() => {

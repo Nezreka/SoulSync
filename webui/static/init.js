@@ -4076,19 +4076,36 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
     }
 
-    if (showWizard && typeof openSetupWizard === 'function') {
+    if (showWizard && await _setupFlowReady()) {
         window._onSetupWizardComplete = function () {
             _continueAppInit();
         };
         // the wizard runs before any profile is picked, let its calls through
         window.SoulSyncProfileGate?.setProfile(null);
         window.SoulSyncProfileGate?.open();
-        openSetupWizard();
+        window.openSetupWizard();
         return; // Defer init until wizard closes
     }
 
     _continueAppInit();
 });
+
+// the setup flow is a react module (webui/src/features/onboarding). module
+// scripts normally run before this handler, but in dev the bundle comes from
+// vite and can land later, so wait a moment for it to announce itself.
+function _setupFlowReady() {
+    if (typeof window.openSetupWizard === 'function') return Promise.resolve(true);
+    return new Promise((resolve) => {
+        const done = (ok) => {
+            window.removeEventListener('soulsync:onboarding-ready', onReady);
+            clearTimeout(timer);
+            resolve(ok);
+        };
+        const onReady = () => done(typeof window.openSetupWizard === 'function');
+        const timer = setTimeout(() => done(typeof window.openSetupWizard === 'function'), 8000);
+        window.addEventListener('soulsync:onboarding-ready', onReady);
+    });
+}
 
 async function _continueAppInit() {
     // Check profiles first — may show picker instead of app
