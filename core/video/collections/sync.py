@@ -341,11 +341,46 @@ def _ordered_server_ids(order_tmdb_ids, owned) -> List[str]:
     return head + [s for s in rest if s not in set(head)]
 
 
-def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
+# every movie a collection hands to the wishlist gets remembered here, and the
+# nightly sync never hands it over again. same idea as the import lists seen-set.
+# without it, removing a wishlist row or deleting the movie just brought it back
+# on the next sync (#1807).
+_FED_KEY = "collection_fed_%d"
+
+
+def _fed_ids(db, did) -> set:
+    getter = getattr(db, "get_setting", None)
+    if did is None or not callable(getter):
+        return set()
+    try:
+        return {int(x) for x in json.loads(getter(_FED_KEY % int(did)) or "[]")}
+    except (ValueError, TypeError):
+        return set()
+
+
+def _save_fed(db, did, ids: set) -> None:
+    setter = getattr(db, "set_setting", None)
+    if did is None or not callable(setter):
+        return
+    try:
+        setter(_FED_KEY % int(did), json.dumps(sorted(ids)))
+    except Exception:   # noqa: BLE001 - a ledger write never fails the sync
+        logger.debug("fed ledger write failed for %s", did, exc_info=True)
+
+
+def forget_fed(db, did) -> None:
+    """Drop a deleted collection's fed ledger."""
+    _save_fed(db, did, set())
+
+
+def wishlist_missing_movies(db, definition: Dict[str, Any], missing, *,
+                            refeed: bool = False) -> int:
     """For a 'list' MOVIE collection with wishlist_missing on, add the members the
-    user doesn't own to the wishlist (idempotent upsert). Franchise/list only —
-    smart collections have no 'missing'. Returns how many were added. No-ops
-    safely if the db doesn't expose the wishlist method (unit-test fakes)."""
+    user doesn't own to the wishlist. Franchise/list only, smart collections have
+    no 'missing'. each title gets fed once per collection (see _FED_KEY).
+    ``refeed`` is the manual 'wishlist these' button, it skips the ledger.
+    returns how many NEW wishlist rows landed. No-ops safely if the db doesn't
+    expose the wishlist method (unit-test fakes)."""
     if not (definition.get("wishlist_missing") and definition.get("kind") == "list"
             and (definition.get("media_type") or "movie") == "movie"):
         return 0
@@ -357,17 +392,34 @@ def wishlist_missing_movies(db, definition: Dict[str, Any], missing) -> int:
         _pid = get_current_profile_id() or 1
     except Exception:  # noqa: BLE001 - no profile context → admin behavior
         _pid = 1
+    did = definition.get("id")
+    fed = _fed_ids(db, did)
+    before = set(fed)
+    status_fn = getattr(db, "wishlisted_movie_status", None)
+    try:
+        on_list = set(status_fn(profile_id=_pid) or {}) if callable(status_fn) else set()
+    except Exception:   # noqa: BLE001 - worst case the count includes rows already there
+        on_list = set()
     n = 0
     for m in missing or []:
         tid = m.get("tmdb_id")
         if not tid:
             continue
+        tid = int(tid)
+        if tid in fed and not refeed:
+            continue
+        if tid in on_list:
+            fed.add(tid)            # already on the wishlist, not a new add
+            continue
         try:
-            if add(int(tid), m.get("title") or "Untitled", year=m.get("year"),
+            if add(tid, m.get("title") or "Untitled", year=m.get("year"),
                    poster_url=m.get("poster_url"), status="wanted", profile_id=_pid):
                 n += 1
+                fed.add(tid)
         except Exception:   # noqa: BLE001 - one bad wishlist row shouldn't stop the sync
             logger.debug("wishlist add failed for tmdb %s", tid, exc_info=True)
+    if fed != before:
+        _save_fed(db, did, fed)
     return n
 
 
@@ -432,12 +484,14 @@ def watchlist_missing_shows(db, definition: Dict[str, Any], missing, *,
     return added
 
 
-def wishlist_missing_members(db, definition: Dict[str, Any], missing) -> int:
+def wishlist_missing_members(db, definition: Dict[str, Any], missing, *,
+                             refeed: bool = False) -> int:
     """Feed a list collection's missing members to acquisition — movies to the
-    WISHLIST (one-shot gets), shows to the WATCHLIST (follows)."""
+    WISHLIST (one-shot gets), shows to the WATCHLIST (follows). unfollowing a
+    show mutes it, so shows already can't come back."""
     if (definition.get("media_type") or "movie") == "show":
         return watchlist_missing_shows(db, definition, missing)
-    return wishlist_missing_movies(db, definition, missing)
+    return wishlist_missing_movies(db, definition, missing, refeed=refeed)
 
 
 def sync_all_collections(db, *, source, list_fetcher: Optional[Callable] = None,
@@ -547,4 +601,4 @@ def sync_one_now(db, definition_id, *, force: bool = False) -> Dict[str, Any]:
 
 __all__ = ["sync_collection", "sync_all_collections", "members_signature",
            "wishlist_missing_movies", "watchlist_missing_shows", "wishlist_missing_members",
-           "run_sync", "sync_one_now", "get_collection_source", "in_season"]
+           "run_sync", "sync_one_now", "get_collection_source", "in_season", "forget_fed"]

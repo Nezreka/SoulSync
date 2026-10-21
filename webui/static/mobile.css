@@ -33,7 +33,7 @@
     height: 2px;
     background: #fff;
     border-radius: 2px;
-    transition: transform 0.3s ease, opacity 0.3s ease;
+    transition: transform var(--dur-slow) ease, opacity var(--dur-slow) ease;
 }
 
 /* Animated X state */
@@ -60,11 +60,11 @@
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--black-a60);
     z-index: 10000;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.3s ease;
+    transition: opacity var(--dur-slow) ease;
 }
 
 .mobile-overlay.active {
@@ -175,7 +175,7 @@
         height: 100dvh;
         z-index: 10001;
         transform: translateX(-100%);
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: transform var(--dur-slow) var(--ease-standard);
         border-radius: 0;
         border-top-right-radius: 24px;
         border-bottom-right-radius: 24px;
@@ -546,7 +546,7 @@
     .playlist-card {
         padding: 16px;
         margin: 8px 4px;
-        border-radius: 14px;
+        border-radius: var(--radius-card);
     }
 
     .playlist-card-main {
@@ -2234,7 +2234,7 @@
     /* no hover on a phone: the play overlay is always there, quietly */
     .enhanced-album-play-btn {
         opacity: 1;
-        background: rgba(0, 0, 0, 0.35);
+        background: var(--black-a35);
     }
     .enhanced-album-title {
         font-size: 14px;
@@ -2348,11 +2348,11 @@
         padding: 14px 16px;
         background: none;
         border: none;
-        border-radius: 10px;
+        border-radius: var(--radius-control);
         color: var(--white-a85);
         font-size: 14px;
         cursor: pointer;
-        transition: background 0.15s;
+        transition: background var(--dur-fast);
     }
     .enhanced-mobile-actions-popover button:active {
         background: var(--white-a08);
@@ -2373,7 +2373,7 @@
     .mobile-popover-overlay {
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.5);
+        background: var(--black-a50);
         z-index: 10000;
     }
 
@@ -2617,7 +2617,7 @@
     .rate-modal {
         width: 95vw !important;
         max-height: 90vh;
-        border-radius: 14px;
+        border-radius: var(--radius-card);
     }
 
     .rate-modal-header h3 {
@@ -2691,7 +2691,7 @@
         max-width: none !important;
         bottom: 62px !important;
         max-height: 55vh;
-        border-radius: 14px;
+        border-radius: var(--radius-card);
     }
 
     .notif-panel-header {
@@ -2904,7 +2904,7 @@
     .enh-source-row {
         padding: 6px 6px;
         gap: 4px;
-        border-radius: 10px;
+        border-radius: var(--radius-control);
     }
     .enh-source-icon {
         min-width: 44px;
@@ -3642,7 +3642,7 @@ html.download-modal-open body {
         align-self: center;
         width: 76px;
         height: 76px;
-        border-radius: 10px;
+        border-radius: var(--radius-control);
     }
     .mix-modal-eyebrow,
     .mix-modal-title,
@@ -3676,7 +3676,7 @@ html.download-modal-open body {
         width: calc(100% - 24px);
         bottom: 12px;
         padding: 10px 12px;
-        border-radius: 18px;
+        border-radius: var(--radius-sheet);
         white-space: normal;
     }
     .mix-sel-count {
@@ -3951,7 +3951,7 @@ body:has(.artist-map-container) #gsearch-bar {
         width: calc(100vw - 12px);
         height: calc(100vh - 12px);
         height: calc(100dvh - 12px);
-        border-radius: 18px;
+        border-radius: var(--radius-sheet);
     }
 
     /* Header: one compact block. Title + actions share the first row, the

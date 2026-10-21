@@ -189,6 +189,13 @@ def _resolve_list(db, media_type: str, body: Dict[str, Any],
         full = list_fetcher(source, ref)
     except Exception as e:   # noqa: BLE001
         return ResolvedCollection(media_type=media_type, error=f"list fetch failed: {e}")
+    # the fetchers swallow tmdb/imdb errors and hand back [], same as a real empty
+    # list. resolving that as "no members" made a sync-mode collection strip every
+    # title off the server during an outage. call it an error so sync leaves the
+    # server collection alone and tries again next run.
+    if not any(item.get("tmdb_id") is not None for item in (full or [])):
+        return ResolvedCollection(media_type=media_type,
+                                  error=f"list source {source!r} returned no titles")
 
     tmdb_ids = [item.get("tmdb_id") for item in (full or []) if item.get("tmdb_id") is not None]
     try:

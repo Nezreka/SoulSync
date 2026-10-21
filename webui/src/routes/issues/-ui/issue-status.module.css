@@ -23,9 +23,9 @@
 }
 
 .issueStatusResolved {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
-  border: 1px solid rgba(74, 222, 128, 0.25);
+  background: rgba(var(--success-rgb), 0.15);
+  color: var(--success);
+  border: 1px solid rgba(var(--success-rgb), 0.25);
 }
 
 .issueStatusDismissed {

@@ -82,7 +82,7 @@
   height: 8px;
   border-radius: var(--radius-circle);
   background: var(--success);
-  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.15);
+  box-shadow: 0 0 0 3px rgba(var(--success-rgb), 0.15);
 }
 
 .caret {

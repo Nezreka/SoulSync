@@ -37,9 +37,12 @@ from typing import Any, Dict, List, Optional
 # entry (#830). Split on the common credit separators; " and " / " with " are
 # deliberately excluded (too many real band names contain them).
 _ARTIST_CREDIT_SPLIT_RE = re.compile(
-    r"\s*[,&;/]\s*|\s+(?:feat\.?|ft\.?|featuring|vs\.?|x)\s+",
+    r"\s*[,&;]\s*|\s+(?:feat\.?|ft\.?|featuring|vs\.?|x)\s+",
     re.IGNORECASE,
 )
+# "/" splits second, inside each piece. splitting on it first turned
+# "K/DA, Madison Beer" into K + DA and lost K/DA itself.
+_ARTIST_SLASH_SPLIT_RE = re.compile(r"\s*/\s*")
 
 
 def _artist_credit_components(name: str) -> List[str]:
@@ -50,8 +53,23 @@ def _artist_credit_components(name: str) -> List[str]:
     if not name:
         return []
     parts = [name]
-    parts.extend(p.strip() for p in _ARTIST_CREDIT_SPLIT_RE.split(name) if p.strip())
+    for piece in _ARTIST_CREDIT_SPLIT_RE.split(name):
+        piece = piece.strip()
+        if not piece:
+            continue
+        parts.append(piece)
+        parts.extend(p.strip() for p in _ARTIST_SLASH_SPLIT_RE.split(piece)
+                     if p.strip() and p.strip() != piece)
     return parts
+
+
+def _artist_key(name: str) -> str:
+    """case and punctuation blind name key. the library can hold a name with
+    its slash swapped for an underscore (K_DA) while the source credits K/DA,
+    and those are the same artist. all-punctuation names (!!!) keep their
+    plain lowercase form so they don't collapse to empty."""
+    plain = (name or "").strip().casefold()
+    return re.sub(r"[\W_]+", "", plain) or plain
 
 from core.watchlist_scanner import (
     is_acoustic_version,
@@ -89,7 +107,7 @@ def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool
         # caller forgot to pass the artist name.
         return True
 
-    target = requested_artist_name.strip().lower()
+    target = _artist_key(requested_artist_name)
     if not target:
         return True
 
@@ -106,7 +124,7 @@ def track_artist_matches(track_artists: Any, requested_artist_name: str) -> bool
         # matching is still exact per-name, so true contamination (the artist
         # genuinely absent) is dropped exactly as before.
         for component in _artist_credit_components(name):
-            if component.strip().lower() == target:
+            if _artist_key(component) == target:
                 return True
 
     return False

@@ -1,6 +1,5 @@
 /* Settings: one category bar within the application's existing navigation. */
 #settings-page {
-    --stg-text-primary: #f3f4f7;
     --stg-text-secondary: #a9b0bf;
     --stg-surface: rgba(22, 27, 38, .72);
 }
@@ -23,8 +22,8 @@
 #settings-page .stg-navigation-heading h2 { margin: 5px 0 0; font-size: 28px; letter-spacing: -.035em; line-height: 1.2; }
 #settings-page .stg-nav-search-wrap { position: relative; width: min(340px, 45%); }
 #settings-page .stg-nav-search-wrap input {
-    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: 10px;
-    border: 1px solid var(--white-a09); background: rgba(0,0,0,.16); color: var(--stg-text-primary); box-sizing: border-box;
+    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: var(--radius-control);
+    border: 1px solid var(--white-a09); background: rgba(0,0,0,.16); color: var(--text-bright); box-sizing: border-box;
 }
 #settings-page .stg-search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; fill: var(--stg-text-secondary); pointer-events: none; }
 #settings-page .stg-tabbar {
@@ -40,10 +39,10 @@
     padding: 13px 12px !important; border: 0 !important; border-bottom: 2px solid transparent !important;
     border-radius: 0 !important; background: transparent !important; color: var(--stg-text-secondary) !important;
     font-size: 13px !important; font-weight: 550; white-space: nowrap; cursor: pointer;
-    box-shadow: none !important; transition: color 120ms, border-color 120ms;
+    box-shadow: none !important; transition: color var(--dur-xfast), border-color var(--dur-xfast);
 }
-#settings-page .stg-tab:hover { color: var(--stg-text-primary) !important; }
-#settings-page .stg-tab.active { color: var(--stg-text-primary) !important; border-bottom-color: var(--accent) !important; }
+#settings-page .stg-tab:hover { color: var(--text-bright) !important; }
+#settings-page .stg-tab.active { color: var(--text-bright) !important; border-bottom-color: var(--accent) !important; }
 #settings-page .stg-tab-badge { display: inline-flex; width: 16px; height: 16px; background: none; box-shadow: none; }
 #settings-page .stg-tab-badge svg { width: 16px; height: 16px; fill: currentColor; opacity: .75; }
 #settings-page .stg-tab.active .stg-tab-badge { color: var(--accent); }
@@ -77,7 +76,7 @@
 #settings-page .settings-group,
 #settings-page .stg-media-card {
     background: var(--stg-surface) !important; border: 1px solid var(--white-a09) !important;
-    border-radius: 14px !important; padding: 22px 24px !important; margin-bottom: 0 !important;
+    border-radius: var(--radius-card) !important; padding: 22px 24px !important; margin-bottom: 0 !important;
     box-shadow: none !important; backdrop-filter: none !important;
 }
 #settings-page .settings-group > h3 { font-size: 16px; font-weight: 650; margin: 0 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--white-a09); }
@@ -99,7 +98,7 @@
 #settings-page input[type="number"], #settings-page select, #settings-page textarea {
     box-sizing: border-box; max-width: 100%; border-radius: var(--radius-md);
     border: 1px solid var(--white-a14); background-color: rgba(0,0,0,.18);
-    color: var(--stg-text-primary); padding: 10px 12px; font: inherit; font-size: 13px;
+    color: var(--text-bright); padding: 10px 12px; font: inherit; font-size: 13px;
 }
 #settings-page input[type="checkbox"] { accent-color: var(--accent); }
 #settings-page button:focus-visible, #settings-page input:focus-visible,
@@ -110,7 +109,7 @@
 #settings-page .svc-tile { border-radius: var(--radius-lg); box-shadow: none; }
 #settings-page .stg-search-results { margin-bottom: 18px; padding: 8px; border: 1px solid var(--white-a09); border-radius: var(--radius-lg); background: var(--stg-surface); }
 #settings-page .stg-search-results[hidden] { display: none; }
-#settings-page .stg-search-results button { display: block; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 7px; background: transparent; color: var(--stg-text-primary); cursor: pointer; font: inherit; font-size: 13px; }
+#settings-page .stg-search-results button { display: block; width: 100%; text-align: left; padding: 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-bright); cursor: pointer; font: inherit; font-size: 13px; }
 #settings-page .stg-search-results button:hover { background: var(--white-a06); }
 #settings-page .stg-search-results p { padding: 8px 12px; margin: 0; color: var(--stg-text-secondary); font-size: 13px; }
 #settings-page .stg-search-target { outline: 2px solid rgba(var(--accent-rgb),.55); outline-offset: 5px; scroll-margin-top: 30px; }

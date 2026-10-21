@@ -43881,9 +43881,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .enhanced-bulk-bar,
 .lib-menu {
     --lib-surface: rgba(255, 255, 255, 0.035);
-    --lib-radius: 14px;
     --lib-warn: #ffb84d;
-    --lib-danger: #ff6b6b;
 }
 
 /* View Toggle Buttons */
@@ -44071,7 +44069,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
     color: var(--white-a40);
 }
 .lib-menu-state.matched { background: rgba(var(--accent-rgb), 0.16); color: rgb(var(--accent-light-rgb)); }
-.lib-menu-state.not-found { background: rgba(255, 107, 107, 0.14); color: var(--lib-danger); }
+.lib-menu-state.not-found { background: rgba(255, 107, 107, 0.14); color: var(--danger-soft); }
 .lib-menu-sub {
     flex-basis: 100%;
     font-size: 11px;
@@ -44101,7 +44099,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
     color: #fff;
 }
 .lib-menu-item:disabled { opacity: 0.45; cursor: wait; }
-.lib-menu-item.danger { color: var(--lib-danger); }
+.lib-menu-item.danger { color: var(--danger-soft); }
 .lib-menu-item.danger:hover { background: rgba(255, 107, 107, 0.12); }
 .lib-menu-icon {
     display: inline-flex;
@@ -44276,7 +44274,7 @@ body.downloads-disabled .discog-download-btn[data-request-action] {
 .enhanced-artist-meta {
     background: var(--lib-surface);
     border: 1px solid var(--white-a07);
-    border-radius: var(--lib-radius);
+    border-radius: var(--radius-card);
     padding: 0;
     margin-bottom: 22px;
     position: relative;
@@ -45027,7 +45025,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
 .enhanced-bitrate { font-variant-numeric: tabular-nums; font-size: 12px; }
 .enhanced-bitrate.high { color: var(--white-a60); }
 .enhanced-bitrate.medium { color: var(--lib-warn); }
-.enhanced-bitrate.low { color: var(--lib-danger); }
+.enhanced-bitrate.low { color: var(--danger-soft); }
 
 /* Empty album state */
 .enhanced-no-tracks {
@@ -45069,7 +45067,7 @@ textarea.enhanced-meta-field-input { min-height: 72px; resize: vertical; }
     margin-bottom: 20px;
     background: var(--lib-surface);
     border: 1px solid var(--white-a07);
-    border-radius: var(--lib-radius);
+    border-radius: var(--radius-card);
 }
 .lib-skeleton-avatar,
 .lib-skeleton-art,

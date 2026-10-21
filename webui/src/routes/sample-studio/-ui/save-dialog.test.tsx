@@ -209,7 +209,7 @@ describe('SaveDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove tag loop' }));
     expect(screen.queryByText('loop')).not.toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'Escape' });
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(props.onClose).toHaveBeenCalled();
   });
 

@@ -86,7 +86,7 @@
     color: rgba(255, 255, 255, 0.42);
     font-size: 13px;
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--dur-fast), background var(--dur-fast);
     box-sizing: border-box;
     font-family: inherit;
 }
@@ -136,7 +136,7 @@
     color: rgba(255, 255, 255, 0.78);
     cursor: pointer;
     user-select: none;
-    transition: background 0.12s, color 0.12s;
+    transition: background var(--dur-xfast), color var(--dur-xfast);
     letter-spacing: 0.005em;
 }
 .docs-nav-section-title:hover {
@@ -164,7 +164,7 @@
 .docs-nav-arrow {
     font-size: 8px;
     color: var(--white-a35);
-    transition: transform 0.18s ease;
+    transition: transform var(--dur-quick) ease;
     flex: 0 0 auto;
 }
 .docs-nav-section-title.expanded .docs-nav-arrow { transform: rotate(90deg); }
@@ -190,7 +190,7 @@
     line-height: 1.35;
     color: rgba(255, 255, 255, 0.52);
     cursor: pointer;
-    transition: background 0.12s, color 0.12s;
+    transition: background var(--dur-xfast), color var(--dur-xfast);
 }
 .docs-nav-child::before {
     content: '';
@@ -277,7 +277,7 @@
     font-size: 15px;
     color: rgb(var(--accent-light-rgb));
     text-decoration: none;
-    transition: opacity 0.15s;
+    transition: opacity var(--dur-fast);
 }
 .dd-body h2:hover .dd-anchor { opacity: 0.8; }
 .dd-body h3 {
@@ -305,7 +305,7 @@
     color: rgb(var(--accent-light-rgb));
     text-decoration: none;
     border-bottom: 1px solid rgba(var(--accent-rgb), 0.35);
-    transition: border-color 0.15s;
+    transition: border-color var(--dur-fast);
     cursor: pointer;
 }
 .dd-body a:hover { border-bottom-color: rgb(var(--accent-light-rgb)); }
@@ -383,7 +383,7 @@
     border-radius: 7px;
     padding: 4px 10px;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all var(--dur-fast);
     font-family: inherit;
 }
 .dd-codeblock-header .dd-copy-btn:hover {
@@ -457,7 +457,7 @@
     vertical-align: top;
 }
 .dd-body tr:last-child td { border-bottom: none; }
-.dd-body tbody tr { transition: background 0.12s; }
+.dd-body tbody tr { transition: background var(--dur-xfast); }
 .dd-body tbody tr:hover { background: rgba(255, 255, 255, 0.025); }
 
 /* Screenshots */
@@ -467,14 +467,14 @@
     width: 100%;
     border-radius: var(--radius-lg);
     border: 1px solid var(--white-a10);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 12px 40px var(--black-a45);
     cursor: zoom-in;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform var(--dur-base) ease, box-shadow var(--dur-base) ease;
     background: #0b0e12;
 }
 .dd-screenshot:hover {
     transform: translateY(-2px);
-    box-shadow: 0 18px 52px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 18px 52px var(--black-a55), 0 0 0 1px rgba(var(--accent-rgb), 0.25);
 }
 .dd-figcaption {
     margin-top: 9px;
@@ -496,7 +496,7 @@
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-lg);
     padding: 15px 16px;
-    transition: transform 0.15s, border-color 0.15s, background 0.15s;
+    transition: transform var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
 }
 .dd-card:hover {
     transform: translateY(-2px);
@@ -558,7 +558,7 @@
     border: 1px solid var(--white-a09);
     background: var(--white-a03);
     text-decoration: none;
-    transition: border-color 0.15s, background 0.15s, transform 0.15s;
+    transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast);
     cursor: pointer;
 }
 .dd-prevnext a:hover {
@@ -609,7 +609,7 @@
     text-decoration: none;
     border-left: 1px solid var(--white-a10);
     line-height: 1.45;
-    transition: color 0.12s, border-color 0.12s;
+    transition: color var(--dur-xfast), border-color var(--dur-xfast);
     cursor: pointer;
     font-size: 12.8px;
 }
@@ -627,7 +627,7 @@
 .dd-palette-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--black-a60);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     z-index: 9999;
@@ -647,7 +647,7 @@
     background: #12161c;
     border: 1px solid var(--white-a12);
     border-radius: var(--radius-xl);
-    box-shadow: 0 30px 90px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(var(--accent-rgb), 0.12);
+    box-shadow: 0 30px 90px var(--black-a70), 0 0 0 1px rgba(var(--accent-rgb), 0.12);
     overflow: hidden;
     transform: translateY(-8px) scale(0.99);
     transition: transform 0.16s ease;
@@ -738,7 +738,7 @@
     max-width: 94vw;
     max-height: 90vh;
     border-radius: var(--radius-lg);
-    box-shadow: 0 30px 100px rgba(0,0,0,0.8);
+    box-shadow: 0 30px 100px var(--black-a80);
     border: 1px solid var(--white-a12);
 }
 .docs-lightbox-close, .dd-lightbox-close {
@@ -762,7 +762,7 @@
     top: 14px; left: 14px;
     z-index: 25;
     width: 40px; height: 40px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--white-a12);
     background: rgba(10, 12, 16, 0.85);
     backdrop-filter: blur(10px);
@@ -786,8 +786,8 @@
         width: 300px;
         z-index: 40;
         transform: translateX(-105%);
-        transition: transform 0.25s ease;
-        box-shadow: 20px 0 60px rgba(0,0,0,0.5);
+        transition: transform var(--dur-moderate) ease;
+        box-shadow: 20px 0 60px var(--black-a50);
         background: rgba(10, 12, 16, 0.98);
     }
     .docs-layout.dd-sidebar-open .docs-sidebar { transform: none; }

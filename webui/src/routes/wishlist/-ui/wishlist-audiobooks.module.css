@@ -93,13 +93,13 @@
 }
 
 .dotLooking {
-  background: #fbbf24;
-  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+  background: var(--warning);
+  box-shadow: 0 0 6px rgba(var(--warning-rgb), 0.6);
 }
 
 .dotActive {
-  background: #38bdf8;
-  box-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+  background: var(--info);
+  box-shadow: 0 0 6px rgba(var(--info-rgb), 0.6);
 }
 
 .dotDone {
@@ -108,7 +108,7 @@
 }
 
 .dotFailed {
-  background: #f87171;
+  background: var(--danger-light);
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
 }
 
@@ -213,7 +213,7 @@
 }
 
 .quickRemove:hover {
-  background: rgba(239, 68, 68, 0.95);
+  background: rgba(var(--danger-rgb), 0.95);
   border-color: transparent;
   color: #fff;
   transform: scale(1.12);
@@ -310,25 +310,25 @@
 
 .badgeActive {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(56, 189, 248, 0.5);
+  border-color: rgba(var(--info-rgb), 0.5);
   color: #7dd3fc;
 }
 
 .badgeActive .badgePulse {
-  background: #38bdf8;
-  box-shadow: 0 0 6px #38bdf8;
+  background: var(--info);
+  box-shadow: 0 0 6px var(--info);
   animation: heroPulse 1.5s infinite;
 }
 
 .badgeSearching {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(251, 191, 36, 0.5);
+  border-color: rgba(var(--warning-rgb), 0.5);
   color: #fde68a;
 }
 
 .badgeSearching .badgePulse {
-  background: #fbbf24;
-  box-shadow: 0 0 6px #fbbf24;
+  background: var(--warning);
+  box-shadow: 0 0 6px var(--warning);
   animation: heroPulse 1.2s infinite;
 }
 
@@ -370,12 +370,12 @@
 
 .badgeFailed {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(239, 68, 68, 0.45);
+  border-color: rgba(var(--danger-rgb), 0.45);
   color: #fca5a5;
 }
 
 .badgeFailed .badgePulse {
-  background: #ef4444;
+  background: var(--danger);
 }
 
 .info {
@@ -548,7 +548,7 @@
 }
 
 .actionDanger:hover {
-  background: rgba(239, 68, 68, 0.9);
+  background: rgba(var(--danger-rgb), 0.9);
   border-color: transparent;
   color: #ffffff;
 }
