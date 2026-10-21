@@ -493,10 +493,37 @@ def _recording_identity(title: Optional[str]) -> str:
     return re.sub(r'\s+', ' ', s).strip()
 
 
+def _length_backs_expected_version(best_rec, matched_version,
+                                   file_duration_s, expected_duration_s) -> bool:
+    """Whether the file's length says it IS the version that was asked for,
+    whatever the matched recording's title calls it (#1804).
+
+    the file has to run the expected track's length, tight. then either the
+    match is bare titled (musicbrainz files plenty of remixes and extended
+    mixes under the bare title, 77 tiesto 'suburban train' recordings from 49s
+    to 627s) or the matched recording runs a different length than the file,
+    so its version label belongs to some other cut.
+
+    known and accepted: a remix asked for and the original delivered at the
+    same length to within a few seconds now skips instead of failing. a skipped
+    wrong file stays retryable, a failed right file is quarantined.
+    """
+    from core.matching.acoustid_candidates import (
+        duration_mismatches_strongly, durations_agree, recording_seconds,
+    )
+    if not durations_agree(file_duration_s, expected_duration_s):
+        return False
+    if matched_version == 'original':
+        return True
+    return duration_mismatches_strongly(file_duration_s, recording_seconds(best_rec or {}))
+
+
 def evaluate(expected_title: str, expected_artist: str,
              recordings: List[dict], *, fingerprint_score: float,
              aliases_provider: Optional[Any] = None,
-             accept_version: Optional[str] = None) -> Outcome:
+             accept_version: Optional[str] = None,
+             file_duration_s: Optional[float] = None,
+             expected_duration_s: Optional[float] = None) -> Outcome:
     """Decide PASS / SKIP / FAIL for a fingerprinted file against expected
     title/artist. Pure: no I/O. Shared by import verification and library scan.
 
@@ -519,10 +546,36 @@ def evaluate(expected_title: str, expected_artist: str,
     fails exactly as before. None (the default, and the library scan always)
     leaves the gate strict.
 
-    Note: fingerprint-collision duration checks are the caller's responsibility
-    (the library scan pre-checks the top recording's length before calling this)
-    so the decision here stays purely about title/artist/version identity.
+    ``file_duration_s``: the file's real length. a FAIL becomes a SKIP when
+    every top match runs a wildly different length (a fingerprint collision).
+    ``expected_duration_s``: the length the metadata source gives for the
+    expected track. with the file running that length, a version mismatch
+    the title alone can't settle skips instead of failing (#1804). leave it
+    None when it isn't independent of the file (the library scan's db length
+    is the file's own).
     """
+    outcome = _evaluate(
+        expected_title, expected_artist, recordings,
+        fingerprint_score=fingerprint_score,
+        aliases_provider=aliases_provider,
+        accept_version=accept_version,
+        file_duration_s=file_duration_s,
+        expected_duration_s=expected_duration_s,
+    )
+    if outcome.decision == Decision.FAIL:
+        from core.matching.acoustid_candidates import fingerprint_length_contradicts
+        if fingerprint_length_contradicts(recordings, file_duration_s):
+            return Outcome(
+                Decision.SKIP, outcome.title_sim, outcome.artist_sim,
+                outcome.matched_title, outcome.matched_artist,
+                f"Fingerprint matches run a very different length than the file "
+                f"({file_duration_s:.0f}s), looks like a fingerprint collision")
+    return outcome
+
+
+def _evaluate(expected_title, expected_artist, recordings, *, fingerprint_score,
+              aliases_provider, accept_version, file_duration_s,
+              expected_duration_s) -> Outcome:
     from core.matching.script_compat import is_cross_script_mismatch
     from core.matching.version_mismatch import is_acceptable_version_mismatch
 
@@ -635,6 +688,17 @@ def evaluate(expected_title: str, expected_artist: str,
             fingerprint_score=fingerprint_score,
             title_similarity=title_sim, artist_similarity=artist_sim,
         ):
+            # same song, same artist, and the file runs the length of the
+            # version we asked for. the title label is the weak side here
+            if (title_sim >= TITLE_MATCH_THRESHOLD
+                    and artist_sim >= ARTIST_MATCH_THRESHOLD
+                    and _length_backs_expected_version(
+                        best_rec, matched_version,
+                        file_duration_s, expected_duration_s)):
+                return out(Decision.SKIP,
+                           f"File runs the length of the expected "
+                           f"({expected_version}) version, AcoustID lists it "
+                           f"as '{matched_title}' ({matched_version})")
             return out(Decision.FAIL,
                        f"Version mismatch: expected ({expected_version}) "
                        f"but file is ({matched_version})")

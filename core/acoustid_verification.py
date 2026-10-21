@@ -96,6 +96,19 @@ _mb_service_lock = threading.Lock()
 MAX_MB_ENRICHMENT_LOOKUPS = 3
 
 
+def _file_duration_seconds(path: str) -> Optional[float]:
+    """The file's real length in seconds, None when mutagen can't tell."""
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(path)
+        length = getattr(getattr(audio, 'info', None), 'length', None)
+        if isinstance(length, (int, float)) and length > 0:
+            return float(length)
+    except Exception as e:
+        logger.debug(f"Could not read duration of {path}: {e}")
+    return None
+
+
 def _get_mb_client() -> MusicBrainzClient:
     """Get or create a shared MusicBrainz client instance."""
     global _mb_client
@@ -486,6 +499,7 @@ class AcoustIDVerification:
         expected_artist_name: str,
         context: Optional[Dict[str, Any]] = None,
         min_score: Optional[float] = None,
+        expected_duration_s: Optional[float] = None,
     ) -> Tuple[VerificationResult, str]:
         """
         Verify that an audio file matches expected track metadata.
@@ -511,6 +525,8 @@ class AcoustIDVerification:
                 not have to fingerprint the file a second time.
             min_score: Override the fingerprint-confidence floor. The scan
                 exposes it as a job setting; the download uses the constant.
+            expected_duration_s: the metadata source's length for the expected
+                track. only pass it when it doesn't come from the file itself.
 
         Returns:
             Tuple of (VerificationResult, reason_message)
@@ -618,11 +634,14 @@ class AcoustIDVerification:
             if isinstance(context, dict):
                 _accept_version = str(context.get('_preferred_version_taken') or '') or None
 
+            _file_duration_s = _file_duration_seconds(audio_file_path)
             outcome = _core_evaluate(
                 expected_track_name, expected_artist_name, recordings,
                 fingerprint_score=best_score,
                 aliases_provider=_aliases_provider,
                 accept_version=_accept_version,
+                file_duration_s=_file_duration_s,
+                expected_duration_s=expected_duration_s,
             )
             if (outcome.decision == _CoreDecision.FAIL
                     or (outcome.decision == _CoreDecision.SKIP
@@ -657,6 +676,8 @@ class AcoustIDVerification:
                             fingerprint_score=best_score,
                             aliases_provider=_aliases_provider,
                             accept_version=_accept_version,
+                            file_duration_s=_file_duration_s,
+                            expected_duration_s=expected_duration_s,
                         )
                 except Exception as e:
                     logger.debug(

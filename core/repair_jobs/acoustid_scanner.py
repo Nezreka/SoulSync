@@ -24,7 +24,9 @@ from core.repair_jobs.base import (
 )
 from utils.logging_config import get_logger
 from core.matching.audio_verification import fingerprint_is_ambiguous, Decision
-from core.matching.acoustid_candidates import duration_mismatches_strongly
+from core.matching.acoustid_candidates import (
+    fingerprint_length_contradicts, top_scored_recordings,
+)
 
 logger = get_logger("repair_job.acoustid")
 
@@ -417,17 +419,8 @@ class AcoustIDScannerJob(RepairJob):
             file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
         except Exception:
             file_duration_s = 0.0
-        _recs = recordings
-        _scored = [r for r in _recs if r.get('score') is not None]
-        _top = max((r['score'] for r in _scored), default=None)
-        _judge = [r for r in _scored if r['score'] >= _top] if _top is not None else _recs
-        _durations = [
-            (r.get('duration') or r.get('length')) for r in _judge
-        ]
-        _known = [d for d in _durations if d]
-        all_mismatch = bool(_known) and all(
-            duration_mismatches_strongly(file_duration_s, d) for d in _known)
-        if file_duration_s and all_mismatch:
+        _judge = top_scored_recordings(recordings)
+        if fingerprint_length_contradicts(recordings, file_duration_s):
             if context.report_progress:
                 context.report_progress(
                     log_line=(f'Skipped (duration mismatch suggests fingerprint '

@@ -1070,11 +1070,19 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
 
                 if expected_track and expected_artist:
                     logger.info(f"Running AcoustID verification for: '{expected_track}' by '{expected_artist}'")
+                    # the source's length for the track we asked for. lets a
+                    # file that runs the extended mix's length survive acoustid
+                    # only knowing it by the bare title (#1804)
+                    try:
+                        _expected_s = (int(track_info.get('duration_ms') or 0) / 1000.0) or None
+                    except (TypeError, ValueError):
+                        _expected_s = None
                     verification_result, verification_msg = verifier.verify_audio_file(
                         file_path,
                         expected_track,
                         expected_artist,
                         context,
+                        expected_duration_s=_expected_s,
                     )
                     logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value

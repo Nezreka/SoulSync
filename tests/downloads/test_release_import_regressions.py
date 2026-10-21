@@ -165,12 +165,14 @@ def album(tmp_path, monkeypatch):
     monkeypatch.setattr("core.downloads.monitor.requeue_quarantined_task_for_retry", lambda *a, **k: pytest.fail("album extra retried"))
     monkeypatch.setattr(db, "add_to_wishlist", lambda *a, **k: pytest.fail("album extra added to wishlist"))
     outcomes = {"Second": acoustid.VerificationResult.PASS, "Third": acoustid.VerificationResult.PASS}
+    verify_kwargs = {}
 
     class Verifier:
         def quick_check_available(self):
             return True, "fixture"
 
-        def verify_audio_file(self, path, title, artist, context):
+        def verify_audio_file(self, path, title, artist, context, **_kwargs):
+            verify_kwargs[title] = _kwargs
             return outcomes[title], "fixture fingerprint result"
 
     monkeypatch.setattr(acoustid, "AcoustIDVerification", Verifier)
@@ -217,7 +219,7 @@ def album(tmp_path, monkeypatch):
             is_owned=lambda *a: False)
 
     yield SimpleNamespace(db=db, profile=profile, qp=quality_profile, settings=settings, paths=paths,
-                          context=context, tracks=tracks, outcomes=outcomes, calls=calls, events=events, expand=expand, tmp=tmp_path)
+                          context=context, tracks=tracks, outcomes=outcomes, verify_kwargs=verify_kwargs, calls=calls, events=events, expand=expand, tmp=tmp_path)
     invalidate_library_scope_cache()
 
 
@@ -241,6 +243,14 @@ def test_full_pipeline_inherits_profile_quality_and_persists_real_files(album):
     assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in album.paths] == hashes
     assert download_tasks["requested-task"] == {"status": "completed"}
     assert not matched_downloads_context
+
+
+def test_acoustid_gets_the_source_length_of_the_expected_track(album):
+    """#1804: the version gate can only trust a file's length if the import
+    hands the verifier the source's length for the track it asked for."""
+    assert album.expand() == 2
+    assert album.verify_kwargs["Second"]["expected_duration_s"] == 3.0
+    assert album.verify_kwargs["Third"]["expected_duration_s"] == 3.0
 
 
 def test_batch_only_profile_and_resolved_default_quality_are_inherited(album):
