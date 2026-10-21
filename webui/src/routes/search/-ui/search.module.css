@@ -99,7 +99,7 @@
 .modes button[aria-selected='true'] {
   background: var(--sp-raised-2);
   color: var(--sp-text);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 1px 2px var(--black-a40);
 }
 
 /* ── search field ─────────────────────────────────────────────────────── */
@@ -112,10 +112,10 @@
   padding: 6px;
   background: var(--sp-surface);
   border: 1px solid var(--line-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
 }
 
 .searchBox:focus-within {
@@ -130,7 +130,7 @@
   flex-shrink: 0;
   padding: 7px 11px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--sp-raised);
   font-size: 13px;
   font-weight: 600;
@@ -226,9 +226,9 @@
   overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--line-strong);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: #17181e;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 20px 60px var(--black-a55);
 }
 
 .menuHead {
@@ -378,11 +378,11 @@
   height: 100px;
   padding: 16px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   overflow: hidden;
   text-align: left;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform var(--dur-fast) ease;
 }
 
 .tile::after {
@@ -509,7 +509,7 @@
   min-height: 240px;
   padding: 22px;
   border: 1px solid var(--white-a07);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   overflow: hidden;
   background:
     radial-gradient(120% 120% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 55%),
@@ -551,7 +551,7 @@
   flex-shrink: 0;
   border-radius: var(--radius-lg);
   object-fit: cover;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 14px 34px var(--black-a50);
 }
 
 .topText {
@@ -651,7 +651,7 @@
   padding: 9px 14px;
   border-top: 1px solid var(--white-a07);
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background var(--dur-xfast) ease;
 }
 
 .trackRow:first-child {
@@ -803,7 +803,7 @@
   text-decoration: none;
   text-align: center;
   color: var(--sp-text) !important;
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) ease;
 }
 
 .face:hover {
@@ -816,7 +816,7 @@
   border-radius: var(--radius-circle);
   object-fit: cover;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.28), #16171d);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px var(--black-a35);
 }
 
 .facePh {
@@ -868,11 +868,11 @@
   gap: 9px;
   min-width: 0;
   padding: 10px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   cursor: pointer;
   text-decoration: none;
   color: var(--sp-text) !important;
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) ease;
 }
 
 .coverCard:hover,
@@ -885,10 +885,10 @@
   width: 100%;
   max-width: 100%;
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.22), #111218);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 8px 24px var(--black-a35);
 }
 
 .cover img {
@@ -944,12 +944,12 @@
   border-radius: var(--radius-circle);
   background: var(--sp-text);
   color: #0c0d11 !important;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 18px var(--black-a40);
   opacity: 0;
   transform: translateY(6px);
   transition:
-    opacity 0.18s ease,
-    transform 0.18s ease;
+    opacity var(--dur-quick) ease,
+    transform var(--dur-quick) ease;
   cursor: pointer;
 }
 
@@ -996,13 +996,13 @@
   gap: 12px;
   padding: 11px 14px 11px 11px;
   border: 1px solid var(--white-a07);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--sp-surface);
   text-decoration: none;
   color: var(--sp-text) !important;
   transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
 }
 
 .labelTile:hover {
@@ -1015,7 +1015,7 @@
   place-items: center;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.22), rgba(var(--accent-rgb), 0.06));
   color: rgba(255, 255, 255, 0.78);
 }
@@ -1053,8 +1053,8 @@
   place-items: center;
   color: var(--sp-faint);
   transition:
-    color 0.15s ease,
-    transform 0.15s ease;
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 
 .labelChevron svg {
@@ -1125,7 +1125,7 @@
   background: rgba(12, 13, 17, 0.72);
   backdrop-filter: blur(6px);
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-fast) ease;
 }
 
 .videoAction svg {
