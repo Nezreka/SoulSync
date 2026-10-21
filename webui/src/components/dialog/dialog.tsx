@@ -18,6 +18,7 @@ export function DialogFrame({
   'aria-label': ariaLabel,
   children,
   className,
+  id,
   initialFocus,
   onOpenChange,
   open,
@@ -26,6 +27,8 @@ export function DialogFrame({
   'aria-label'?: string;
   children: ReactNode;
   className?: string;
+  /** Goes on the popup, the element with role="dialog". */
+  id?: string;
   initialFocus?: ComponentProps<typeof Dialog.Popup>['initialFocus'];
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -39,6 +42,7 @@ export function DialogFrame({
         <Dialog.Viewport className={custom ? viewportClassName : styles.viewport}>
           <Dialog.Popup
             aria-label={ariaLabel}
+            id={id}
             initialFocus={initialFocus}
             className={custom ? className : clsx(styles.popup, className)}
           >

@@ -1,0 +1,49 @@
+/* The fix prompts sit on the shared .modal-overlay (style.css), which fixes,
+   centres and blurs them; they stay centred on phones, where mobile.css
+   top-aligns .modal-overlay. */
+.overlay {
+  align-items: center;
+}
+
+.box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-xl);
+  padding: 28px;
+  width: 90%;
+  text-align: center;
+}
+
+.box380 {
+  max-width: 380px;
+}
+
+.box420 {
+  max-width: 420px;
+}
+
+.box460 {
+  max-width: 460px;
+}
+
+/* The mass-deletion gate: its own black scrim and a danger-bordered box. */
+.witnessOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.witnessBox {
+  background: var(--bg-secondary);
+  border: 2px solid var(--danger);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  max-width: 480px;
+  width: 90%;
+  color: var(--text-primary);
+  font-family: inherit;
+}
