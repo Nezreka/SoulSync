@@ -80,7 +80,36 @@ Review tests were rerun, not inferred from component reuse alone.
   reachable metadata decision on desktop and phone.
 
 The open inherited policy/ambiguity findings and CSS debt above are not closed
-by a passing finite corpus. Deployment results follow after live verification.
+by a passing finite corpus. The historical Evanescence AOL-session missing/extra
+pair is likewise not claimed resolved by this pass; it predates the reassessed
+sessions and is outside the seven-album live sample.
+
+### Deployment status and live baseline
+
+The corrections are committed as `3e68dd2c3`. The maintained deployment script
+built and loaded `localhost/soulsync:test-3e68dd2c3f50`. Its pre-rollout idle check
+then found Lyrics Filler running at approximately 37%, so it stopped before
+changing the image or automation settings. The existing `336c7cf68c1e` deployment
+remains healthy at 1/1; Flux remains in its prior feature-review suspension.
+The user has been asked whether to leave the scan running and hold the rollout,
+or stop it gracefully and restart it after deployment. A restart retains its
+existing findings but begins the scan again. **The new image is not yet deployed
+or verified against live data.**
+
+Read-only live inspection of the existing deployment completed 21 Plan/Tracks/
+Release views: seven albums on desktop, three of those on phone, and Stone Sour's
+release comparison. No browser exceptions, failed static assets or measured
+header/comparison overflows occurred. Artwork requests were allowed to settle;
+available exact-release covers and neutral fallbacks remain distinct. The
+Matchbox Twenty Plan visibly confirms the missing combined-conflict explanation
+on desktop and phone. This is baseline evidence, not a claim that the corrections
+have already reached production.
+
+The saved before-deployment API sample covers seven albums and 250 assignments.
+After rollout, compare complete assignment/edits/choice/readiness/signature
+payloads, allowing only the intentional decision-explanation differences, then
+repeat the browser checks. No live review choice, repair apply, wishlist request,
+library scan or music-file mutation was performed for verification.
 
 ## Stage 3 recovery — completed 2026-10-20
 
