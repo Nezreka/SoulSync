@@ -25,8 +25,13 @@ from core.lidarr_compat.service import LidarrCompat, MusicBrainzSource
 from core.lidarr_compat.store import LidarrStore, ensure_schema
 
 
+_MBIDS = iter(range(1, 10_000))
+
+
 def _mbid():
-    return str(uuid.uuid4())
+    # deterministic, not uuid4: STUDIO lands in a parametrize id, and pytest-xdist
+    # refuses to run when its workers collect different test names
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"soulsync-lidarr-test-{next(_MBIDS)}"))
 
 
 ARTIST = _mbid()
