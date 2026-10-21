@@ -24,7 +24,7 @@
 }
 .automations-stats .auto-stat {
     display: inline-flex; align-items: baseline; gap: 7px;
-    padding: 7px 14px; border-radius: 10px;
+    padding: 7px 14px; border-radius: var(--radius-control);
     background: var(--white-a04);
     border: 1px solid var(--white-a06);
     font-size: 12px; font-weight: 500; letter-spacing: .04em;
@@ -45,25 +45,25 @@
     color: var(--white-a45);
     background: var(--white-a04);
     border: 1px solid var(--white-a09);
-    transition: all .25s ease;
+    transition: all var(--dur-moderate) ease;
 }
 .automations-stats .auto-master-toggle.on {
     color: rgb(134, 239, 172);
-    background: rgba(34, 197, 94, 0.09);
-    border-color: rgba(34, 197, 94, 0.35);
-    box-shadow: 0 0 18px rgba(34, 197, 94, 0.12), inset 0 0 12px rgba(34, 197, 94, 0.05);
+    background: rgba(var(--success-strong-rgb), 0.09);
+    border-color: rgba(var(--success-strong-rgb), 0.35);
+    box-shadow: 0 0 18px rgba(var(--success-strong-rgb), 0.12), inset 0 0 12px rgba(var(--success-strong-rgb), 0.05);
 }
 .automations-stats .auto-master-toggle:hover { transform: translateY(-1px); }
 .automations-stats .auto-master-sw {
     width: 34px; height: 18px; border-radius: var(--radius-pill); position: relative;
-    background: var(--white-a12); transition: background .25s ease;
+    background: var(--white-a12); transition: background var(--dur-moderate) ease;
 }
-.automations-stats .auto-master-toggle.on .auto-master-sw { background: rgba(34, 197, 94, 0.55); }
+.automations-stats .auto-master-toggle.on .auto-master-sw { background: rgba(var(--success-strong-rgb), 0.55); }
 .automations-stats .auto-master-sw::after {
     content: ''; position: absolute; top: 2px; left: 2px;
     width: 14px; height: 14px; border-radius: var(--radius-circle);
-    background: #fff; transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
-    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    background: #fff; transition: transform var(--dur-moderate) cubic-bezier(.4, 1.6, .4, 1);
+    box-shadow: 0 1px 4px var(--black-a40);
 }
 .automations-stats .auto-master-toggle.on .auto-master-sw::after { transform: translateX(16px); }
 
@@ -73,12 +73,12 @@
     display: flex; align-items: center; gap: 10px;
     padding: 6px 4px; cursor: pointer; user-select: none;
     border-radius: var(--radius-md);
-    transition: background .15s ease;
+    transition: background var(--dur-fast) ease;
 }
 .automations-section-header:hover { background: rgba(255,255,255,0.025); }
 .automations-section-header .section-chevron {
     font-size: 9px; color: var(--white-a35);
-    transition: transform .25s ease;
+    transition: transform var(--dur-moderate) ease;
 }
 .automations-section.collapsed .automations-section-header .section-chevron { transform: rotate(-90deg); }
 .automations-section-header .section-label {
@@ -99,7 +99,7 @@
 .automations-section-header .section-action-btn {
     background: transparent; border: 1px solid transparent; border-radius: 7px;
     padding: 3px 7px; cursor: pointer; font-size: 12px; opacity: .5;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-section-header .section-action-btn:hover {
     opacity: 1; background: var(--white-a06); border-color: var(--white-a08);
@@ -142,14 +142,14 @@
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-lg);
-    transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+    transition: transform var(--dur-quick) ease, border-color var(--dur-quick) ease, box-shadow var(--dur-quick) ease;
     overflow: hidden;
 }
 /* status rail — the card's left edge carries its state */
 .automation-card::before {
     content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(180deg, rgba(34, 197, 94, 0.85), rgba(34, 197, 94, 0.25));
-    transition: background .3s ease, box-shadow .3s ease;
+    background: linear-gradient(180deg, rgba(var(--success-strong-rgb), 0.85), rgba(var(--success-strong-rgb), 0.25));
+    transition: background var(--dur-slow) ease, box-shadow var(--dur-slow) ease;
 }
 .automation-card.disabled::before { background: var(--white-a10); }
 .automation-card.running::before {
@@ -168,13 +168,13 @@
 /* Held by the side's master switch — not disabled by the user, so it must not
    look disabled. Desaturated rather than dimmed: it is intact and waiting. */
 .automation-card.paused::before {
-    background: linear-gradient(180deg, rgba(245, 158, 11, 0.7), rgba(245, 158, 11, 0.2));
+    background: linear-gradient(180deg, rgba(var(--warning-strong-rgb), 0.7), rgba(var(--warning-strong-rgb), 0.2));
 }
 
 .automation-card:hover {
     transform: translateY(-2px);
     border-color: rgba(255,255,255,0.13);
-    box-shadow: 0 10px 30px -12px rgba(0,0,0,0.6);
+    box-shadow: 0 10px 30px -12px var(--black-a60);
 }
 
 .automation-card.errored {
@@ -218,7 +218,7 @@
 }
 .automation-card .automation-status.enabled {
     background: rgb(74, 222, 128);
-    box-shadow: 0 0 8px rgba(34, 197, 94, 0.7);
+    box-shadow: 0 0 8px rgba(var(--success-strong-rgb), 0.7);
 }
 .automation-card .automation-status.disabled {
     background: var(--white-a18); box-shadow: none;
@@ -267,7 +267,7 @@
 }
 .automation-card .flow-notify {
     color: rgb(134, 239, 172);
-    background: rgba(34, 197, 94, 0.08);
+    background: rgba(var(--success-strong-rgb), 0.08);
 }
 .automation-card .flow-delay {
     color: rgb(253, 224, 71);
@@ -292,7 +292,7 @@
 }
 .automation-card .auto-runs-link {
     cursor: pointer; text-decoration: none;
-    transition: color .15s ease;
+    transition: color var(--dur-fast) ease;
 }
 .automation-card .auto-runs-link:hover { text-decoration: underline; }
 .automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
@@ -306,7 +306,7 @@
 /* actions — quiet until the card is hovered (always-on for touch, below) */
 .automation-card .automation-actions {
     display: flex; align-items: center; gap: 5px; flex-shrink: 0;
-    opacity: .45; transition: opacity .18s ease;
+    opacity: .45; transition: opacity var(--dur-quick) ease;
 }
 .automation-card:hover .automation-actions,
 .automation-card:focus-within .automation-actions { opacity: 1; }
@@ -316,7 +316,7 @@
     border: none;
     border-radius: var(--radius-md); color: var(--white-a65);
     cursor: pointer; font-size: 12px; line-height: 1;
-    transition: background .15s ease, color .15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .automation-card .automation-actions button:hover {
     background: var(--white-a08);
@@ -335,16 +335,16 @@
 .automation-card .automation-toggle .toggle-slider {
     position: absolute; inset: 0; border-radius: var(--radius-pill);
     background: var(--white-a12);
-    transition: background .25s ease;
+    transition: background var(--dur-moderate) ease;
 }
 .automation-card .automation-toggle .toggle-slider::before {
     content: ''; position: absolute; top: 2.5px; left: 2.5px;
     width: 15px; height: 15px; border-radius: var(--radius-circle);
-    background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.45);
-    transition: transform .25s cubic-bezier(.4, 1.6, .4, 1);
+    background: #fff; box-shadow: 0 1px 4px var(--black-a45);
+    transition: transform var(--dur-moderate) cubic-bezier(.4, 1.6, .4, 1);
 }
 .automation-card .automation-toggle input:checked + .toggle-slider {
-    background: rgba(34, 197, 94, 0.6);
+    background: rgba(var(--success-strong-rgb), 0.6);
 }
 .automation-card .automation-toggle input:checked + .toggle-slider::before {
     transform: translateX(16px);
@@ -371,7 +371,7 @@
     position: absolute; left: 0; top: 0; height: 2px; width: 100%;
     background: linear-gradient(90deg,
         rgba(var(--tile-glow, var(--accent-rgb)), 0.30), rgba(var(--tile-glow, var(--accent-rgb)), 0));
-    transition: width .5s ease, background .3s ease, box-shadow .3s ease;
+    transition: width var(--dur-slowest) ease, background var(--dur-slow) ease, box-shadow var(--dur-slow) ease;
     pointer-events: none;
 }
 .automation-card.automation-tile .auto-tile-edge.running {
@@ -385,7 +385,7 @@
 /* Its time has come round and the scheduler has not reached it yet — worth a
    glance, not an alarm. */
 .automation-card.automation-tile.sched-due .auto-tile-edge {
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.5), rgba(34, 197, 94, 0));
+    background: linear-gradient(90deg, rgba(var(--success-strong-rgb), 0.5), rgba(var(--success-strong-rgb), 0));
 }
 
 /* head — dot, name, and the run count as a link to the history */
@@ -404,7 +404,7 @@
     font-size: 10.5px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill);
     background: rgba(255,255,255,0.055); color: var(--white-a50);
     font-variant-numeric: tabular-nums;
-    transition: background .15s ease, color .15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .automation-card.automation-tile .auto-tile-badge:hover {
     background: rgba(var(--accent-rgb), 0.18); color: rgb(var(--accent-light-rgb));
@@ -418,7 +418,7 @@
     font-family: inherit; cursor: pointer;
     border: 1px dashed rgba(var(--accent-rgb), 0.35);
     padding: 2px 8px;
-    transition: background .15s ease, border-color .15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .automation-card.automation-tile .auto-flow-editable:hover {
     background: rgba(var(--accent-rgb), 0.16);
@@ -435,12 +435,12 @@
     font-family: inherit; font-size: 11px; padding: 3px 6px;
 }
 .automation-card.automation-tile .auto-cadence-edit input[type="number"] { width: 52px; }
-.automation-card.automation-tile .auto-cadence-edit select option { background: #1a1a1a; }
+.automation-card.automation-tile .auto-cadence-edit select option { background: var(--bg-raised); }
 .automation-card.automation-tile .auto-cadence-save,
 .automation-card.automation-tile .auto-cadence-cancel {
     border: none; border-radius: 7px; cursor: pointer;
     font-family: inherit; font-size: 11px; font-weight: 600; padding: 4px 9px;
-    transition: background .15s ease, color .15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .automation-card.automation-tile .auto-cadence-save {
     background: rgba(var(--accent-rgb), 0.28); color: rgb(var(--accent-light-rgb));
@@ -467,7 +467,7 @@
 .automation-card.automation-tile .auto-tile-next.waiting { color: rgba(var(--accent-light-rgb), 0.9); }
 .automation-card.automation-tile .auto-tile-next.due { color: rgb(134, 239, 172); }
 .automation-card.automation-tile .auto-tile-next.running { color: rgb(var(--accent-light-rgb)); }
-.automation-card.automation-tile .auto-tile-next.paused { color: #f59e0b; }
+.automation-card.automation-tile .auto-tile-next.paused { color: var(--warning-strong); }
 .automation-card.automation-tile .auto-tile-next.listening { color: rgba(134, 239, 172, 0.7); }
 .automation-card.automation-tile .auto-tile-next.off { color: var(--white-a25); }
 .automation-card.automation-tile .auto-tile-next.unscheduled {
@@ -493,7 +493,7 @@
 .automation-card .automation-output {
     flex-basis: 100%; width: 100%;
     max-height: 0; opacity: 0; overflow: hidden;
-    transition: max-height .35s ease, opacity .3s ease, margin .3s ease;
+    transition: max-height .35s ease, opacity var(--dur-slow) ease, margin var(--dur-slow) ease;
     margin: 0;
 }
 .automation-card .automation-output.visible {
@@ -509,7 +509,7 @@
     height: 100%; border-radius: var(--radius-pill);
     background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.85), rgb(var(--accent-light-rgb)));
     box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.5);
-    transition: width .5s ease;
+    transition: width var(--dur-slowest) ease;
     position: relative;
 }
 .automation-card .auto-progress-bar::after {
@@ -523,8 +523,8 @@
     to { background-position: -200% 0; }
 }
 .automation-card .automation-output.finished .auto-progress-bar {
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.8), rgb(74, 222, 128));
-    box-shadow: 0 0 10px rgba(34, 197, 94, 0.4);
+    background: linear-gradient(90deg, rgba(var(--success-strong-rgb), 0.8), rgb(74, 222, 128));
+    box-shadow: 0 0 10px rgba(var(--success-strong-rgb), 0.4);
 }
 .automation-card .automation-output.finished .auto-progress-bar::after,
 .automation-card .automation-output.error .auto-progress-bar::after { animation: none; content: none; }
@@ -577,7 +577,7 @@
     color: #fff; font-weight: 650; font-size: 13px; font-family: inherit;
     padding: 10px 18px; border-radius: 11px; cursor: pointer;
     box-shadow: 0 4px 18px -4px rgba(var(--accent-rgb), 0.5);
-    transition: transform .15s ease, box-shadow .15s ease;
+    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .automations-list-view .auto-new-btn:hover, .automations-empty .auto-new-btn:hover {
     transform: translateY(-1px);
@@ -592,7 +592,7 @@
     padding: 7px 15px; border-radius: var(--radius-pill); cursor: pointer;
     background: var(--white-a04); border: 1px solid var(--white-a08);
     color: var(--white-a55); font-size: 12.5px; font-weight: 600; font-family: inherit;
-    transition: all .18s ease;
+    transition: all var(--dur-quick) ease;
 }
 .automations-section .auto-hub-tab:hover { color: #fff; border-color: var(--white-a16); }
 .automations-section .auto-hub-tab.active {
@@ -602,13 +602,13 @@
 }
 .automations-section .auto-hub-filter-pill {
     border-radius: var(--radius-pill); font-size: 11.5px;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-section .auto-hub-badge {
     border-radius: var(--radius-pill); font-size: 10px; font-weight: 700;
     letter-spacing: .06em; text-transform: uppercase; padding: 2px 8px;
 }
-.automations-section .auto-hub-badge.beginner { background: rgba(34,197,94,.14); color: rgb(134,239,172); }
+.automations-section .auto-hub-badge.beginner { background: rgba(var(--success-strong-rgb), .14); color: rgb(134,239,172); }
 .automations-section .auto-hub-badge.intermediate { background: rgba(234,179,8,.14); color: rgb(253,224,71); }
 .automations-section .auto-hub-badge.advanced { background: rgba(239,68,68,.14); color: rgb(252,165,165); }
 
@@ -623,10 +623,10 @@
     border-radius: 16px 16px 0 0; border-bottom: none;
 }
 .automations-builder-view .builder-back-btn {
-    width: 34px; height: 34px; border-radius: 10px; cursor: pointer;
+    width: 34px; height: 34px; border-radius: var(--radius-control); cursor: pointer;
     background: var(--white-a05); border: 1px solid var(--white-a09);
     color: #fff; font-size: 15px;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-builder-view .builder-back-btn:hover { background: var(--white-a10); transform: translateX(-2px); }
 .automations-builder-view .builder-name-input {
@@ -634,7 +634,7 @@
     background: transparent; border: none; border-bottom: 2px solid var(--white-a10);
     color: #fff; font-size: 17px; font-weight: 650; font-family: inherit;
     padding: 7px 4px; border-radius: 0;
-    transition: border-color .2s ease;
+    transition: border-color var(--dur-base) ease;
 }
 .automations-builder-view .builder-name-input:focus {
     outline: none; border-bottom-color: rgba(var(--accent-rgb), 0.7);
@@ -642,7 +642,7 @@
 .automations-builder-view .builder-group-input {
     width: 170px;
     background: rgba(255,255,255,0.045); border: 1px solid var(--white-a08);
-    border-radius: 10px; color: var(--white-a80); font-size: 12.5px; font-family: inherit;
+    border-radius: var(--radius-control); color: var(--white-a80); font-size: 12.5px; font-family: inherit;
     padding: 8px 12px;
 }
 .automations-builder-view .builder-group-input:focus {
@@ -650,18 +650,18 @@
 }
 .automations-builder-view .btn-cancel {
     background: var(--white-a05); border: 1px solid var(--white-a10);
-    color: var(--white-a70); padding: 9px 16px; border-radius: 10px;
+    color: var(--white-a70); padding: 9px 16px; border-radius: var(--radius-control);
     font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-builder-view .btn-cancel:hover { background: var(--white-a10); color: #fff; }
 .automations-builder-view .btn-save {
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
     border: 1px solid rgba(var(--accent-light-rgb), 0.4);
-    color: #fff; padding: 9px 20px; border-radius: 10px;
+    color: #fff; padding: 9px 20px; border-radius: var(--radius-control);
     font-size: 13px; font-weight: 650; font-family: inherit; cursor: pointer;
     box-shadow: 0 4px 16px -4px rgba(var(--accent-rgb), 0.5);
-    transition: transform .15s ease, box-shadow .15s ease;
+    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .automations-builder-view .btn-save:hover {
     transform: translateY(-1px); box-shadow: 0 7px 22px -4px rgba(var(--accent-rgb), 0.65);
@@ -692,12 +692,12 @@
     background: linear-gradient(180deg, var(--white-a04), var(--white-a02));
     border: 1px solid var(--white-a07);
     cursor: grab;
-    transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+    transition: transform var(--dur-fast) ease, border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .automations-builder-view .block-item:hover {
     transform: translateX(3px);
     border-color: rgba(var(--accent-rgb), 0.35);
-    box-shadow: -3px 0 0 0 rgba(var(--accent-rgb), 0.5), 0 6px 16px -8px rgba(0,0,0,0.5);
+    box-shadow: -3px 0 0 0 rgba(var(--accent-rgb), 0.5), 0 6px 16px -8px var(--black-a50);
 }
 .automations-builder-view .block-item:active { cursor: grabbing; transform: scale(.985); }
 .automations-builder-view .block-item.coming-soon { opacity: .38; cursor: default; }
@@ -722,7 +722,7 @@
     padding: 2px 7px; border-radius: var(--radius-pill);
     background: rgba(234, 179, 8, 0.15); color: rgb(253, 224, 71);
 }
-.automations-builder-view .block-help-btn { opacity: .35; transition: opacity .15s ease; }
+.automations-builder-view .block-help-btn { opacity: .35; transition: opacity var(--dur-fast) ease; }
 .automations-builder-view .block-item:hover .block-help-btn { opacity: .9; }
 
 /* canvas — the pipeline */
@@ -735,8 +735,8 @@
     background-size: auto, 22px 22px;
 }
 .automations-builder-view .flow-slot {
-    border-radius: 14px; position: relative;
-    transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+    border-radius: var(--radius-card); position: relative;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease, box-shadow var(--dur-base) ease;
 }
 .automations-builder-view .flow-slot.empty {
     border: 2px dashed rgba(255,255,255,0.13);
@@ -770,8 +770,8 @@
     border: 1px solid rgba(168, 85, 247, 0.25);
 }
 .automations-builder-view .flow-slot-label.then {
-    color: rgb(134, 239, 172); background: rgba(34, 197, 94, 0.11);
-    border: 1px solid rgba(34, 197, 94, 0.22);
+    color: rgb(134, 239, 172); background: rgba(var(--success-strong-rgb), 0.11);
+    border: 1px solid rgba(var(--success-strong-rgb), 0.22);
 }
 .automations-builder-view .flow-connector {
     width: 2px; height: 26px; margin: 4px auto;
@@ -799,7 +799,7 @@
     width: 24px; height: 24px; border-radius: 7px; cursor: pointer;
     background: transparent; border: 1px solid transparent;
     color: var(--white-a35); font-size: 11px;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-builder-view .placed-block-remove:hover {
     background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); color: rgb(252, 165, 165);
@@ -827,7 +827,7 @@
     border: 1px solid var(--white-a09);
     border-radius: 9px; color: #fff; font-size: 12.5px; font-family: inherit;
     padding: 7px 10px;
-    transition: border-color .15s ease, box-shadow .15s ease;
+    transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .automations-builder-view .placed-block-config input:focus,
 .automations-builder-view .placed-block-config select:focus,
@@ -842,7 +842,7 @@
     padding: 5px 10px; border-radius: var(--radius-md); cursor: pointer;
     background: rgba(255,255,255,0.045); border: 1px solid var(--white-a09);
     color: var(--white-a50); font-size: 11.5px; font-weight: 600; font-family: inherit;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-builder-view .day-btn.active {
     background: rgba(var(--accent-rgb), 0.16);
@@ -850,7 +850,7 @@
     color: rgb(var(--accent-light-rgb));
 }
 .automations-builder-view .condition-builder {
-    margin-top: 6px; padding: 10px; border-radius: 10px;
+    margin-top: 6px; padding: 10px; border-radius: var(--radius-control);
     background: rgba(0,0,0,0.16); border: 1px solid var(--white-a05);
 }
 .automations-builder-view .condition-row {
@@ -860,7 +860,7 @@
     width: 22px; height: 22px; border-radius: var(--radius-sm); cursor: pointer;
     background: transparent; border: 1px solid transparent;
     color: var(--white-a30); font-size: 10px;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automations-builder-view .remove-condition-btn:hover {
     background: rgba(239, 68, 68, 0.12); color: rgb(252, 165, 165);
@@ -901,8 +901,8 @@
 .automation-history-modal {
     background: linear-gradient(180deg, rgba(30, 30, 46, 0.97), rgba(22, 22, 34, 0.97));
     border: 1px solid var(--white-a09);
-    border-radius: 18px;
-    box-shadow: 0 24px 80px -20px rgba(0,0,0,0.8), 0 0 40px -20px rgba(var(--accent-rgb), 0.25);
+    border-radius: var(--radius-sheet);
+    box-shadow: 0 24px 80px -20px var(--black-a80), 0 0 40px -20px rgba(var(--accent-rgb), 0.25);
     backdrop-filter: blur(20px);
     max-width: 640px; width: 92%; max-height: 78vh;
     display: flex; flex-direction: column; overflow: hidden;
@@ -920,7 +920,7 @@
     width: 30px; height: 30px; border-radius: 9px; cursor: pointer;
     background: var(--white-a05); border: 1px solid var(--white-a09);
     color: var(--white-a70); font-size: 16px; line-height: 1;
-    transition: all .15s ease;
+    transition: all var(--dur-fast) ease;
 }
 .automation-history-modal .history-close-btn:hover {
     background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.35); color: #fff;
@@ -932,7 +932,7 @@
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-lg); margin-bottom: 9px; overflow: hidden;
     background: linear-gradient(180deg, rgba(255,255,255,0.032), rgba(255,255,255,0.012));
-    transition: border-color .15s ease;
+    transition: border-color var(--dur-fast) ease;
 }
 .automation-history-modal .history-entry:hover { border-color: var(--white-a12); }
 .automation-history-modal .history-entry-header {
@@ -944,8 +944,8 @@
     padding: 3px 9px; border-radius: var(--radius-pill);
 }
 .automation-history-modal .history-status-badge.success {
-    background: rgba(34, 197, 94, 0.13); color: rgb(134, 239, 172);
-    border: 1px solid rgba(34, 197, 94, 0.25);
+    background: rgba(var(--success-strong-rgb), 0.13); color: rgb(134, 239, 172);
+    border: 1px solid rgba(var(--success-strong-rgb), 0.25);
 }
 .automation-history-modal .history-status-badge.error {
     background: rgba(239, 68, 68, 0.13); color: rgb(252, 165, 165);
@@ -964,7 +964,7 @@
 }
 .automation-history-modal .history-log-section {
     margin: 0 13px 11px; padding: 8px 11px; border-radius: 9px;
-    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.045);
+    background: var(--black-a30); border: 1px solid rgba(255,255,255,0.045);
     font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
     font-size: 10.5px; line-height: 1.7; max-height: 180px; overflow-y: auto;
 }
@@ -983,7 +983,7 @@
     background: linear-gradient(180deg, rgba(34, 34, 50, 0.98), rgba(24, 24, 38, 0.98));
     border: 1px solid var(--white-a10);
     border-radius: 13px;
-    box-shadow: 0 16px 48px -12px rgba(0,0,0,0.75);
+    box-shadow: 0 16px 48px -12px var(--black-a75);
     backdrop-filter: blur(16px);
     padding: 6px; min-width: 190px;
 }
@@ -992,7 +992,7 @@
     padding: 8px 12px; border-radius: 9px; cursor: pointer;
     background: transparent; border: none;
     color: var(--white-a75); font-size: 12.5px; font-family: inherit;
-    transition: all .12s ease;
+    transition: all var(--dur-xfast) ease;
 }
 .auto-group-dropdown .auto-group-option:hover {
     background: rgba(var(--accent-rgb), 0.12); color: #fff;
@@ -1043,7 +1043,7 @@
     position: relative;
     padding: 12px 14px 14px;
     border: 1px solid var(--white-a05);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background:
         radial-gradient(90% 130% at 0% 0%, rgba(var(--tile-glow), 0.05), transparent 55%),
         rgba(255,255,255,0.012);
@@ -1099,7 +1099,7 @@
 .builder-sidebar .block-drawer-head:hover { background: var(--white-a04); }
 .builder-sidebar .block-drawer-chevron {
     font-size: 8px; color: var(--white-a30);
-    transition: transform .2s ease;
+    transition: transform var(--dur-base) ease;
 }
 .builder-sidebar .block-drawer.collapsed .block-drawer-chevron { transform: rotate(-90deg); }
 .builder-sidebar .block-drawer-name {
