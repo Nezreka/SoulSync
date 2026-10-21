@@ -14,7 +14,6 @@
   --wl-text-muted: #6b7280;
   --wl-shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line);
   --wl-shadow-hover: 0 12px 32px -4px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--white-a18), 0 0 24px -6px rgba(var(--accent-rgb), 0.22);
-  --wl-accent-glow: 0 0 18px rgba(var(--accent-rgb), 0.35);
 
   position: relative;
   max-width: 1540px;

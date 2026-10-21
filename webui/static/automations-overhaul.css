@@ -17,8 +17,6 @@
 
 .automx {
   --automx-danger: 244, 63, 94;
-  --automx-warn: 245, 158, 11;
-  --automx-ok: 34, 197, 94;
 }
 
 /* ── App frame ──────────────────────────────────────────────────────────── */
@@ -206,8 +204,8 @@
   border-radius: var(--radius-circle);
   flex-shrink: 0;
 }
-.automx-health-dot.ok { background: rgb(var(--automx-ok)); box-shadow: 0 0 6px rgba(var(--automx-ok), 0.8); }
-.automx-health-dot.warn { background: rgb(var(--automx-warn)); box-shadow: 0 0 6px rgba(var(--automx-warn), 0.8); }
+.automx-health-dot.ok { background: rgb(var(--success-strong-rgb)); box-shadow: 0 0 6px rgba(var(--success-strong-rgb), 0.8); }
+.automx-health-dot.warn { background: rgb(var(--warning-strong-rgb)); box-shadow: 0 0 6px rgba(var(--warning-strong-rgb), 0.8); }
 .automx-health-dot.bad {
   background: rgb(var(--automx-danger));
   box-shadow: 0 0 8px rgba(var(--automx-danger), 0.9);
@@ -272,8 +270,8 @@
   transition: transform 0.22s var(--ease-emphasized);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
-.automx-master.on { color: rgb(134, 239, 172); border-color: rgba(var(--automx-ok), 0.35); }
-.automx-master.on .automx-master-sw { background: rgba(var(--automx-ok), 0.55); }
+.automx-master.on { color: rgb(134, 239, 172); border-color: rgba(var(--success-strong-rgb), 0.35); }
+.automx-master.on .automx-master-sw { background: rgba(var(--success-strong-rgb), 0.55); }
 .automx-master.on .automx-master-sw::after { transform: translateX(14px); }
 .automx-master:disabled { opacity: 0.55; cursor: default; }
 
@@ -329,11 +327,11 @@
   transition: background 0.5s ease;
 }
 .automx-hero.ok .automx-hero-glow {
-  background: radial-gradient(circle, rgba(var(--automx-ok), 0.22), transparent 65%);
+  background: radial-gradient(circle, rgba(var(--success-strong-rgb), 0.22), transparent 65%);
   animation: automx-breathe 5s ease-in-out infinite;
 }
 .automx-hero.warn .automx-hero-glow {
-  background: radial-gradient(circle, rgba(var(--automx-warn), 0.26), transparent 65%);
+  background: radial-gradient(circle, rgba(var(--warning-strong-rgb), 0.26), transparent 65%);
   animation: automx-breathe 3.2s ease-in-out infinite;
 }
 .automx-hero.paused .automx-hero-glow {
@@ -359,13 +357,13 @@
 }
 .automx-hero.ok .automx-hero-mark {
   color: rgb(134, 239, 172);
-  border-color: rgba(var(--automx-ok), 0.45);
-  box-shadow: 0 0 26px rgba(var(--automx-ok), 0.28), inset 0 1px 0 var(--white-a12);
+  border-color: rgba(var(--success-strong-rgb), 0.45);
+  box-shadow: 0 0 26px rgba(var(--success-strong-rgb), 0.28), inset 0 1px 0 var(--white-a12);
 }
 .automx-hero.warn .automx-hero-mark {
   color: rgb(253, 224, 171);
-  border-color: rgba(var(--automx-warn), 0.5);
-  box-shadow: 0 0 26px rgba(var(--automx-warn), 0.3), inset 0 1px 0 var(--white-a12);
+  border-color: rgba(var(--warning-strong-rgb), 0.5);
+  box-shadow: 0 0 26px rgba(var(--warning-strong-rgb), 0.3), inset 0 1px 0 var(--white-a12);
 }
 .automx-hero-text { position: relative; flex: 1; min-width: 0; }
 .automx-hero-title {

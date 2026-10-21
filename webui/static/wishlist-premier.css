@@ -7,7 +7,6 @@
    ========================================================================== */
 
 .wlp {
-  --wlp-gold: 245, 185, 66;
   --wlp-warn: 255, 176, 32;
   --wlp-danger: 255, 93, 93;
   --wlp-surface: rgba(255, 255, 255, 0.045);
@@ -28,7 +27,7 @@
   height: 560px;
   background:
     radial-gradient(ellipse 60% 55% at 18% 0%, rgba(var(--accent-rgb), 0.16) 0%, transparent 70%),
-    radial-gradient(ellipse 50% 50% at 82% 8%, rgba(var(--wlp-gold), 0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 50% at 82% 8%, rgba(var(--gold-rgb), 0.10) 0%, transparent 70%),
     radial-gradient(ellipse 70% 60% at 50% -10%, rgba(162, 56, 255, 0.07) 0%, transparent 70%);
   filter: blur(50px);
   pointer-events: none;
@@ -55,7 +54,7 @@
   position: absolute;
   top: -70px; right: -40px;
   width: 340px; height: 340px;
-  background: radial-gradient(circle, rgba(var(--wlp-gold), 0.14) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(var(--gold-rgb), 0.14) 0%, transparent 65%);
   filter: blur(30px);
   pointer-events: none;
 }
@@ -63,13 +62,13 @@
 .wlp-eyebrow {
   display: inline-flex; align-items: center; gap: 8px;
   font-size: 11px; font-weight: 800; letter-spacing: 0.22em; text-transform: uppercase;
-  color: rgb(var(--wlp-gold));
+  color: rgb(var(--gold-rgb));
   margin-bottom: 10px;
 }
 .wlp-eyebrow::before {
   content: '★';
   font-size: 12px;
-  filter: drop-shadow(0 0 6px rgba(var(--wlp-gold), 0.8));
+  filter: drop-shadow(0 0 6px rgba(var(--gold-rgb), 0.8));
 }
 .wlp-title {
   margin: 0;
@@ -619,7 +618,7 @@
   width: 88px; height: 88px; margin: 0 auto 22px;
   border-radius: 28px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, rgba(var(--wlp-gold), 0.14), rgba(var(--accent-rgb), 0.10));
+  background: linear-gradient(135deg, rgba(var(--gold-rgb), 0.14), rgba(var(--accent-rgb), 0.10));
   border: 1px solid var(--white-a10);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 var(--white-a10);
   animation: wlp-float 5s ease-in-out infinite;
