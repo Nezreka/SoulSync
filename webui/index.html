@@ -8679,10 +8679,12 @@
                                                         <small class="settings-hint setting-help-body" hidden>Maximum
                                                             drift between the file's actual length and the metadata
                                                             source's expected length before the file is quarantined.
-                                                            <strong>0 = auto</strong> (3s normal, 5s for tracks
-                                                            &gt;10min). Raise this if tracks routinely quarantine for
-                                                            being a few seconds off (live recordings, alternate
-                                                            masterings, etc). Capped at 60s.</small>
+                                                            <strong>0 = auto</strong>: files can run 3s short (5s for
+                                                            tracks &gt;10min) or 15s long. Raise this if tracks
+                                                            routinely quarantine for being a few seconds off (live
+                                                            recordings, alternate masterings, CD pregaps). A set value
+                                                            applies both ways, so anything under 15 also tightens the
+                                                            long side. Capped at 60s.</small>
                                                     </div>
                                                 </div>
 

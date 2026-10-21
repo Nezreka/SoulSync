@@ -109,6 +109,7 @@ These live on other tabs, not Downloads:
 ## Verification & enhancement
 
 - **AcoustID verification** — fingerprints each download and quarantines files that don't match the expected track
+- **Duration tolerance** (Post-Processing > Core Features): how far a file's length can drift from the expected length before it's quarantined. **0 = auto**: 3s short (5s for tracks over 10 minutes) or 15s long. Raise it if good files keep landing in quarantine for being a few seconds off, which is common with CD rips (pregaps, trimmed silence) and alternate masters. A set value applies both ways, so anything under 15 also tightens the long side. Max 60
 
 ## Organization
 
