@@ -33,7 +33,7 @@ function Harness({ candidates, count }: { candidates?: string[]; count?: number 
 
 describe('relocate second confirmation', () => {
   it('first relocate click arms confirmation instead of resolving', () => {
-    const { container } = render(<Harness />);
+    render(<Harness />);
     fireEvent.click(screen.getByText('open'));
 
     // The AcoustID prompt should be visible with a Relocate button.
@@ -43,7 +43,7 @@ describe('relocate second confirmation', () => {
     // Should NOT have resolved yet — instead shows the confirmation step.
     expect(screen.getByTestId('result').textContent).toBe('undefined');
     expect(screen.getByText('Confirm Relocate')).toBeTruthy();
-    expect(container.querySelector('#_acid-relocate-confirm')).toBeTruthy();
+    expect(document.querySelector('#_acid-relocate-confirm')).toBeTruthy();
   });
 
   it('second click on the confirm button resolves relocate', async () => {
@@ -70,14 +70,14 @@ describe('relocate second confirmation', () => {
   });
 
   it('bulk count is reflected in the confirmation button and body', () => {
-    const { container } = render(<Harness count={42} />);
+    render(<Harness count={42} />);
     fireEvent.click(screen.getByText('open'));
     fireEvent.click(screen.getByText('Relocate'));
 
     // Button names the count…
     expect(screen.getByText('Yes, relocate 42 files')).toBeTruthy();
     // …and so does the body copy (not the singular "the file").
-    const body = container.textContent || '';
+    const body = document.body.textContent || '';
     expect(body).toContain('42 files');
     expect(body).not.toContain('move the file out');
   });
