@@ -197,6 +197,9 @@ def redownload_start(track_id):
             'track_number': track_number,
             'disc_number': disc_number,
             '_is_explicit_album_download': bool(full_album_data or (album_data.get('id'))),
+            # #1810: tells the library writer which row this file replaces,
+            # so a new filename repoints that row instead of adding a second
+            '_redownload_library_track_id': track_id,
         }
 
         # Build explicit context if we have full album data

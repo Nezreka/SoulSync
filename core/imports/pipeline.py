@@ -59,7 +59,6 @@ from core.imports.side_effects import (
     record_library_history_download,
     record_soulsync_library_entry,
 )
-from core.imports.redownload_merge import fold_imported_duplicate_tracks
 from core.downloads.atomic_album_publish import split_staged_path
 from core.wishlist.library_match import artist_names
 from core.wishlist.removal_guard import STAGED as GUARD_STAGED, classify_publication
@@ -2229,47 +2228,17 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     if lib_track_id and expected_final_path:
                         _rd_db = get_database()
                         _rd_conn = _rd_db._get_connection()
-                        try:
-                            _rd_cursor = _rd_conn.cursor()
-                            # #1810: when the replacement landed at a different
-                            # path, the import INSERTed a fresh row for it; fold
-                            # that duplicate into the original row (and delete
-                            # it) BEFORE repointing, or both rows end up pointing
-                            # at the replacement file. The fold runs under a
-                            # savepoint: if it fails, roll back to the pre-fold
-                            # state and still repoint (the pre-fix behavior)
-                            # rather than leave the original pointing at the
-                            # just-deleted old file.
-                            _rd_cursor.execute("SAVEPOINT redownload_fold")
-                            try:
-                                _folded = fold_imported_duplicate_tracks(
-                                    _rd_cursor, lib_track_id, expected_final_path
-                                )
-                                _rd_cursor.execute("RELEASE redownload_fold")
-                            except Exception as _fold_err:
-                                logger.error(
-                                    f"[Redownload] Duplicate fold failed for track "
-                                    f"{lib_track_id}, repointing without it: {_fold_err}"
-                                )
-                                _rd_cursor.execute("ROLLBACK TO redownload_fold")
-                                _rd_cursor.execute("RELEASE redownload_fold")
-                                _folded = []
-                            if _folded:
-                                logger.info(
-                                    f"[Redownload] Folded duplicate track row(s) {_folded} "
-                                    f"into track {lib_track_id}"
-                                )
-                            _rd_cursor.execute(
-                                """
-                                UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
-                                WHERE id = ?
-                                """,
-                                (expected_final_path, lib_track_id),
-                            )
-                            _rd_conn.commit()
-                            logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
-                        finally:
-                            _rd_conn.close()
+                        _rd_cursor = _rd_conn.cursor()
+                        _rd_cursor.execute(
+                            """
+                            UPDATE tracks SET file_path = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                            """,
+                            (expected_final_path, lib_track_id),
+                        )
+                        _rd_conn.commit()
+                        _rd_conn.close()
+                        logger.info(f"[Redownload] Updated DB path for track {lib_track_id}")
                 except Exception as e:
                     logger.error(f"[Redownload] Post-processing hook error: {e}")
 
