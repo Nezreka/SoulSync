@@ -22,7 +22,7 @@
 #settings-page .stg-navigation-heading h2 { margin: 5px 0 0; font-size: 28px; letter-spacing: -.035em; line-height: 1.2; }
 #settings-page .stg-nav-search-wrap { position: relative; width: min(340px, 45%); }
 #settings-page .stg-nav-search-wrap input {
-    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: 10px;
+    width: 100%; padding: 11px 14px 11px 38px !important; border-radius: var(--radius-control);
     border: 1px solid var(--white-a09); background: rgba(0,0,0,.16); color: var(--text-bright); box-sizing: border-box;
 }
 #settings-page .stg-search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; fill: var(--stg-text-secondary); pointer-events: none; }
@@ -39,7 +39,7 @@
     padding: 13px 12px !important; border: 0 !important; border-bottom: 2px solid transparent !important;
     border-radius: 0 !important; background: transparent !important; color: var(--stg-text-secondary) !important;
     font-size: 13px !important; font-weight: 550; white-space: nowrap; cursor: pointer;
-    box-shadow: none !important; transition: color 120ms, border-color 120ms;
+    box-shadow: none !important; transition: color var(--dur-xfast), border-color var(--dur-xfast);
 }
 #settings-page .stg-tab:hover { color: var(--text-bright) !important; }
 #settings-page .stg-tab.active { color: var(--text-bright) !important; border-bottom-color: var(--accent) !important; }
@@ -76,7 +76,7 @@
 #settings-page .settings-group,
 #settings-page .stg-media-card {
     background: var(--stg-surface) !important; border: 1px solid var(--white-a09) !important;
-    border-radius: 14px !important; padding: 22px 24px !important; margin-bottom: 0 !important;
+    border-radius: var(--radius-card) !important; padding: 22px 24px !important; margin-bottom: 0 !important;
     box-shadow: none !important; backdrop-filter: none !important;
 }
 #settings-page .settings-group > h3 { font-size: 16px; font-weight: 650; margin: 0 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--white-a09); }
