@@ -462,6 +462,8 @@ textarea.vce-input { resize: vertical; min-height: 58px; }
 }
 .vce-wl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: rgba(255,255,255,.78); cursor: pointer; }
 .vce-wl input { width: 15px; height: 15px; accent-color: rgb(var(--a)); }
+.vce-wl-note { font-size: 12px; color: #ffcf80; }
+.vce-wl-note[hidden] { display: none; }
 .vce-foot-spacer { flex: 1; }
 
 /* ── editor ──────────────────────────────────────────────────────────────── */

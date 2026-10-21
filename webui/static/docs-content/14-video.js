@@ -972,6 +972,10 @@ Then **sync** them to your server as Plex **Collections** or Jellyfin **BoxSets*
 
 The manager shows you what's *missing* from a collection — and lets you **wishlist the gaps in one click**. You can also import/export collection definitions and **adopt** collections that already exist on the server.
 
+A list collection (franchise, universe, chart, keyword or imported list) can also **wishlist its missing titles on every sync** — the *Wishlist members I don't own* box in the editor, or *Wishlist the movies I'm missing* when creating from a preset pack. It's always off unless you tick it, and the picker tells you how many titles that means before you create anything. Imported collections always land with it off.
+
+Each collection hands a title to the wishlist **once**. Remove it from the wishlist (or delete the movie) and the nightly sync won't add it back; the collection's *wishlist all* button is the way to re-add on purpose. To stop a collection acquiring entirely, untick its wishlist box, untick *Include in daily sync*, or delete it.
+
 > [!WARNING]
 > The Collection Manager is **admin-only** for both reads and writes.
 `

@@ -5270,16 +5270,24 @@ class VideoDatabase:
             conn.close()
 
     def duplicate_collection_definition(self, definition_id: int) -> int | None:
+        from core.video.collections.poster_gen import is_generated_ref
         src = self.get_collection_definition(definition_id)
         if not src:
             return None
+        # a generated poster url points at the SOURCE's file, the copy can't push
+        # it and never got its own. drop it so the copy renders fresh art.
+        poster = src.get("poster_url")
+        if is_generated_ref(poster):
+            poster = None
         return self.create_collection_definition(
             (src.get("name") or "Untitled") + " (copy)",
             kind=src.get("kind", "smart"), media_type=src.get("media_type", "movie"),
-            definition=src.get("definition") or {}, poster_url=src.get("poster_url"),
+            definition=src.get("definition") or {}, poster_url=poster,
             summary=src.get("summary"), sort_order=src.get("sort_order", "release"),
             sync_mode=src.get("sync_mode", "sync"), pinned=bool(src.get("pinned")),
-            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")))
+            wishlist_missing=bool(src.get("wishlist_missing")), enabled=bool(src.get("enabled")),
+            window_start=src.get("window_start"), window_end=src.get("window_end"),
+            collection_mode=src.get("collection_mode"))
 
     def resolve_smart_members(self, media_type: str, definition: dict) -> list:
         """Owned library items matching a smart definition's rules. Raises
