@@ -132,6 +132,10 @@ function rowSub(
     if (importElapsedMs > 2000) text += ` · ${vdlFmtElapsed(importElapsedMs)}`;
     return { text, tone: 'live' };
   }
+  if (status === 'downloading' && clampPct(d.progress) === 0 && !d.speed_bps) {
+    // nothing has moved yet: "0 MB of 0.9 GB" read as stalled, not starting
+    return { text: ['Connecting', d.username, d.source].filter(Boolean).join(' · '), tone: 'live' };
+  }
   if (vdlIsActive(status)) {
     const pct = clampPct(d.progress);
     const got = d.size_bytes
@@ -234,7 +238,7 @@ function VdlCard({
   return (
     <>
       <div
-        className={`dlc-row dlc-row-${cls}${inGroup ? ' dlc-row-compact' : ''}${open ? ' dlc-row-open' : ''}`}
+        className={`dlc-row dlc-row-${cls}${downloading ? ' dlc-row-live' : ''}${inGroup ? ' dlc-row-compact' : ''}${open ? ' dlc-row-open' : ''}`}
         data-dl-id={d.id}
         data-vtype={vt}
         role="button"
@@ -280,7 +284,11 @@ function VdlCard({
           ) : null}
           {downloading ? (
             <>
-              <span className="dlc-state dlc-state-active">{Math.round(pct)}%</span>
+              {/* says DOWNLOADING in words: a lone "0%" didn't read as anything */}
+              <span className="dlc-live-pill">
+                <span className="dlc-live-dot" aria-hidden="true" />
+                {pct === 0 && !d.speed_bps ? 'Starting' : `Downloading · ${Math.round(pct)}%`}
+              </span>
               {d.speed_bps ? <span className="dlc-speed">{vdlFmtSpeed(d.speed_bps)}</span> : null}
               {vdlFmtEta(d.eta_seconds) ? <span>{vdlFmtEta(d.eta_seconds)}</span> : null}
             </>
@@ -333,6 +341,11 @@ function VdlCard({
         {downloading && pct > 0 ? (
           <div className="dlc-rowbar" aria-hidden="true">
             <i style={{ width: `${pct}%` }} />
+          </div>
+        ) : downloading ? (
+          // started, no bytes yet: the sweep says it's alive
+          <div className="dlc-rowbar dlc-rowbar-indet" aria-hidden="true">
+            <i />
           </div>
         ) : d.status === 'queued' || d.status === 'searching' || importing ? (
           // no number to show yet: a sweep says it's alive. moving with a

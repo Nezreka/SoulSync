@@ -622,6 +622,42 @@
     stroke: rgb(var(--vt));
 }
 
+/* a download that's moving reads as one at a glance: its type colour down the
+   left edge, a faint wash, an outlined poster and a thicker bar */
+.dlc-row-live {
+    background: rgba(var(--vt, var(--accent-rgb)), 0.05);
+}
+.dlc-row-live::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px; bottom: 8px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: rgb(var(--vt, var(--accent-rgb)));
+}
+.dlc-row-live .dlc-lead-poster .dlc-art {
+    box-shadow: 0 0 0 2px rgba(var(--vt, var(--accent-rgb)), 0.85), 0 4px 14px var(--black-a40);
+}
+.dlc-row-live .dlc-rowbar { height: 3px; }
+.dlc-live-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    /* one colour for "live" on every type: youtube's red would read as failed */
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.dlc-live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor;
+    animation: dlcLiveDot 1.6s ease-in-out infinite;
+}
+@keyframes dlcLiveDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dlc-live-dot { animation: none; } }
+
 /* buttons */
 .dlc-btn {
     display: inline-flex;

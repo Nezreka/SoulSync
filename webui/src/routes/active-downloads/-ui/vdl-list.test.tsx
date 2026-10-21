@@ -77,6 +77,33 @@ describe('the row', () => {
     expect(container.querySelector('.dlc-rowbar i')?.getAttribute('style')).toContain('42%');
   });
 
+  it('a downloading row says so in words and is marked live', () => {
+    const { container } = list([dl()]);
+    const row = container.querySelector('.dlc-row')!;
+    expect(row.className).toContain('dlc-row-live');
+    expect(container.querySelector('.dlc-live-pill')?.textContent).toBe('Downloading · 42%');
+  });
+
+  it('a download that has not moved yet reads as starting, not stalled', () => {
+    // 0% and no speed used to show "0 MB of 0.9 GB" and a lone "0%", with no bar
+    const { container } = list([dl({ progress: 0, speed_bps: 0, eta_seconds: null })]);
+    expect(container.querySelector('.dlc-row')!.className).toContain('dlc-row-live');
+    expect(container.querySelector('.dlc-live-pill')?.textContent).toBe('Starting');
+    expect(container.querySelector('.dlc-sub')?.textContent).toBe('Connecting · cinephile');
+    expect(container.querySelector('.dlc-sub')?.textContent).not.toContain('MB of');
+    // the sweep says it's alive
+    expect(container.querySelector('.dlc-rowbar-indet')).toBeTruthy();
+  });
+
+  it('only a downloading row is marked live', () => {
+    for (const status of ['queued', 'searching', 'importing', 'completed', 'failed', 'cancelled']) {
+      cleanup();
+      const { container } = list([dl({ status })]);
+      expect(container.querySelector('.dlc-row')!.className, status).not.toContain('dlc-row-live');
+      expect(container.querySelector('.dlc-live-pill'), status).toBeNull();
+    }
+  });
+
   it('gives a failed row Retry as its one action and says why once', () => {
     const { container, cardActions } = list([
       dl({ status: 'failed', error: 'No seeders after 3 attempts', attempts: 3 }),
