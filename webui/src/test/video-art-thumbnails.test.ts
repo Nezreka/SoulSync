@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { sized as wishlistSized } from '@/routes/wishlist/-video.helpers';
+
 import { extractFunction } from './vanilla-extract';
 
 /**
@@ -21,7 +23,6 @@ import { extractFunction } from './vanilla-extract';
 
 const FILES = {
   watchlist: 'static/video/video-watchlist.js',
-  wishlist: 'static/video/video-wishlist.js',
   detail: 'static/video/video-detail.js',
 } as const;
 
@@ -99,6 +100,40 @@ describe('the grids use it', () => {
         offenders.map((m) => m[0]),
         `${file} builds an unsized <img src>`,
       ).toEqual([]);
+    }
+  });
+});
+
+describe('the wishlist (React) sizes every image it shows', () => {
+  // the wishlist page was the one that DID size its images; it is React now.
+  // its sized() is the vanilla one, checked line for line in
+  // -video.helpers.differential.test.ts. these pin that every image uses it.
+  it('the helper behaves', () => {
+    expect(wishlistSized('/api/video/poster/show/12', 342)).toBe('/api/video/poster/show/12?w=342');
+    expect(wishlistSized('https://image.tmdb.org/t/p/original/abc.jpg', 342)).toBe(
+      'https://image.tmdb.org/t/p/w342/abc.jpg',
+    );
+  });
+
+  it('every image site goes through it', () => {
+    const page = source('src/routes/wishlist/-ui/video-wishlist.tsx');
+    const sheets = source('src/routes/wishlist/-ui/video-sheets.tsx');
+    expect(page).toContain("image={sized(m.poster_url || '', 342)}"); // movie poster
+    expect(page).toContain("image={sized(img(poster) || '', 240)}"); // show / channel orb
+    expect(page).toContain('sized(img(u), 185)'); // the orb's season ring
+    expect(sheets).toContain("image={sized(movie.poster_url || '', 342)}"); // movie panel
+    expect(sheets).toContain("image={sized(img(poster) || '', 342)}"); // show panel
+    expect(sheets).toContain('sized(img(posterUrl), 342)'); // season cover
+    expect(sheets).toContain('sized(img(ep.still_url), 342)'); // episode still
+  });
+
+  it('no raw poster or still url reaches an image', () => {
+    for (const file of [
+      'src/routes/wishlist/-ui/video-wishlist.tsx',
+      'src/routes/wishlist/-ui/video-sheets.tsx',
+    ]) {
+      const text = source(file);
+      expect(text, file).not.toMatch(/(src|image)=\{[a-zA-Z.]*(poster_url|still_url)\}/);
     }
   });
 });

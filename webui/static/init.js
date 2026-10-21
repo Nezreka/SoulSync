@@ -2139,6 +2139,24 @@ function profileAllowedSides() {
     return (s === 'video' || s === 'both') ? s : 'music';
 }
 
+// A shared React page that shows the VIDEO side's view of itself under
+// ?media=... is gated by that video page's permission (and the video side
+// being on), not the music page's. /wishlist?media=tv is the video wishlist.
+const SHARED_VIDEO_VIEWS = {
+    wishlist: { media: ['movies', 'tv', 'youtube'], videoPage: 'video-wishlist' },
+};
+
+function isPageAccessAllowed(pageId, search) {
+    const view = SHARED_VIDEO_VIEWS[pageId];
+    let media = null;
+    if (view) {
+        try { media = new URLSearchParams(search || '').get('media'); } catch (e) { media = null; }
+    }
+    if (!view || view.media.indexOf(media) === -1) return isPageAllowed(pageId);
+    if (profileAllowedSides() === 'music') return false;
+    return isPageAllowed(view.videoPage);
+}
+
 // =====================
 // PERSONAL SETTINGS MODAL
 // =====================
@@ -5099,7 +5117,8 @@ async function loadInitialData() {
         // Navigate to user's home page (or dashboard for admin)
         const homePage = getProfileHomePage();
         const urlPage = _getPageFromPath();
-        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAllowed(urlPage))
+        // media-aware: /wishlist?media=tv is the video wishlist, gated by that page
+        let targetPage = (urlPage && urlPage !== 'dashboard' && isPageAccessAllowed(urlPage, window.location.search))
             ? urlPage
             : homePage;
 
@@ -5120,7 +5139,7 @@ async function loadInitialData() {
         // answers the question startup was already asking, so adopt it.
         if ((window.SoulSyncURL?.strip(window.location.pathname) ?? window.location.pathname) !== initialPath) {
             const redirectedPage = _getPageFromPath();
-            if (redirectedPage && isPageAllowed(redirectedPage)) {
+            if (redirectedPage && isPageAccessAllowed(redirectedPage, window.location.search)) {
                 targetPage = redirectedPage;
             }
         }

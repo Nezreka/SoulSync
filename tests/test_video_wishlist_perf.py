@@ -13,7 +13,13 @@ from pathlib import Path
 from api.video.poster import _tmdb_resize
 
 _ROOT = Path(__file__).resolve().parent.parent
-_WL = (_ROOT / "webui" / "static" / "video" / "video-wishlist.js").read_text(encoding="utf-8")
+# the page is React now (webui/src/routes/wishlist); sized() is the vanilla
+# helper, ported, and checked against the frozen original by the differential test.
+_WLD = _ROOT / "webui" / "src" / "routes" / "wishlist"
+_HELPERS = (_WLD / "-video.helpers.ts").read_text(encoding="utf-8")
+_PAGE = (_WLD / "-ui" / "video-wishlist.tsx").read_text(encoding="utf-8")
+_SHEETS = (_WLD / "-ui" / "video-sheets.tsx").read_text(encoding="utf-8")
+_WL = _PAGE + _SHEETS
 
 
 def test_tmdb_resize_rewrites_to_a_small_bucket():
@@ -28,19 +34,21 @@ def test_tmdb_resize_rewrites_to_a_small_bucket():
 
 def test_wishlist_has_a_sizer_and_uses_it_everywhere():
     # the helper exists and handles both the proxy (?w=) and tmdb (bucket) forms
-    assert "function sized(url, w)" in _WL
-    assert "'/api/video/poster/'" in _WL and "'w=' + w" in _WL
-    assert "image.tmdb.org" in _WL and "/t/p/w" in _WL
+    assert "export function sized<" in _HELPERS
+    assert "'/api/video/poster/'" in _HELPERS and "w=${w}" in _HELPERS
+    assert "image.tmdb.org" in _HELPERS and "/t/p/w${b}/" in _HELPERS
     # every image render site goes through it — no raw full-size poster_url left
-    for site in ("sized(it.poster_url, 342)",        # movie card
-                 "sized(pimg(poster), 240)",         # show orb
-                 "sized(pimg(posterUrl), 342)",      # season thumb
-                 "sized(pimg(poster), 500)",         # expand backdrop
-                 "sized(pimg(e.still_url), 342)"):   # episode still
+    for site in ("sized(m.poster_url || '', 342)",      # movie poster
+                 "sized(img(poster) || '', 240)",       # show / channel orb
+                 "sized(img(u), 185)",                  # the orb's season ring
+                 "sized(movie.poster_url || '', 342)",  # movie panel (and its backdrop)
+                 "sized(img(poster) || '', 342)",       # show panel (and its backdrop)
+                 "sized(img(posterUrl), 342)",          # season cover
+                 "sized(img(ep.still_url), 342)"):      # episode still
         assert site in _WL, site
 
 
 def test_no_raw_fullsize_poster_src_remains():
-    # a raw `src="' + esc(poster` (unsized) would reintroduce the lag
-    assert "src=\"' + esc(it.poster_url)" not in _WL
-    assert "src=\"' + esc(pimg(poster))" not in _WL
+    # a raw poster_url / still_url straight into an image would reintroduce the lag
+    import re
+    assert not re.search(r"(src|image)=\{[a-zA-Z.]*(poster_url|still_url)\}", _WL)

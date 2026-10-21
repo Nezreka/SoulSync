@@ -3,6 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { guardPageAccess } from '@/platform/shell/route-guard';
 
 import { WishlistPage } from './-ui/wishlist-page';
+import { isVideoMedia } from './-video.types';
 import {
   wishlistArtistPhotosQueryOptions,
   wishlistCycleQueryOptions,
@@ -13,10 +14,15 @@ import { wishlistSearchSchema } from './-wishlist.types';
 
 export const Route = createFileRoute('/wishlist')({
   validateSearch: wishlistSearchSchema,
-  beforeLoad: ({ context }) => {
-    guardPageAccess(context.shell.bridge, 'wishlist');
+  beforeLoad: ({ context, search }) => {
+    // the video tabs are the video side's wishlist: the shell asks for the
+    // video-wishlist permission (and the video side) instead of the music one.
+    guardPageAccess(context.shell.bridge, 'wishlist', `?media=${search.media}`);
   },
-  loader: async ({ context }) => {
+  loaderDeps: ({ search }) => ({ media: search.media }),
+  loader: async ({ context, deps }) => {
+    // the video tabs fetch their own; warming the music lists would be waste.
+    if (isVideoMedia(deps.media)) return;
     const { profile } = context.shell;
     const { queryClient } = context;
 

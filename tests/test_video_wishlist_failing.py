@@ -166,12 +166,16 @@ class TestSurface:
         assert items[0]["last_search_at"]
 
     def test_ui_renders_the_failing_marker(self):
-        js = (_ROOT / "webui" / "static" / "video" / "video-wishlist.js").read_text(
+        # the wishlist page is React now: stuck rows read search_attempts and
+        # wear the amber edge (poster), amber caption (orb) and pill (panel row).
+        wl = _ROOT / "webui" / "src" / "routes" / "wishlist"
+        helpers = (wl / "-video.helpers.ts").read_text(encoding="utf-8", errors="replace")
+        css = (_ROOT / "webui" / "static" / "wishlist-premier.css").read_text(
             encoding="utf-8", errors="replace")
-        css = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(
-            encoding="utf-8", errors="replace")
-        assert "vwsh-failing" in js and "search_attempts" in js
-        assert ".vwsh-failing" in css and ".vwsh-failing-inline" in css
+        assert "search_attempts" in helpers and "export function isFailingItem(" in helpers
+        for cls in (".wlp-poster.is-stuck", ".wlp-poster-meta.is-stuck", ".wl-orb-meta--stuck",
+                    ".wlp-sheet-pill.is-stuck"):
+            assert cls in css, cls
 
 
 # ── the receipt: WHY the last search came back empty ─────────────────────────

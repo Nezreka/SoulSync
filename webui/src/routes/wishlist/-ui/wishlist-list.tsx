@@ -18,6 +18,7 @@ import {
   type WishlistZone,
 } from '../-wishlist.helpers';
 import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { NebulaZoneHead } from './nebula-parts';
 
 /**
  * The dense LIST view — the nebula's operational twin (Boulder: "alternative
@@ -488,21 +489,21 @@ function ListZoneHead({
   busy: boolean;
 }) {
   return (
-    <div className={`wlp-zone-head wl-list-zone wlp-zone--${zone.kind}`}>
-      <h2 className="wlp-zone-title">{zone.title}</h2>
-      <span className="wlp-zone-sub">{zone.sub}</span>
-      <span className="wlp-zone-rule" aria-hidden="true" />
-      {onRetryIds && zone.stuckIds.length > 0 ? (
-        <button
-          type="button"
-          className="wlp-btn wlp-btn--sm wlp-zone-retry"
-          disabled={busy}
-          title="Clear the retry backoff so the next pass tries these again"
-          onClick={() => onRetryIds(zone.stuckIds)}
-        >
-          {zone.stuckIds.length === 1 ? 'Retry now' : `Retry all ${zone.stuckIds.length}`}
-        </button>
-      ) : null}
-    </div>
+    <NebulaZoneHead
+      kind={zone.kind}
+      title={zone.title}
+      sub={zone.sub}
+      className="wl-list-zone"
+      action={
+        onRetryIds && zone.stuckIds.length > 0
+          ? {
+              label: zone.stuckIds.length === 1 ? 'Retry now' : `Retry all ${zone.stuckIds.length}`,
+              title: 'Clear the retry backoff so the next pass tries these again',
+              disabled: busy,
+              onClick: () => onRetryIds(zone.stuckIds),
+            }
+          : null
+      }
+    />
   );
 }

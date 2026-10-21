@@ -239,7 +239,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 **Getting things**
 - **Watchlist → wishlist → download**:
   - Follow shows, people, studios and YouTube channels, with back-catalog policies.
-  - The wishlist retries with backoff, and a diagnostics drawer shows why each release was refused.
+  - The wishlist (Movies, TV and YouTube tabs, the same design as the music one) retries with backoff and groups what's stuck by cause: found but refused by your rules, nothing found, couldn't search, or not posted yet. Open a title to see every release the last search judged and why each was refused.
 - **Requests**: Overseerr-style. Non-admins request, admins approve.
 - **Import lists**: TMDB, IMDb and Plex Watchlist.
 - **Indexers & clients**:

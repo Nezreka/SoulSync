@@ -9,7 +9,9 @@ import { describe, expect, it } from 'vitest';
  * which reads as a spreadsheet: the artwork was decoration and the text carried
  * everything. The video wishlist does the opposite and is the model — a grid of
  * posters, art dominant, title and meta underneath, the card itself almost
- * invisible until pointed at (.vwsh-movie / .vwsh-movie-art, video-side.css).
+ * invisible until pointed at (.wlp-poster / .wlp-poster-art in
+ * wishlist-premier.css, the movie tab's poster grid since the video wishlist
+ * moved to React).
  *
  * Read from the source because the failure mode is visual and structural: every
  * control still present, every class still styled, and the geometry matching
@@ -20,7 +22,7 @@ const HERE = __dirname;
 const TSX = readFileSync(join(HERE, 'wishlist-audiobooks.tsx'), 'utf8');
 const CSS = readFileSync(join(HERE, 'wishlist-audiobooks.module.css'), 'utf8');
 const VIDEO_CSS = readFileSync(
-  join(HERE, '..', '..', '..', '..', 'static', 'video', 'video-side.css'),
+  join(HERE, '..', '..', '..', '..', 'static', 'wishlist-premier.css'),
   'utf8',
 );
 
@@ -53,9 +55,9 @@ describe('the cards are a poster grid', () => {
     // same auto-fill grid and the same hover lift, so the two pages read as
     // one product rather than two
     expect(rule('grid')).toContain('auto-fill');
-    expect(VIDEO_CSS).toContain('auto-fill');
+    expect(VIDEO_CSS).toMatch(/\.wlp-zone-grid--posters\s*\{[^}]*auto-fill/);
     expect(rule('card:hover .art', CSS) || CSS).toContain('translateY(-3px)');
-    expect(VIDEO_CSS).toContain('translateY(-3px)');
+    expect(VIDEO_CSS).toMatch(/\.wlp-poster:hover \.wlp-poster-art\s*\{[^}]*translateY\(-3px\)/);
   });
 });
 

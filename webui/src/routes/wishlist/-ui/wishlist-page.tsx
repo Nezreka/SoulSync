@@ -14,6 +14,7 @@ import type {
   WishlistBulkAction,
 } from '../-wishlist.types';
 
+import { isVideoMedia } from '../-video.types';
 import {
   bulkWishlistActionChunked,
   removeWishlistAlbum,
@@ -36,6 +37,8 @@ import {
 } from '../-wishlist.helpers';
 import { useLiveWishlist } from '../-wishlist.live';
 import { Route } from '../route';
+import { NebulaStage, NebulaZone } from './nebula-parts';
+import { VideoWishlist } from './video-wishlist';
 import { WishlistArtistSheet } from './wishlist-artist-sheet';
 import { WishlistAudiobooks } from './wishlist-audiobooks';
 import { WishlistList } from './wishlist-list';
@@ -57,9 +60,40 @@ function groupTrackIds(group: WishlistArtistGroup): string[] {
   );
 }
 
+/**
+ * One wishlist page for both sides. Music and audiobooks are the music side's
+ * tabs; movies, TV and YouTube are the video side's (the video sidebar hands
+ * /video-wishlist off to here). Both render on the same grammar: hero, command
+ * bar, zones by what's wrong, and the side panel.
+ */
 export function WishlistPage() {
-  useReactPageShell('wishlist');
+  const search = Route.useSearch();
+  // the video tabs ask for the video wishlist's permission, not the music one
+  useReactPageShell('wishlist', isVideoMedia(search.media) ? `?media=${search.media}` : undefined);
+  const { profileId } = useProfile();
+  const navigate = useNavigate({ from: Route.fullPath });
 
+  if (isVideoMedia(search.media)) {
+    return (
+      <div className="page-shell wlp wlp--video">
+        <VideoWishlist
+          profileId={profileId}
+          media={search.media}
+          query={search.q}
+          failing={search.failing}
+          onMedia={(media) =>
+            void navigate({ search: (prev) => ({ ...prev, media, q: '', failing: false }) })
+          }
+          onQuery={(q) => void navigate({ search: (prev) => ({ ...prev, q }), replace: true })}
+          onFailing={(failing) => void navigate({ search: (prev) => ({ ...prev, failing }) })}
+        />
+      </div>
+    );
+  }
+  return <MusicWishlistPage />;
+}
+
+function MusicWishlistPage() {
   const { profileId } = useProfile();
   const search = Route.useSearch();
   const media = search.media;
@@ -703,8 +737,9 @@ export function WishlistPage() {
                   onRetryIds={onRetryIds}
                 />
               ) : (
-                <div className={`wl-nebula${sheetGroup ? ' has-sheet' : ''}`}>
-                  <div className={`wlp-stage${sheetGroup ? ' has-sheet' : ''}`}>
+                <NebulaStage
+                  sheetOpen={sheetGroup !== null}
+                  field={
                     <div
                       className={`wl-nebula-field wlp-field${processing ? ' nebula-processing' : ''}`}
                     >
@@ -714,52 +749,49 @@ export function WishlistPage() {
                         </div>
                       ) : (
                         nebulaZones.map((zone) => (
-                          <section
+                          <NebulaZone
                             key={zone.kind}
-                            className={`wlp-zone wlp-zone--${zone.kind}`}
-                            aria-label={zone.title}
-                          >
-                            <div className="wlp-zone-head">
-                              <h2 className="wlp-zone-title">{zone.title}</h2>
-                              <span className="wlp-zone-sub">{zone.sub}</span>
-                              <span className="wlp-zone-rule" aria-hidden="true" />
-                              {zone.stuckIds.length > 0 ? (
-                                <button
-                                  type="button"
-                                  className="wlp-btn wlp-btn--sm wlp-zone-retry"
-                                  disabled={bulkAction.isPending}
-                                  title="Clear the retry backoff so the next pass tries these again"
-                                  onClick={() => onRetryIds(zone.stuckIds)}
-                                >
-                                  {zone.stuckIds.length === 1
-                                    ? 'Retry now'
-                                    : `Retry all ${zone.stuckIds.length}`}
-                                </button>
-                              ) : null}
-                            </div>
-                            <div className="wlp-zone-grid">
-                              {zone.groups.map((group) => (
-                                <WishlistOrb
-                                  key={group.name}
-                                  group={group}
-                                  index={nebulaGroups.indexOf(group)}
-                                  artistImages={artistImages}
-                                  currentCycle={currentCycle}
-                                  processing={processing}
-                                  expanded={expandedArtist === group.name}
-                                  onToggleExpand={() =>
-                                    setExpandedArtist((current) =>
-                                      current === group.name ? null : group.name,
-                                    )
+                            kind={zone.kind}
+                            title={zone.title}
+                            sub={zone.sub}
+                            action={
+                              zone.stuckIds.length > 0
+                                ? {
+                                    label:
+                                      zone.stuckIds.length === 1
+                                        ? 'Retry now'
+                                        : `Retry all ${zone.stuckIds.length}`,
+                                    title:
+                                      'Clear the retry backoff so the next pass tries these again',
+                                    disabled: bulkAction.isPending,
+                                    onClick: () => onRetryIds(zone.stuckIds),
                                   }
-                                />
-                              ))}
-                            </div>
-                          </section>
+                                : null
+                            }
+                          >
+                            {zone.groups.map((group) => (
+                              <WishlistOrb
+                                key={group.name}
+                                group={group}
+                                index={nebulaGroups.indexOf(group)}
+                                artistImages={artistImages}
+                                currentCycle={currentCycle}
+                                processing={processing}
+                                expanded={expandedArtist === group.name}
+                                onToggleExpand={() =>
+                                  setExpandedArtist((current) =>
+                                    current === group.name ? null : group.name,
+                                  )
+                                }
+                              />
+                            ))}
+                          </NebulaZone>
                         ))
                       )}
                     </div>
-                    {sheetGroup ? (
+                  }
+                  sheet={
+                    sheetGroup ? (
                       <WishlistArtistSheet
                         key={sheetGroup.name}
                         group={sheetGroup}
@@ -773,9 +805,9 @@ export function WishlistPage() {
                         onRemoveArtist={() => void onRemoveArtist(sheetGroup)}
                         actionBusy={bulkAction.isPending}
                       />
-                    ) : null}
-                  </div>
-                </div>
+                    ) : null
+                  }
+                />
               )}
             </>
           )}

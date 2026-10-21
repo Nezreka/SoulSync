@@ -622,10 +622,12 @@
 @media (min-width: 1300px) {
   .wlp-stage.has-sheet { grid-template-columns: minmax(0, 1fr) 420px; }
   .wlp-sheet {
+    /* sticks below the sticky command bar (one 70px row at these widths),
+       or the bar would slide over the panel's head on scroll */
     position: sticky;
-    top: 16px; right: auto; bottom: auto;
+    top: 88px; right: auto; bottom: auto;
     width: auto;
-    max-height: calc(100vh - 32px);
+    max-height: calc(100vh - 104px);
     z-index: auto;
   }
   .wlp-sheet-scrim { display: none; }
@@ -652,6 +654,9 @@
   .wlp-sheet-chip, .wlp-sheet-x { height: 40px; }
   .wlp-sheet-x { width: 40px; }
   .wlp-zone-sub { white-space: normal; }
+  .wlp-zone-grid--posters { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 18px 12px; }
+  .wlp-video-ep-detail { padding-left: 8px; }
+  .wlp-video-ep-thumb { flex-basis: 56px; height: 32px; }
   /* the artist row's Grab all drops to its own line instead of off-screen */
   .wlp .wl-list-sep { flex-wrap: wrap; row-gap: 6px; }
 }
@@ -669,7 +674,128 @@
   .wlp .wl-orb-tooltip { display: none; }
   .wlp .wl-orb-group:hover,
   .wlp .wl-orb-group:hover .wl-orb { transform: none; }
+  .wlp-poster:hover .wlp-poster-art { transform: none; }
 }
+
+/* ── Video tabs (movies · tv · youtube) ─────────────────────────────── */
+/* the same page on its video tabs: same hero, bar, zones and panel. what's
+   below is only what video has and music doesn't. */
+.wlp-media-tabs .wlp-tab-count {
+  margin-left: 7px; padding: 1px 7px; border-radius: var(--radius-pill);
+  background: var(--white-a08); color: var(--white-a60);
+  font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums;
+}
+.wlp-media-tabs button[aria-selected="true"] .wlp-tab-count { background: rgba(0, 0, 0, 0.25); color: inherit; }
+
+/* movies: a film is a poster, not an orb */
+.wlp-zone-grid--posters {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 24px 16px;
+}
+.wlp-poster {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  text-align: left; cursor: pointer;
+}
+.wlp-poster-art {
+  position: relative; display: block; aspect-ratio: 2 / 3; overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--white-a05);
+  box-shadow: 0 14px 34px var(--black-a50), 0 0 0 1px var(--white-a08);
+  transition: transform var(--dur-moderate) var(--ease-emphasized), box-shadow var(--dur-moderate) var(--ease-emphasized);
+}
+.wlp-poster-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wlp-poster-ph {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800; color: var(--white-a40);
+}
+.wlp-poster:hover .wlp-poster-art { transform: translateY(-3px); box-shadow: 0 20px 44px var(--black-a60), 0 0 0 1px var(--white-a16); }
+.wlp-poster.is-stuck .wlp-poster-art { box-shadow: 0 14px 34px var(--black-a50), 0 0 0 2px rgba(var(--wlp-warn), 0.5); }
+.wlp-poster.expanded .wlp-poster-art {
+  transform: translateY(-3px);
+  box-shadow: 0 20px 44px var(--black-a60), 0 0 0 3px rgba(var(--accent-rgb), 0.9), 0 0 32px rgba(var(--accent-rgb), 0.4);
+}
+.wlp-poster:focus-visible { outline: none; }
+.wlp-poster:focus-visible .wlp-poster-art { outline: 2px solid rgba(var(--accent-rgb), 0.8); outline-offset: 3px; }
+.wlp-poster-title { font-size: 13.5px; font-weight: 700; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-poster-meta { margin-top: -3px; font-size: 12px; color: var(--white-a50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-poster-meta.is-stuck { color: rgba(var(--wlp-warn), 0.9); }
+
+/* panel bits video needs */
+.wlp-sheet-avatar--poster { width: 76px; height: 114px; border-radius: var(--radius-md); }
+.wlp-sheet-pill.is-live { background: rgba(var(--accent-rgb), 0.16); color: rgb(var(--accent-rgb)); }
+.wlp-sheet-pill.is-done { background: var(--white-a05); color: var(--white-a40); }
+.wlp-sheet-more { font-size: 16px; line-height: 1; }
+.wlp-sheet-about { display: flex; flex-direction: column; gap: 12px; }
+.wlp-sheet-overview {
+  margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-2);
+  display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+}
+.wlp-sheet-disclose {
+  align-self: flex-start; padding: 6px 0; border: 0; background: none;
+  color: rgb(var(--accent-rgb)); font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.wlp-sheet-disclose:hover { text-decoration: underline; }
+.wlp-sheet-remove:disabled { opacity: 0.45; cursor: default; }
+
+/* cast: small round faces, a tap opens the person */
+.wlp-cast { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.wlp-cast-member {
+  flex: 0 0 64px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer;
+}
+.wlp-cast-img { position: relative; width: 48px; height: 48px; border-radius: var(--radius-circle); overflow: hidden; background: var(--white-a08); }
+.wlp-cast-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.wlp-cast-ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; color: var(--white-a50); }
+.wlp-cast-name { max-width: 64px; font-size: 11px; color: var(--white-a60); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlp-cast-member:hover .wlp-cast-name { color: var(--text-1); }
+
+/* an episode / video row: a still, the line, and it opens in place */
+.wlp-video-ep { flex-direction: column; align-items: stretch; gap: 0; padding: 6px; }
+.wlp-video-ep-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wlp-video-ep-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 4px; border: 0; border-radius: var(--radius-md); background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.wlp-video-ep-main:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); }
+.wlp-video-ep-sub { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wlp-video-ep-sub .wlp-sheet-track-why { min-width: 0; }
+.wlp-video-ep-thumb {
+  flex: 0 0 72px; height: 41px; border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--white-a06);
+}
+.wlp-video-ep-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.wlp-video-ep-detail { display: flex; flex-direction: column; gap: 10px; padding: 8px 8px 6px 86px; }
+.wlp-video-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--white-a50); }
+.wlp-video-note { margin: 0; font-size: 12.5px; color: rgba(var(--wlp-warn), 0.9); }
+.wlp-video-watch { align-self: flex-start; font-size: 13px; font-weight: 700; color: rgb(var(--accent-rgb)); text-decoration: none; }
+.wlp-video-watch:hover { text-decoration: underline; }
+
+/* the diagnostics drawer: what the last search found, per source */
+.wlp-diag {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px; border-radius: var(--radius-lg);
+  background: rgba(0, 0, 0, 0.25); border: 1px solid var(--white-a07);
+}
+.wlp-diag--note { font-size: 12.5px; color: var(--white-a50); }
+.wlp-diag-grid { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; }
+.wlp-diag-line { display: contents; }
+.wlp-diag-line dt { font-size: 11.5px; font-weight: 700; color: var(--white-a50); }
+.wlp-diag-line dd { margin: 0; font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+.wlp-diag-line.is-gap dd { color: rgba(var(--wlp-warn), 0.9); }
+.wlp-diag-line.is-live dd { color: rgb(var(--accent-rgb)); }
+.wlp-diag-src { display: flex; flex-direction: column; gap: 4px; }
+.wlp-diag-src-head { font-size: 12px; font-weight: 800; color: var(--text-1); }
+.wlp-diag-rel { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--white-a60); }
+.wlp-diag-rel-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlp-diag-rel-w { flex: none; max-width: 55%; text-align: right; color: var(--white-a50); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wlp-diag-rel.is-ok .wlp-diag-rel-w { color: rgb(var(--accent-rgb)); }
+.wlp-diag-rel.is-none { font-style: italic; color: var(--white-a40); }
+
+/* pages of 60 */
+.wlp-pager { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px 0 24px; }
+.wlp-pager-info { font-size: 13px; color: var(--white-a50); font-variant-numeric: tabular-nums; }
 
 /* ── List view ──────────────────────────────────────────────────────── */
 .wlp .wl-list { gap: 0; }

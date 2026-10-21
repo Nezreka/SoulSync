@@ -304,6 +304,14 @@ body[data-side="video"][data-video-page="video-downloads"] #webui-react-root {
 body[data-side="video"][data-video-page="video-downloads"] #video-page-host {
     display: none !important;
 }
+/* The wishlist is the same kind of shared React page (its video tabs),
+   handed off by gotoUnifiedWishlist() in video-side.js. */
+body[data-side="video"][data-video-page="video-wishlist"] #webui-react-root {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-wishlist"] #video-page-host {
+    display: none !important;
+}
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV
    library mapping) — hidden on the music side. */
 body[data-side="music"] [data-video-only] {
@@ -4234,321 +4242,8 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vdsc-tile, .vdsc-btn, .vdsc-chip, .vdsc-seg-btn, .vdsc-lang,
     .vdsc-hero-cta, .vdsc-hero-trailer, .vdsc-hero-nav, .vsr-notint { transition: none; }
 }
-/* ══════════════════════════════════════════════════════════════════════════
-   Wishlist page (.vwsh-*) — Movies grid + grouped TV show→season→episode tree
-   ══════════════════════════════════════════════════════════════════════════ */
-.vwsh-page { --vd-accent-rgb: var(--accent-rgb); color: var(--text-primary); padding: 0 0 70px; }
-.vwsh-head { position: relative; padding: 30px 40px 0; overflow: hidden; }
-.vwsh-head-glow { position: absolute; top: -190px; left: 50%; transform: translateX(-50%);
-    width: 860px; height: 390px; pointer-events: none; z-index: 0;
-    background: radial-gradient(56% 70% at 50% 0%, rgba(var(--accent-rgb), 0.22), transparent 70%); filter: blur(10px); }
-.vwsh-head-row { position: relative; z-index: 1; display: flex; align-items: flex-end;
-    justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.vwsh-title { font-size: 36px; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
-.vwsh-sub { margin: 7px 0 0; color: var(--white-a55); font-size: 14px; font-weight: 600; }
-
-/* Toolbar controls — aligned to the video side's polished language: the
-   calendar's segmented tabs, the search page's focus-ring shell, and
-   custom-chevron selects. All controls share one height (42px) + radius (12px)
-   so the toolbar reads as a single cohesive row. */
-/* Tabs are individual pills; the SELECTED one lights up with an accent outline +
-   ring glow (the same focus language as the search field) rather than a filled
-   accent block. */
-.vwsh-tabs { display: inline-flex; gap: 8px; padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
-.vwsh-tab { border: 1px solid var(--white-a10); background: var(--white-a04);
-    color: rgba(255, 255, 255, 0.62); font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
-    padding: 9px 18px; border-radius: var(--radius-lg); cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
-    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
-.vwsh-tab:hover { color: #fff; border-color: var(--white-a20); background: var(--white-a06); }
-.vwsh-tab--on { color: #fff; background: rgba(var(--vd-accent-rgb), 0.08);
-    border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
-.vwsh-tab-n { font-size: 11px; font-weight: 800; min-width: 18px; text-align: center;
-    padding: 1px 6px; border-radius: var(--radius-pill); background: var(--white-a08); color: var(--white-a60);
-    transition: background 0.2s ease, color 0.2s ease; }
-.vwsh-tab--on .vwsh-tab-n { background: rgba(var(--vd-accent-rgb), 0.25); color: #fff; }
-
-.vwsh-toolbar { padding: 18px 40px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.vwsh-body { padding: 26px 40px 0; }
-/* search — a bordered shell that lights up on focus (the video-side ring) */
-.vwsh-search { position: relative; display: flex; align-items: center; gap: 10px;
-    flex: 1; max-width: 440px; min-width: 220px; height: 42px; padding: 0 14px; box-sizing: border-box;
-    background: var(--white-a05); border: 1px solid var(--white-a10); border-radius: var(--radius-lg);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; }
-.vwsh-search:focus-within { border-color: rgba(var(--vd-accent-rgb), 0.6);
-    background: var(--white-a07); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
-.vwsh-search-ic { position: static; transform: none; flex: 0 0 auto;
-    color: var(--white-a40); transition: color 0.2s ease; }
-.vwsh-search:focus-within .vwsh-search-ic { color: rgba(var(--vd-accent-rgb), 0.95); }
-.vwsh-search-input { flex: 1; min-width: 0; width: 100%; height: 100%; padding: 0; border: 0;
-    background: transparent; color: #fff; font-size: 14px; font-weight: 500; outline: none; }
-.vwsh-search-input::placeholder { color: rgba(255, 255, 255, 0.42); }
-
-.vwsh-loading { padding: 50px; text-align: center; }
-.vwsh-state { padding: 70px 24px; text-align: center; }
-.vwsh-state.hidden, .vwsh-loading.hidden, .vwsh-pagination.hidden { display: none; }
-.vwsh-state-ic { font-size: 42px; margin-bottom: 12px; opacity: 0.8; }
-.vwsh-state-title { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 7px; }
-.vwsh-state-sub { font-size: 13.5px; color: var(--white-a50); max-width: 430px; margin: 0 auto; line-height: 1.55; }
-
-.vwsh-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 26px; }
-.vwsh-page-btn { padding: 9px 16px; border-radius: 10px; background: var(--white-a05);
-    border: 1px solid var(--white-a10); color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
-.vwsh-page-btn:disabled { opacity: 0.4; cursor: default; }
-.vwsh-page-info { font-size: 13px; color: var(--white-a50); }
-
-/* movies grid */
-.vwsh-grid--movies { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 22px 18px; }
-.vwsh-movie { cursor: pointer; }
-.vwsh-movie-art { position: relative; aspect-ratio: 2 / 3; border-radius: var(--radius-lg); overflow: hidden; background: #16161d;
-    border: 1px solid var(--white-a07); transition: border-color 0.18s ease, transform 0.18s ease; }
-.vwsh-movie:hover .vwsh-movie-art { border-color: rgba(var(--vd-accent-rgb), 0.48); transform: translateY(-3px); box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(var(--vd-accent-rgb), 0.12); }
-.vwsh-movie-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-movie-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 34px; opacity: 0.4; }
-.vwsh-movie-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.5), transparent 45%); opacity: 0; transition: opacity 0.2s; }
-.vwsh-movie:hover .vwsh-movie-scrim { opacity: 1; }
-.vwsh-movie-info { padding: 8px 2px 0; }
-.vwsh-movie-title { display: block; font-size: 13.5px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vwsh-movie-meta { display: block; font-size: 11.5px; color: var(--white-a45); margin-top: 2px; }
-
-/* shows = the "Nebula" (reuses the music wl-* orb/album/track design). EVERY
-   video enhancement is scoped under .vwsh-nebula (a class only the video field
-   gets) so the music wishlist's wl-* styling is never affected. */
-.vwsh-nebula .wl-orb-remove { position: absolute; top: 0; right: 0; z-index: 6; width: 22px; height: 22px;
-    border-radius: var(--radius-circle); border: 1px solid var(--white-a15); background: rgba(0, 0, 0, 0.62);
-    color: var(--white-a70); font-size: 11px; line-height: 1; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .wl-orb-group:hover .wl-orb-remove,
-.vwsh-nebula .wl-orb-group.expanded .wl-orb-remove { opacity: 1; }
-.vwsh-nebula .wl-orb-remove:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
-
-/* #1 cinematic expand — blurred poster backdrop + hue glow behind the season fan */
-.vwsh-nebula .wl-orb-group.expanded { overflow: hidden;
-    box-shadow: 0 14px 50px -12px hsla(var(--orb-hue, 230), 70%, 45%, 0.45);
-    border: 1px solid hsla(var(--orb-hue, 230), 70%, 55%, 0.25); }
-.vwsh-nebula .wl-orb-group.expanded::before { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background-image: var(--vwsh-poster, none); background-size: cover; background-position: center;
-    filter: blur(28px) saturate(1.25); opacity: 0.4; transform: scale(1.25); }
-.vwsh-nebula .wl-orb-group.expanded::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    background: linear-gradient(180deg, hsla(var(--orb-hue, 230), 55%, 12%, 0.55), rgba(12, 12, 16, 0.92)); }
-.vwsh-nebula .wl-orb-group.expanded > * { position: relative; z-index: 1; }
-
-/* episode status dot (used in the episode-card meta line) */
-.vwsh-nebula .vwsh-ep-dot { display: inline-block; vertical-align: middle; margin-right: 6px;
-    width: 7px; height: 7px; border-radius: var(--radius-circle);
-    background: rgb(var(--accent-rgb)); box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6); }
-.vwsh-nebula .vwsh-ep-dot--searching { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
-.vwsh-nebula .vwsh-ep-dot--downloading { background: #8ab0ff; box-shadow: 0 0 6px rgba(100, 149, 237, 0.6); }
-.vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
-.vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
-.vwsh-nebula .vwsh-ep-dot--monitored { background: var(--white-a45); }
-.vwsh-nebula .vwsh-ep-dot--upgrade { background: hsl(282, 85%, 68%); box-shadow: 0 0 6px hsla(282, 85%, 62%, 0.6); }
-
-/* #5 sort select — custom chevron (no native arrow), matched height/radius/ring */
-.vwsh-sort { height: 42px; padding: 0 36px 0 14px; box-sizing: border-box; border-radius: var(--radius-lg);
-    background-color: var(--white-a05); border: 1px solid var(--white-a10);
-    color: rgba(255, 255, 255, 0.88); font-size: 13.5px; font-weight: 600; font-family: inherit;
-    cursor: pointer; outline: none; -webkit-appearance: none; -moz-appearance: none; appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='rgba(255,255,255,0.45)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
-    background-repeat: no-repeat; background-position: right 13px center;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease; }
-.vwsh-sort:hover { border-color: var(--white-a20); color: #fff; }
-.vwsh-sort:focus { border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
-.vwsh-sort option { background: #16161d; color: #fff; }
-/* Clear-all (empties the current tab) — red danger, same metrics as the row */
-.vwsh-clear { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: var(--radius-lg);
-    cursor: pointer; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700;
-    color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
-    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease; }
-.vwsh-clear:hover { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.55); color: #fecaca;
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14); }
-.vwsh-clear .vwsh-clear-ic { flex: 0 0 auto; }
-.vwsh-clear[hidden] { display: none; }
-
-/* video-only: square-ish bubbles (the music orbs are circles) */
-.vwsh-nebula .wl-orb, .vwsh-nebula .wl-orb-glow, .vwsh-nebula .wl-orb-img,
-.vwsh-nebula .wl-orb-initials, .vwsh-nebula .wl-orb-ring { border-radius: 24%; }
-
-/* #4 acquisition progress — a thin bar across the bubble bottom (done ÷ wanted) */
-.vwsh-nebula .vwsh-prog { position: absolute; left: 9%; right: 9%; bottom: 6px; height: 4px; z-index: 3;
-    border-radius: 3px; pointer-events: none;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)) calc(var(--vwsh-prog, 0) * 100%),
-        var(--white-a16) calc(var(--vwsh-prog, 0) * 100%));
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
-
-/* bigger square bubbles so the posters breathe */
-.vwsh-nebula .wl-orb.orb-sm { width: 84px; height: 84px; }
-.vwsh-nebula .wl-orb.orb-md { width: 104px; height: 104px; }
-.vwsh-nebula .wl-orb.orb-lg { width: 124px; height: 124px; }
-
-/* expanded header — synopsis (left) · poster (middle) · cast (right). The side
-   columns hide (:empty) when there's nothing, so a collapsed/cast-less show just
-   shows the centered bubble (nebula grid unchanged). */
-.vwsh-nebula .vwsh-xhead { display: flex; align-items: center; justify-content: center; gap: 24px; width: 100%; }
-.vwsh-nebula .vwsh-xhead-mid { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.vwsh-nebula .vwsh-info-syn { flex: 0 1 340px; min-width: 0; align-self: center; text-align: left;
-    font-size: 12.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.62);
-    display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
-.vwsh-nebula .vwsh-info-cast { flex: 0 1 340px; min-width: 0; align-self: center; display: flex; flex-wrap: wrap;
-    gap: 12px 10px; align-content: center; justify-content: flex-start; }
-.vwsh-nebula .vwsh-info-syn:empty, .vwsh-nebula .vwsh-info-cast:empty { display: none; }
-.vwsh-nebula .vwsh-cast { width: 56px; padding: 0; border: none; background: none; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center; gap: 5px; }
-.vwsh-nebula .vwsh-cast-img { position: relative; width: 46px; height: 46px; border-radius: var(--radius-circle); overflow: hidden;
-    background: #1c1c24; border: 1px solid var(--white-a12);
-    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
-.vwsh-nebula .vwsh-cast:hover .vwsh-cast-img { transform: translateY(-2px);
-    border-color: hsla(var(--orb-hue, 230), 70%, 62%, 0.75); box-shadow: 0 6px 16px -4px hsla(var(--orb-hue, 230), 70%, 50%, 0.6); }
-.vwsh-nebula .vwsh-cast-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.vwsh-nebula .vwsh-cast--ph .vwsh-cast-img img { display: none; }
-.vwsh-nebula .vwsh-cast-ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 800; color: var(--white-a45); }
-.vwsh-nebula .vwsh-cast-name { font-size: 9.5px; font-weight: 600; color: var(--white-a55);
-    text-align: center; line-height: 1.2; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vwsh-nebula .vwsh-cast:hover .vwsh-cast-name { color: var(--white-a85); }
-@media (max-width: 640px) {
-    .vwsh-nebula .vwsh-xhead { flex-direction: column; gap: 14px; }
-    .vwsh-nebula .vwsh-info-syn { flex-basis: auto; text-align: center; }
-    .vwsh-nebula .vwsh-info-cast { flex-basis: auto; justify-content: center; }
-}
-.vwsh-nebula .vwsh-info-eyebrow { display: block; font-size: 10px; font-weight: 800; text-transform: uppercase;
-    letter-spacing: 0.05em; color: hsl(var(--orb-hue, 230) 80% 76%); margin-bottom: 6px; }
-/* selected episode card */
-.vwsh-nebula .vwsh-epc.vwsh-epc--sel { background: hsla(var(--orb-hue, 230), 48%, 22%, 0.5);
-    border-color: hsla(var(--orb-hue, 230), 70%, 58%, 0.65); }
-
-/* season = a poster panel on the LEFT (→ show page), episode grid to its RIGHT */
-.vwsh-nebula .vwsh-seasons { display: flex; flex-direction: column; gap: 20px; }
-.vwsh-nebula .vwsh-szn { display: flex; align-items: flex-start; gap: 16px; }
-.vwsh-nebula .vwsh-szn-side { position: relative; flex-shrink: 0; width: 108px; cursor: pointer; text-align: center;
-    padding: 7px 7px 9px; border-radius: var(--radius-lg); border: 1px solid transparent; transition: background 0.15s ease, border-color 0.15s ease; }
-.vwsh-nebula .vwsh-szn-side:hover { background: hsla(var(--orb-hue, 230), 45%, 22%, 0.4); border-color: hsla(var(--orb-hue, 230), 70%, 58%, 0.4); }
-.vwsh-nebula .vwsh-szn-poster { width: 94px; aspect-ratio: 2 / 3; margin: 0 auto; border-radius: var(--radius-md); overflow: hidden; background: #16161d;
-    border: 1px solid var(--white-a08); display: flex; align-items: center; justify-content: center;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
-.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-poster { transform: translateY(-2px);
-    border-color: hsla(var(--orb-hue, 230), 75%, 62%, 0.6); box-shadow: 0 8px 20px hsla(var(--orb-hue, 230), 60%, 30%, 0.5); }
-.vwsh-nebula .vwsh-szn-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-nebula .vwsh-szn-ph { font-size: 26px; opacity: 0.35; }
-.vwsh-nebula .vwsh-szn-name { margin-top: 8px; font-size: 13px; font-weight: 800; color: #fff; }
-.vwsh-nebula .vwsh-szn-count { margin-top: 2px; font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
-.vwsh-nebula .vwsh-szn-go { margin-top: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
-    color: hsl(var(--orb-hue, 230) 80% 74%); opacity: 0; transition: opacity 0.15s ease; }
-.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-go { opacity: 1; }
-.vwsh-nebula .vwsh-szn-rm { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: var(--radius-circle); border: none;
-    background: rgba(0, 0, 0, 0.5); color: var(--white-a55); font-size: 12px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-rm { opacity: 1; }
-.vwsh-nebula .vwsh-szn-rm:hover { background: rgba(239, 68, 68, 0.9); color: #fff; }
-
-.vwsh-nebula .vwsh-ep-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
-    max-height: 440px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
-.vwsh-nebula .vwsh-epc { position: relative; display: flex; align-items: flex-start; gap: 11px; padding: 9px; cursor: pointer;
-    border-radius: 10px; background: var(--white-a04); border: 1px solid var(--white-a06);
-    transition: background 0.15s ease, border-color 0.15s ease; }
-.vwsh-nebula .vwsh-epc:hover { background: var(--white-a07); border-color: hsla(var(--orb-hue, 230), 60%, 55%, 0.35); }
-.vwsh-nebula .vwsh-epc-thumb { position: relative; flex-shrink: 0; width: 92px; height: 52px; border-radius: var(--radius-sm); overflow: hidden;
-    background: #16161d; border: 1px solid var(--white-a08); }
-.vwsh-nebula .vwsh-epc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-/* no still → a quiet placeholder (faint icon) instead of loud diagonal stripes */
-.vwsh-nebula .vwsh-epc-thumb--none { background: var(--white-a03); }
-.vwsh-nebula .vwsh-epc-thumb--none img { display: none; }
-.vwsh-nebula .vwsh-epc-thumb--none::after { content: '📺'; position: absolute; inset: 0; display: flex;
-    align-items: center; justify-content: center; font-size: 17px; opacity: 0.22; }
-.vwsh-nebula .vwsh-epc-body { flex: 1; min-width: 0; }
-.vwsh-nebula .vwsh-epc-title { font-size: 12.5px; font-weight: 700; color: #fff; line-height: 1.3;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.vwsh-nebula .vwsh-epc:hover .vwsh-epc-title { color: hsl(var(--orb-hue, 230) 80% 80%); }
-.vwsh-nebula .vwsh-epc-meta { margin-top: 3px; font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
-.vwsh-nebula .vwsh-epc-ov { margin-top: 5px; font-size: 11px; line-height: 1.45; color: var(--white-a50);
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.vwsh-nebula .vwsh-epc-rm { flex-shrink: 0; width: 22px; height: 22px; border-radius: var(--radius-circle); border: none;
-    background: rgba(0, 0, 0, 0.35); color: var(--white-a45); font-size: 12px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-epc:hover .vwsh-epc-rm { opacity: 1; }
-.vwsh-nebula .vwsh-epc-rm:hover { background: rgba(239, 68, 68, 0.85); color: #fff; }
-
-/* status pills + remove button */
-.vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: var(--radius-sm); flex-shrink: 0; }
-.vwsh-st--wanted { background: rgba(var(--accent-rgb), 0.16); color: rgb(var(--accent-rgb)); }
-.vwsh-st--searching { background: rgba(245, 158, 11, 0.16); color: #f59e0b; }
-.vwsh-st--downloading { background: rgba(100, 149, 237, 0.18); color: #8ab0ff; }
-.vwsh-st--done { background: rgba(34, 197, 94, 0.18); color: #4ade80; }
-.vwsh-st--failed { background: rgba(248, 113, 113, 0.16); color: #f87171; }
-.vwsh-st--monitored { background: var(--white-a10); color: var(--white-a65); }
-.vwsh-st--upgrade { background: hsla(282, 80%, 62%, 0.18); color: hsl(282, 90%, 78%); }
-.vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
-/* Repeatedly-failing marker (#liveleak-failing-hub) — sits under the status pill */
-.vwsh-failing {
-    position: absolute; top: 34px; left: 8px; z-index: 2;
-    font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: var(--radius-sm);
-    color: #fca5a5; background: rgba(220, 38, 38, 0.22);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    backdrop-filter: blur(6px); cursor: default;
-}
-.vwsh-failing-inline { color: #fca5a5; font-weight: 700; cursor: default; }
-
-/* 'Search now' — per-item manual search (movie art / episode row / season side) */
-.vwsh-hunt { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--white-a12);
-    background: rgba(0, 0, 0, 0.35); color: var(--white-a60); cursor: pointer;
-    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
-.vwsh-hunt:hover { background: rgba(var(--accent-rgb), 0.85); border-color: transparent; color: #fff; }
-.vwsh-hunt:disabled { opacity: 0.4; cursor: default; }
-.vwsh-hunt--busy svg { animation: vwsh-hunt-spin 0.9s linear infinite; }
-@keyframes vwsh-hunt-spin { to { transform: rotate(360deg); } }
-.vwsh-movie-art .vwsh-hunt { position: absolute; top: 8px; right: 40px; z-index: 3; opacity: 0; }
-/* manual release-picker sits left of the auto-search button (rm 8 · hunt 40 · pick 72) */
-.vwsh-movie-art .vwsh-hunt.vwsh-pick { right: 72px; }
-.vwsh-movie:hover .vwsh-movie-art .vwsh-hunt { opacity: 1; }
-.vwsh-nebula .vwsh-epc-hunt { flex-shrink: 0; width: 22px; height: 22px; border-radius: var(--radius-circle); border: none;
-    background: var(--white-a08); color: var(--white-a60); cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-epc:hover .vwsh-epc-hunt { opacity: 1; }
-.vwsh-nebula .vwsh-epc-hunt:hover { background: rgba(var(--accent-rgb), 0.85); color: #fff; }
-.vwsh-nebula .vwsh-epc-hunt:disabled { opacity: 0.35; cursor: default; }
-.vwsh-nebula .vwsh-szn-hunt { position: absolute; top: 4px; right: 30px; width: 22px; height: 22px; border-radius: var(--radius-circle); border: none;
-    background: rgba(0, 0, 0, 0.45); color: var(--white-a65); cursor: pointer;
-    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-hunt { opacity: 1; }
-.vwsh-nebula .vwsh-szn-hunt:hover { background: rgba(var(--accent-rgb), 0.85); color: #fff; }
-/* manual release-picker sits left of the season auto-search (rm 4 · hunt 30 · pick 56) */
-.vwsh-nebula .vwsh-szn-hunt.vwsh-pick { right: 56px; }
-@media (hover: none) { .vwsh-movie-art .vwsh-hunt, .vwsh-nebula .vwsh-epc-hunt, .vwsh-nebula .vwsh-szn-hunt { opacity: 1; } }
-
-/* 'Search all missing' — toolbar sibling of Clear all */
-/* "⚠ Failing" filter chip — the LiveLeak fix-it hub toggle */
-.vwsh-failing-filter { height: 42px; padding: 0 14px; box-sizing: border-box; border-radius: var(--radius-lg);
-    border: 1px solid rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08);
-    color: rgba(245, 158, 11, 0.9); font-size: 13px; font-weight: 600; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease; }
-.vwsh-failing-filter:hover { background: rgba(245, 158, 11, 0.18); }
-.vwsh-failing-filter--on { background: rgba(245, 158, 11, 0.9); border-color: transparent; color: #1a1a1a; }
-.vwsh-failing-filter[hidden] { display: none; }
-.vwsh-failing-n:empty { display: none; }
-.vwsh-searchall { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: var(--radius-lg);
-    display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer;
-    border: 1px solid rgba(var(--accent-rgb), 0.4); color: #fff;
-    background: rgba(var(--accent-rgb), 0.14); transition: all 0.15s ease; }
-.vwsh-searchall:hover { background: rgba(var(--accent-rgb), 0.3);
-    border-color: rgba(var(--accent-rgb), 0.7); }
-.vwsh-searchall:disabled { opacity: 0.5; cursor: default; }
-.vwsh-searchall[hidden] { display: none; }
-.vwsh-searchall + .vwsh-clear { margin-left: 0; }
-
-.vwsh-rm { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--white-a12);
-    background: rgba(0, 0, 0, 0.35); color: var(--white-a60); font-size: 17px; line-height: 1; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
-.vwsh-rm:hover { background: rgba(248, 113, 113, 0.85); border-color: transparent; color: #fff; }
-.vwsh-rm:disabled { opacity: 0.4; cursor: default; }
-.vwsh-movie-art .vwsh-rm { position: absolute; top: 8px; right: 8px; z-index: 3; opacity: 0; }
-.vwsh-movie:hover .vwsh-movie-art .vwsh-rm { opacity: 1; }
-@media (hover: none) { .vwsh-movie-art .vwsh-rm { opacity: 1; } }
-@media (max-width: 900px) {
-    .vwsh-head, .vwsh-toolbar, .vwsh-body { padding-left: 18px; padding-right: 18px; }
-    .vwsh-grid--movies { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
-}
-
 /* ══ YouTube channels (search chip · wishlist channel blocks · watchlist cards) ══
-   Scoped .vyt-* — never touches music wl-* or the TMDB vwsh-* nebula. */
+   Scoped .vyt-* — never touches the music wl-* styling. */
 .vyt-avatar--ph { display: inline-flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg, #ff3b3b, #b3122a); color: #fff; font-weight: 800; }
 
@@ -4668,12 +4363,6 @@ body:not(.video-admin) .vst-combo-panels { grid-template-columns: 1fr; }
     .vc-page { padding: 0 16px 50px; }
     .vc-name { font-size: 28px; }
 }
-
-/* "Watch on YouTube" link inside the wishlist info-bar synopsis (YouTube videos) */
-.vwsh-nebula .vwsh-yt-watch { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 800;
-    color: #ff6b6b; text-decoration: none; padding: 6px 13px; border-radius: var(--radius-pill);
-    border: 1px solid rgba(255, 59, 59, 0.35); transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-yt-watch:hover { background: rgba(255, 59, 59, 0.14); color: #fff; }
 
 /* ── channel page: tags ribbon, toolbar, load-more, inline detail, playlists ── */
 .vc-tags { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
@@ -6274,36 +5963,6 @@ body[data-side="video"] #gsearch-aura {
 [data-video-only] .server-config-container { max-width: 560px; }
 
 /* ── Dashboard system-health strip ─────────────────────────────────────── */
-/* Stuck-row diagnostics drawer. Opens in place under the row it explains — the
-   evidence belongs beside the thing it is evidence about, not in a modal that
-   loses which row you were looking at. */
-.vwsh-failing-btn { cursor: pointer; font: inherit; background: none; border: none; padding: 0; }
-.vwsh-failing-btn:hover { text-decoration: underline; }
-.vwsh-diag {
-    grid-column: 1 / -1; margin: 8px 0 2px; padding: 12px 14px; border-radius: 10px;
-    background: rgba(0,0,0,0.28); border: 1px solid var(--white-a09);
-    font-size: 12px; line-height: 1.5;
-}
-.vwsh-diag-loading { color: var(--white-a50); }
-.vwsh-diag-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 3px 18px;
-}
-.vwsh-diag-line { display: flex; gap: 8px; min-width: 0; }
-.vwsh-diag-k { flex: none; width: 96px; color: var(--white-a45); }
-.vwsh-diag-v { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: rgba(255,255,255,0.82); }
-/* A missing id is the answer often enough to earn a colour. */
-.vwsh-diag-line--gap .vwsh-diag-v { color: #fbbf24; }
-.vwsh-diag-line--live .vwsh-diag-v { color: #38bdf8; }
-.vwsh-diag-rels { margin-top: 10px; border-top: 1px solid var(--white-a07); padding-top: 8px; }
-.vwsh-diag-src { margin: 8px 0 4px; font-weight: 700; color: rgba(255,255,255,0.66); }
-.vwsh-diag-rel { display: flex; gap: 12px; padding: 2px 0; min-width: 0; }
-.vwsh-diag-rel-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-    white-space: nowrap; color: var(--white-a70); font-family: ui-monospace, Menlo, monospace;
-    font-size: 11px; }
-.vwsh-diag-rel-w { flex: none; max-width: 45%; color: var(--white-a50); }
-.vwsh-diag-rel--ok .vwsh-diag-rel-w { color: #4ade80; }
-.vwsh-diag-rel--none { color: var(--white-a40); font-style: italic; }
 
 /* ── Import subscriptions (ytdl-sub / Kometa) ─────────────────────────────── */
 .vwlp-import-btn {
@@ -7334,56 +6993,6 @@ body[data-side="video"] #gsearch-aura {
 }
 
 
-/* Wishlist polish pass: source-native affordances without changing the shared contract. */
-.vwsh-grid { min-height: 120px; }
-.vwsh-movie-art::after {
-    content: ''; position: absolute; inset: auto 0 0; height: 42%; pointer-events: none;
-    background: linear-gradient(0deg, rgba(0,0,0,0.68), transparent);
-    opacity: 0; transition: opacity 0.2s ease;
-}
-.vwsh-movie:hover .vwsh-movie-art::after { opacity: 1; }
-.vwsh-movie-art .vwsh-hunt, .vwsh-movie-art .vwsh-rm {
-    backdrop-filter: blur(10px); box-shadow: 0 6px 16px rgba(0,0,0,0.28);
-}
-.vwsh-hunt.vwsh-pick:hover, .vwsh-nebula .vwsh-epc-hunt.vwsh-pick:hover, .vwsh-nebula .vwsh-szn-hunt.vwsh-pick:hover {
-    background: rgba(251, 191, 36, 0.9); color: #1a1302;
-}
-.vwsh-searchall[data-vwsh-mode="youtube"] {
-    border-color: rgba(255, 54, 54, 0.48);
-    background: linear-gradient(135deg, rgba(255, 54, 54, 0.22), var(--white-a06));
-}
-.vwsh-searchall[data-vwsh-mode="youtube"]:hover {
-    background: linear-gradient(135deg, rgba(255, 54, 54, 0.34), var(--white-a08));
-    border-color: rgba(255, 84, 84, 0.72);
-}
-.vwsh-nebula .vwsh-epc--youtube {
-    background: linear-gradient(135deg, rgba(255,255,255,0.052), rgba(255, 0, 0, 0.045));
-    border-color: rgba(255, 255, 255, 0.075);
-}
-.vwsh-nebula .vwsh-epc--youtube:hover {
-    background: linear-gradient(135deg, var(--white-a07), rgba(255, 0, 0, 0.075));
-    border-color: rgba(255, 72, 72, 0.34);
-}
-.vwsh-nebula .vwsh-epc--youtube .vwsh-ep-dot--wanted,
-.vwsh-nebula .vwsh-epc--youtube .vwsh-ep-dot--failed {
-    background: #ff4545; box-shadow: 0 0 8px rgba(255, 69, 69, 0.68);
-}
-.vwsh-nebula .vwsh-epc-hunt--yt:hover { background: #ff3434; color: #fff; }
-.vwsh-nebula .vwsh-epc-meta { overflow-wrap: anywhere; }
-.vwsh-state {
-    border: 1px solid var(--white-a07); border-radius: 18px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.035), rgba(0,0,0,0.16));
-}
-@media (max-width: 640px) {
-    .vwsh-toolbar { align-items: stretch; }
-    .vwsh-search, .vwsh-sort, .vwsh-failing-filter, .vwsh-searchall, .vwsh-clear { width: 100%; max-width: none; justify-content: center; }
-    .vwsh-clear, .vwsh-searchall { margin-left: 0; }
-    .vwsh-nebula .vwsh-szn { flex-direction: column; }
-    .vwsh-nebula .vwsh-szn-side { width: 100%; display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 4px 12px; text-align: left; align-items: center; }
-    .vwsh-nebula .vwsh-szn-poster { grid-row: 1 / 4; width: 72px; margin: 0; }
-    .vwsh-nebula .vwsh-szn-go { opacity: 1; }
-    .vwsh-nebula .vwsh-ep-grid { width: 100%; grid-template-columns: 1fr; max-height: none; }
-}
 
 /* ── Downloading now ─────────────────────────────────────────────────────────
    Live transfer cards. A GRID, not full width rows: two downloads in a row that

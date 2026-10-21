@@ -1,5 +1,3 @@
-import { useEffect } from 'react';
-
 import type {
   ParsedWishlistTrack,
   WishlistAlbumGroup,
@@ -15,6 +13,7 @@ import {
   trackCountLabel,
 } from '../-wishlist.helpers';
 import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { NebulaSheet } from './nebula-parts';
 
 interface Props {
   group: WishlistArtistGroup;
@@ -78,70 +77,24 @@ export function WishlistArtistSheet({
   const stuck = groupTracks(group).filter((track) => track.failing);
   const callout = stuck.length > 0 ? troubleCallout(stuck) : null;
 
-  // escape closes the panel, unless a dialog opened from it (the source
-  // inspector, a confirm) is the thing being dismissed.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"], [aria-modal="true"], .modal-overlay.active'))
-        return;
-      onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <>
-      {/* only shown where the panel floats over the field (tablet, phone):
-        a tap outside closes it. */}
-      <div className="wlp-sheet-scrim" aria-hidden="true" onClick={onClose} />
-      <aside className="wlp-sheet" aria-label={`${group.name} on the wishlist`}>
-        <div className="wlp-sheet-backdrop" aria-hidden="true">
-          {image ? <img src={image} alt="" /> : null}
-        </div>
-        <button
-          type="button"
-          className="wlp-sheet-close"
-          aria-label="Close artist panel"
-          title="Close"
-          onClick={onClose}
-        >
-          ✕
-        </button>
-
-        <div className="wlp-sheet-head">
-          {image ? (
-            <img className="wlp-sheet-avatar" src={image} alt="" />
-          ) : (
-            <div className="wlp-sheet-avatar wlp-sheet-avatar--ph" aria-hidden="true">
-              {group.name.substring(0, 2).toUpperCase()}
-            </div>
-          )}
-          <div className="wlp-sheet-id">
-            <h2 className="wlp-sheet-name">{group.name}</h2>
-            <div className="wlp-sheet-meta">
-              {trackCountLabel(group.total)} wanted
-              {stuck.length > 0 ? (
-                <span className="wlp-sheet-stuck"> · {stuck.length} stuck</span>
-              ) : null}
-            </div>
-          </div>
-        </div>
-
-        {callout ? (
-          <div className="wlp-sheet-callout" role="note">
-            <span className="wlp-sheet-callout-icon" aria-hidden="true">
-              !
-            </span>
-            <div>
-              <div className="wlp-sheet-callout-title">{callout.headline}</div>
-              <p className="wlp-sheet-callout-text">{callout.detail}</p>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="wlp-sheet-actions">
+    <NebulaSheet
+      label={`${group.name} on the wishlist`}
+      image={image}
+      avatarFallback={group.name.substring(0, 2).toUpperCase()}
+      name={group.name}
+      meta={
+        <>
+          {trackCountLabel(group.total)} wanted
+          {stuck.length > 0 ? (
+            <span className="wlp-sheet-stuck"> · {stuck.length} stuck</span>
+          ) : null}
+        </>
+      }
+      callout={callout}
+      onClose={onClose}
+      actions={
+        <>
           <button
             type="button"
             className="wlp-btn wlp-btn--primary wlp-sheet-primary"
@@ -170,83 +123,81 @@ export function WishlistArtistSheet({
           >
             Open artist
           </button>
-        </div>
-
-        <div className="wlp-sheet-body">
-          {group.albums.map((album) => (
-            <section key={album.name} className="wlp-sheet-album" data-album={album.name}>
-              <div className="wlp-sheet-album-head">
-                {album.image ? (
-                  <img className="wlp-sheet-cover" src={album.image} alt="" />
-                ) : (
-                  <div className="wlp-sheet-cover wlp-sheet-cover--ph" aria-hidden="true">
-                    ♪
-                  </div>
-                )}
-                <div className="wlp-sheet-album-id">
-                  <div className="wlp-sheet-album-name" title={album.name}>
-                    {album.name}
-                  </div>
-                  <div className="wlp-sheet-album-count">
-                    {trackCountLabel(album.tracks.length)} wanted
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="wlp-sheet-chip"
-                  disabled={actionBusy}
-                  title={`Download "${album.name}" now`}
-                  aria-label={`Download album ${album.name} now`}
-                  onClick={() => onGrabAlbum(album)}
-                >
-                  Grab
-                </button>
-                <button
-                  type="button"
-                  className="wlp-sheet-x"
-                  title="Remove album from the wishlist"
-                  aria-label={`Remove album ${album.name}`}
-                  onClick={() => onRemoveAlbum(album.name)}
-                >
-                  ✕
-                </button>
+        </>
+      }
+    >
+      {group.albums.map((album) => (
+        <section key={album.name} className="wlp-sheet-album" data-album={album.name}>
+          <div className="wlp-sheet-album-head">
+            {album.image ? (
+              <img className="wlp-sheet-cover" src={album.image} alt="" />
+            ) : (
+              <div className="wlp-sheet-cover wlp-sheet-cover--ph" aria-hidden="true">
+                ♪
               </div>
-              {album.tracks.map((track) => (
-                <SheetTrack
-                  key={track.id || track.track}
-                  track={track}
-                  onRemove={() => onRemoveTrack(track.id)}
-                />
-              ))}
-            </section>
+            )}
+            <div className="wlp-sheet-album-id">
+              <div className="wlp-sheet-album-name" title={album.name}>
+                {album.name}
+              </div>
+              <div className="wlp-sheet-album-count">
+                {trackCountLabel(album.tracks.length)} wanted
+              </div>
+            </div>
+            <button
+              type="button"
+              className="wlp-sheet-chip"
+              disabled={actionBusy}
+              title={`Download "${album.name}" now`}
+              aria-label={`Download album ${album.name} now`}
+              onClick={() => onGrabAlbum(album)}
+            >
+              Grab
+            </button>
+            <button
+              type="button"
+              className="wlp-sheet-x"
+              title="Remove album from the wishlist"
+              aria-label={`Remove album ${album.name}`}
+              onClick={() => onRemoveAlbum(album.name)}
+            >
+              ✕
+            </button>
+          </div>
+          {album.tracks.map((track) => (
+            <SheetTrack
+              key={track.id || track.track}
+              track={track}
+              onRemove={() => onRemoveTrack(track.id)}
+            />
           ))}
+        </section>
+      ))}
 
-          {group.singles.length > 0 ? (
-            <section className="wlp-sheet-album">
-              <h3 className="wlp-sheet-label">Singles</h3>
-              {group.singles.map((track) => (
-                <SheetTrack
-                  key={track.id || track.track}
-                  track={track}
-                  withCover
-                  onRemove={() => onRemoveTrack(track.id)}
-                />
-              ))}
-            </section>
-          ) : null}
+      {group.singles.length > 0 ? (
+        <section className="wlp-sheet-album">
+          <h3 className="wlp-sheet-label">Singles</h3>
+          {group.singles.map((track) => (
+            <SheetTrack
+              key={track.id || track.track}
+              track={track}
+              withCover
+              onRemove={() => onRemoveTrack(track.id)}
+            />
+          ))}
+        </section>
+      ) : null}
 
-          <button
-            type="button"
-            className="wlp-sheet-remove"
-            title={`Remove ${group.name} from the wishlist`}
-            aria-label={`Remove ${group.name} from the wishlist`}
-            onClick={onRemoveArtist}
-          >
-            Remove artist from wishlist
-          </button>
-        </div>
-      </aside>
-    </>
+      <button
+        type="button"
+        className="wlp-sheet-remove"
+        title={`Remove ${group.name} from the wishlist`}
+        aria-label={`Remove ${group.name} from the wishlist`}
+        onClick={onRemoveArtist}
+      >
+        Remove artist from wishlist
+      </button>
+    </NebulaSheet>
   );
 }
 

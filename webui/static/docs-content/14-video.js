@@ -502,6 +502,23 @@ The **Wishlist** is everything the video side wants but doesn't have at the qual
 - **Cutoff-unmet** — titles you own below their profile's cutoff quality
 
 It's the video equivalent of a Sonarr/Radarr "Wanted" queue: the single list the download pipeline works through.
+
+The page has three tabs — **Movies**, **TV** and **YouTube** — and looks and works like the music wishlist. Movies show as posters; shows and channels show as orbs.
+
+## Grouped by what's wrong
+
+Everything is grouped by what's holding it up, worst first:
+
+- **Found, but turned down** — a release that *is* this title came back, and one of your rules (quality tiers, size cap, blocklist) refused it. This is the one you can act on.
+- **Nothing found** — no source had a release that was this title
+- **Couldn't search** — a source isn't set up or is down, so nothing was looked for
+- **Keeps coming back empty** — searched three times or more, with no receipt saying why yet
+- **Not posted yet** — the show is out there, this episode simply isn't yet (a wait, not a fault)
+- **Downloading now**, **Still hunting**, **Upgrading**, **Not out yet**, **Not followed** and **Done** for everything that's fine
+
+A show or channel sits in the group of its worst episode. **⚠ Failing** narrows the page to the stuck ones.
+
+Click a poster or orb and a panel opens beside it (a drawer on a tablet, a bottom sheet on a phone). It says in plain words why the title is stuck, and lists every season and episode with **Search**, a **⋯** menu for **Pick a release** and **Retry with all sources**, and remove. Click an episode to open its synopsis, guest cast and **what the last search found** — every release each source returned and the rule that turned it down.
 `
         },
         {

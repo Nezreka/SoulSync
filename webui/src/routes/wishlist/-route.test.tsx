@@ -194,6 +194,27 @@ describe('wishlist route', () => {
     fireEvent.click(document.querySelector('.wlp-sheet-scrim')!);
     expect(document.querySelector('.wlp-sheet')).toBeNull();
 
+    // a hidden dialog the shell keeps in the page (the profile picker is one)
+    // must not swallow escape: that broke it in the real app
+    const parked = document.createElement('div');
+    parked.setAttribute('role', 'dialog');
+    parked.hidden = true;
+    document.body.appendChild(parked);
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    parked.remove();
+    // nor one parked faded out (the track detail overlay: opacity 0, no pointer events)
+    const faded = document.createElement('div');
+    faded.style.opacity = '0';
+    faded.style.pointerEvents = 'none';
+    faded.innerHTML = '<div role="dialog" aria-modal="true"></div>';
+    document.body.appendChild(faded);
+    fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.wlp-sheet')).toBeNull();
+    faded.remove();
+
     // but not while a dialog opened from the panel is the thing being closed
     fireEvent.click(orbs()[0].querySelector('.wl-orb')!);
     const dialog = document.createElement('div');

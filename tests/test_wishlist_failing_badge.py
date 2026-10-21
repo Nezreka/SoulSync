@@ -23,6 +23,8 @@ _WL = _ROOT / "webui" / "src" / "routes" / "wishlist"
 _HELPERS = (_WL / "-wishlist.helpers.ts").read_text(encoding="utf-8", errors="replace")
 _TYPES = (_WL / "-wishlist.types.ts").read_text(encoding="utf-8", errors="replace")
 _ORB = (_WL / "-ui" / "wishlist-orb.tsx").read_text(encoding="utf-8", errors="replace")
+# the orb itself (one for music and video) lives in the shared parts
+_PARTS = (_WL / "-ui" / "nebula-parts.tsx").read_text(encoding="utf-8", errors="replace")
 # the artist detail moved out of the orb into a panel beside the nebula
 _SHEET = (_WL / "-ui" / "wishlist-artist-sheet.tsx").read_text(encoding="utf-8", errors="replace")
 _PAGE = (_WL / "-ui" / "wishlist-page.tsx").read_text(encoding="utf-8", errors="replace")
@@ -43,8 +45,10 @@ def test_parser_carries_the_retry_data():
 def test_failing_marks_reach_every_surface():
     # the orb meta rollup, the panel header, and each track row in the panel
     # (album tracks and singles share one row component)
-    assert "wl-orb-meta--stuck" in _ORB
-    assert "data-failing={group.failingCount}" in _ORB
+    assert "failingCount={group.failingCount}" in _ORB
+    assert "stuck={group.failingCount > 0}" in _ORB
+    assert "data-failing={failingCount}" in _PARTS
+    assert "wl-orb-meta--stuck" in _PARTS
     assert "wlp-sheet-stuck" in _SHEET
     assert "wlp-sheet-pill${track.failing ? ' is-stuck'" in _SHEET
 
