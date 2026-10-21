@@ -415,6 +415,12 @@ def mirrored_cover_from_match(extra_data: dict) -> str:
     return ''
 
 
+
+def _register_py_lower(conn) -> None:
+    """sqlite's LOWER() only folds ascii, so "MARCØS" never equals "marcøs".
+    python's lower() does. register it per connection for the name lookups."""
+    conn.create_function("PY_LOWER", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -24196,6 +24202,63 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error counting unverified library history: %s", e)
             return 0
+
+    def get_artist_thumbs_by_names(self, lower_names) -> list[tuple]:
+        """(lowercased name, thumb url) for artists the downloads page names.
+
+        library artists first, then watched artists for anyone not in the
+        library yet. lowercased on both sides because a download's artist
+        string and the media server's can differ only in case.
+        """
+        names = [n for n in dict.fromkeys(lower_names or []) if n]
+        if not names:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(names), 500):
+                chunk = names[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(name), thumb_url FROM artists
+                    WHERE PY_LOWER(name) IN ({marks}) AND thumb_url IS NOT NULL AND thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+                cursor.execute(f"""
+                    SELECT PY_LOWER(artist_name), image_url FROM watchlist_artists
+                    WHERE PY_LOWER(artist_name) IN ({marks}) AND image_url IS NOT NULL AND image_url != ''
+                """, chunk)
+                out.extend((r[0], r[1]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("artist thumb lookup failed: %s", e)
+        return out
+
+    def get_album_thumbs_by_titles(self, lower_titles) -> list[tuple]:
+        """(lowercased artist, lowercased album, thumb url) for album titles the
+        downloads page names. the caller matches the artist, so two albums
+        called "Greatest Hits" don't swap covers."""
+        titles = [t for t in dict.fromkeys(lower_titles or []) if t]
+        if not titles:
+            return []
+        out = []
+        try:
+            conn = self._get_connection()
+            _register_py_lower(conn)
+            cursor = conn.cursor()
+            for i in range(0, len(titles), 500):
+                chunk = titles[i:i + 500]
+                marks = ",".join("?" * len(chunk))
+                cursor.execute(f"""
+                    SELECT PY_LOWER(ar.name), PY_LOWER(al.title), al.thumb_url
+                    FROM albums al JOIN artists ar ON ar.id = al.artist_id
+                    WHERE PY_LOWER(al.title) IN ({marks}) AND al.thumb_url IS NOT NULL AND al.thumb_url != ''
+                """, chunk)
+                out.extend((r[0], r[1], r[2]) for r in cursor.fetchall())
+        except Exception as e:
+            logger.debug("album thumb lookup failed: %s", e)
+        return out
 
     def get_library_history_unverified(self, exclude_download_sources=()) -> list[dict]:
         """Return every library_history row that still needs human confirmation.

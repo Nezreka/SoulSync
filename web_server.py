@@ -17019,6 +17019,14 @@ def get_active_processes():
 
 # Status payload helpers live in core/downloads/status.py.
 from core.downloads import status as _downloads_status
+from core.downloads import row_art as _row_art
+
+# one per process so its name cache outlives each 2s poll
+_row_art_lookup = _row_art.RowArtLookup(
+    query_artists=lambda names: get_database().get_artist_thumbs_by_names(names),
+    query_albums=lambda titles: get_database().get_album_thumbs_by_titles(titles),
+    normalize=fix_artist_image_url,
+)
 
 
 def _build_status_deps():
@@ -17050,6 +17058,7 @@ def _build_status_deps():
         get_unverified_download_history=lambda: get_database().get_library_history_unverified(
             exclude_download_sources=('acoustid_scan',),
         ),
+        attach_row_art=lambda items: _row_art.attach_row_art(items, _row_art_lookup),
     )
 
 
