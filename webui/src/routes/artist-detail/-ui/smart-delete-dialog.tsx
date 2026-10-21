@@ -1,4 +1,8 @@
-import { useEffect } from 'react';
+import clsx from 'clsx';
+
+import { DialogFrame } from '@/components/dialog';
+
+import styles from './smart-delete-dialog.module.css';
 
 /**
  * The two-option delete dialog (library.js _showSmartDeleteDialog 3139 /
@@ -43,61 +47,45 @@ export function SmartDeleteDialog({
   onChoose: (choice: string) => void;
   onClose: () => void;
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    <div
-      className="modal-overlay"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.7)',
-        zIndex: 10000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+    <DialogFrame
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
+      viewportClassName={clsx('modal-overlay', styles.overlay)}
+      className="smart-delete-modal"
+      aria-label={copy.title}
     >
-      <div className="smart-delete-modal">
-        <div className="smart-delete-header">
-          <h3>{copy.title}</h3>
-          <button className="smart-delete-close" type="button" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        <p className="smart-delete-desc">
-          How should this {copy.title === 'Delete Album' ? 'album' : 'track'} be deleted?
-        </p>
-        <div className="smart-delete-options">
-          <button className="smart-delete-option" type="button" onClick={() => onChoose('db_only')}>
-            <div className="smart-delete-option-icon">📋</div>
-            <div className="smart-delete-option-info">
-              <div className="smart-delete-option-title">Remove from Library</div>
-              <div className="smart-delete-option-desc">{copy.keepDesc}</div>
-            </div>
-          </button>
-          <button
-            className="smart-delete-option destructive"
-            type="button"
-            onClick={() => onChoose(copy.deleteChoice)}
-          >
-            <div className="smart-delete-option-icon">🗑️</div>
-            <div className="smart-delete-option-info">
-              <div className="smart-delete-option-title">{copy.deleteTitle}</div>
-              <div className="smart-delete-option-desc">{copy.deleteDesc}</div>
-            </div>
-          </button>
-        </div>
+      <div className="smart-delete-header">
+        <h3>{copy.title}</h3>
+        <button className="smart-delete-close" type="button" onClick={onClose}>
+          ×
+        </button>
       </div>
-    </div>
+      <p className="smart-delete-desc">
+        How should this {copy.title === 'Delete Album' ? 'album' : 'track'} be deleted?
+      </p>
+      <div className="smart-delete-options">
+        <button className="smart-delete-option" type="button" onClick={() => onChoose('db_only')}>
+          <div className="smart-delete-option-icon">📋</div>
+          <div className="smart-delete-option-info">
+            <div className="smart-delete-option-title">Remove from Library</div>
+            <div className="smart-delete-option-desc">{copy.keepDesc}</div>
+          </div>
+        </button>
+        <button
+          className="smart-delete-option destructive"
+          type="button"
+          onClick={() => onChoose(copy.deleteChoice)}
+        >
+          <div className="smart-delete-option-icon">🗑️</div>
+          <div className="smart-delete-option-info">
+            <div className="smart-delete-option-title">{copy.deleteTitle}</div>
+            <div className="smart-delete-option-desc">{copy.deleteDesc}</div>
+          </div>
+        </button>
+      </div>
+    </DialogFrame>
   );
 }
