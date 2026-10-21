@@ -927,6 +927,20 @@ class MusicMatchingEngine:
         return queries[0] if queries else ""
         
     
+    @staticmethod
+    def _candidate_text(slskd_track) -> str:
+        """The text the matcher reads off a result.
+
+        Soulseek: the path. YouTube: just the title after the video id, since
+        'videoId||title' is not a path and the id only drags the score down.
+        A catalog hit is 'videoId||Sugar', so the id was most of the string
+        and exact matches fell under the threshold (#1817).
+        """
+        filename = slskd_track.filename or ''
+        if getattr(slskd_track, 'username', None) == 'youtube' and '||' in filename:
+            return filename.split('||', 1)[1]
+        return filename
+
     def calculate_slskd_match_confidence(self, spotify_track: SpotifyTrack, slskd_track: TrackResult) -> float:
         """
         Calculates a confidence score for a Soulseek track against a Spotify track.
@@ -937,8 +951,12 @@ class MusicMatchingEngine:
         spotify_title_norm = self.normalize_string(spotify_track.name)
         spotify_artists_norm = [self.normalize_string(a) for a in spotify_track.artists]
 
+        # --- Source Type ---
+        is_youtube = slskd_track.username == 'youtube'
+
         # The slskd filename is our primary source of truth, so normalize it
-        slskd_filename_norm = self.normalize_string(slskd_track.filename)
+        candidate_text = self._candidate_text(slskd_track)
+        slskd_filename_norm = self.normalize_string(candidate_text)
 
         # 1. Title Score: Use full-string similarity instead of substring matching
         # This prevents false positives like "Love" matching "Loveless"
@@ -965,7 +983,11 @@ class MusicMatchingEngine:
 
         # Split original filename into segments for per-segment matching.
         # Handles path separators (/, \) and YouTube's || delimiter.
-        _artist_segments = re.split(r'[/\\|]+', slskd_track.filename)
+        _artist_segments = re.split(r'[/\\|]+', candidate_text)
+        # YouTube hands us the artist already. A catalog hit's title never
+        # carries it, so without this the artist was nowhere to be found.
+        if is_youtube and getattr(slskd_track, 'artist', None):
+            _artist_segments.append(slskd_track.artist)
         _artist_segments_norm = [self.normalize_string(s) for s in _artist_segments if s.strip()]
 
         for artist in spotify_artists_norm:
@@ -1008,9 +1030,6 @@ class MusicMatchingEngine:
                 quality_bonus = 0.03  # Reduced from 0.07
             elif slskd_track.quality.lower() == 'mp3' and (slskd_track.bitrate or 0) >= 320:
                 quality_bonus = 0.02  # Reduced from 0.05
-
-        # --- Source Type ---
-        is_youtube = slskd_track.username == 'youtube'
 
         # 4b. Album Bonus/Penalty: Prefer results from the correct album folder.
         # Uses full-string similarity to prevent "Paradise" matching "Club Paradise".
@@ -1262,7 +1281,9 @@ class MusicMatchingEngine:
         base_confidence = self.calculate_slskd_match_confidence(spotify_track, slskd_track)
 
         # Detect version type in Soulseek result
-        version_type, penalty = self.detect_version_type(slskd_track.filename)
+        candidate_text = self._candidate_text(slskd_track)
+        is_youtube = getattr(slskd_track, 'username', None) == 'youtube'
+        version_type, penalty = self.detect_version_type(candidate_text)
 
         # --- Base-title veto (#1626) ---
         # A shared version qualifier inflates whole-path similarity enough to
@@ -1298,9 +1319,9 @@ class MusicMatchingEngine:
                                   or [''])[0]
                 _wanted_base = self.base_title_of(spotify_track.name,
                                                   _wanted_artist)
-                _cand_base = self.base_title_of(slskd_track.filename,
+                _cand_base = self.base_title_of(candidate_text,
                                                 _wanted_artist,
-                                                from_filename=True)
+                                                from_filename=not is_youtube)
                 if _wanted_base and _cand_base:
                     _base_sim = SequenceMatcher(
                         None, _wanted_base, _cand_base).ratio()
@@ -1526,8 +1547,9 @@ class MusicMatchingEngine:
             if getattr(r, 'version_type', 'original') != preferred:
                 continue
             try:
-                if self.base_title_of(getattr(r, 'filename', ''), artist,
-                                      from_filename=True) == wanted:
+                is_youtube = getattr(r, 'username', None) == 'youtube'
+                if self.base_title_of(self._candidate_text(r), artist,
+                                      from_filename=not is_youtube) == wanted:
                     matches.add(id(r))
             except Exception:
                 continue
