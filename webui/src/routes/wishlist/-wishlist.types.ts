@@ -29,10 +29,7 @@ export const wishlistSearchSchema = z.object({
    */
   // movies / tv / youtube: the video wishlist, reached from the video sidebar
   // (video-side.js hands /video-wishlist off to this page with one of these).
-  media: z
-    .enum(['music', 'audiobooks', 'movies', 'tv', 'youtube'])
-    .default('music')
-    .catch('music'),
+  media: z.enum(['music', 'audiobooks', 'movies', 'tv', 'youtube']).default('music').catch('music'),
 });
 
 export type WishlistSearch = z.infer<typeof wishlistSearchSchema>;

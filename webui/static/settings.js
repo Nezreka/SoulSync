@@ -78,6 +78,17 @@ function syncRetryConditionalRows() {
 }
 window.syncRetryConditionalRows = syncRetryConditionalRows;
 
+// Sign in with OIDC: the provider's settings (and the admin's connect row
+// inside them) only mean something while the toggle is on, so they hide when
+// it is off. Hidden fields keep their values and still save, so switching
+// OIDC off and on again loses nothing.
+function syncOidcProviderBlock() {
+    const toggle = document.getElementById('security-oidc-signin');
+    const block = document.getElementById('security-oidc-provider');
+    if (block) block.hidden = !(toggle && toggle.checked);
+}
+window.syncOidcProviderBlock = syncOidcProviderBlock;
+
 // Every Settings -> Quality control belongs to the profile currently shown in
 // the editor. Keep this list separate from ordinary app settings so a quality
 // edit uses the profile endpoint (and does not re-initialize every service
@@ -3642,6 +3653,30 @@ async function loadSettingsData() {
             if (plexCreate) plexCreate.checked = settings.security?.plex_signin_auto_create !== false;
             const plexDl = document.getElementById('security-plex-signin-can-download');
             if (plexDl) plexDl.checked = settings.security?.plex_signin_default_can_download || false;
+            const oidcOn = document.getElementById('security-oidc-signin');
+            if (oidcOn) oidcOn.checked = settings.security?.oidc_signin || false;
+            syncOidcProviderBlock();
+            for (const [id, key] of [
+                ['security-oidc-issuer', 'oidc_issuer'],
+                ['security-oidc-client-id', 'oidc_client_id'],
+                ['security-oidc-client-secret', 'oidc_client_secret'],
+                ['security-oidc-button-label', 'oidc_button_label'],
+                ['security-oidc-icon-url', 'oidc_icon_url'],
+                ['security-oidc-required-group', 'oidc_required_group'],
+                ['security-oidc-groups-claim', 'oidc_groups_claim'],
+                ['security-oidc-scopes', 'oidc_scopes'],
+                ['security-oidc-redirect-uri', 'oidc_redirect_uri'],
+            ]) {
+                const el = document.getElementById(id);
+                if (el) el.value = settings.security?.[key] || '';
+            }
+            const oidcCreate = document.getElementById('security-oidc-signin-auto-create');
+            if (oidcCreate) oidcCreate.checked = settings.security?.oidc_signin_auto_create !== false;
+            const oidcDl = document.getElementById('security-oidc-signin-can-download');
+            if (oidcDl) oidcDl.checked = settings.security?.oidc_signin_default_can_download || false;
+            // the address to register at the provider, as this browser sees it
+            const oidcCb = document.getElementById('security-oidc-callback-url');
+            if (oidcCb) oidcCb.textContent = window.location.origin + '/api/auth/oidc/callback';
             const signupSides = document.getElementById('security-signup-sides');
             if (signupSides) {
                 const sides = settings.security?.signup_sides;
@@ -6804,6 +6839,18 @@ async function saveSettings(quiet = false) {
             plex_signin: _cfgBool('security-plex-signin'),
             plex_signin_auto_create: _cfgBool('security-plex-signin-auto-create'),
             plex_signin_default_can_download: _cfgBool('security-plex-signin-can-download'),
+            oidc_signin: _cfgBool('security-oidc-signin'),
+            oidc_issuer: _cfgStr('security-oidc-issuer', { trim: true }),
+            oidc_client_id: _cfgStr('security-oidc-client-id', { trim: true }),
+            oidc_client_secret: _cfgStr('security-oidc-client-secret'),
+            oidc_button_label: _cfgStr('security-oidc-button-label', { trim: true }),
+            oidc_icon_url: _cfgStr('security-oidc-icon-url', { trim: true }),
+            oidc_required_group: _cfgStr('security-oidc-required-group', { trim: true }),
+            oidc_groups_claim: _cfgStr('security-oidc-groups-claim', { trim: true }),
+            oidc_scopes: _cfgStr('security-oidc-scopes', { trim: true }),
+            oidc_redirect_uri: _cfgStr('security-oidc-redirect-uri', { trim: true }),
+            oidc_signin_auto_create: _cfgBool('security-oidc-signin-auto-create'),
+            oidc_signin_default_can_download: _cfgBool('security-oidc-signin-can-download'),
             signup_sides: _cfgStr('security-signup-sides', { fallback: 'music' }),
             signup_request_limit: _cfgInt('security-signup-request-limit', 0),
             signup_request_limit_days: _cfgInt('security-signup-request-limit-days', 7),

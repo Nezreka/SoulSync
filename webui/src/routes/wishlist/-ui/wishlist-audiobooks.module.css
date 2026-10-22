@@ -47,7 +47,7 @@
     rgba(var(--accent-rgb), 0.08) 100%
   );
   border: 1px solid rgba(var(--accent-rgb), 0.35);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 14px var(--black-a15);
   backdrop-filter: blur(10px);
 }
 
@@ -70,8 +70,8 @@
   width: 22px;
   height: 22px;
   transition:
-    background 0.15s ease,
-    color 0.15s ease;
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .searchClear:hover {
@@ -120,7 +120,7 @@
 
 .skeleton {
   height: 320px;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a06);
   --skeleton-base: var(--white-a03);
   --skeleton-highlight: var(--white-a08);
@@ -147,16 +147,16 @@
   background: var(--white-a02);
   border: 1px solid var(--white-a05);
   transition:
-    border-color 0.2s ease,
-    background 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
+    border-color var(--dur-base) ease,
+    background var(--dur-base) ease,
+    box-shadow var(--dur-base) ease,
+    transform var(--dur-base) ease;
 }
 
 .card:hover {
   background: var(--white-a04);
   border-color: var(--white-a12);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 16px 36px var(--black-a35);
 }
 
 .coverContainer {
@@ -195,10 +195,10 @@
   z-index: 5;
   opacity: 0;
   transition:
-    opacity 0.18s ease,
-    background 0.18s ease,
-    transform 0.18s ease,
-    color 0.18s ease;
+    opacity var(--dur-quick) ease,
+    background var(--dur-quick) ease,
+    transform var(--dur-quick) ease,
+    color var(--dur-quick) ease;
 }
 
 .card:hover .quickRemove,
@@ -226,25 +226,25 @@
   overflow: hidden;
   background: #15161e;
   border: 1px solid var(--white-a08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 18px var(--black-a25);
   transition:
-    border-color 0.2s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+    border-color var(--dur-base) ease,
+    transform var(--dur-base) ease,
+    box-shadow var(--dur-base) ease;
 }
 
 .card:hover .art {
   border-color: rgba(var(--accent-rgb), 0.55);
   transform: translateY(-3px);
   box-shadow:
-    0 16px 36px rgba(0, 0, 0, 0.45),
+    0 16px 36px var(--black-a45),
     0 0 20px rgba(var(--accent-rgb), 0.15);
 }
 
 .spineSheen {
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, var(--white-a15) 0%, rgba(0, 0, 0, 0.4) 3.5%, transparent 9%);
+  background: linear-gradient(90deg, var(--white-a15) 0%, var(--black-a40) 3.5%, transparent 9%);
   pointer-events: none;
   z-index: 2;
 }
@@ -269,9 +269,9 @@
 .scrim {
   position: absolute;
   inset: 0;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.6) 0%, transparent 50%);
+  background: linear-gradient(0deg, var(--black-a60) 0%, transparent 50%);
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--dur-base) ease;
   pointer-events: none;
   z-index: 1;
 }
@@ -360,12 +360,12 @@
 
 .badgeDone {
   background: rgba(10, 12, 18, 0.82);
-  border-color: rgba(34, 197, 94, 0.45);
+  border-color: rgba(var(--success-strong-rgb), 0.45);
   color: #86efac;
 }
 
 .badgeDone .badgePulse {
-  background: #22c55e;
+  background: var(--success-strong);
 }
 
 .badgeFailed {
@@ -396,7 +396,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color 0.15s ease;
+  transition: color var(--dur-fast) ease;
 }
 
 .title:hover {
@@ -426,9 +426,9 @@
   cursor: pointer;
   border: 1px solid transparent;
   transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
 }
 
 .narratorLocked {
@@ -488,7 +488,7 @@
   gap: 6px;
   margin-top: 8px;
   opacity: 0.88;
-  transition: opacity 0.18s ease;
+  transition: opacity var(--dur-quick) ease;
 }
 
 .card:hover .actions,
@@ -516,10 +516,10 @@
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background-color 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease,
-    transform 0.15s ease;
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 
 .action:hover {
@@ -570,26 +570,26 @@
   justify-content: space-between;
   gap: 16px;
   padding: 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a02);
   border: 1px solid var(--white-a06);
   transition:
-    background 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    background var(--dur-quick) ease,
+    border-color var(--dur-quick) ease,
+    box-shadow var(--dur-quick) ease;
 }
 
 .shelfRow:hover {
   background: rgba(255, 255, 255, 0.045);
   border-color: var(--white-a12);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 8px 24px var(--black-a25);
 }
 
 .shelfThumb {
   position: relative;
   width: 52px;
   height: 52px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   flex-shrink: 0;
   background: #15161e;

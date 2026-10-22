@@ -124,7 +124,7 @@
   border-radius: var(--radius-pill);
   background: var(--white-a12);
   backdrop-filter: blur(4px);
-  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.35s var(--ease-emphasized);
   position: relative;
 }
 
@@ -151,8 +151,8 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  transition: all 0.22s var(--ease-emphasized);
+  box-shadow: 0 4px 16px var(--black-a30);
 }
 
 .close:hover {
@@ -160,7 +160,7 @@
   color: #fff;
   border-color: var(--white-a25);
   transform: scale(1.08);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 20px var(--black-a40);
 }
 
 .close:active {
@@ -297,13 +297,13 @@
   align-items: center;
   gap: 8px;
   padding: 20px 28px;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   background: var(--white-a04);
   border: 1px solid var(--white-a08);
   backdrop-filter: blur(16px);
   min-width: 170px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
-  transition: all 0.25s ease;
+  box-shadow: 0 10px 30px var(--black-a25);
+  transition: all var(--dur-moderate) ease;
 }
 
 .fact:hover {
@@ -374,7 +374,7 @@
   transform-origin: bottom;
   animation: barGrow 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
   box-shadow: 0 0 12px rgba(var(--accent-light-rgb), 0.3);
-  transition: filter 0.2s ease;
+  transition: filter var(--dur-base) ease;
 }
 
 .monthBar:hover {
@@ -449,11 +449,11 @@
   align-items: center;
   gap: 16px;
   padding: 12px 18px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid var(--white-a06);
   backdrop-filter: blur(12px);
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .countdownRow:hover {
@@ -522,7 +522,7 @@
   box-shadow:
     0 0 0 3px rgba(var(--accent-light-rgb), 0.4),
     0 0 50px rgba(var(--accent-light-rgb), 0.3),
-    0 24px 60px rgba(0, 0, 0, 0.7);
+    0 24px 60px var(--black-a70);
   animation: heroPulse 4s ease-in-out infinite alternate;
 }
 
@@ -532,14 +532,14 @@
     box-shadow:
       0 0 0 3px rgba(var(--accent-light-rgb), 0.35),
       0 0 40px rgba(var(--accent-light-rgb), 0.25),
-      0 24px 60px rgba(0, 0, 0, 0.7);
+      0 24px 60px var(--black-a70);
   }
   100% {
     transform: scale(1.03);
     box-shadow:
       0 0 0 4px rgba(var(--accent-light-rgb), 0.6),
       0 0 65px rgba(var(--accent-light-rgb), 0.45),
-      0 28px 70px rgba(0, 0, 0, 0.8);
+      0 28px 70px var(--black-a80);
   }
 }
 
@@ -552,7 +552,7 @@
   font-size: 3.5rem;
   box-shadow:
     0 0 0 1px var(--white-a12),
-    0 24px 60px rgba(0, 0, 0, 0.7),
+    0 24px 60px var(--black-a70),
     0 0 40px rgba(var(--accent-light-rgb), 0.2);
 }
 
@@ -561,7 +561,7 @@
   color: inherit;
   text-decoration: none;
   border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .heroLink:hover,
@@ -582,11 +582,11 @@
 .collageArt {
   width: 90px;
   height: 90px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   object-fit: cover;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 14px 34px var(--black-a60);
   border: 1px solid var(--white-a10);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-slow) var(--ease-emphasized);
 }
 
 .collageArt:nth-child(1) {
@@ -598,7 +598,7 @@
 .collageArt:nth-child(3) {
   transform: rotate(0deg) scale(1.1);
   z-index: 2;
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 18px 45px var(--black-a70);
 }
 .collageArt:nth-child(4) {
   transform: rotate(3deg) translateY(-4px);
@@ -611,7 +611,7 @@
   transform: translateY(-8px) scale(1.15) !important;
   z-index: 5;
   box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.8),
+    0 20px 50px var(--black-a80),
     0 0 25px rgba(var(--accent-light-rgb), 0.35);
 }
 
@@ -629,13 +629,13 @@
   gap: 6px;
   padding: 12px;
   border: 1px solid var(--white-a06);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   background: var(--white-a03);
   backdrop-filter: blur(12px);
   color: inherit;
   font: inherit;
   text-align: left;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-moderate) var(--ease-emphasized);
 }
 
 .albumCardPlayable {
@@ -646,7 +646,7 @@
   background: var(--white-a08);
   border-color: var(--white-a18);
   transform: translateY(-4px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 16px 40px var(--black-a50);
 }
 
 .albumArtWrap {
@@ -672,9 +672,9 @@
   font-size: 1.1rem;
   opacity: 0;
   transform: translateY(10px) scale(0.9);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.22s var(--ease-emphasized);
   box-shadow:
-    0 10px 24px rgba(0, 0, 0, 0.5),
+    0 10px 24px var(--black-a50),
     0 0 15px rgba(var(--accent-light-rgb), 0.5);
 }
 
@@ -689,10 +689,10 @@
   width: 100%;
   aspect-ratio: 1;
   border-radius: var(--radius-lg);
-  transition: transform 0.3s ease;
+  transition: transform var(--dur-slow) ease;
   object-fit: cover;
   font-size: 2.6rem;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 28px var(--black-a50);
 }
 
 .albumCardPlayable:hover .albumArt {
@@ -736,19 +736,19 @@
   gap: 6px;
   padding: 18px 12px;
   border: 1px solid var(--white-a07);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(12px);
   color: inherit;
   text-decoration: none;
-  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.24s var(--ease-emphasized);
 }
 
 .discoveryCard:hover {
   border-color: rgba(var(--accent-light-rgb), 0.4);
   background: rgba(var(--accent-light-rgb), 0.1);
   transform: translateY(-4px);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 30px var(--black-a40);
 }
 
 .discoveryArt {
@@ -758,7 +758,7 @@
   border-radius: var(--radius-circle);
   object-fit: cover;
   font-size: 2rem;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 24px var(--black-a40);
 }
 
 .discoveryName {
@@ -784,7 +784,7 @@
   object-fit: cover;
   font-size: 1.3rem;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 12px var(--black-a40);
 }
 
 /* =========================================================================
@@ -824,18 +824,18 @@
 .cardPreview {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   border: 1px solid var(--white-a12);
   box-shadow:
-    0 24px 70px rgba(0, 0, 0, 0.75),
+    0 24px 70px var(--black-a75),
     0 0 35px rgba(var(--accent-light-rgb), 0.16);
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-slow) var(--ease-emphasized);
 }
 
 .cardPreview:hover {
   transform: scale(1.02);
   box-shadow:
-    0 30px 85px rgba(0, 0, 0, 0.85),
+    0 30px 85px var(--black-a85),
     0 0 45px rgba(var(--accent-light-rgb), 0.25);
 }
 
@@ -851,7 +851,7 @@
   background: rgba(18, 22, 28, 0.65);
   border: 1px solid var(--white-a09);
   backdrop-filter: blur(24px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 16px 40px var(--black-a40);
 }
 
 .cardGroup {
@@ -893,14 +893,14 @@
   gap: 6px;
   padding: 7px 13px;
   border: 1px solid var(--white-a10);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a04);
   color: var(--white-a80);
   font-family: inherit;
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all var(--dur-quick) ease;
 }
 
 .chip:hover:not(:disabled) {
@@ -943,7 +943,7 @@
   font-size: 0.74rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .layoutChip:hover {
@@ -1030,18 +1030,18 @@
 .swatch {
   padding: 8px 14px;
   border: 1px solid var(--white-a16);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   font-family: inherit;
   font-size: 0.78rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
 }
 
 .swatch:hover {
   transform: translateY(-2px);
   filter: brightness(1.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--black-a30);
 }
 
 .swatchActive {
@@ -1092,7 +1092,7 @@
   font-size: 0.9rem;
   font-weight: 750;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
   box-shadow: 0 6px 20px rgba(var(--accent-light-rgb), 0.35);
 }
 
@@ -1117,7 +1117,7 @@
   font-size: 0.9rem;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
 }
 
 .copyButton:hover {
@@ -1188,7 +1188,7 @@
   font-size: 0.9rem;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
 }
 
 .navButton:hover:not(:disabled) {

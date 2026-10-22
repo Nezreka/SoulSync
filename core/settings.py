@@ -127,6 +127,8 @@ class ConfigManager:
         # Other
         'hydrabase.api_key',
         'discogs.token',
+        # Sign in with OIDC
+        'security.oidc_client_secret',
     })
 
     def _get_fernet(self) -> Fernet:

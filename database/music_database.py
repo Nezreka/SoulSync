@@ -1333,6 +1333,7 @@ class MusicDatabase:
             self._add_profile_navidrome_login(cursor)
             self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -6975,6 +6976,79 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
         return None
+
+    def _add_profile_oidc_identity(self, cursor):
+        """who signs in with oidc as this profile: the provider's issuer and
+        the account's subject, as one ``<issuer>|<sub>`` string. set only by
+        oidc sign-in or by a signed-in profile connecting its own account,
+        never from an email address or any other claim a user can change"""
+        try:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN oidc_identity TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def get_profile_by_oidc_identity(self, identity: str) -> Optional[Dict[str, Any]]:
+        """the profile an oidc account signs in as, or None.
+        {'id', 'name', 'is_admin', 'disabled'}"""
+        if not identity:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'oidc_identity' not in cols:
+                    return None
+                has_disabled = 'disabled' in cols
+                cursor.execute(
+                    f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
+                    "WHERE oidc_identity = ? ORDER BY id LIMIT 1", (str(identity),))
+                row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
+                    'disabled': bool(row['disabled']) if has_disabled else False}
+        except Exception as e:
+            logger.error(f"Error looking up profile by oidc identity: {e}")
+            return None
+
+    def set_profile_oidc_identity(self, profile_id: int, identity: Optional[str]) -> bool:
+        """record (or with None clear) which oidc account signs in as a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET oidc_identity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(identity) if identity else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving oidc identity for profile {profile_id}: {e}")
+            return False
+
+    def profile_sign_in_methods(self, profile_id: int) -> Dict[str, bool]:
+        """how a profile can sign in: {'password', 'plex', 'oidc'}. lets a
+        disconnect refuse to strand a profile with no other way in"""
+        out = {'password': False, 'plex': False, 'oidc': False}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                picks = [c for c in ('password_hash', 'plex_account_id', 'oidc_identity') if c in cols]
+                if not picks:
+                    return out
+                cursor.execute(f"SELECT {', '.join(picks)} FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row:
+                return out
+            names = {'password_hash': 'password', 'plex_account_id': 'plex', 'oidc_identity': 'oidc'}
+            for c in picks:
+                out[names[c]] = row[c] is not None
+            return out
+        except Exception as e:
+            logger.error(f"Error reading sign-in methods for profile {profile_id}: {e}")
+            return out
 
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,
@@ -12792,6 +12866,57 @@ class MusicDatabase:
                 best, best_confidence = candidate, confidence
         return (best, best_confidence) if best else None
     
+    def routed_album_owned_tracks(self, album: str, artist: str) -> int:
+        """How many tracks of ``album`` a routed artist has on disk.
+
+        The album twin of ``_routed_download_match``: a routed artist's albums
+        live in the audiobook library, so the ``albums`` table has no row for
+        them and the artist page listed every one as missing. The download
+        ledger knows them. Counts distinct files of completed downloads that
+        still exist; 0 for an artist that is not routed.
+        """
+        from core.audiobook_routing import existing_download_path, is_routed_artist, route_key
+        if not album or not is_routed_artist(artist, self):
+            return 0
+
+        def _title_key(value):
+            return ''.join(ch for ch in str(value or '').casefold() if ch.isalnum())
+
+        key, wanted = route_key(artist), _title_key(album)
+        with self._get_connection() as conn:
+            rows = conn.cursor().execute(
+                "SELECT file_path, track_artist, track_album FROM track_downloads "
+                "WHERE status = 'completed' AND file_path IS NOT NULL "
+                "AND track_artist IS NOT NULL AND track_album IS NOT NULL").fetchall()
+        files = set()
+        for row in rows:
+            if route_key(row['track_artist']) != key or _title_key(row['track_album']) != wanted:
+                continue
+            found = existing_download_path(row['file_path'])
+            if found:
+                files.add(found)
+        return max(len(files), self._audiobook_library_tracks(key, wanted, _title_key))
+
+    @staticmethod
+    def _audiobook_library_tracks(artist_key: str, album_key: str, title_key) -> int:
+        """File count of the audiobook library's copy of a routed album.
+
+        The library scan reads the same folder Audiobookshelf does, so a book
+        that arrived by hand (or before the artist was routed) is found here
+        even when the download ledger never heard of it.
+        """
+        from core.audiobook_routing import route_key
+        try:
+            from core.audiobook_database import get_audiobook_db
+            books = get_audiobook_db().get_library()
+        except Exception:  # noqa: BLE001 - the audiobook side being unavailable must not break the page
+            logger.debug("audiobook library lookup failed", exc_info=True)
+            return 0
+        return max(
+            (int(b.get('file_count') or 0) for b in books
+             if route_key(b.get('author')) == artist_key and title_key(b.get('title')) == album_key),
+            default=0)
+
     def check_album_exists(self, title: str, artist: str, confidence_threshold: float = 0.8) -> Tuple[Optional[DatabaseAlbum], float]:
         """
         Check if an album exists in the database with fuzzy matching and confidence scoring.

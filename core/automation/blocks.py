@@ -71,7 +71,7 @@ TRIGGERS: list[dict] = [
     {"type": "batch_complete", "label": "Batch Complete", "icon": "check-circle", "description": "When an album/playlist download finishes", "available": True,
      "has_conditions": True,
      "condition_fields": ["playlist_name"],
-     "variables": ["playlist_name", "total_tracks", "completed_tracks", "failed_tracks"]},
+     "variables": ["playlist_name", "artist", "title", "album", "total_tracks", "completed_tracks", "failed_tracks"]},
     {"type": "watchlist_new_release", "label": "New Release Found", "icon": "bell", "description": "When watchlist detects new music", "available": True,
      "has_conditions": True,
      "condition_fields": ["artist"],

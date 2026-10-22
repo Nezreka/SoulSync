@@ -212,6 +212,11 @@
                     <span class="login-plex-or">or</span>
                     <button id="login-plex-button" type="button" class="login-plex-button">Sign in with Plex</button>
                 </div>
+                <!-- shown when sign in with oidc is on (webui/src/shell/oidc-signin.ts) -->
+                <div id="login-oidc" class="login-oidc" hidden>
+                    <span class="login-oidc-or">or</span>
+                    <button id="login-oidc-button" type="button" class="login-oidc-button">Sign in with OIDC</button>
+                </div>
                 <p id="login-error" class="launch-pin-error" style="display: none;"></p>
                 <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
             </div>
@@ -4210,8 +4215,18 @@
                                                 <option value="">Loading...</option>
                                             </select>
                                         </div>
+                                        <!-- Every other TV library on the server: tick Scan to read it as
+                                     well, Anime when its shows are anime (their new episodes then go
+                                     to the Anime folder). Filled by video-settings.js. -->
+                                        <div class="form-group video-library-selectors video-library-tv-more"
+                                            data-video-lib-tv-more-row hidden>
+                                            <label>Other TV Libraries:</label>
+                                            <div class="video-library-tv-more-list" data-video-lib-tv-more></div>
+                                        </div>
                                         <div class="setting-help-text video-library-note">
-                                            Which libraries the video side scans. <span data-video-lib-save-status></span>
+                                            Which libraries the video side scans. A library ticked Anime files
+                                            its shows' new episodes in the Anime folder (Settings &gt; Library).
+                                            <span data-video-lib-save-status></span>
                                         </div>
                                     </div>
                                     <!-- Video Library Organization — uses the SAME settings vocabulary as the
@@ -7168,9 +7183,12 @@
                                                 <div class="form-group">
                                                     <label>🍥 Anime Library (optional):</label>
                                                     <input type="text" id="video-anime-path" placeholder="/media/anime">
-                                                    <div class="setting-help-text">New episodes of anime shows
-                                                        (series type Anime, or tagged with the Anime genre) go here
-                                                        instead of the TV folder. Leave empty to keep anime with TV.
+                                                    <div class="setting-help-text">New episodes of anime shows go
+                                                        here instead of the TV folder: shows in a TV library ticked Anime
+                                                        (Settings &gt; Connections), shows set to Anime by hand, and shows
+                                                        not in your library yet that TMDB suggests are anime (an admin can
+                                                        change that on the show's page or when approving). Leave empty to
+                                                        keep anime with TV.
                                                     </div>
                                                 </div>
                                                 <div class="setting-help-text">
@@ -9613,6 +9631,109 @@
                                                     </label>
                                                 </div>
 
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-oidc-signin"
+                                                            onchange="syncOidcProviderBlock()">
+                                                        <span>Sign in with OIDC</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a sign-in button for your own identity provider (Pocket ID,
+                                                        Authentik, Authelia, Keycloak or any other OpenID Connect
+                                                        provider). SoulSync never sees passwords. Create a client at the
+                                                        provider with this callback URL:
+                                                        <code id="security-oidc-callback-url">/api/auth/oidc/callback</code>.
+                                                        New OIDC profiles start with what New sign-ups below sets.
+                                                        Accounts are matched by the provider's account id, never by email,
+                                                        and nobody becomes an admin from a provider claim: to sign in as
+                                                        the admin, save these settings, then connect your own account
+                                                        at the bottom.
+                                                    </div>
+                                                    <!-- the provider's settings: one nested block inside the toggle's row -->
+                                                    <div class="security-nested security-nested-block" id="security-oidc-provider">
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-issuer">Issuer URL:</label>
+                                                            <input type="text" id="security-oidc-issuer" placeholder="https://id.example.com"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-id">Client ID:</label>
+                                                            <input type="text" id="security-oidc-client-id" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-secret">Client secret:</label>
+                                                            <input type="password" id="security-oidc-client-secret" autocomplete="new-password"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-button-label">Button label:</label>
+                                                            <input type="text" id="security-oidc-button-label" placeholder="Sign in with OIDC"
+                                                                autocomplete="off" maxlength="40" style="width: 100%;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-icon-url">Icon URL
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-icon-url" placeholder="https://..."
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Your provider's logo, shown on the sign-in card in My Account
+                                                                (https only). Leave empty for a plain key icon.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-required-group">Required group
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-required-group" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only accounts in this group get in. Leave empty to let every
+                                                                account at the provider sign in.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-groups-claim">Groups claim:</label>
+                                                            <input type="text" id="security-oidc-groups-claim" placeholder="groups"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-scopes">Scopes:</label>
+                                                            <input type="text" id="security-oidc-scopes" placeholder="openid profile email"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Add the scope your provider needs to send groups, if you set a
+                                                                required group (Pocket ID: <code>groups</code>).
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-redirect-uri">Callback URL override
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-redirect-uri" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only if your reverse proxy doesn't pass the public address through.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-auto-create" checked>
+                                                                <span>Let new OIDC users sign up (off: only accounts already
+                                                                    connected to a profile can sign in)</span>
+                                                            </label>
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-can-download">
+                                                                <span>New OIDC profiles can download (off: request-only)</span>
+                                                            </label>
+                                                        </div>
+                                                        <!-- the admin's own connection (webui/src/shell/oidc-signin.ts):
+                                                             status, icon and disconnect when connected, else connect -->
+                                                        <div class="form-group security-oidc-admin" id="security-oidc-admin">
+                                                            <button type="button" class="auth-button"
+                                                                onclick="window.location.assign('/api/profiles/me/oidc-connect/start')">Connect
+                                                                my admin account</button>
+                                                        </div>
+                                                    </div>
+                                                </div>
                                                 <div class="form-group" id="security-signup-defaults">
                                                     <label for="security-signup-sides">New sign-ups start on</label>
                                                     <select id="security-signup-sides" class="form-select">

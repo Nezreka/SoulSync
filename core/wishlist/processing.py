@@ -482,6 +482,19 @@ def record_failed_attempt(wishlist_service, track_data, failure_reason, profile_
         return False
 
 
+def bundle_failure_counts_as_attempt(reason: str) -> bool:
+    """Whether a terminal album-bundle failure says anything about the release.
+
+    A Prowlarr search that did not complete (an indexer down and held back by
+    Prowlarr, a timeout, a 5xx) never looked at a release, so counting it
+    would push every wishlist track of the batch into the retry backoff for
+    something that is not theirs. Those tracks are simply tried again on the
+    next cycle, when the search can run.
+    """
+    from core.prowlarr_client import SEARCH_FAILED_PREFIX
+    return not str(reason or '').startswith(SEARCH_FAILED_PREFIX)
+
+
 def record_failed_attempts_for_tracks(wishlist_service, tracks, failure_reason, profile_id,
                                       *, logger=logger) -> int:
     """Stamp one failed attempt on every track of a batch that failed as a whole.

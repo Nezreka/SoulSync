@@ -384,3 +384,140 @@ describe('My Account', () => {
     expect(body().querySelector('.ma-section')).toBeNull();
   });
 });
+
+describe('My Account: sign in with oidc', () => {
+  function mockOidc(status: Record<string, unknown>) {
+    server.use(
+      http.get('/api/profiles/me/oidc', () => HttpResponse.json({ success: true, ...status })),
+    );
+  }
+  const signIn = () =>
+    (body().querySelector('#ma-signin-h')?.closest('.ma-section') ?? null) as HTMLElement | null;
+
+  it('has no sign-in card when the admin has not turned it on', async () => {
+    mockAccount();
+    mockOidc({ enabled: false, label: 'Sign in with OIDC', connected: false, last: null });
+    await opened();
+    expect(signIn()).toBeNull();
+  });
+
+  it("offers connect, named with the admin's label", async () => {
+    mockAccount();
+    mockOidc({ enabled: true, label: 'Sign in with Pocket ID', connected: false, last: null });
+    await opened();
+    await vi.waitFor(() => expect(signIn()).not.toBeNull());
+    expect(signIn()!.textContent).toContain('Sign in with Pocket ID');
+    expect(signIn()!.querySelector('[data-ma="oidc-connect"]')).not.toBeNull();
+    expect(signIn()!.querySelector('[data-ma="oidc-disconnect"]')).toBeNull();
+  });
+
+  it('disconnect when connected, and it says so', async () => {
+    mockAccount();
+    mockOidc({ enabled: true, label: 'Sign in with Pocket ID', connected: true, last: null });
+    let deleted = 0;
+    server.use(
+      http.delete('/api/profiles/me/oidc', () => {
+        deleted++;
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    await opened();
+    await vi.waitFor(() =>
+      expect(signIn()?.querySelector('[data-ma="oidc-disconnect"]')).not.toBeNull(),
+    );
+    click('[data-ma="oidc-disconnect"]');
+    await vi.waitFor(() => expect(deleted).toBe(1));
+    await vi.waitFor(() => expect(toasts).toContain('Disconnected'));
+  });
+
+  it('a refused disconnect shows the server reason', async () => {
+    mockAccount();
+    mockOidc({ enabled: true, label: 'Sign in with Pocket ID', connected: true, last: null });
+    server.use(
+      http.delete('/api/profiles/me/oidc', () =>
+        HttpResponse.json(
+          { success: false, error: 'This is the only way this profile can sign in.' },
+          { status: 400 },
+        ),
+      ),
+    );
+    await opened();
+    await vi.waitFor(() =>
+      expect(signIn()?.querySelector('[data-ma="oidc-disconnect"]')).not.toBeNull(),
+    );
+    click('[data-ma="oidc-disconnect"]');
+    await vi.waitFor(() => expect(toasts.join(' ')).toContain('only way'));
+  });
+
+  it('says how a connect that just came back went', async () => {
+    mockAccount();
+    mockOidc({
+      enabled: true,
+      label: 'Sign in with Pocket ID',
+      connected: false,
+      last: { connected: false, error: 'That account is connected to another SoulSync profile' },
+    });
+    await opened();
+    await vi.waitFor(() => expect(toasts.join(' ')).toContain('another SoulSync profile'));
+  });
+
+  it('the admin, pointed at Settings, still gets the sign-in card', async () => {
+    mockAccount({ isAdmin: true });
+    mockOidc({
+      enabled: true,
+      label: 'Sign in with Pocket ID',
+      connected: true,
+      last: { connected: true },
+    });
+    openMyAccountsModal();
+    await vi.waitFor(() => expect(body().textContent).toContain("They're set up in Settings"));
+    await vi.waitFor(() => expect(signIn()).not.toBeNull());
+    expect(toasts.join(' ')).toContain('Connected');
+  });
+
+  it("shows the admin's logo, or a plain key without one", async () => {
+    mockAccount();
+    mockOidc({
+      enabled: true,
+      label: 'Sign In With Pocket ID',
+      icon: 'https://cdn.example.test/pocket-id.png',
+      connected: true,
+      last: null,
+    });
+    await opened();
+    await vi.waitFor(() => expect(signIn()).not.toBeNull());
+    expect(signIn()!.querySelector('.ma-logo img')!.getAttribute('src')).toBe(
+      'https://cdn.example.test/pocket-id.png',
+    );
+
+    closeMyAccountsModal();
+    mockOidc({
+      enabled: true,
+      label: 'Sign In With Pocket ID',
+      icon: '',
+      connected: true,
+      last: null,
+    });
+    await opened();
+    await vi.waitFor(() => expect(signIn()).not.toBeNull());
+    expect(signIn()!.querySelector('.ma-logo img')).toBeNull();
+    expect(signIn()!.querySelector('.ma-logo-key svg')).not.toBeNull();
+  });
+
+  it('the header catches up when the profile is known after it opened', async () => {
+    window.getCurrentProfileContext = () => null;
+    mockAccount();
+    mockOidc({ enabled: true, label: 'Sign In With Pocket ID', connected: true, last: null });
+    await opened();
+    expect(modal().querySelector('.ma-title')!.textContent).toBe('My Account');
+    window.getCurrentProfileContext = () => ({
+      profileId: 7,
+      isAdmin: false,
+      name: 'Kim',
+      avatarColor: '#6d5ce8',
+      avatarUrl: '',
+    });
+    window.dispatchEvent(new CustomEvent('ss:webui-profile-context-changed'));
+    expect(modal().querySelector('.ma-title')!.textContent).toBe('Kim');
+  });
+});

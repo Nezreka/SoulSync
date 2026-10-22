@@ -287,6 +287,13 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "Already resolved."}), 409
 
         wished = 0
+        if req["kind"] in ("show", "episode") and req.get("tmdb_id"):
+            # the approve sheet may carry the show's type (``series_type``);
+            # without one, a show in no library gets TMDB's suggestion. Either
+            # way it is stored before the wishes, so the drain files right.
+            from core.video.anime_hint import note_show_wanted
+            note_show_wanted(get_video_db, req["tmdb_id"],
+                             (request.get_json(silent=True) or {}).get("series_type"))
         # per-profile wishlists: every claimant gets the wish on their own
         # list. duplicates across profiles are fine — the download drain
         # dedupes to a single download.
