@@ -4261,6 +4261,12 @@
                                                     class="server-logo">
                                                 Navidrome
                                             </button>
+                                            <button class="server-toggle-btn" id="music_assistant-toggle"
+                                                onclick="toggleServer('music_assistant')">
+                                                <img src="/static/img/brands/music-assistant.png" alt="Music Assistant"
+                                                    class="server-logo">
+                                                Music Assistant
+                                            </button>
                                             <button class="server-toggle-btn" id="soulsync-toggle"
                                                 onclick="toggleServer('soulsync')">
                                                 <img src="/static/trans2.png" alt="SoulSync" class="server-logo">
@@ -4450,6 +4456,41 @@
                                                     onclick="autoDetectNavidrome()">Auto-detect</button>
                                                 <button class="test-button"
                                                     onclick="testConnection('navidrome')">Test</button>
+                                            </div>
+                                        </div>
+
+                                        <!-- Music Assistant Settings -->
+                                        <div class="server-config-container hidden" id="music_assistant-container">
+                                            <div class="setting-help-text">
+                                                SoulSync reads one <strong>Local files</strong> (or SMB) music source
+                                                of your Music Assistant library, so every track has a file path. Create
+                                                a long-lived token in Music Assistant under Settings, Users.
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Music Assistant URL:</label>
+                                                <input type="url" id="music_assistant-url"
+                                                    placeholder="http://localhost:8095">
+                                                <div class="form-actions">
+                                                    <button class="detect-button" type="button"
+                                                        onclick="autoDetectMusicAssistant()">Auto-detect</button>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label>Long-lived token:</label>
+                                                <input type="password" id="music_assistant-token" placeholder="Token">
+                                            </div>
+                                            <div class="form-group" id="music_assistant-source-selector-container"
+                                                style="display: none;">
+                                                <label>Music source</label>
+                                                <select id="music_assistant-source"
+                                                    onchange="selectMusicAssistantSource()">
+                                                </select>
+                                                <div class="setting-help-text">The Local files source whose tracks
+                                                    SoulSync scans. Save the URL and token first, then pick one.</div>
+                                            </div>
+                                            <div class="form-actions">
+                                                <button class="test-button" type="button"
+                                                    onclick="loadMusicAssistantSources()">Load sources</button>
                                             </div>
                                         </div>
 

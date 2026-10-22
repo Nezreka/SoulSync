@@ -214,7 +214,26 @@ SOULSYNC = ServerDescriptor(
     is_external=False,
 )
 
-SERVERS: Tuple[ServerDescriptor, ...] = (PLEX, JELLYFIN, NAVIDROME, SOULSYNC)
+MUSIC_ASSISTANT = ServerDescriptor(
+    name='music_assistant',
+    display_name='Music Assistant',
+    config_section='music_assistant',
+    fields=(
+        ConfigField('base_url', 'url', label='Music Assistant URL'),
+        ConfigField('token', 'token', label='Long-lived token'),
+        # the Local files or SMB source whose tracks have file paths; picked
+        # in settings from the server's sources, empty = first one found
+        ConfigField('source_instance', 'text', required=False, label='Music source'),
+        ConfigField('auto_detect', 'text', required=False, default=True),
+        ConfigField('request_timeout_seconds', 'text', required=False, default=30),
+    ),
+    detection=Detection(port=8095, path='/info'),
+    brand=Brand(color='#1976d2', logo='/static/img/brands/music-assistant.png'),
+    library_concept='source',
+    aliases=('musicassistant', 'ma'),
+)
+
+SERVERS: Tuple[ServerDescriptor, ...] = (PLEX, JELLYFIN, NAVIDROME, MUSIC_ASSISTANT, SOULSYNC)
 
 _BY_NAME: Dict[str, ServerDescriptor] = {}
 for _d in SERVERS:

@@ -216,11 +216,13 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
     the write keeps skipping — a blank ``server_id`` was one — spins here forever.
     """
     changed = 0
+    sources = sorted(MEDIA_SERVER_SOURCES)
+    marks = ",".join("?" for _ in sources)
     for entity_type, table in ENTITY_TABLES.items():
         while not (should_stop and should_stop()):
             rows = cursor.execute(
                 f"""SELECT id,server_source,server_id FROM {table} old
-                     WHERE old.server_source IN ('plex','jellyfin','navidrome')
+                     WHERE old.server_source IN ({marks})
                        AND old.server_id IS NOT NULL
                        AND TRIM(old.server_id) <> ''
                        AND NOT EXISTS (
@@ -228,7 +230,7 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                             WHERE m.entity_type=? AND m.entity_id=old.id
                               AND m.server_source=old.server_source)
                      LIMIT ?""",
-                (entity_type, max(1, int(batch_size))),
+                (*sources, entity_type, max(1, int(batch_size))),
             ).fetchall()
             if not rows:
                 break

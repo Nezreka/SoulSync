@@ -17,6 +17,7 @@ def _import_server_classes():
     auth-init-heavy modules (Plex, Jellyfin) aren't imported at test
     collection."""
     from core.jellyfin_client import JellyfinClient
+    from core.music_assistant_client import MusicAssistantClient
     from core.navidrome_client import NavidromeClient
     from core.plex_client import PlexClient
     from core.soulsync_client import SoulSyncClient
@@ -25,21 +26,22 @@ def _import_server_classes():
         'plex': PlexClient,
         'jellyfin': JellyfinClient,
         'navidrome': NavidromeClient,
+        'music_assistant': MusicAssistantClient,
         'soulsync': SoulSyncClient,
     }
 
 
-def test_default_registry_registers_all_four_servers():
+def test_default_registry_registers_all_servers():
     """Smoke check that the foundation registry knows about every
     server SoulSync historically dispatched to."""
     from core.media_server.registry import build_default_registry
 
     registry = build_default_registry()
-    expected = {'plex', 'jellyfin', 'navidrome', 'soulsync'}
+    expected = {'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'}
     assert set(registry.names()) == expected
 
 
-@pytest.mark.parametrize('server_name', ['plex', 'jellyfin', 'navidrome', 'soulsync'])
+@pytest.mark.parametrize('server_name', ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'])
 def test_server_class_has_all_required_methods(server_name):
     """Every registered server class exposes every required protocol
     method by name. Diagnostic-friendly: tells you WHICH method is
@@ -54,7 +56,7 @@ def test_server_class_has_all_required_methods(server_name):
     )
 
 
-@pytest.mark.parametrize('server_name', ['plex', 'jellyfin', 'navidrome', 'soulsync'])
+@pytest.mark.parametrize('server_name', ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync'])
 def test_server_class_explicitly_inherits_contract(server_name):
     """Per Cin's standard from the download refactor: clients must
     explicitly inherit ``MediaServerClient`` so the contract conformance
