@@ -1312,7 +1312,8 @@ describe('per-finding actions', () => {
       id: 43,
       finding_type: 'suspect_album_tag',
       entity_type: 'album',
-      entity_id: '700',
+      // the native subject; the library route gets the bare album id
+      entity_id: 'lib2:700',
       title: 'Suspect album: "Music" may be a poisoned batch',
       details: {
         album_id: 700,
