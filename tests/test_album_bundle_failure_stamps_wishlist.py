@@ -104,3 +104,23 @@ def test_both_dispatch_sites_stamp_before_returning():
     assert src.count("_album_bundle_dispatch.try_dispatch(") == 2
     assert src.count("_stamp_terminal_bundle_failure()\n") == 2
     assert "record_failed_attempts_for_tracks" in src
+
+
+def test_an_unfinished_search_is_not_an_attempt():
+    """an indexer that Prowlarr holds back answers 400, which the plugins report
+    as 'Prowlarr search failed: ...'. no release was tried, so it must not push
+    the batch's tracks into the backoff."""
+    from core.wishlist.processing import bundle_failure_counts_as_attempt
+
+    assert not bundle_failure_counts_as_attempt('Prowlarr search failed: indexer 1: Prowlarr returned HTTP 400')
+    assert not bundle_failure_counts_as_attempt('Prowlarr search failed: Prowlarr did not answer within 30s')
+    assert bundle_failure_counts_as_attempt('Usenet download failed or timed out')
+    assert bundle_failure_counts_as_attempt('')
+    assert bundle_failure_counts_as_attempt(None)
+
+
+def test_plugins_report_search_failures_with_the_shared_prefix():
+    from core.prowlarr_client import SEARCH_FAILED_PREFIX
+    for name in ('torrent', 'usenet'):
+        src = (_ROOT / "core" / "download_plugins" / f"{name}.py").read_text(encoding="utf-8")
+        assert "f'{SEARCH_FAILED_PREFIX}: {e}'" in src, name
