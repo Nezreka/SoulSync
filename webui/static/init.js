@@ -2097,6 +2097,9 @@ function updateProfileIndicator() {
         const page = btn.getAttribute('data-video-page');
         if (page === 'video-help' || page === 'video-issues') { btn.style.display = ''; return; }
         if (VIDEO_ADMIN_ONLY.includes(page)) { btn.style.display = currentProfile.is_admin ? '' : 'none'; return; }
+        // requests: admins answer them, profiles without download rights make
+        // them. same rule as the music side's requests, not a page toggle
+        if (page === 'video-requests') { btn.style.display = (currentProfile.is_admin || !canDownload()) ? '' : 'none'; return; }
         if (currentProfile.id === 1) { btn.style.display = ''; return; }
         const ap = currentProfile.allowed_pages;
         btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';

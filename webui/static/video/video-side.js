@@ -318,6 +318,9 @@
         if (!cp || cp.is_admin || cp.id === 1) return true;
         if (pageId === 'video-help' || pageId === 'video-issues' || DETAIL_PAGES[pageId]) return true;
         if (['video-import', 'video-settings', 'video-automations'].indexOf(pageId) > -1) return false;
+        // requests: profiles without download rights make them (admins passed
+        // above). same rule as the sidebar, not a page toggle
+        if (pageId === 'video-requests') return typeof canDownload === 'function' && !canDownload();
         var ap = cp.allowed_pages;
         return !ap || ap.indexOf(pageId) > -1;
     }
