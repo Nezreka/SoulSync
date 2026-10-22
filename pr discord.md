@@ -1,15 +1,13 @@
-**SoulSync 3.5.9 is out** :musical_note:
+**SoulSync 3.6.0 is out** :musical_note:
 
-SoulSync can now answer as Lidarr, so Singarr and MusicSeerr 1.x can request albums from it (thanks @Topaze77 for the request). There's also an MCP endpoint so an AI client can drive SoulSync. Both are off until you turn them on in Settings > Advanced.
+You can now sign in with any OpenID Connect provider, like Pocket ID, Authentik, Authelia or Keycloak. Members link their own accounts, an optional required group keeps everyone else out, and new accounts start with your new sign-up defaults. Turn it on in Settings > Security (thanks @PapaBearDoes).
 
-First-run setup is rebuilt as a guided flow that finds your servers on the network, checks every part before it finishes, and can pick up where you left off.
+Anime is now picked by library instead of guessed from a genre tag, so shows like Star Wars: Visions stop landing in the anime folder. Mark any TV library as anime, scan more than one TV library, and set the type by hand for shows you don't own yet (thanks @PapaBearDoes).
 
-You can now choose what new Plex sign-ups start with (music, movies and TV, or both, plus a request limit), members can open the video Requests page, and anime can have its own library folder (thanks @PapaBearDoes).
+Prowlarr outages are handled better. Search names the indexers that failed next to the results (thanks @glebosotov), and a search that didn't complete no longer counts as a failed attempt on the wishlist or shows "No releases found" for audiobooks (thanks @SimpleSimonLA).
 
-The Downloads page is rebuilt for music and video: status on the art, one action per row, and a detail sheet that explains what happened. The Wishlist groups artists by what's stuck with a side panel that says why, and the video wishlist now lives on the same page.
+Audiobook fixes: a wrong book far longer than the one you wanted fails and moves to the next release instead of sitting in staging, and artists set to treat as audiobook stop showing every release as missing. Batch complete notifications also name the track for wishlist singles (thanks @SimpleSimonLA).
 
-Fixes: AcoustID judges files by their real length and the duration tolerance setting is easier to find (thanks @QT3496), YouTube Music tracks match on their real title and artist (thanks @andreamassaro9), and the GPU stops pegging during downloads (thanks @OlivierMartinez). Review deletes blacklist the source and append drops old wrong matches (thanks @kevin2xk), redownloads stop leaving duplicate rows (thanks @glebosotov), and collections stop wishlisting movies nobody asked for (thanks @hilburn). Plus audiobook matching fixes (thanks @SimpleSimonLA), dead file findings that close (thanks @splitsec2) and empty usenet folders cleaned up.
-
-Under the hood: the CSS token system and shared UI primitives (thanks @Thundernerd).
+Under the hood: more of the CSS token system filled in (thanks @Thundernerd).
 
 Full notes on GitHub.

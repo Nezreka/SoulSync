@@ -3465,6 +3465,16 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.6.0': [
+        { date: 'October 2026 · 3.6.0' },
+        { title: 'Sign in with OIDC', desc: 'Sign in with any OpenID Connect provider, like Pocket ID, Authentik, Authelia or Keycloak. Members link their own account from My Account, an optional required group keeps everyone else out, and new accounts start with your new sign-up defaults. Turn it on in Settings > Security (thanks @PapaBearDoes) (#1834).', page: 'settings' },
+        { title: 'Anime by library', desc: 'Anime is picked by library instead of guessed from a genre tag. Mark any TV library as anime, scan more than one TV library, and set a show\'s type by hand from its page or the approve sheet, even before you own it (thanks @PapaBearDoes) (#1835).' },
+        { title: 'Failed indexers named in search', desc: 'When some Prowlarr indexers fail, Search shows a note over the results naming them, with each error under Details (thanks @glebosotov) (#1831).', page: 'search' },
+        { title: 'Prowlarr outages are not misses', desc: 'A Prowlarr search that did not complete no longer counts as a failed attempt on the wishlist, and audiobooks show the real error instead of No releases found (thanks @SimpleSimonLA) (#1826, #1832).', page: 'wishlist' },
+        { title: 'Audiobook fixes', desc: 'A wrong book far longer than the wanted one fails and tries the next release instead of staging (#1833), and artists set to treat as audiobook stop showing every release as missing (#1825) (thanks @SimpleSimonLA).' },
+        { title: 'Batch complete names the track', desc: 'Batch complete notifications for wishlist singles name the artist and track, and artist, title and album are trigger variables (thanks @SimpleSimonLA) (#1823).', page: 'automations' },
+        { title: 'Earlier versions', desc: '3.5.9 added the Lidarr and MCP APIs, guided first-run setup and rebuilt Downloads and Wishlist pages.' },
+    ],
     '3.5.9': [
         { date: 'October 2026 · 3.5.9' },
         { title: 'Lidarr compatible API', desc: 'Singarr and MusicSeerr 1.x can request albums from SoulSync by pointing their Lidarr URL at /lidarr with an admin API key. Requests land on the wishlist of the profile you pick. Off until turned on in Settings > Advanced (thanks @Topaze77 for the request) (#1799).', page: 'settings' },
@@ -3480,19 +3490,6 @@ const WHATS_NEW = {
         { title: 'Collections stop over-wishlisting', desc: 'Preset collections no longer start with wishlist missing ticked, and a removed movie stays removed (thanks @hilburn) (#1807).' },
         { title: 'Smoother downloads', desc: 'The download modal no longer redraws blurs nobody could see every frame, so the GPU stops pegging while a sync runs (thanks @OlivierMartinez) (#1816).' },
         { title: 'Earlier versions', desc: '3.5.8 added Request Lists, playlists that re-sync after their downloads land and Discover mixes on the dashboard.' },
-    ],
-    '3.5.8': [
-        { date: 'October 2026 · 3.5.8' },
-        { title: 'Request Lists', desc: 'A new Sync page tab for playlists that only download. Copy any playlist there, or start an empty one, and syncing it wishlists what is missing without building a playlist on your media server.', page: 'sync' },
-        { title: 'Spotify auto-remove', desc: 'A Spotify request list can remove tracks you now own from the Spotify playlist. It asks first, uses your own Spotify login, and only removes tracks the library holds under the same Spotify id.', page: 'sync' },
-        { title: 'Playlists sync after their downloads', desc: 'When a playlist\'s wishlist batch finishes and the database update runs, the playlist re-syncs so the new tracks reach your server playlist. The Sync Playlist automation can also sync every mirrored playlist.', page: 'automations' },
-        { title: 'Discover mixes on the dashboard', desc: 'The Listen band shows your Discover quick mixes. Click one to preview it, or press play to start it.', page: 'dashboard' },
-        { title: 'Chat uploads', desc: 'Uploads open a preview with a caption and progress bar, shared files get inline players and an image lightbox, and Movie Night is now Watch Together.' },
-        { title: 'Audiobook automations', desc: 'Audiobooks fire automation triggers now, including Import Complete, grabs, failed downloads, wishlist, follows and scans (thanks @SimpleSimonLA) (#1774).', page: 'automations' },
-        { title: 'No more first-visit bans', desc: 'A normal page load stopped sending the burst of refused calls CrowdSec and fail2ban read as a scanner, and deleting a profile no longer strands its browsers (thanks @PapaBearDoes) (#1763, #1786).' },
-        { title: 'Import and download fixes', desc: 'Artist letter folders follow the album artist (thanks @QT3496) (#1785), singles reuse a folder that differs only by case (#1788), No track picked imports from the file\'s own tags (thanks @edy80) (#1772), and Review no longer freezes on a big queue (thanks @QT3496) (#1775).', page: 'import' },
-        { title: 'Lost tracks come back', desc: 'A track your server no longer has gets wishlisted and stays wishlisted until it downloads, and re-identified tracks from a bad album import one by one (thanks @kevin2xk) (#1754, #1567).', page: 'sync' },
-        { title: 'Earlier versions', desc: '3.5.7 turned Beatport charts into playlists, added a second pass for missed tracks and brought automatic album completion.' },
     ],
 };
 
@@ -3522,6 +3519,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
+        title: '3.6.0: sign in with oidc, anime by library, and prowlarr outages handled',
+        description: 'Any OpenID Connect provider can sign people in, anime is picked by library instead of a genre tag, Search names the Prowlarr indexers that failed, and an outage stops counting as a miss.',
+        features: [
+            'Sign in with OIDC: Pocket ID, Authentik, Authelia, Keycloak and more, with linked accounts, an optional required group and your sign-up defaults (thanks @PapaBearDoes) (#1834).',
+            'Anime by library: mark TV libraries as anime, scan more than one TV library, and set a show\'s type before you own it (thanks @PapaBearDoes) (#1835).',
+            'Search names the Prowlarr indexers that failed next to the results (thanks @glebosotov) (#1831).',
+            'Prowlarr outages no longer count as failed wishlist attempts or No releases found for audiobooks (thanks @SimpleSimonLA) (#1826, #1832).',
+            'Long wrong audiobooks fail and try the next release, audiobook-routed artists show what they own, and batch complete names the track (thanks @SimpleSimonLA) (#1833, #1825, #1823).',
+            'Under the hood: more of the CSS token system filled in (thanks @Thundernerd).',
+        ],
+    },
+    {
+        title: 'Earlier in 3.5.9',
+        description: 'Lidarr and MCP APIs, guided first-run setup, rebuilt Downloads and Wishlist pages, new sign-up defaults and an anime library folder.',
+        features: [],
+    },
+    {
         title: '3.5.9: lidarr and mcp apis, guided setup, and rebuilt downloads and wishlist',
         description: 'SoulSync can answer as Lidarr for request apps and as an MCP server for AI clients, first-run setup is a guided flow, the Downloads page and Wishlist are rebuilt on both the music and video side, new sign-ups and anime get their own settings, and a round of matching, library and video fixes.',
         features: [
@@ -3537,25 +3551,6 @@ const VERSION_MODAL_SECTIONS = [
             'Audiobook matching fixes for German releases, short MP3 headers and dead album bundles (thanks @SimpleSimonLA) (#1795, #1796, #1800).',
             'The GPU stops pegging during downloads (thanks @OlivierMartinez) (#1816).',
             'Under the hood: the CSS token system and shared UI primitives (thanks @Thundernerd).',
-        ],
-    },
-    {
-        title: 'Earlier in 3.5.8',
-        description: 'Request Lists, playlists that re-sync after their downloads land, Discover mixes on the dashboard and a new chat upload flow.',
-        features: [],
-    },
-    {
-        title: '3.5.8: request lists, playlists that sync after downloads, and a round of fixes',
-        description: 'Request Lists download what a playlist is missing without building a server playlist, playlists re-sync once their downloads land, Discover mixes come to the dashboard, chat gets a new upload flow, and members stop getting banned by CrowdSec on their first visit.',
-        features: [
-            'Request Lists: copy a playlist to download what is missing without a server playlist, with opt-in Spotify auto-remove that only trusts Spotify ids.',
-            'Playlists re-sync after their wishlist downloads land, and Sync Playlist can sync every mirrored playlist.',
-            'Discover quick mixes on the dashboard, and chat uploads with previews, captions and inline players.',
-            'Audiobook automation triggers, including Import Complete (thanks @SimpleSimonLA) (#1774).',
-            'No more first-visit CrowdSec bans, and deleting a profile clears its sessions (thanks @PapaBearDoes) (#1763, #1786).',
-            'Artist letter folders, case-split singles, No track picked imports and a frozen Review page fixed (thanks @QT3496, @edy80) (#1785, #1788, #1772, #1775).',
-            'Lost tracks come back and re-identify fixes (thanks @kevin2xk) (#1754, #1567).',
-            'Under the hood: one descriptor per media server (thanks @splitsec2), about 12,000 lines of dead CSS gone (thanks @Thundernerd) and the replaced vanilla pages retired (thanks @AnonymousMorris).',
         ],
     },
 ];
