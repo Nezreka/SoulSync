@@ -1250,6 +1250,7 @@ def search_releases(
     min_relevance: float = 0.5,
     prowlarr_client: Any = None,
     narrator_mode: str = "exact",
+    raise_on_outage: bool = False,
 ) -> List[AudiobookRelease]:
     """Every plausible release for a book, best first.
 
@@ -1259,8 +1260,10 @@ def search_releases(
     "author + title" query answers most of the time, so firing all three
     variants unconditionally would triple the indexer load for nothing.
 
-    Fails open — an unreachable or unconfigured Prowlarr returns [], and the
-    caller reports "no releases found" rather than a 500.
+    Fails open by default: an unreachable or unconfigured Prowlarr returns [],
+    and the caller reports "no releases found" rather than a 500. With
+    ``raise_on_outage`` a Prowlarr that did not answer ANY query raises instead,
+    so a caller can tell "nothing found" from "could not look".
     """
     queries = build_queries(book)
     if not queries:
@@ -1283,6 +1286,7 @@ def search_releases(
     for step in iter_prowlarr_releases(
         book, limit=limit, min_relevance=min_relevance,
         prowlarr_client=client, narrator_mode=narrator_mode,
+        raise_on_outage=raise_on_outage,
     ):
         last = step["releases"]
     return last
@@ -1294,6 +1298,7 @@ def iter_prowlarr_releases(
     min_relevance: float = 0.5,
     prowlarr_client: Any = None,
     narrator_mode: str = "exact",
+    raise_on_outage: bool = False,
 ):
     """The same search, yielding after every query variant.
 
@@ -1325,13 +1330,17 @@ def iter_prowlarr_releases(
 
     categories = _configured_categories()
     collected: List[AudiobookRelease] = []
+    first_error: Optional[Exception] = None
+    answered = 0
 
     for index, query in enumerate(queries):
         try:
             results = _run(client.search(query, categories=categories, limit=limit * 2))
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Audiobook release search failed for %r: %s", query, exc)
+            first_error = first_error or exc
             continue
+        answered += 1
 
         for result in results or []:
             release = release_from_prowlarr(result, book)
@@ -1353,6 +1362,13 @@ def iter_prowlarr_releases(
         }
         if enough:
             return
+
+    # Every query errored: the indexers never answered "no". Say so, because an
+    # empty result here reads as "this book is not out there" and sends the
+    # wishlist row into a retry backoff it did not earn (an indexer that Prowlarr
+    # had backed off answers HTTP 400 to every search).
+    if raise_on_outage and first_error is not None and answered == 0:
+        raise first_error
 
 
 def configured_chain() -> List[str]:
@@ -1405,6 +1421,7 @@ def search_all_sources(
             collected.extend(search_releases(
                 book, limit=limit, min_relevance=min_relevance,
                 prowlarr_client=prowlarr_client, narrator_mode=narrator_mode,
+                raise_on_outage=True,
             ))
         except Exception as exc:                            # noqa: BLE001
             logger.warning("Prowlarr audiobook search failed: %s", exc)
