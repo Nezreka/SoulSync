@@ -139,6 +139,70 @@ def test_unrouted_artist_download_is_not_owned_by_the_ledger(db, folders):
     assert track is None
 
 
+def _episode_files(books, album, names):
+    folder = books / "Bobby & Max" / album
+    folder.mkdir(parents=True)
+    paths = []
+    for name in names:
+        f = folder / name
+        f.write_bytes(b"x")
+        paths.append(f)
+    return paths
+
+
+def test_routed_album_owned_tracks_counts_distinct_files_on_disk(db, folders):
+    _, books = folders
+    routing.add_route("Bobby & Max", db)
+    first, second = _episode_files(books, "Folge 1", ["01.mp3", "02.mp3"])
+    for f in (first, second, first):  # a retried download is one file, not two
+        _record_download(db, f, f.stem, "Bobby & Max", album="Folge 1: Die Reise")
+    _record_download(db, books / "gone.mp3", "gone", "Bobby & Max", album="Folge 1: Die Reise")
+    _record_download(db, first, "other", "Bobby & Max", album="Folge 2")
+
+    assert db.routed_album_owned_tracks("folge 1 - die reise", "bobby & max") == 2  # case and punctuation don't matter
+    assert db.routed_album_owned_tracks("Folge 3: Die Reise", "Bobby & Max") == 0
+    assert db.routed_album_owned_tracks("Folge 1: Die Reise", "Bobby & Max") == 2
+    assert db.routed_album_owned_tracks("Folge 1: Die Reise", "Queen") == 0
+
+
+def test_routed_album_is_also_found_in_the_audiobook_library(db, folders, monkeypatch):
+    """a book that never went through the download ledger (moved in by hand)
+    is still on the shelf Audiobookshelf reads; the library scan knows it."""
+    routing.add_route("Bobby & Max", db)
+
+    class _Shelf:
+        def get_library(self):
+            return [{"author": "Bobby & Max", "title": "Folge 2: Das Geheimnis", "file_count": 15},
+                    {"author": "Someone Else", "title": "Folge 2: Das Geheimnis", "file_count": 99}]
+
+    monkeypatch.setattr("core.audiobook_database.get_audiobook_db", lambda: _Shelf())
+    assert db.routed_album_owned_tracks("Folge 2: Das Geheimnis", "Bobby & Max") == 15
+    assert db.routed_album_owned_tracks("Folge 9: Unbekannt", "Bobby & Max") == 0
+    assert db.routed_album_owned_tracks("Folge 2: Das Geheimnis", "Queen") == 0
+
+
+def test_artist_page_credits_a_routed_album_the_library_does_not_hold(db, folders):
+    """the artist page asked only the albums table, so every audiobook-routed
+    release showed as missing although the files sit in the audiobook folder."""
+    from core.metadata.completion import check_album_completion
+
+    _, books = folders
+    routing.add_route("Bobby & Max", db)
+    files = _episode_files(books, "Folge 1", ["01.mp3", "02.mp3"])
+    for f in files:
+        _record_download(db, f, f.stem, "Bobby & Max", album="Folge 1: Die Reise")
+
+    done = check_album_completion(db, {"id": "x", "name": "Folge 1: Die Reise", "total_tracks": 2},
+                                  "Bobby & Max", source_chain=["deezer"])
+    assert (done["status"], done["owned_tracks"]) == ("completed", 2)
+    part = check_album_completion(db, {"id": "y", "name": "Folge 1: Die Reise", "total_tracks": 4},
+                                  "Bobby & Max", source_chain=["deezer"])
+    assert (part["status"], part["owned_tracks"]) == ("partial", 2)
+    other = check_album_completion(db, {"id": "z", "name": "Folge 2: Anders", "total_tracks": 2},
+                                   "Bobby & Max", source_chain=["deezer"])
+    assert other["status"] == "missing"
+
+
 def test_transfer_root_for_context_prefers_the_route(db, folders, monkeypatch):
     from core.imports import paths
 
