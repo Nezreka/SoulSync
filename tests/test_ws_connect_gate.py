@@ -314,10 +314,10 @@ def test_socket_rejected_replaying_cookie_after_real_logout(monkeypatch):
     assert sio2.is_connected() is False
 
 
-def test_profile_join_rebuilds_snapshot_for_switched_profile():
-    # the frozen-session trap: a socket that joins a DIFFERENT profile's
-    # room (admin watching, or a switch that didn't reconnect) must be
-    # revocation-checked against the JOINED profile, not the connect one
+def test_profile_join_keeps_the_connect_session_checked():
+    # an admin socket (or a stolen admin cookie) joining another profile's
+    # room must not shed its own session's checks: logging that browser out
+    # still drops it
     db = web_server.get_database()
     pid_a = db.create_profile('WsRev-adminA-1837', is_admin=True)
     pid_b, epoch_b = _profile_with_device('dev-B-1837')
@@ -329,21 +329,17 @@ def test_profile_join_rebuilds_snapshot_for_switched_profile():
         web_server.app, flask_test_client=_session_client(pid_a, epoch_a, 'dev-A-1837'))
     assert sio.is_connected() is True
     sio.emit('profile:join', {'profile_id': pid_b})
-    snaps = [s for s in web_server._ws_session_by_sid.values() if s.get('profile_id') == pid_b]
-    assert snaps, "joining profile B must re-snapshot the socket under B"
 
-    # revoking the ORIGINAL profile's device must not drop a socket that
-    # now acts as B
-    assert db.revoke_profile_device(pid_a, 'dev-A-1837')
-    from core.security.devices import forget as _dev_forget
-    _dev_forget('dev-A-1837')
-    web_server._disconnect_revoked_sockets()
-    assert sio.is_connected() is True
-
-    # but signing B out everywhere must drop it
+    # signing B out is about B's browsers, not this one
     assert db.bump_profile_session_epoch(pid_b) is not None
     from core.security.session_epoch import forget as _epoch_forget
     _epoch_forget(pid_b)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is True
+
+    assert db.revoke_profile_device(pid_a, 'dev-A-1837')
+    from core.security.devices import forget as _dev_forget
+    _dev_forget('dev-A-1837')
     web_server._disconnect_revoked_sockets()
     assert sio.is_connected() is False
 

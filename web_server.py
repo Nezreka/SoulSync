@@ -23136,41 +23136,6 @@ def _ws_store_snapshot():
         logger.debug(f"[WS gate] session snapshot store failed: {e}")
 
 
-def _ws_refresh_snapshot_for_join(target_pid):
-    """Rebuild the snapshot when profile:join moves this socket to a profile
-    other than the one it connected under.
-
-    Flask-SocketIO freezes the session at the handshake (manage_session), so
-    the frozen session can NOT observe an HTTP-side profile switch — reading
-    it here would just copy the stale values. The real client reconnects on
-    switch (init.js), which re-snapshots at connect; this covers clients
-    that join a different profile's room on the existing socket instead.
-    The joined profile's epoch comes from the db; its device id is
-    unknowable here (the switch minted it inside the HTTP session), so a
-    foreign profile's snapshot is epoch-checked only — the same treatment
-    pre-device sessions get. Same-profile joins keep the connect snapshot,
-    which carries the real device id."""
-    try:
-        sid = request.sid
-        with _ws_session_by_sid_lock:
-            current = _ws_session_by_sid.get(sid)
-        if current and current.get('profile_id') == target_pid:
-            return
-        epoch = 0
-        try:
-            epoch = (get_database().get_profile(target_pid) or {}).get('session_epoch', 0)
-        except Exception:  # noqa: BLE001 - epoch 0 is every profile's floor
-            epoch = 0
-        with _ws_session_by_sid_lock:
-            _ws_session_by_sid[sid] = {
-                'profile_id': target_pid,
-                'profile_epoch': epoch,
-                'device_id': None,
-            }
-    except Exception as e:  # noqa: BLE001 - a failed refresh keeps the old snapshot
-        logger.debug(f"[WS gate] join snapshot refresh failed: {e}")
-
-
 def _forget_sid(sid):
     """Drop every per-sid trace (connected set, revocation snapshot, the
     activity and log-live subscription sets). Shared by the disconnect
@@ -23208,11 +23173,16 @@ def _disconnect_revoked_sockets():
     (_ws_snapshot_revoked never raises — its contract is fail-open.)"""
     with _ws_session_by_sid_lock:
         items = list(_ws_session_by_sid.items())
+    # one check per distinct session: tabs of one browser share it
+    verdicts = {}
     for sid, snapshot in items:
-        if not _ws_snapshot_revoked(snapshot):
+        key = (snapshot.get('profile_id'), snapshot.get('profile_epoch'), snapshot.get('device_id'))
+        if key not in verdicts:
+            verdicts[key] = _ws_snapshot_revoked(snapshot)
+        if not verdicts[key]:
             continue
-        # Drop only on the evidence we checked: a snapshot refreshed since
-        # the copy (a reconnect / profile:join) is re-checked next sweep.
+        # drop only on the evidence we checked: a sid whose snapshot was
+        # replaced or forgotten since the copy is left to the next sweep
         with _ws_session_by_sid_lock:
             if _ws_session_by_sid.get(sid) is not snapshot:
                 continue
@@ -23353,10 +23323,9 @@ def handle_profile_join(data):
     if pid is None:
         return
     target = requested if (is_admin and requested) else pid
-    # #1837: profile:join is where a client declares its (possibly switched)
-    # profile — rebuild the revocation snapshot for the joined profile so
-    # the sweep re-checks THAT profile, not just the one from connect time.
-    _ws_refresh_snapshot_for_join(target)
+    # #1837: the connect snapshot stays the socket's credential. joining
+    # another profile's room (admins only) must not swap it for a
+    # device-less one, or logout / device revoke would stop reaching it.
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
                        "joining the session's room", requested, pid)

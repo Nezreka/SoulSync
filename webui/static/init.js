@@ -1953,10 +1953,11 @@ let _pfLastSelect = null;
 // keep acting on, and being revocation-checked against, the stale
 // session (#1837). The connect handler re-joins rooms and re-subscribes.
 function pfReconnectSocket() {
-    if (socket && socket.connected) {
-        socket.disconnect();
-        socket.connect();
-    }
+    if (!socket) return;
+    // the revocation sweep can drop the old socket before this runs, and a
+    // server-side drop never auto-reconnects, so connect either way
+    if (socket.connected) socket.disconnect();
+    socket.connect();
 }
 
 async function selectProfile(profileId) {
