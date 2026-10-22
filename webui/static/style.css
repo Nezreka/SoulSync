@@ -61633,6 +61633,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
         box-shadow 0.24s ease;
     overflow: hidden;
     isolation: isolate;
+    animation: dashCardMount 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 /* Cursor-following accent blob — two-layer "liquid" effect that spans
@@ -61725,9 +61726,6 @@ body.max-performance .dash-card::after {
 @keyframes dashCardMount {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
-}
-.dash-card {
-    animation: dashCardMount 0.55s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 .dash-card[data-card="services"]        { animation-delay: 0.00s; }
 .dash-card[data-card="stats"]           { animation-delay: 0.06s; }
@@ -62451,6 +62449,7 @@ body.max-performance .dash-card::after {
     .dash-card[data-card="library"] .library-status-header {
         min-width: 0;
         flex-basis: 100%;
+        flex-wrap: wrap;
     }
     /* The band stacks: art + name + countdown up top, result chips next,
        the ownership bar full-width beneath. Actions stay touchable. */
@@ -62498,9 +62497,6 @@ body.max-performance .dash-card::after {
     }
     .dash-card[data-card="library"] .library-status-stat + .library-status-stat {
         border-left: none;
-    }
-    .dash-card[data-card="library"] .library-status-header {
-        flex-wrap: wrap;
     }
     .dash-card[data-card="library"] .library-status-actions {
         flex-direction: row;
@@ -64537,8 +64533,8 @@ body.max-performance .dash-card::after {
     cursor: pointer;
     text-align: left;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+    position: relative;
 }
-.em-worker-row { position: relative; }
 .em-worker-row:hover { background: var(--white-a05); }
 .em-worker-row.active {
     background: rgba(var(--accent-rgb), 0.14);
@@ -71144,7 +71140,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
        do the scrolling. Verified in Chromium at 390px: .sync-main-panel stops
        overflowing entirely and the strip reports scrollWidth 736 in a 246px
        box. */
-    .library-filters { display: block; }
+    .library-filters { display: block; margin-left: 2px; margin-right: 2px; }
     .library-tabs {
         display: flex;
         /* The row's flex `gap` does nothing once it is a block. */
@@ -71194,8 +71190,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     .playlist-scroll-container { padding: 5px; }
 
     .pl-grid { padding: 2px 2px 10px; }
-
-    .library-filters { margin-left: 2px; margin-right: 2px; }
 
     .sync-header { margin-bottom: 16px; }
     .sync-title { font-size: 22px; }
@@ -71426,6 +71420,10 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
        height below meaningless and the box grew with every message */
     #chat-page .chat-shell {
         flex: none;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 8px;
+        height: calc(100vh - 214px);
     }
 
     #chat-page .chat-guild-wrap {
@@ -71445,13 +71443,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     #chat-page .chat-social-nav-text,
     #chat-page .chat-side-label-row {
         display: none;
-    }
-
-    #chat-page .chat-shell {
-        grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto auto minmax(0, 1fr);
-        gap: 8px;
-        height: calc(100vh - 214px);
     }
 
     #chat-page .chat-guilds {
@@ -71547,15 +71538,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         min-width: 0;
     }
 
-    #chat-page .chat-jbx-headbar {
-        gap: 8px;
-    }
-
-    #chat-page .chat-jbx-headbar .chat-jbx-form {
-        min-width: 0;
-        margin-left: 0;
-    }
-
     #chat-page .chat-shell {
         /* ends above the floating activity / bell / help buttons, which
            otherwise sit on top of the send button */
@@ -71565,11 +71547,8 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
     #chat-page .chat-head {
         padding: 10px 12px;
-    }
-
-    /* the header is one row that scrolls sideways, the topic hides. wrapped,
-       the title, topic and six buttons took 212px of a 624px chat */
-    #chat-page .chat-head {
+        /* the header is one row that scrolls sideways, the topic hides. wrapped,
+           the title, topic and six buttons took 212px of a 624px chat */
         flex-wrap: nowrap;
         overflow-x: auto;
         scrollbar-width: none;
@@ -71627,6 +71606,7 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
 
     #chat-page .chat-input--bare {
         padding: 8px;
+        flex: 1 1 auto;
     }
 
     #chat-page .chat-send-fab {
@@ -71644,10 +71624,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
         display: none;
     }
 
-    #chat-page .chat-input--bare {
-        flex: 1 1 auto;
-    }
-
     /* the plain-text note keeps its first line; the rest is desktop detail */
     #chat-page .chat-modehint {
         overflow: hidden;
@@ -71663,10 +71639,13 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     }
 
     #chat-page .chat-jbx-headbar {
+        gap: 8px;
         flex-wrap: nowrap;
     }
 
     #chat-page .chat-jbx-headbar .chat-jbx-form {
+        min-width: 0;
+        margin-left: 0;
         flex: 1 1 0;
     }
 
@@ -75828,6 +75807,7 @@ body.src-modal-open { overflow: hidden; }
     padding: 8px 6px 8px 4px;
     background: none;
     border-color: transparent;
+    position: relative;
 }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row:hover { background: var(--white-a04); }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row--live { background: rgba(var(--accent-rgb), 0.06); }
@@ -75838,7 +75818,6 @@ body.src-modal-open { overflow: hidden; }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-last:not(.dash-autom-last--bad)::before { content: 'ran '; }
 /* narrow rail: run/pause float over the row on hover instead of holding a
    column open that squeezes the names */
-#dashboard-page .dash-side-card[data-card="automations"] .dash-autom-row { position: relative; }
 #dashboard-page .dash-side-card[data-card="automations"] .dash-autom-actions {
     position: absolute;
     right: 8px;
