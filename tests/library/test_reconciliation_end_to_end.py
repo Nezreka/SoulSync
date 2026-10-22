@@ -583,6 +583,36 @@ def test_digital_tie_break_resolves_medium_split_without_overriding_pin(tmp_path
         assert bool(conflict) == (both_digital and not locked)
 
 
+@pytest.mark.parametrize(('album_format', 'locked'), [('CD', False), ('Digital Media', False), ('CD', True)])
+def test_lone_track_keeps_album_context_ahead_of_format_and_country(tmp_path, monkeypatch, album_format, locked):
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch)
+    paths[1].unlink()
+    with db._get_connection() as conn:
+        conn.execute('DELETE FROM tracks WHERE id=2')
+        conn.commit()
+    db.set_album_canonical(10, 'musicbrainz', 'compilation' if locked else 'album', .99, locked=locked)
+    monkeypatch.setattr(LibraryReconciliationJob, '_release_candidates',
+                        lambda *_args, **_kwargs: [('musicbrainz', 'compilation'), ('musicbrainz', 'album')])
+    monkeypatch.setattr(module, '_release_group_candidates', lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda _source, release_id, **_kwargs: {
+        'name': 'Ashes of the Wake (Deluxe)' if release_id == 'album' else 'Metal Compilation',
+        'format': album_format if release_id == 'album' else 'Digital Media',
+        'country': 'US' if release_id == 'album' else 'XW'})
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda _source, release_id, **_kwargs: [
+        {'id': mbids[0], 'name': 'Laid to Rest', 'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
+        {'id': f'{release_id}-absent', 'name': 'Hourglass' if release_id == 'album' else 'Other Song',
+         'artists': [{'name': 'Lamb of God'}], 'track_number': 2, 'disc_number': 1, 'duration_ms': 200000}])
+    assert not LibraryReconciliationJob().scan(context).errors
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT release_id FROM reconcile_album_plans').fetchone()[0] == (
+            'compilation' if locked else 'album')
+        # Album context orders the recommendation; it does not prove an edition.
+        conflict = conn.execute("SELECT 1 FROM repair_findings WHERE finding_type='reconciliation_release'").fetchone()
+        assert bool(conflict) is not locked
+
+
 @pytest.mark.parametrize(('multidisc', 'reversed_source'), [(True, False), (True, True), (False, False)])
 def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, monkeypatch, multidisc, reversed_source):
     import core.repair_jobs.library_reconciliation as module

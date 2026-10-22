@@ -2229,12 +2229,17 @@ class LibraryReconciliationJob(RepairJob):
                     leading_rank = rank_candidate(scored[0])
                     leading_count = sum(rank_candidate(row) == leading_rank for row in scored)
                     if leading_count > 1:
+                        def edition_order(row):
+                            metadata = _release_metadata(
+                                row, release_meta_cache, exact_musicbrainz_releases)
+                            # A lone recording can belong to many compilations.
+                            # Its known album context precedes format/country,
+                            # without claiming the tied editions are equivalent.
+                            context_fit = int(len(files) == 1 and bool(album) and
+                                not _single_file_album_context_conflict(album, metadata))
+                            return context_fit, *_edition_preference(metadata)
                         scored[:leading_count] = sorted(
-                            scored[:leading_count],
-                            key=lambda row: _edition_preference(
-                                _release_metadata(row, release_meta_cache,
-                                                  exact_musicbrainz_releases)),
-                            reverse=True)
+                            scored[:leading_count], key=edition_order, reverse=True)
                     # A single fingerprint proves the recording, but that same
                     # recording can occur on an original album and many later
                     # compilations. If the best audio-derived release contradicts

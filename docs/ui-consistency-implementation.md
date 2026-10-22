@@ -113,6 +113,22 @@ cover physical-vs-digital layouts, pins and two genuinely different digital
 layouts. A packed DDTT filename overflow guard also preserves prefixes that
 cannot represent the source position. The complete rerun remains required.
 
+Run 901 on `4a5129417048` completed all 13,835 files with zero errors, zero
+automatic file changes and complete catalogue evidence. The persisted review
+contained 857 numbering proposals, all matching their selected source positions;
+no pending legacy digital-mode proposals remained. A read-only batch preview
+contained exactly the 128 fully eligible albums / 519 changes. All 27 live
+desktop/phone views passed without page errors, overflow or repair mutations.
+
+Comparing changed release recommendations then caught a further ordering issue:
+without the old numbering bias, an unrelated compilation could precede a lone
+track's known album on equal audio fit. These cases remained manual, but the
+recommendation was worse (for example Piano Solos and Between Us). The tie order
+now considers the existing single-file album context before format/country,
+without overriding better audio, explicit pins or genuine edition ambiguity.
+The regression failed before the correction; the final rollout/run review is
+still required below.
+
 ## Reverification against the original assessment — 2026-10-20
 
 Baseline: `e80e4a1da`; deployed application `336c7cf68c1e`. Recovered the full
