@@ -1333,6 +1333,7 @@ class MusicDatabase:
             self._add_profile_navidrome_login(cursor)
             self._add_profile_lastfm_username(cursor)
             self._add_profile_plex_home_user(cursor)
+            self._add_profile_oidc_identity(cursor)
             self._add_profile_controls(cursor)
             self._add_own_library_columns(cursor)
             self._repair_own_jellyfin_artist_ids(cursor)
@@ -6975,6 +6976,79 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
         return None
+
+    def _add_profile_oidc_identity(self, cursor):
+        """who signs in with oidc as this profile: the provider's issuer and
+        the account's subject, as one ``<issuer>|<sub>`` string. set only by
+        oidc sign-in or by a signed-in profile connecting its own account,
+        never from an email address or any other claim a user can change"""
+        try:
+            cursor.execute("ALTER TABLE profiles ADD COLUMN oidc_identity TEXT DEFAULT NULL")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    def get_profile_by_oidc_identity(self, identity: str) -> Optional[Dict[str, Any]]:
+        """the profile an oidc account signs in as, or None.
+        {'id', 'name', 'is_admin', 'disabled'}"""
+        if not identity:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if 'oidc_identity' not in cols:
+                    return None
+                has_disabled = 'disabled' in cols
+                cursor.execute(
+                    f"SELECT id, name, is_admin{', disabled' if has_disabled else ''} FROM profiles "
+                    "WHERE oidc_identity = ? ORDER BY id LIMIT 1", (str(identity),))
+                row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin']),
+                    'disabled': bool(row['disabled']) if has_disabled else False}
+        except Exception as e:
+            logger.error(f"Error looking up profile by oidc identity: {e}")
+            return None
+
+    def set_profile_oidc_identity(self, profile_id: int, identity: Optional[str]) -> bool:
+        """record (or with None clear) which oidc account signs in as a profile"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profiles SET oidc_identity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(identity) if identity else None, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error saving oidc identity for profile {profile_id}: {e}")
+            return False
+
+    def profile_sign_in_methods(self, profile_id: int) -> Dict[str, bool]:
+        """how a profile can sign in: {'password', 'plex', 'oidc'}. lets a
+        disconnect refuse to strand a profile with no other way in"""
+        out = {'password': False, 'plex': False, 'oidc': False}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(profiles)")
+                cols = {c[1] for c in cursor.fetchall()}
+                picks = [c for c in ('password_hash', 'plex_account_id', 'oidc_identity') if c in cols]
+                if not picks:
+                    return out
+                cursor.execute(f"SELECT {', '.join(picks)} FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+            if not row:
+                return out
+            names = {'password_hash': 'password', 'plex_account_id': 'plex', 'oidc_identity': 'oidc'}
+            for c in picks:
+                out[names[c]] = row[c] is not None
+            return out
+        except Exception as e:
+            logger.error(f"Error reading sign-in methods for profile {profile_id}: {e}")
+            return out
 
     def get_profile_plex_home_user(self, profile_id: int) -> Optional[Dict[str, str]]:
         """{'id', 'title', 'token'} for the profile's linked plex home user,

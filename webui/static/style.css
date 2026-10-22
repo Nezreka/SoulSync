@@ -66339,6 +66339,8 @@ body.em-scroll-lock { overflow: hidden; }
     display: flex; align-items: center; justify-content: center;
 }
 .ma-logo img { width: 26px; height: 26px; object-fit: contain; }
+/* sign-in card with no provider logo set */
+.ma-logo-key { color: rgba(244, 245, 247, 0.7); }
 .ma-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ma-row-name { font-size: 15px; font-weight: 500; }
 .ma-row-sub { font-size: 13px; line-height: 1.4; color: rgba(var(--text-bright-rgb), 0.6); }
@@ -66612,6 +66614,60 @@ select.ma-input { appearance: auto; }
     margin-left: 14px;
     padding-left: 14px;
     border-left: 2px solid var(--white-a08);
+}
+/* several nested rows that belong together (sign in with oidc's provider
+   settings): one rule down the side and one quiet panel, so they read as a
+   single block. the rows inside keep their own hairline separators */
+.security-nested-block {
+    background: var(--white-a02);
+    border-radius: 0 10px 10px 0;
+    padding: 2px 6px 2px 10px;
+    margin-bottom: 8px;
+}
+.security-nested-block > .form-group {
+    border-radius: 6px;
+}
+/* inside its toggle's row (sign in with oidc): take the full width under the
+   help text, and don't let the row's hover tint wash over the whole block */
+#settings-page .form-group > .security-nested-block {
+    flex: 1 1 100%;
+    margin-top: 4px;
+}
+#settings-page .form-group:has(> .security-nested-block):hover {
+    background: transparent;
+}
+/* the admin's own oidc connection, last row of the block */
+.security-oidc-admin {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.security-oidc-admin-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: #0b0c0f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(244, 245, 247, 0.7);
+}
+.security-oidc-admin-logo img {
+    width: 22px;
+    height: 22px;
+    object-fit: contain;
+}
+.security-oidc-admin-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.74);
+}
+.security-oidc-admin-note {
+    flex-basis: 100%;
+    font-size: 12px;
+    color: #f0b35a;
 }
 .security-locked {
     opacity: 0.5;
@@ -76129,6 +76185,56 @@ body.src-modal-open { overflow: hidden; }
     outline-offset: 2px;
 }
 .login-plex-button:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+/* sign in with oidc on the login screen (webui/src/shell/oidc-signin.ts).
+   same shape as plex's, in the theme accent since the provider is anyone's */
+.login-oidc {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-top: 14px;
+}
+.login-oidc[hidden] {
+    display: none;
+}
+/* with plex's button above it, one "or" is enough */
+.login-plex:not([hidden]) + .login-oidc {
+    margin-top: 10px;
+}
+.login-plex:not([hidden]) + .login-oidc .login-oidc-or {
+    display: none;
+}
+.login-oidc-or {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--white-a40);
+}
+.login-oidc-button {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid rgba(var(--accent-rgb), 0.55);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.login-oidc-button:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.22);
+    border-color: rgba(var(--accent-rgb), 0.85);
+}
+.login-oidc-button:focus-visible {
+    outline: 2px solid rgb(var(--accent-rgb));
+    outline-offset: 2px;
+}
+.login-oidc-button:disabled {
     opacity: 0.6;
     cursor: wait;
 }
