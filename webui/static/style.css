@@ -52852,8 +52852,8 @@ tr.tag-diff-same {
     display: flex;
     gap: 4px;
     padding: 5px;
-    background: rgba(0, 0, 0, 0.35);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+    background: var(--black-a35);
+    box-shadow: inset 0 1px 2px var(--black-a50);
     border-radius: 13px;
     margin-bottom: 28px;
     /* Was `overflow-x: auto` with the scrollbar hidden and `width: fit-content`:
@@ -52878,9 +52878,9 @@ tr.tag-diff-same {
     letter-spacing: -0.005em;
     cursor: pointer;
     /* was `all`, which animates layout properties too and fights the wrap */
-    transition: background 140ms cubic-bezier(0.2, 0, 0, 1),
-                color 140ms cubic-bezier(0.2, 0, 0, 1),
-                box-shadow 140ms cubic-bezier(0.2, 0, 0, 1);
+    transition: background 140ms var(--ease-decelerate),
+                color 140ms var(--ease-decelerate),
+                box-shadow 140ms var(--ease-decelerate);
     white-space: nowrap;
     font-family: inherit;
 }
@@ -52899,7 +52899,7 @@ tr.tag-diff-same {
     background: var(--accent);
     color: #fff;
     font-weight: 600;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 1px 2px var(--black-a30);
 }
 
 /* Service accordion (API services, expandable sections) */
@@ -52914,7 +52914,7 @@ tr.tag-diff-same {
     justify-content: space-between;
     padding: 14px 16px;
     cursor: pointer;
-    transition: background 0.2s, padding-left 0.2s;
+    transition: background var(--dur-base), padding-left var(--dur-base);
     user-select: none;
 }
 .stg-service-header:hover {
@@ -52928,7 +52928,7 @@ tr.tag-diff-same {
 }
 .stg-service-chevron {
     color: var(--white-a25);
-    transition: transform 0.2s;
+    transition: transform var(--dur-base);
     font-size: 0.8em;
 }
 .stg-service.expanded .stg-service-chevron {
@@ -52958,11 +52958,11 @@ tr.tag-diff-same {
     border-radius: var(--radius-lg);
     margin-bottom: 16px;
     overflow: hidden;
-    transition: border-color 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 .stg-card:hover {
     border-color: var(--white-a10);
-    box-shadow: 0 2px 16px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 2px 16px var(--black-a15);
 }
 
 /* Toggle switch (replaces checkbox for booleans) */
@@ -53113,7 +53113,7 @@ tr.tag-diff-same {
     border: none;
     border-left: none;
     position: relative;
-    transition: color 240ms cubic-bezier(0.2, 0, 0, 1);
+    transition: color 240ms var(--ease-decelerate);
 }
 /* Kill the accent underline on h3 */
 #settings-page .settings-group > h3::after {
@@ -53141,8 +53141,8 @@ tr.tag-diff-same {
     padding: 10px 12px !important;
     margin: 0 !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.055);
-    border-radius: 10px;
-    transition: background 140ms cubic-bezier(0.2, 0, 0, 1);
+    border-radius: var(--radius-control);
+    transition: background 140ms var(--ease-decelerate);
 }
 #settings-page .form-group:hover {
     background: rgba(255, 255, 255, 0.028);
@@ -53190,23 +53190,23 @@ tr.tag-diff-same {
     padding: 9px 14px;
     background: var(--white-a04);
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a90);
     font-size: var(--stg-t-body, 0.82rem);
     font-family: inherit;
     margin: 0;
-    transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), background var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 #settings-page .form-group > textarea {
     padding: 9px 14px;
     background: var(--white-a04);
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a90);
     font-size: var(--stg-t-body, 0.82rem);
     margin: 0;
     resize: vertical;
-    transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), background var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 #settings-page .form-group > input:hover {
     background: var(--white-a06);
@@ -53235,14 +53235,14 @@ tr.tag-diff-same {
     background-repeat: no-repeat;
     background-position: right 12px center;
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     color: var(--white-a85);
     font-size: var(--stg-t-body, 0.82rem);
     font-family: inherit;
     cursor: pointer;
     min-width: 0;
     margin: 0;
-    transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), background-color var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 #settings-page select:hover {
     background-color: var(--white-a06);
@@ -53267,16 +53267,16 @@ tr.tag-diff-same {
     margin: 6px 0;
     padding: 0 !important;
     overflow: hidden;
-    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s;
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate), transform var(--dur-moderate);
 }
 #settings-page .api-service-frame:hover {
     border-color: var(--white-a10);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 4px 20px var(--black-a15);
     transform: translateY(-1px);
 }
 #settings-page .api-service-frame:focus-within {
     border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.1), 0 4px 20px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.1), 0 4px 20px var(--black-a15);
 }
 
 #settings-page .api-service-frame .service-title {
@@ -53326,16 +53326,16 @@ tr.tag-diff-same {
     gap: 8px;
 }
 #settings-page .server-toggle-btn {
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 10px 20px;
     font-size: var(--stg-t-body, 0.82rem);
     font-weight: 500;
     border: 1px solid var(--white-a08);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 #settings-page .server-toggle-btn:hover {
     transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 4px 16px var(--black-a20);
     border-color: rgba(var(--accent-rgb), 0.25);
 }
 #settings-page .server-toggle-btn:active {
@@ -53351,7 +53351,7 @@ tr.tag-diff-same {
 #settings-page .auth-button {
     padding: 9px 18px;
     min-width: fit-content;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: var(--stg-t-body, 0.82rem);
     font-weight: 600;
     font-family: inherit;
@@ -53359,7 +53359,7 @@ tr.tag-diff-same {
     border: 1px solid var(--white-a08);
     color: var(--white-a70);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     position: relative;
     overflow: hidden;
     letter-spacing: 0.01em;
@@ -53370,10 +53370,10 @@ tr.tag-diff-same {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.05) 100%);
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity var(--dur-slow);
 }
 #settings-page .test-button:hover::before,
 #settings-page .detect-button:hover::before,
@@ -53424,7 +53424,7 @@ tr.tag-diff-same {
     cursor: pointer;
     font-size: var(--stg-t-label, 0.78rem);
     color: var(--white-a80);
-    transition: background 0.2s, color 0.2s;
+    transition: background var(--dur-base), color var(--dur-base);
 }
 #settings-page .checkbox-label:hover {
     background: var(--white-a02);
@@ -53457,7 +53457,7 @@ tr.tag-diff-same {
     border-radius: var(--radius-lg);
     margin-bottom: 6px;
     overflow: hidden;
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-base);
 }
 #settings-page .tag-service-group:hover {
     border-color: var(--white-a10);
@@ -53578,7 +53578,7 @@ tr.tag-diff-same {
     border-bottom-left-radius: 12px;
     border-bottom-right-radius: 12px;
     background: rgba(255, 255, 255, 0.012);
-    box-shadow: 0 10px 26px -18px rgba(0, 0, 0, 0.7);
+    box-shadow: 0 10px 26px -18px var(--black-a70);
     padding: 16px;
 }
 /* Inner groups inside an expanded tile: no own frame/shadow/accent bar —
@@ -53593,8 +53593,8 @@ tr.tag-diff-same {
 #settings-page .settings-section-body:not(.collapsed) [id$="-settings-container"]:not(#hybrid-settings-container) {
     background: rgba(255, 255, 255, 0.045) !important;
     border: 1px solid rgba(255, 255, 255, 0.13) !important;
-    border-radius: 10px !important;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+    border-radius: var(--radius-control) !important;
+    box-shadow: 0 2px 10px var(--black-a25) !important;
     padding: 6px 16px 12px !important;
     margin: 0 0 14px !important;
 }
@@ -53683,7 +53683,7 @@ tr.tag-diff-same {
     text-align: center;
     margin-left: 6px;
     flex: 0 0 auto;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 #settings-page .info-icon:hover {
     background: rgba(var(--accent-rgb), 0.16);
@@ -53769,7 +53769,7 @@ tr.tag-diff-same {
     border-radius: var(--radius-lg);
     padding: 4px 18px;
     margin: 8px 0;
-    transition: border-color 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 #settings-page #soulseek-settings-container:hover,
 #settings-page #tidal-download-settings-container:hover,
@@ -53804,8 +53804,8 @@ tr.tag-diff-same {
     padding: 10px 14px;
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
-    transition: all 0.2s;
+    border-radius: var(--radius-control);
+    transition: all var(--dur-base);
     user-select: none;
     cursor: grab;
 }
@@ -53840,7 +53840,7 @@ tr.tag-diff-same {
     padding: 1px 4px;
     line-height: 1;
     border-radius: 3px;
-    transition: all 0.15s;
+    transition: all var(--dur-fast);
 }
 .hybrid-arrow-btn:hover {
     color: var(--accent);
@@ -53881,7 +53881,7 @@ tr.tag-diff-same {
     padding: 2px 6px;
     border-radius: var(--radius-sm);
     line-height: 1;
-    transition: all 0.15s;
+    transition: all var(--dur-fast);
 }
 .hybrid-source-config-btn:hover {
     color: rgb(var(--accent-light-rgb));
@@ -53918,8 +53918,8 @@ tr.tag-diff-same {
    downloads skip it; the chip says why instead of silently unchecking */
 .hybrid-source-unready {
     margin-left: 6px;
-    border-color: rgba(245, 158, 11, 0.4);
-    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(var(--warning-strong-rgb), 0.4);
+    background: rgba(var(--warning-strong-rgb), 0.12);
     color: #fbcd7a;
 }
 .hybrid-source-priority {
@@ -53974,9 +53974,9 @@ tr.tag-diff-same {
     position: absolute;
     inset: 0;
     background: var(--white-a12);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
-    transition: background 0.25s;
+    transition: background var(--dur-moderate);
 }
 .hybrid-source-toggle .toggle-track::after {
     content: '';
@@ -53987,7 +53987,7 @@ tr.tag-diff-same {
     height: 16px;
     background: #fff;
     border-radius: var(--radius-circle);
-    transition: transform 0.25s;
+    transition: transform var(--dur-moderate);
 }
 .hybrid-source-toggle input:checked + .toggle-track {
     background: var(--accent);
@@ -53999,7 +53999,7 @@ tr.tag-diff-same {
 /* ── Settings Accordion Services — visual upgrade ── */
 #settings-page .api-service-frame.stg-service {
     overflow: hidden;
-    transition: border-color 0.25s, box-shadow 0.25s, transform 0.25s, border-left-color 0.3s;
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate), transform var(--dur-moderate), border-left-color var(--dur-slow);
 }
 #settings-page .api-service-frame.stg-service:hover {
     transform: none;
@@ -54011,7 +54011,7 @@ tr.tag-diff-same {
     gap: 12px;
     padding: 13px 18px;
     cursor: pointer;
-    transition: background 0.2s ease, padding-left 0.25s ease;
+    transition: background var(--dur-base) ease, padding-left var(--dur-moderate) ease;
     user-select: none;
 }
 #settings-page .stg-service > .stg-service-header:hover {
@@ -54030,7 +54030,7 @@ tr.tag-diff-same {
     letter-spacing: 0.02em;
     text-transform: none;
     flex: 1;
-    transition: color 0.2s;
+    transition: color var(--dur-base);
 }
 #settings-page .stg-service:hover .stg-service-header .service-title,
 #settings-page .stg-service.expanded .stg-service-header .service-title {
@@ -54073,7 +54073,7 @@ tr.tag-diff-same {
     background: currentColor;
     opacity: 0.85;
     box-shadow: 0 0 6px currentColor;
-    transition: opacity 0.25s, transform 0.25s, box-shadow 0.25s;
+    transition: opacity var(--dur-moderate), transform var(--dur-moderate), box-shadow var(--dur-moderate);
 }
 #settings-page .stg-service:hover .stg-service-dot {
     opacity: 1;
@@ -54089,7 +54089,7 @@ tr.tag-diff-same {
 #settings-page .stg-service > .stg-service-header > .stg-service-chevron {
     color: var(--white-a20);
     font-size: 1.1em;
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.25s;
+    transition: transform var(--dur-moderate) var(--ease-standard), color var(--dur-moderate);
     flex-shrink: 0;
     margin-left: auto;
     line-height: 1;
@@ -54114,7 +54114,7 @@ tr.tag-diff-same {
 #settings-page .api-service-frame.stg-service.expanded {
     border-left: 2px solid rgba(var(--accent-rgb), 0.4);
     background: rgba(255, 255, 255, 0.025);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15), inset 0 1px 0 var(--white-a03);
+    box-shadow: 0 4px 20px var(--black-a15), inset 0 1px 0 var(--white-a03);
 }
 
 /* ── Service config-status gradients ──
@@ -54211,7 +54211,7 @@ tr.tag-diff-same {
     cursor: pointer;
     padding: 4px 10px;
     border-radius: var(--radius-sm);
-    transition: color 0.2s, background 0.2s, border-color 0.2s;
+    transition: color var(--dur-base), background var(--dur-base), border-color var(--dur-base);
     margin-left: auto;
     letter-spacing: 0.03em;
     font-family: inherit;
@@ -54419,7 +54419,7 @@ tr.tag-diff-same {
     inset: -6px;
     border-radius: var(--radius-circle);
     border: 1.5px solid rgba(var(--accent-rgb), 0);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slower) var(--ease-standard);
     pointer-events: none;
 }
 
@@ -54551,9 +54551,9 @@ tr.tag-diff-same {
     min-width: 280px;
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
     flex-shrink: 0;
     position: relative;
     overflow: hidden;
@@ -54573,7 +54573,7 @@ tr.tag-diff-same {
     bottom: 0;
     width: 3px;
     border-radius: 14px 0 0 14px;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 
 .sync-history-card.health-good::before { background: #4CAF50; }
@@ -54584,7 +54584,7 @@ tr.tag-diff-same {
     background: var(--white-a06);
     border-color: var(--white-a12);
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 6px 20px var(--black-a25);
 }
 
 .sync-card-info {
@@ -54648,7 +54648,7 @@ tr.tag-diff-same {
 
 .sync-detail-table tbody tr {
     border-bottom: 1px solid var(--white-a03);
-    transition: background 0.15s;
+    transition: background var(--dur-fast);
 }
 
 .sync-detail-table tbody tr:hover {
@@ -54706,7 +54706,7 @@ tr.tag-diff-same {
     border-radius: var(--radius-pill);
     padding: 3px 9px;
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .sync-dl-wishlist-btn:hover { background: rgba(255, 183, 77, 0.22); border-color: rgba(255, 183, 77, 0.6); color: #ffce8a; }
 .sync-dl-wishlist-btn.is-busy { opacity: 0.6; cursor: default; }
@@ -54810,7 +54810,7 @@ tr.tag-diff-same {
 .server-pl-others {
     margin-top: 28px;
     padding: 20px;
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
     background: var(--white-a02);
     border: 1px solid var(--white-a06);
 }
@@ -54937,7 +54937,7 @@ tr.tag-diff-same {
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-xl);
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     overflow: hidden;
     animation: sync-card-enter 0.35s ease both;
 }
@@ -54950,14 +54950,14 @@ tr.tag-diff-same {
     height: 100%;
     background: radial-gradient(ellipse at center, hsla(var(--card-hue), 70%, 55%, 0.08) 0%, transparent 70%);
     pointer-events: none;
-    transition: opacity 0.4s;
+    transition: opacity var(--dur-slower);
     opacity: 0.5;
 }
 
 .server-pl-card:hover {
     transform: translateY(-4px);
     border-color: hsla(var(--card-hue), 60%, 60%, 0.25);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35), 0 0 20px hsla(var(--card-hue), 70%, 55%, 0.08);
+    box-shadow: 0 8px 30px var(--black-a35), 0 0 20px hsla(var(--card-hue), 70%, 55%, 0.08);
 }
 
 .server-pl-card:hover .server-pl-card-glow {
@@ -54999,7 +54999,7 @@ tr.tag-diff-same {
     width: 3.5px;
     border-radius: 2px;
     background: hsla(var(--card-hue), 65%, 60%, 0.7);
-    transition: height 0.3s ease;
+    transition: height var(--dur-slow) ease;
 }
 
 .server-pl-card-bars span:nth-child(1) { height: 8px; }
@@ -55027,7 +55027,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     color: var(--white-a35);
-    transition: color 0.3s, border-color 0.3s;
+    transition: color var(--dur-slow), border-color var(--dur-slow);
 }
 
 .server-pl-card:hover .server-pl-card-badge {
@@ -55082,7 +55082,7 @@ tr.tag-diff-same {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--white-a25);
-    transition: color 0.3s;
+    transition: color var(--dur-slow);
 }
 
 .server-pl-card:hover .server-pl-card-action {
@@ -55091,7 +55091,7 @@ tr.tag-diff-same {
 
 .server-pl-card-arrow {
     color: var(--white-a20);
-    transition: transform 0.3s, color 0.3s;
+    transition: transform var(--dur-slow), color var(--dur-slow);
     display: flex;
     align-items: center;
 }
@@ -55122,14 +55122,14 @@ tr.tag-diff-same {
 .server-disambig-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--black-a60);
     backdrop-filter: blur(8px);
     z-index: 9000;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: opacity 0.25s ease;
+    transition: opacity var(--dur-moderate) ease;
     pointer-events: none;
 }
 .server-disambig-overlay.visible { opacity: 1; pointer-events: auto; }
@@ -55142,9 +55142,9 @@ tr.tag-diff-same {
     padding: 28px;
     max-width: 520px;
     width: 90vw;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 32px 80px var(--black-a50);
     transform: scale(0.95);
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform var(--dur-slow) var(--ease-spring);
 }
 .server-disambig-overlay.visible .server-disambig-modal { transform: scale(1); }
 
@@ -55181,7 +55181,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .server-disambig-close:hover { background: var(--white-a12); color: #fff; }
 
@@ -55190,11 +55190,11 @@ tr.tag-diff-same {
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
     cursor: pointer;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
     margin-bottom: 8px;
     animation: fadeSlideUp 0.3s ease both;
 }
@@ -55265,7 +55265,7 @@ tr.tag-diff-same {
 .server-disambig-arrow {
     color: var(--white-a20);
     flex-shrink: 0;
-    transition: transform 0.25s, color 0.25s;
+    transition: transform var(--dur-moderate), color var(--dur-moderate);
 }
 .server-disambig-card:hover .server-disambig-arrow {
     transform: translateX(4px);
@@ -55294,7 +55294,7 @@ tr.tag-diff-same {
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     flex-shrink: 0;
 }
 .server-editor-back:hover { background: var(--white-a10); color: #fff; }
@@ -55313,7 +55313,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .server-editor-refresh:hover {
     background: var(--white-a10);
@@ -55363,7 +55363,7 @@ tr.tag-diff-same {
     font-size: 11px; font-weight: 700; letter-spacing: 0.2px; white-space: nowrap;
     color: #ffb74d; background: rgba(255, 183, 77, 0.12);
     border: 1px solid rgba(255, 183, 77, 0.4);
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 .server-order-badge:hover { background: rgba(255, 183, 77, 0.22); }
 
@@ -55378,8 +55378,8 @@ tr.tag-diff-same {
 .server-order-dialog {
     width: min(460px, 100%); max-height: 82vh; display: flex; flex-direction: column;
     background: linear-gradient(180deg, #20232b, #16181e);
-    border: 1px solid var(--white-a09); border-radius: 18px;
-    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8), inset 0 1px 0 var(--white-a05);
+    border: 1px solid var(--white-a09); border-radius: var(--radius-sheet);
+    box-shadow: 0 30px 80px -20px var(--black-a80), inset 0 1px 0 var(--white-a05);
     overflow: hidden; animation: serverOrderPop 0.2s cubic-bezier(0.2, 0.7, 0.2, 1.1);
 }
 @keyframes serverOrderPop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
@@ -55394,13 +55394,13 @@ tr.tag-diff-same {
 .server-order-close {
     flex: 0 0 auto; width: 30px; height: 30px; border-radius: var(--radius-md);
     background: var(--white-a05); border: none; color: var(--white-a55);
-    font-size: 20px; line-height: 1; cursor: pointer; transition: all 0.15s ease;
+    font-size: 20px; line-height: 1; cursor: pointer; transition: all var(--dur-fast) ease;
 }
 .server-order-close:hover { color: #fff; background: var(--white-a12); }
 .server-order-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; scrollbar-width: thin; }
 .server-order-row {
-    display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 10px;
-    transition: background 0.12s ease;
+    display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: var(--radius-control);
+    transition: background var(--dur-xfast) ease;
 }
 .server-order-row:hover { background: var(--white-a04); }
 .server-order-num {
@@ -55409,7 +55409,7 @@ tr.tag-diff-same {
 }
 .server-order-art {
     flex: 0 0 40px; width: 40px; height: 40px; border-radius: 7px; object-fit: cover;
-    background: var(--white-a05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    background: var(--white-a05); box-shadow: 0 2px 8px var(--black-a40);
 }
 .server-order-art-ph { display: flex; align-items: center; justify-content: center;
     font-size: 17px; color: var(--white-a30); }
@@ -55423,9 +55423,9 @@ tr.tag-diff-same {
 .server-order-actions { display: flex; gap: 10px; }
 .server-align-btn {
     flex: 1; display: flex; flex-direction: column; gap: 3px; text-align: left;
-    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    padding: 10px 12px; border-radius: var(--radius-control); cursor: pointer;
     background: var(--white-a04); border: 1px solid var(--white-a12);
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .server-align-btn:hover { background: rgba(76, 175, 80, 0.14); border-color: rgba(76, 175, 80, 0.5); }
 .server-align-btn-t { font-size: 13px; font-weight: 700; color: #fff; }
@@ -55445,7 +55445,7 @@ tr.tag-diff-same {
     padding: 10px 16px;
     background: rgba(255, 183, 77, 0.06);
     border: 1px solid rgba(255, 183, 77, 0.15);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 12px;
     color: rgba(255, 183, 77, 0.8);
     margin-bottom: 10px;
@@ -55466,7 +55466,7 @@ tr.tag-diff-same {
     min-height: 380px;
     max-height: 620px;
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     overflow: hidden;
 }
 
@@ -55506,7 +55506,7 @@ tr.tag-diff-same {
     font-variant-numeric: tabular-nums;
     font-size: 10px;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a05);
     color: var(--white-a40);
 }
@@ -55529,7 +55529,7 @@ tr.tag-diff-same {
     padding: 7px 14px;
     border-bottom: 1px solid var(--white-a03);
     cursor: pointer;
-    transition: background 0.15s, box-shadow 0.2s;
+    transition: background var(--dur-fast), box-shadow var(--dur-base);
     min-height: 50px;
 }
 .server-track-item:hover { background: var(--white-a03); }
@@ -55627,7 +55627,7 @@ tr.tag-diff-same {
     border-radius: var(--radius-md);
     border: 1.5px dashed rgba(239, 83, 80, 0.2);
     background: rgba(239, 83, 80, 0.02);
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     min-height: 36px;
 }
 .server-track-empty-slot:hover {
@@ -55653,7 +55653,7 @@ tr.tag-diff-same {
     font-size: 11px;
     font-weight: 600;
     color: rgba(239, 83, 80, 0.5);
-    transition: color 0.2s;
+    transition: color var(--dur-base);
     white-space: nowrap;
 }
 
@@ -55714,7 +55714,7 @@ tr.tag-diff-same {
     gap: 2px;
     flex-shrink: 0;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity var(--dur-fast);
 }
 .server-track-item:hover .server-track-actions { opacity: 1; }
 
@@ -55730,7 +55730,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     padding: 0;
 }
 .server-track-swap-btn:hover {
@@ -55751,7 +55751,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     padding: 0;
 }
 .server-track-remove-btn:hover {
@@ -55776,14 +55776,14 @@ tr.tag-diff-same {
 .server-search-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--black-a55);
     backdrop-filter: blur(4px);
     z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--dur-base) ease;
 }
 .server-search-overlay.visible { opacity: 1; }
 
@@ -55795,11 +55795,11 @@ tr.tag-diff-same {
     backdrop-filter: blur(20px);
     border: 1px solid var(--white-a08);
     border-radius: 20px;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--white-a03) inset;
+    box-shadow: 0 32px 80px var(--black-a60), 0 0 0 1px var(--white-a03) inset;
     display: flex;
     flex-direction: column;
     transform: scale(0.96) translateY(8px);
-    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    transition: transform var(--dur-slow) var(--ease-spring);
 }
 .server-search-overlay.visible .server-search-popover {
     transform: scale(1) translateY(0);
@@ -55854,7 +55854,7 @@ tr.tag-diff-same {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .server-search-close:hover { background: var(--white-a12); color: #fff; }
 
@@ -55866,7 +55866,7 @@ tr.tag-diff-same {
     background: var(--white-a05);
     border: 1px solid var(--white-a08);
     border-radius: var(--radius-lg);
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-base);
 }
 .server-search-input-wrap:focus-within {
     border-color: rgba(var(--accent-rgb), 0.4);
@@ -55935,7 +55935,7 @@ tr.tag-diff-same {
     border-radius: var(--radius-lg);
     margin-bottom: 2px;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background var(--dur-fast);
     animation: fadeSlideUp 0.2s ease both;
 }
 .server-search-result:hover { background: var(--white-a05); }
@@ -56024,7 +56024,7 @@ tr.tag-diff-same {
     font-weight: 600;
     cursor: pointer;
     flex-shrink: 0;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .server-search-select-btn:hover {
     background: var(--accent);
@@ -56102,7 +56102,7 @@ tr.tag-diff-same {
     padding: 24px;
     max-width: 420px;
     width: 90vw;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 32px 80px var(--black-a60);
 }
 
 .smart-delete-header {
@@ -56131,7 +56131,7 @@ tr.tag-diff-same {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
 }
 .smart-delete-close:hover { background: var(--white-a12); color: #fff; }
 
@@ -56152,11 +56152,11 @@ tr.tag-diff-same {
     align-items: center;
     gap: 14px;
     padding: 14px 16px;
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     text-align: left;
     color: #fff;
 }
@@ -56201,7 +56201,7 @@ tr.tag-diff-same {
 .redownload-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
+    background: var(--black-a70);
     backdrop-filter: blur(4px);
     z-index: 10000;
     display: flex;
@@ -56221,7 +56221,7 @@ tr.tag-diff-same {
     max-height: 88dvh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--white-a06) inset, 0 0 80px rgba(0,0,0,0.3) inset;
+    box-shadow: 0 40px 100px var(--black-a70), 0 0 0 1px var(--white-a06) inset, 0 0 80px var(--black-a30) inset;
 }
 
 .redownload-header {
@@ -56237,7 +56237,7 @@ tr.tag-diff-same {
 .redownload-close {
     width: 32px; height: 32px; border: none; background: var(--white-a06);
     color: var(--white-a40); border-radius: var(--radius-circle); font-size: 18px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; transition: all var(--dur-base);
     flex-shrink: 0;
 }
 .redownload-close:hover { background: var(--white-a12); color: #fff; }
@@ -56280,7 +56280,7 @@ tr.tag-diff-same {
 }
 .redownload-step {
     font-size: 13px; font-weight: 600; color: var(--white-a20);
-    padding: 8px 16px; border-radius: 10px; transition: all 0.25s;
+    padding: 8px 16px; border-radius: var(--radius-control); transition: all var(--dur-moderate);
     display: flex; align-items: center; gap: 10px; white-space: nowrap;
 }
 .redownload-step.active {
@@ -56316,7 +56316,7 @@ tr.tag-diff-same {
 
 .redownload-source-col {
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -56332,7 +56332,7 @@ tr.tag-diff-same {
 .redownload-col-icon { font-size: 16px; }
 .redownload-col-label { flex: 1; }
 .redownload-col-count {
-    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; padding: 2px 8px; border-radius: var(--radius-control);
     background: var(--white-a06); color: var(--white-a35);
     font-variant-numeric: tabular-nums;
 }
@@ -56350,14 +56350,14 @@ tr.tag-diff-same {
 
 .redownload-result {
     display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-lg);
-    cursor: pointer; transition: all 0.15s; margin-bottom: 3px;
+    cursor: pointer; transition: all var(--dur-fast); margin-bottom: 3px;
     border: 1px solid transparent;
 }
 .redownload-result:hover { background: var(--white-a04); border-color: var(--white-a06); }
 .redownload-result:has(input:checked) { background: rgba(var(--accent-rgb), 0.06); border-color: rgba(var(--accent-rgb), 0.15); }
 .redownload-result input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; width: 16px; height: 16px; }
 
-.redownload-result-art { width: 48px; height: 48px; border-radius: 10px; overflow: hidden; flex-shrink: 0; }
+.redownload-result-art { width: 48px; height: 48px; border-radius: var(--radius-control); overflow: hidden; flex-shrink: 0; }
 .redownload-result-art img { width: 100%; height: 100%; object-fit: cover; }
 .redownload-art-empty { width: 100%; height: 100%; background: var(--white-a04); border-radius: var(--radius-sm); }
 
@@ -56383,7 +56383,7 @@ tr.tag-diff-same {
 
 .rdl-src-col {
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -56399,7 +56399,7 @@ tr.tag-diff-same {
 .rdl-src-col-icon { font-size: 16px; }
 .rdl-src-col-label { flex: 1; }
 .rdl-src-col-count {
-    font-size: 10px; padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; padding: 2px 8px; border-radius: var(--radius-control);
     background: var(--white-a06); color: var(--white-a35);
 }
 
@@ -56413,7 +56413,7 @@ tr.tag-diff-same {
 .rdl-src-item {
     display: flex; align-items: flex-start; gap: 10px;
     padding: 10px 12px; border-radius: var(--radius-lg); cursor: pointer;
-    transition: all 0.15s; margin-bottom: 4px;
+    transition: all var(--dur-fast); margin-bottom: 4px;
     border: 1px solid transparent;
 }
 .rdl-src-item:hover { background: var(--white-a04); border-color: var(--white-a06); }
@@ -56457,7 +56457,7 @@ tr.tag-diff-same {
     height: 3px; background: var(--white-a06); border-radius: 2px; overflow: hidden;
 }
 .rdl-src-conf-fill {
-    height: 100%; border-radius: 2px; transition: width 0.3s ease;
+    height: 100%; border-radius: 2px; transition: width var(--dur-slow) ease;
 }
 .rdl-src-conf-fill.high { background: #4caf50; }
 .rdl-src-conf-fill.medium { background: #ffb74d; }
@@ -56475,7 +56475,7 @@ tr.tag-diff-same {
 /* Rejected candidates — quiet until asked for */
 .rdl-rej { margin-top: 4px; padding-top: 6px; border-top: 1px dashed var(--white-a06); }
 .rdl-rej-toggle {
-    display: block; width: 100%; padding: 8px 12px; border: 0; border-radius: 10px;
+    display: block; width: 100%; padding: 8px 12px; border: 0; border-radius: var(--radius-control);
     background: transparent; color: var(--white-a40);
     font-size: 11px; font-weight: 600; text-align: left; cursor: pointer;
 }
@@ -56519,7 +56519,7 @@ tr.tag-diff-same {
 
 .rdl-rej-evidence {
     margin-top: 8px; padding: 10px; border-radius: var(--radius-md);
-    background: rgba(0, 0, 0, 0.25); border: 1px solid var(--white-a05);
+    background: var(--black-a25); border: 1px solid var(--white-a05);
 }
 .rdl-rej-reason { font-size: 11px; color: var(--white-a80); margin-bottom: 8px; line-height: 1.4; }
 .rdl-rej-score { color: var(--white-a35); }
@@ -56559,13 +56559,13 @@ tr.tag-diff-same {
 .redownload-progress-title { font-size: 13px; font-weight: 600; color: var(--white-a80); }
 .redownload-progress-from { font-size: 11px; color: var(--white-a30); margin: 4px 0 16px; }
 .redownload-progress-bar-wrap { height: 8px; background: var(--white-a08); border-radius: var(--radius-xs); overflow: hidden; }
-.redownload-progress-bar { height: 100%; background: linear-gradient(90deg, #4caf50, #66bb6a); border-radius: var(--radius-xs); width: 0; transition: width 0.5s ease; box-shadow: 0 0 8px rgba(76, 175, 80, 0.4); }
+.redownload-progress-bar { height: 100%; background: linear-gradient(90deg, #4caf50, #66bb6a); border-radius: var(--radius-xs); width: 0; transition: width var(--dur-slowest) ease; box-shadow: 0 0 8px rgba(76, 175, 80, 0.4); }
 .redownload-progress-status { font-size: 11px; color: var(--white-a30); margin-top: 12px; }
 
 /* Action buttons */
 .redownload-actions { display: flex; justify-content: flex-end; gap: 12px; }
 .redownload-btn {
-    padding: 12px 28px; border-radius: var(--radius-lg); font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s; border: none;
+    padding: 12px 28px; border-radius: var(--radius-lg); font-size: 14px; font-weight: 700; cursor: pointer; transition: all var(--dur-base); border: none;
 }
 .redownload-btn.primary {
     background: linear-gradient(135deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.8));
@@ -56586,11 +56586,11 @@ tr.tag-diff-same {
     backdrop-filter: blur(20px);
     border: 1px solid var(--white-a10);
     border-radius: var(--radius-xl);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 16px 48px var(--black-a50);
     z-index: 9500;
     opacity: 0;
     transform: scale(0.96);
-    transition: opacity 0.2s, transform 0.2s;
+    transition: opacity var(--dur-base), transform var(--dur-base);
 }
 .source-info-popover.visible { opacity: 1; transform: scale(1); }
 
@@ -56640,7 +56640,7 @@ tr.tag-diff-same {
 .source-info-blacklist-btn {
     width: 100%; padding: 8px 14px; border-radius: var(--radius-md); border: 1px solid rgba(239,83,80,0.2);
     background: rgba(239,83,80,0.06); color: #ef5350; font-size: 11px; font-weight: 600;
-    cursor: pointer; transition: all 0.2s;
+    cursor: pointer; transition: all var(--dur-base);
 }
 .source-info-blacklist-btn:hover { background: rgba(239,83,80,0.12); border-color: rgba(239,83,80,0.35); }
 .source-info-blacklist-btn:disabled { opacity: 0.5; cursor: default; }
@@ -56661,7 +56661,7 @@ tr.tag-diff-same {
     max-height: 80dvh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 32px 80px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 32px 80px var(--black-a60);
 }
 .blacklist-modal-header {
     display: flex; justify-content: space-between; align-items: center;
@@ -56679,9 +56679,9 @@ tr.tag-diff-same {
 
 .blacklist-entry {
     display: flex; align-items: center; gap: 12px;
-    padding: 10px 12px; border-radius: 10px; margin-bottom: 4px;
+    padding: 10px 12px; border-radius: var(--radius-control); margin-bottom: 4px;
     border: 1px solid var(--white-a04);
-    transition: background 0.15s;
+    transition: background var(--dur-fast);
 }
 .blacklist-entry:hover { background: var(--white-a03); }
 
@@ -56709,7 +56709,7 @@ tr.tag-diff-same {
     width: 24px; height: 24px; border-radius: var(--radius-sm); border: none;
     background: transparent; color: var(--white-a20);
     cursor: pointer; display: flex; align-items: center; justify-content: center;
-    font-size: 12px; flex-shrink: 0; transition: all 0.15s;
+    font-size: 12px; flex-shrink: 0; transition: all var(--dur-fast);
 }
 .blacklist-entry-remove:hover { background: rgba(239, 83, 80, 0.12); color: #ef5350; }
 
