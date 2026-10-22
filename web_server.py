@@ -6313,9 +6313,11 @@ def search_music():
     add_activity_item("", "Search Started", f"'{query}'", "Now")
 
     try:
-        results = _search_basic.run_basic_search(query, download_orchestrator, run_async, source=requested_source)
+        warnings = []
+        results = _search_basic.run_basic_search(query, download_orchestrator, run_async,
+                                                 source=requested_source, warnings=warnings)
         add_activity_item("", "Search Complete", f"'{query}' - {len(results)} results", "Now")
-        return jsonify({"results": results})
+        return jsonify({"results": results, "warnings": warnings})
     except ValueError as ve:
         # user-facing config problem (e.g. SoundCloud link with the source
         # disabled) — a clear 400, not a silent empty result

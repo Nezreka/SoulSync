@@ -74,6 +74,8 @@ SoulSync downloads from multiple sources. Connect each source in **Settings → 
 | **Usenet** | Full releases via your Usenet client and Prowlarr indexers | Fast, complete releases |
 | **Hybrid** | Tries your primary source first, then falls back through alternates automatically | Best overall success rate |
 
+Torrent and Usenet search each Prowlarr indexer on its own, so one slow or broken indexer never costs you the others' results. When some indexers fail, a note above the results names them (click **Details** for each one's error), so you know the list may be missing releases.
+
 > [!TIP]
 > **Hybrid mode** is recommended for most users. It tries your primary source first, then falls back through your configured priority order. Order all sources via drag-and-drop in Settings → Downloads.
 

@@ -240,6 +240,67 @@
 
 /* ── results ──────────────────────────────────────────────────────────── */
 
+/* some prowlarr indexers failed, the rest answered (#1831). a note over the
+   results, not an error, they're still good */
+.warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 10px 14px;
+  border: 1px solid rgba(var(--warning-strong-rgb), 0.35);
+  border-radius: 12px;
+  background: rgba(var(--warning-strong-rgb), 0.08);
+  color: #f5d9a8;
+  font-size: 13px;
+}
+
+.warningHeadline {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.warningDetails summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.warningDetails[open] {
+  flex-basis: 100%;
+}
+
+.warningDetails ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.warningDetails li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  color: var(--bs-text);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.warningSource {
+  color: var(--bs-faint);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  align-self: center;
+}
+
+.warningError {
+  color: var(--text-secondary);
+  font-family: var(--bs-mono);
+  overflow-wrap: anywhere;
+}
+
 .list {
   border: 1px solid var(--white-a07);
   border-radius: var(--radius-xl);

@@ -80,10 +80,28 @@ export interface BasicSourcesResponse {
   sources: BasicSource[];
 }
 
+/**
+ * a prowlarr indexer that failed while the others answered (#1831). the
+ * results are real, they're just missing whatever this indexer had.
+ */
+export interface BasicSearchWarning {
+  /** 'torrent' or 'usenet' */
+  source: string;
+  indexer: string;
+  error: string;
+}
+
 /** POST /api/search. `error` is set instead of `results` on a 400. */
 export interface BasicSearchResponse {
   results?: BasicResult[];
+  warnings?: BasicSearchWarning[];
   error?: string;
+}
+
+/** what a basic search hands back to the controller */
+export interface BasicSearchOutcome {
+  results: BasicResult[];
+  warnings: BasicSearchWarning[];
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────
