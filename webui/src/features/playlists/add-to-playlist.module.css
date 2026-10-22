@@ -12,8 +12,8 @@
   color: var(--white-a50);
   cursor: pointer;
   transition:
-    color 0.15s ease,
-    background 0.15s ease;
+    color var(--dur-fast) ease,
+    background var(--dur-fast) ease;
 }
 
 .button:hover,
@@ -38,7 +38,7 @@
   backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.6),
+    0 24px 60px var(--black-a60),
     0 0 0 1px rgba(var(--accent-rgb), 0.08),
     0 0 60px rgba(var(--accent-rgb), 0.12);
   color: #fff;
@@ -104,9 +104,9 @@
   width: 52px;
   height: 52px;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   object-fit: cover;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 20px var(--black-a45);
 }
 
 .subjectBlank {
@@ -158,18 +158,18 @@
   padding: 0;
   border: none;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--black-a25);
   color: var(--white-a70);
   cursor: pointer;
   transition:
-    color 0.15s ease,
-    background 0.15s ease,
-    transform 0.15s ease;
+    color var(--dur-fast) ease,
+    background var(--dur-fast) ease,
+    transform var(--dur-fast) ease;
 }
 
 .heart:hover:not(:disabled) {
   color: #fff;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--black-a40);
   transform: scale(1.06);
 }
 
@@ -319,7 +319,7 @@
   border-radius: 9px;
   object-fit: cover;
   background: linear-gradient(145deg, rgba(var(--accent-rgb), 0.55), rgba(var(--accent-rgb), 0.1));
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 12px var(--black-a35);
   color: #fff;
   font-weight: 800;
   font-size: 17px;
@@ -375,7 +375,7 @@
   font-weight: 700;
   font-size: 11.5px;
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--dur-fast) ease;
 }
 
 .row:hover:not(:disabled) .go,

@@ -79,7 +79,7 @@
   padding: 16px 18px;
   background: linear-gradient(110deg, rgba(var(--accent-rgb), 0.08), #ffffff02);
   border: 1px solid rgba(var(--accent-rgb), 0.15);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -212,12 +212,12 @@
 .card > a {
   display: block;
   text-decoration: none;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
 }
 .art {
   position: relative;
   aspect-ratio: 1;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   overflow: hidden;
   background: #24242c;
   box-shadow: 0 8px 20px #0003;
@@ -374,7 +374,7 @@
   .modal {
     width: calc(100vw - 48px);
     height: calc(100dvh - 48px);
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
   }
   .header {
     padding: 22px 18px 18px;

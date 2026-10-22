@@ -16,8 +16,8 @@
   border: 1px solid var(--white-a08);
   border-top: 1px solid var(--white-a14);
   box-shadow:
-    0 24px 60px -12px rgba(0, 0, 0, 0.65),
-    0 8px 24px -4px rgba(0, 0, 0, 0.4),
+    0 24px 60px -12px var(--black-a65),
+    0 8px 24px -4px var(--black-a40),
     inset 0 1px 0 var(--white-a10);
   backdrop-filter: blur(28px);
 }
@@ -52,7 +52,7 @@
   font-weight: 750;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.24s var(--ease-emphasized);
   box-shadow:
     0 0 20px rgba(var(--accent-light-rgb), 0.2),
     inset 0 1px 0 var(--white-a20);
@@ -107,7 +107,7 @@
   font-size: 0.82rem;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-quick) var(--ease-emphasized);
 }
 
 .statsTab:hover {
@@ -119,7 +119,7 @@
   background: var(--white-a15) !important;
   color: #fff !important;
   box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 2px 8px var(--black-a35),
     inset 0 1px 0 var(--white-a20);
 }
 
@@ -143,7 +143,7 @@
   font-size: 0.8rem;
   font-weight: 650;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all var(--dur-quick) ease;
   font-family: inherit;
 }
 
@@ -219,13 +219,13 @@
 .statsSyncButton {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--white-a10);
   background: var(--white-a05);
   color: var(--white-a70);
   font-size: 15px;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -278,7 +278,7 @@
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.035);
   backdrop-filter: blur(14px);
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .historyImportControl:hover {
@@ -328,7 +328,7 @@
   font-weight: 650;
   white-space: nowrap;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
 }
 
 .historyImportButton:hover:not(:disabled) {
@@ -376,12 +376,12 @@
 .statsCard {
   background: linear-gradient(145deg, rgba(24, 28, 36, 0.75) 0%, rgba(14, 16, 22, 0.85) 100%);
   border: 1px solid var(--white-a07);
-  border-radius: 18px;
+  border-radius: var(--radius-sheet);
   padding: 18px 20px 16px;
   position: relative;
   overflow: hidden;
-  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  transition: all 0.28s var(--ease-emphasized);
+  box-shadow: 0 8px 28px var(--black-a35);
   display: flex;
   flex-direction: column;
 }
@@ -400,7 +400,7 @@
   transform: translateY(-3px);
   border-color: rgba(var(--accent-rgb), 0.3);
   box-shadow:
-    0 14px 36px rgba(0, 0, 0, 0.5),
+    0 14px 36px var(--black-a50),
     0 0 20px rgba(var(--accent-rgb), 0.15);
 }
 
@@ -495,8 +495,8 @@
   border-radius: 20px;
   padding: 22px;
   backdrop-filter: blur(20px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-  transition: all 0.25s ease;
+  box-shadow: 0 10px 30px var(--black-a30);
+  transition: all var(--dur-moderate) ease;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -504,7 +504,7 @@
 
 .statsSectionCard:hover {
   border-color: var(--white-a12);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 14px 40px var(--black-a40);
 }
 
 .statsSectionTitle {
@@ -596,8 +596,8 @@
   border: none;
   padding: 0;
   transition:
-    transform 0.15s ease,
-    filter 0.15s ease;
+    transform var(--dur-fast) ease,
+    filter var(--dur-fast) ease;
 }
 
 .statsClockCell:disabled {
@@ -720,7 +720,7 @@
   color: inherit;
   text-decoration: none;
   font: inherit;
-  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.22s var(--ease-emphasized);
 }
 
 .statsArtistBubbleDisabled {
@@ -738,7 +738,7 @@
   background-color: var(--white-a08);
   border: 2px solid rgba(var(--accent-rgb), 0.35);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 8px 24px var(--black-a40),
     0 0 16px rgba(var(--accent-rgb), 0.2);
   display: flex;
   align-items: center;
@@ -750,7 +750,7 @@
 .statsArtistBubble:hover .statsBubbleImage {
   border-color: rgb(var(--accent-rgb));
   box-shadow:
-    0 10px 28px rgba(0, 0, 0, 0.5),
+    0 10px 28px var(--black-a50),
     0 0 24px rgba(var(--accent-rgb), 0.45);
 }
 
@@ -813,7 +813,7 @@
   border-radius: var(--radius-lg);
   background: var(--white-a02);
   border: 1px solid transparent;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .statsRankedItem:hover,
@@ -861,7 +861,7 @@
   flex-shrink: 0;
   background: var(--white-a06);
   object-fit: cover;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--black-a30);
 }
 
 .statsRankedInfo {
@@ -908,7 +908,7 @@
   padding: 0;
   cursor: pointer;
   font: inherit;
-  transition: color 0.15s ease;
+  transition: color var(--dur-fast) ease;
 }
 
 .statsArtistLink:hover {
@@ -935,9 +935,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--dur-base) var(--ease-emphasized);
   opacity: 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--black-a30);
 }
 
 .statsRankedItem:hover .statsPlayButton,
@@ -1002,7 +1002,7 @@
   height: 7px;
   border-radius: var(--radius-pill);
   min-width: 3px;
-  transition: width 0.3s ease;
+  transition: width var(--dur-slow) ease;
 }
 
 .statsOwnPlayOwned {
@@ -1189,7 +1189,7 @@
 .statsHealthItem {
   text-align: center;
   padding: 14px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--white-a05);
 }
@@ -1222,7 +1222,7 @@
   overflow: hidden;
   margin-top: 10px;
   background: var(--white-a05);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 3px var(--black-a40);
 }
 
 .statsFormatSegment {
@@ -1465,7 +1465,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--black-a65);
   backdrop-filter: blur(14px);
 }
 
@@ -1479,7 +1479,7 @@
   border: 1px solid var(--white-a10);
   background: rgba(18, 22, 28, 0.96);
   backdrop-filter: blur(28px);
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 28px 80px var(--black-a70);
 }
 
 .statsDetailHeader {
@@ -1526,7 +1526,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .statsDetailClose:hover {
@@ -1556,7 +1556,7 @@
   min-height: 64px;
   padding: 10px 12px;
   border-radius: var(--radius-lg);
-  transition: background 0.15s ease;
+  transition: background var(--dur-fast) ease;
 }
 
 .statsDetailRow:hover {
@@ -1570,7 +1570,7 @@
   border-radius: var(--radius-md);
   object-fit: cover;
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 12px var(--black-a35);
 }
 
 .statsDetailArtFallback {
@@ -1640,7 +1640,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all var(--dur-base) ease;
 }
 
 .statsDetailPlay:hover {
@@ -1671,7 +1671,7 @@
   .statsContainer {
     margin: 10px;
     padding: 16px;
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
   }
 
   .statsOverview {

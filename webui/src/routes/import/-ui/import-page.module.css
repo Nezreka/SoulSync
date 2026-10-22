@@ -123,9 +123,9 @@
   color: var(--white-a65);
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s,
-    border-color 0.15s;
+    background var(--dur-fast),
+    color var(--dur-fast),
+    border-color var(--dur-fast);
 }
 
 .iconButton:hover {
@@ -157,7 +157,7 @@
   gap: 2px;
   padding: 3px;
   border: 1px solid var(--white-a08);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a04);
 }
 
@@ -176,8 +176,8 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--dur-fast),
+    color var(--dur-fast);
 }
 
 .pill:hover {
@@ -249,8 +249,8 @@
   border-radius: var(--radius-lg);
   background: var(--white-a03);
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--dur-fast),
+    background var(--dur-fast);
 }
 
 .row:hover {
@@ -462,7 +462,7 @@
 .progressFill {
   height: 100%;
   background: rgb(var(--accent-light-rgb));
-  transition: width 0.4s ease;
+  transition: width var(--dur-slower) ease;
 }
 
 .progressFill.indeterminate {
@@ -590,7 +590,7 @@
   gap: 14px;
   padding: 16px;
   border: 1px solid var(--white-a08);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   background: var(--white-a03);
 }
 
@@ -611,7 +611,7 @@
 .heroArt {
   width: 96px;
   height: 96px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   object-fit: cover;
   background: var(--white-a06);
   flex: 0 0 auto;
@@ -672,8 +672,8 @@
   cursor: pointer;
   font: inherit;
   transition:
-    background 0.15s,
-    border-color 0.15s;
+    background var(--dur-fast),
+    border-color var(--dur-fast);
 }
 
 .candidate:hover {
@@ -770,8 +770,8 @@
   border: 1px solid var(--white-a06);
   background: rgba(255, 255, 255, 0.025);
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--dur-fast),
+    background var(--dur-fast);
 }
 
 .track.matched {
@@ -915,8 +915,8 @@
   font-size: 12.5px;
   cursor: grab;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--dur-fast),
+    background var(--dur-fast);
 }
 
 .chip:hover {
@@ -1045,7 +1045,7 @@
   align-items: center;
   padding: 8px 12px;
   border: 1px solid var(--white-a07);
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   background: var(--white-a03);
   font-size: 12.5px;
 }
@@ -1229,7 +1229,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
 }
 
 .dropzoneOver {

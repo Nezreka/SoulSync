@@ -3,5 +3,5 @@
    and stays centred on phones, where mobile.css top-aligns .modal-overlay. */
 .overlay {
   align-items: center;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--black-a70);
 }

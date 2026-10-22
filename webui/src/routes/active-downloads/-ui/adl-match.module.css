@@ -51,7 +51,7 @@
 
 .type {
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--white-a10);
   background: transparent;
   color: rgba(255, 255, 255, 0.78);
@@ -60,9 +60,9 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
+    background var(--dur-fast),
+    border-color var(--dur-fast),
+    color var(--dur-fast);
 }
 
 .type:hover {
@@ -89,7 +89,7 @@
   padding: 0 14px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--white-a12);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--black-a25);
   color: #f5f5f7;
   font: inherit;
   font-size: 14px;
@@ -116,7 +116,7 @@
   padding: 0 10px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--white-a12);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--black-a25);
   color: #f5f5f7;
   font: inherit;
   font-size: 14px;
@@ -143,7 +143,7 @@
   gap: 14px;
   width: 100%;
   padding: 12px;
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   border: 1px solid var(--white-a06);
   background: var(--white-a03);
   color: inherit;
@@ -151,8 +151,8 @@
   text-align: left;
   cursor: pointer;
   transition:
-    border-color 0.15s,
-    background 0.15s;
+    border-color var(--dur-fast),
+    background var(--dur-fast);
 }
 
 .hit:hover {
@@ -168,7 +168,7 @@
   width: 52px;
   height: 52px;
   flex-shrink: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   object-fit: cover;
   display: flex;
   align-items: center;
@@ -318,8 +318,8 @@
   border: 1px solid var(--white-a08);
   background: var(--white-a02);
   transition:
-    border-color 0.15s,
-    opacity 0.15s;
+    border-color var(--dur-fast),
+    opacity var(--dur-fast);
 }
 
 .bulkRow[data-status='none'] {
