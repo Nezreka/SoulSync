@@ -50,11 +50,11 @@ no shared policy resolver, override framework, or new settings are authorized.
   partial/multidisc albums, conflicting versions, stale plans, codec round trips,
   naming collisions and apply-then-rescan stability before broadening defaults.
 
-## Queue numbering correction and recovery — 2026-10-22 (in progress)
+## Queue numbering correction and recovery — 2026-10-22 (completed)
 
 The user authorized implementation, tests, deployment, a full reconciliation run,
-and repeated correction/deployment/run review as needed. Host reboot for a
-vulnerability fix may temporarily interrupt live access; retry after it returns.
+and repeated correction/deployment/run review as needed. The host reboot for a
+vulnerability fix completed; subsequent rollouts and live runs were healthy.
 
 - [x] Keep digital format as an evidence-subordinate release tie breaker;
   separate it from numbering. Respect selected releases and recording versions.
@@ -69,7 +69,7 @@ vulnerability fix may temporarily interrupt live access; retry after it returns.
   verify partial albums, repeated titles, collisions and apply/rescan stability.
 - [x] Remove low-value queue disclosures and excessive component nesting,
   especially release candidates; inspect desktop/mobile before and after.
-- [ ] Run affected backend/UI/browser suites, check/build; deploy via maintained
+- [x] Run affected backend/UI/browser suites, check/build; deploy via maintained
   script, run reconciliation, inspect actual proposals/readiness/recovery, fix
   findings and repeat. Report measured results and remaining limitations.
 
@@ -77,8 +77,9 @@ Scope excludes new preferences, downloads/Soulseek, shared organizer behavior,
 date policy, completeness defaults, and duplicate handling changes. Live review
 does not authorize applying unrelated music-file changes as test data.
 
-Implementation checks: 773 backend tests passed before the final edge-case
-additions; the final affected scan/authority/queue suites passed 233 tests.
+Implementation checks: 783 backend scan/matching/authority/queue tests passed.
+The final album-context correction passed all 137 scan end-to-end tests,
+including three new cases for format/country ordering and explicit pins.
 Recovery tests write real FLAC fixtures, verify disc/track and per-disc totals,
 retain compatible absolute filenames, and rescan to an empty queue. Additional
 coverage includes unordered or incomplete source positions, explicit release
@@ -92,7 +93,7 @@ All 69 pinned browser checks passed against the reviewed snapshots. An initial
 update pass overlapped a production build and lost its manifest in three tests;
 the complete run against the finished build passed without snapshot updates.
 Live baseline: 895 albums, 131 eligible albums / 526 ready changes; captured 137
-release/numbering cases before rollout. Live verification is still pending.
+release/numbering cases before rollout. Final live results are recorded below.
 
 First live run (`aa75e21a2`, run 900): all 13,835 files examined, 306 findings
 created, no file actions applied. It correctly reopened 20 Bad Blood X tracks,
@@ -111,7 +112,7 @@ while preserving explicit pins, material version/tracklist differences and
 competing digital layouts. No source positions are synthesized. Follow-up tests
 cover physical-vs-digital layouts, pins and two genuinely different digital
 layouts. A packed DDTT filename overflow guard also preserves prefixes that
-cannot represent the source position. The complete rerun remains required.
+cannot represent the source position.
 
 Run 901 on `4a5129417048` completed all 13,835 files with zero errors, zero
 automatic file changes and complete catalogue evidence. The persisted review
@@ -126,8 +127,46 @@ track's known album on equal audio fit. These cases remained manual, but the
 recommendation was worse (for example Piano Solos and Between Us). The tie order
 now considers the existing single-file album context before format/country,
 without overriding better audio, explicit pins or genuine edition ambiguity.
-The regression failed before the correction; the final rollout/run review is
-still required below.
+The recommendation-order regression failed before the correction.
+
+### Final live verification
+
+- Deployed `localhost/soulsync:test-f96a3235331e` through the maintained test
+  script. Run **902** completed in **114.7 seconds**: **13,835 files**, **12 new
+  findings**, **zero errors**, **zero provider failures**, complete catalogue
+  evidence, and **zero automatic file changes**.
+- Queue: **886 albums = 753 needs input + 128 ready + 5 file actions + 0 waiting**.
+  The read-only signed batch preview contained exactly the 128 fully eligible
+  albums / **520 changes**, with no file actions or unresolved albums. The extra
+  ready change since run 901 is a newly available, uniquely audio-supported
+  recording-ID repair for Kenny Loggins' “The Real Thing”, inspected separately.
+- Audited every pending numbering proposal: **857 tracks**, **zero disagreements
+  with the selected source's disc/track positions**, and **zero legacy digital
+  mode proposals**. Old approvals cannot silently authorize inverse repairs.
+- **101 historically changed tracks** have fresh numbering review proposals:
+  Bad Blood X 20, ABBA Gold 40, The Fame Monster 15, Unreal Unearth: Unending 26.
+  Recovery follows current selected-release evidence rather than blindly
+  reversing old edits. Actual single-disc editions retain their source layout.
+  No live recovery plan was applied; the apply/rescan cycle was verified with
+  disposable real-tag fixtures.
+- The final context fix improved the leading recommendation on **16 sparse
+  albums**, including Piano Solos and Between Us. All retain their unresolved
+  edition decision where multiple material tracklists fit. A digital bias does
+  not override the known album context, stronger audio evidence or a user pin.
+- **27 live desktop/phone views** passed on the preceding image, followed by
+  **12 targeted recovery/context views** on the final image. Reviewed actual
+  artwork, per-disc previews, filename differences, semantic colors and mobile
+  wrapping. The automated checks found no document overflow, page errors or
+  repair mutations. The 69 fixture-based browser/visual checks also passed.
+
+Remaining behavior is explicit: materially different releases still need a
+choice; source numbering can imply filename changes when an old absolute prefix
+does not match the selected edition's order. Title/remaster policy was preserved,
+not redesigned: six pre-existing source-title proposals still put remaster text
+in filenames (five Deftones Covers tracks and “All It Takes”). Their before/after
+proposals are identical. This round adds no settings and changes no downloader,
+Soulseek, date, folder-organization or duplicate policy. The test image remains
+available for user review with the existing SoulSync-only Flux suspension.
 
 ## Reverification against the original assessment — 2026-10-20
 

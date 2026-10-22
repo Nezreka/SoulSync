@@ -76,6 +76,7 @@ This catalogue records the real-library cases used while designing and tuning th
 | Case | Failure mode | Expected behavior |
 | --- | --- | --- |
 | *The Truman Show* soundtrack | Compilation tracks credited to their performers could be pulled away from the soundtrack album. | Album identity and soundtrack folder context outrank per-track performer ownership. Keep track artists separately from the album artist. |
+| Dustin O'Halloran — *Piano Solos*; Peter Bradley Adams — *Between Us* | After removing numbering bias, equally fitting unrelated compilations could sort before a lone track's known album. | Within equal evidence ranks, prefer compatible album context before format/country. Keep material edition choices and explicit pins; do not let context beat better audio. |
 | Matchbox Twenty, Sixpence None the Richer, Smash Mouth, Vanessa Carlton collections | Single-artist compilations were grouped or displayed as though they were various-artist releases, sometimes producing duplicate queue entries. | Keep a single-artist compilation with its artist and one physical album case. |
 | Chelsea Wolfe pre-release single/EP tracks | The same recordings existed in a short pre-release and the full album. | Detect duplicate copies across the single and album context, preserving playlist evidence before a keeper decision. |
 | Physical disc subfolders | Separate library album rows or damaged positions made one multidisc release appear as several albums. | Merge only when physical ancestry, normalized title, and release identity agree. Preserve conflicts for review. |
@@ -114,7 +115,7 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 8. Accepted exceptions reopen when their audio, release, folder, or evidence signature changes.
 9. A scan interrupted before completion preserves previous plans and findings; a successful scan retires stale ones.
 10. The review queue must distinguish algorithmic uncertainty from presentation state. A selected row should reveal its detail without changing the underlying confidence or risk classification.
-11. Headings describe the proposed outcome (“Use continuous numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.
+11. Headings describe the proposed outcome (“Match release numbering,” “Link MusicBrainz recording IDs”), not the planner's internal category or finding count.
 12. The default album view is the actionable plan. The complete track audit and per-track evidence remain available together in Tracks so dense albums do not bury the controlling decision.
 13. Queue modes separate albums that need input, supported changes ready to apply, and recoverable file actions. Type filtering refines the selected mode instead of duplicating it.
 14. Release comparisons show available title, country, format, date, and disambiguation before asking the user to pin an edition. The Plan view keeps this comparison compact; the Release inspector owns the candidate file-by-file mapping.
