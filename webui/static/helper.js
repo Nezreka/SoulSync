@@ -3469,6 +3469,8 @@ const WHATS_NEW = {
         { date: 'October 2026 · 3.5.9' },
         { title: 'Lidarr compatible API', desc: 'Singarr and MusicSeerr 1.x can request albums from SoulSync by pointing their Lidarr URL at /lidarr with an admin API key. Requests land on the wishlist of the profile you pick. Off until turned on in Settings > Advanced (thanks @Topaze77 for the request) (#1799).', page: 'settings' },
         { title: 'MCP endpoint', desc: 'An AI client can drive SoulSync through /mcp, with the same scopes and limits as your API key. Off until turned on in Settings > Advanced.', page: 'settings' },
+        { title: 'Choose what new sign-ups start with', desc: 'Settings > Security picks the side a profile made by Plex sign-in starts on (music, movies and TV, or both) and an optional request limit. Members can also open the video Requests page now (thanks @PapaBearDoes) (#1818, #1819).', page: 'settings' },
+        { title: 'Anime library folder', desc: 'An optional folder for anime. Episodes of anime-type shows import there instead of the TV folder, and scans, renames and subtitles cover it. Set it in video Settings > Downloads (thanks @PapaBearDoes) (#1820).' },
         { title: 'Guided first-run setup', desc: 'Setup is rebuilt as a guided flow that finds your servers on the network, checks every part before it finishes, and can pick up where you left off. The dashboard shows a finish setting up checklist.', page: 'dashboard' },
         { title: 'Downloads page rebuilt', desc: 'Music and video share one row style: status on the art, one action per row, and a detail sheet that explains what happened and shows asked for vs got. Albums read like a tracklist and history is grouped by day.', page: 'active-downloads' },
         { title: 'Wishlist grouped by what is stuck', desc: 'Artists sit in zones like rejected, no match found and keeps failing, each with its own retry. Click an artist for a side panel that says why. Movies, TV and YouTube now live on the same page.', page: 'wishlist' },
@@ -3521,9 +3523,10 @@ const WHATS_NEW = {
 const VERSION_MODAL_SECTIONS = [
     {
         title: '3.5.9: lidarr and mcp apis, guided setup, and rebuilt downloads and wishlist',
-        description: 'SoulSync can answer as Lidarr for request apps and as an MCP server for AI clients, first-run setup is a guided flow, the Downloads page and Wishlist are rebuilt on both the music and video side, and a round of matching, library and video fixes.',
+        description: 'SoulSync can answer as Lidarr for request apps and as an MCP server for AI clients, first-run setup is a guided flow, the Downloads page and Wishlist are rebuilt on both the music and video side, new sign-ups and anime get their own settings, and a round of matching, library and video fixes.',
         features: [
             'Lidarr compatible API for Singarr and MusicSeerr 1.x, and an MCP endpoint for AI clients. Both off until turned on in Settings > Advanced (thanks @Topaze77 for the request) (#1799).',
+            'Choose what new Plex sign-ups start with, members can open video Requests, and anime can have its own library folder (thanks @PapaBearDoes) (#1818, #1819, #1820).',
             'Guided first-run setup that finds your servers, checks every part before finishing and can resume later.',
             'Downloads page rebuilt for music and video: status on the art, one action per row and a detail sheet for every download.',
             'Wishlist grouped by what is stuck with a side panel that says why, and the video wishlist on the same page.',

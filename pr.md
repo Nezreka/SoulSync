@@ -1,11 +1,16 @@
 # soulsync 3.5.9: `dev` → `main`
 
-soulsync can answer as lidarr and as an mcp server now, first-run setup is rebuilt as a guided flow, the downloads page and the wishlist are rebuilt on both sides, and a stack of matching, library and video fixes. scope: everything on dev since 3.5.8.
+soulsync can answer as lidarr and as an mcp server now, first-run setup is rebuilt as a guided flow, the downloads page and the wishlist are rebuilt on both sides, you can choose what new sign-ups start with, anime gets its own library folder, and a stack of matching, library and video fixes. scope: everything on dev since 3.5.8.
 
 ## api
 
 - lidarr compatible api. singarr and musicseerr 1.x only talk to lidarr, so point their lidarr url at `http://<host>:8008/lidarr` with an admin api key and they run against soulsync. requested albums land on the wishlist of the profile picked in settings, through the same add the album modal uses, and a profile without download rights means every request waits for approval. off until turned on in settings > advanced > soulsync api (thanks @Topaze77 for the request) (#1799).
 - mcp endpoint at `/mcp`, so an ai client can drive soulsync. 35 tools, almost all one `/api/v1` call each, replayed with the caller's own key, so scopes, gates and rate limits are the rest api's. settings, keys, profiles and blocklist clears are not tools. also off until turned on.
+
+## sign-ups
+
+- choose what new sign-ups start with. settings > security has a new sign-ups block: the side a profile made by plex sign-in starts on (music, movies and tv, or both) and an optional request limit. nothing set means exactly what sign-up made before (thanks @PapaBearDoes) (#1818).
+- members can open video requests. a request-only profile could file a request from a card but never open the page to see or withdraw it. it follows the music rule now: admins see it, and so does anyone without download rights (thanks @PapaBearDoes) (#1819).
 
 ## first-run setup
 
@@ -45,6 +50,7 @@ soulsync can answer as lidarr and as an mcp server now, first-run setup is rebui
 ## video
 
 - collections stop wishlisting things nobody asked for. the franchise and universe presets started with "wishlist the movies i'm missing" ticked, and a removed movie came straight back on the nightly sync. the box starts off now, says how many titles it'll grab, and each collection feeds a movie to the wishlist once (thanks @hilburn) (#1807).
+- an optional anime library folder. episodes of anime-type shows (set by hand, or tagged with the anime genre) import there instead of the tv folder, and scans, renames and subtitles cover it. empty means off (thanks @PapaBearDoes) (#1820).
 - a usenet grab's empty release folder is removed after import (thanks @PapaBearDoes) (#1815).
 
 ## audiobooks
