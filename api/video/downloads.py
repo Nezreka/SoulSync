@@ -51,10 +51,14 @@ _PATH_KEYS = ("movies_path", "tv_path", "anime_path", "youtube_path")
 
 
 def _series_type_for(db, kind, body) -> str | None:
-    """Effective series type of the show a TV download is for, from the body's
-    ``media_id`` (a TMDB id when ``media_source`` is 'tmdb', else a library show
-    id -- the same reading grab-pack's owned check uses). None for movies or when
-    the show can't be identified, which routes to the TV folder as before."""
+    """The series type that decides which library FOLDER a TV download is filed
+    in (``routing_series_type``: set by hand, an anime-marked library, or the
+    stored hint for a show not in any library -- never the genre tag). Read from
+    the body's ``media_id``: a TMDB id when ``media_source`` is 'tmdb', else a
+    library show id (the same reading grab-pack's owned check uses). For a TMDB
+    id the show's hint is made sure of first (one TMDB call, only for a show not
+    in any library that has none yet). None for movies or when the show can't
+    be identified, which routes to the TV folder as before."""
     if str(kind or "").lower() == "movie":
         return None
     mid = (body or {}).get("media_id")
@@ -62,8 +66,12 @@ def _series_type_for(db, kind, body) -> str | None:
         return None
     try:
         if str((body or {}).get("media_source") or "").lower() == "tmdb":
-            return db.effective_series_type(tmdb_id=int(mid))
-        return db.effective_series_type(library_id=int(mid))
+            tmdb = int(mid)
+            if db.get_setting("anime_path"):
+                from core.video.anime_hint import ensure_show_type_hint
+                ensure_show_type_hint(db, tmdb)
+            return db.routing_series_type(tmdb_id=tmdb)
+        return db.routing_series_type(library_id=int(mid))
     except (ValueError, TypeError):
         return None
 # The shared input/download dir — the SAME config key the music side reads/writes.

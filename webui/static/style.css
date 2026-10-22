@@ -75034,6 +75034,33 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .settings-group[data-svc-side] .video-library-note {
     margin: 2px 0 0;
 }
+/* other TV libraries: one line each, the name then its Scan / Anime ticks */
+#settings-page .settings-group[data-svc-side] .video-library-tv-more {
+    align-items: flex-start;
+}
+/* a grid, so the Scan / Anime toggles line up down the rows whatever the
+   library names' lengths; each item's children sit straight in its cells */
+#settings-page .settings-group[data-svc-side] .video-library-tv-more-list {
+    margin-left: auto;
+    display: grid;
+    grid-template-columns: minmax(0, max-content) max-content max-content;
+    align-items: center;
+    column-gap: 14px;
+    row-gap: 6px;
+    min-width: 0;
+}
+#settings-page .settings-group[data-svc-side] .video-library-tv-more-item {
+    display: contents;
+}
+#settings-page .settings-group[data-svc-side] .video-library-tv-more-item > span {
+    min-width: 10ch;
+    overflow-wrap: anywhere;
+    /* the same type as the Scan / Anime labels beside it (.checkbox-label),
+       a touch heavier so the name still reads as the row's subject */
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--white-a80);
+}
 /* both sides describe their section the same way */
 #settings-page .settings-group[data-svc-side] > .setting-help-text {
     margin: -2px 0 14px;

@@ -4210,8 +4210,18 @@
                                                 <option value="">Loading...</option>
                                             </select>
                                         </div>
+                                        <!-- Every other TV library on the server: tick Scan to read it as
+                                     well, Anime when its shows are anime (their new episodes then go
+                                     to the Anime folder). Filled by video-settings.js. -->
+                                        <div class="form-group video-library-selectors video-library-tv-more"
+                                            data-video-lib-tv-more-row hidden>
+                                            <label>Other TV Libraries:</label>
+                                            <div class="video-library-tv-more-list" data-video-lib-tv-more></div>
+                                        </div>
                                         <div class="setting-help-text video-library-note">
-                                            Which libraries the video side scans. <span data-video-lib-save-status></span>
+                                            Which libraries the video side scans. A library ticked Anime files
+                                            its shows' new episodes in the Anime folder (Settings &gt; Library).
+                                            <span data-video-lib-save-status></span>
                                         </div>
                                     </div>
                                     <!-- Video Library Organization — uses the SAME settings vocabulary as the
@@ -7168,9 +7178,12 @@
                                                 <div class="form-group">
                                                     <label>🍥 Anime Library (optional):</label>
                                                     <input type="text" id="video-anime-path" placeholder="/media/anime">
-                                                    <div class="setting-help-text">New episodes of anime shows
-                                                        (series type Anime, or tagged with the Anime genre) go here
-                                                        instead of the TV folder. Leave empty to keep anime with TV.
+                                                    <div class="setting-help-text">New episodes of anime shows go
+                                                        here instead of the TV folder: shows in a TV library ticked Anime
+                                                        (Settings &gt; Connections), shows set to Anime by hand, and shows
+                                                        not in your library yet that TMDB suggests are anime (an admin can
+                                                        change that on the show's page or when approving). Leave empty to
+                                                        keep anime with TV.
                                                     </div>
                                                 </div>
                                                 <div class="setting-help-text">

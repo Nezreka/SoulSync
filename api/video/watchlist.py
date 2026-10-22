@@ -111,6 +111,11 @@ def register_routes(bp):
                 server_source=server, profile_id=_profile())
             if not ok:
                 return jsonify({"success": False, "error": "Could not add to watchlist"}), 400
+            if kind == "show":
+                # a show not in any library yet: store its type (TMDB's
+                # suggestion) so its episodes are filed in the right folder
+                from core.video.anime_hint import note_show_wanted
+                note_show_wanted(get_video_db, tmdb_id)
             wished = 0
             monitor = str(body.get("monitor") or "future").lower()
             if kind == "show" and monitor != "future":
