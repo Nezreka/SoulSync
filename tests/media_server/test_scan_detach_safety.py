@@ -54,7 +54,7 @@ def _worker(tmp_path, monkeypatch, *, scanning=False, probe_raises=False):
     worker._get_all_artists = lambda: ([], setattr(worker, "_artists_fetch_verified", True))[0]
     worker._process_all_artists = lambda artists: None
     worker._deep_scan_process_all_artists = lambda artists, seen: None
-    worker._repair_navidrome_identities = lambda: True
+    worker._post_scan = lambda: True
     worker._clear_phantom_artist_thumbs = lambda: None
     return db, worker
 
@@ -76,7 +76,7 @@ def test_empty_inventory_keeps_mappings_when_scan_did_not_finish_safely(
         worker._deep_scan_process_all_artists = lambda artists, seen: setattr(worker, "should_stop", True)
         worker._process_all_artists = lambda artists: setattr(worker, "should_stop", True)
     else:
-        worker._repair_navidrome_identities = lambda: False
+        worker._post_scan = lambda: False
     if mode == "deep":
         worker.run_deep_scan()
     else:

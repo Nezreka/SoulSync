@@ -10653,15 +10653,15 @@ def _build_library_stream_url(track_id, file_path):
     """Build a media-server stream URL for a library track that isn't on the
     SoulSync filesystem (#809 — play via the server's API, no disk mount).
 
-    Navidrome/Subsonic only for now (it has a clean token-authed stream
-    endpoint). ``track_id`` is the server's mapped song id; if missing, look it
-    up by file_path. Returns None when the
-    active server isn't Navidrome or no id resolves."""
+    Any active server whose client builds a token-authed stream URL
+    (``build_stream_url``; Navidrome/Subsonic today). ``track_id`` is the
+    server's mapped song id; if missing, look it up by file_path. Returns None
+    when the active client cannot stream or no id resolves."""
     try:
-        if config_manager.get_active_media_server() != 'navidrome':
-            return None
-        client = media_server_engine.client('navidrome')
-        if not client:
+        active_server = config_manager.get_active_media_server()
+        client = media_server_engine.client(active_server) if media_server_engine else None
+        build_stream_url = getattr(client, 'build_stream_url', None)
+        if not callable(build_stream_url):
             return None
 
         song_id = str(track_id) if track_id else None
@@ -10674,16 +10674,16 @@ def _build_library_stream_url(track_id, file_path):
                     row = conn.cursor().execute(
                         "SELECT m.server_id FROM lib2_track_files f "
                         "JOIN lib2_media_server_mappings m ON m.entity_type='track' "
-                        "AND m.entity_id=f.track_id AND m.server_source='navidrome' "
+                        "AND m.entity_id=f.track_id AND m.server_source=? "
                         "WHERE f.path = ? LIMIT 1",
-                        (file_path,)).fetchone()
+                        (active_server, file_path)).fetchone()
                 if row and row[0]:
                     song_id = str(row[0])
             except Exception as e:
-                logger.debug("navidrome stream id lookup failed: %s", e)
+                logger.debug("%s stream id lookup failed: %s", active_server, e)
         if not song_id:
             return None
-        return client.build_stream_url(song_id)
+        return build_stream_url(song_id)
     except Exception as e:
         logger.debug("build library stream url failed: %s", e)
         return None
@@ -10733,7 +10733,8 @@ def library_play_track():
             )
             if not server_track_id and data.get('lib2_track_id'):
                 active_server = config_manager.get_active_media_server()
-                if active_server in ('plex', 'jellyfin', 'navidrome'):
+                from core.library2.media_mappings import is_media_server_source
+                if is_media_server_source(active_server):
                     with get_database()._get_connection() as conn:
                         row = conn.execute(
                             "SELECT server_id FROM lib2_media_server_mappings "

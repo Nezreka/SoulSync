@@ -51,9 +51,12 @@ def sync_artist(database, artist_id, media_engine=None, *, worker_factory=None):
                                     full_refresh=False, server_type=source, force_sequential=True,
                                     owner_profile_id=owner_for_scope(current_library_scope()))
             worker.database = database
+            # a client that looks artists up by id says so with the method;
+            # Plex has none and resolves the ratingKey through its server
+            by_id = getattr(client, 'get_artist_by_id', None)
             for server_id in server_ids:
-                remote = (client.server.fetchItem(int(server_id)) if source == 'plex'
-                          else client.get_artist_by_id(str(server_id)))
+                remote = (by_id(str(server_id)) if callable(by_id)
+                          else client.server.fetchItem(int(server_id)))
                 if remote is None:
                     confirmed = False
                     continue

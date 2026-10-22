@@ -11,8 +11,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+from core.media_server import specs
 
-MEDIA_SERVER_SOURCES = frozenset({"plex", "jellyfin", "navidrome"})
+# every server the media-server descriptors call external: a new server's ids
+# reach the mappings without another edit here (#1050)
+MEDIA_SERVER_SOURCES = frozenset(specs.external_names())
 ENTITY_TABLES = {
     "artist": "lib2_artists",
     "album": "lib2_albums",

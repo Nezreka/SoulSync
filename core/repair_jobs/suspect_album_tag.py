@@ -352,7 +352,7 @@ class SuspectAlbumTagDetector(RepairJob):
             cur.execute(f"""
                 SELECT
                     al.id          AS album_id,
-                    al.artist_id   AS artist_id,
+                    al.primary_artist_id AS artist_id,
                     al.title       AS album_title,
                     al.album_type  AS album_type,
                     COALESCE(al.expected_track_count, al.track_count) AS full_track_count,

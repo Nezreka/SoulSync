@@ -261,7 +261,7 @@ def _verify_grab_as_mismatch(tmp_path, monkeypatch, request_data, lib2_ctx):
         def quick_check_available(self):
             return True, "ok"
 
-        def verify_audio_file(self, _path, title, artist, _context=None):
+        def verify_audio_file(self, _path, title, artist, _context=None, expected_duration_s=None):
             asked.append((title, artist))
             return _Result.FAIL, "Audio mismatch"
 

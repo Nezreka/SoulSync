@@ -58,6 +58,15 @@ def test_the_scan_files_both_spellings_under_one_artist(tmp_path, monkeypatch):
 
 
 # ── post-scan merge ──────────────────────────────────────────────────────────
+# Library v2 port: the merge folds catalogue artists (lib2_artists). Their
+# provider ids are the musicbrainz_id column and the external_ids JSON.
+
+import json
+
+from core.library2.importer import normalize_name
+
+MB, DZ, OTHER = 1, 2, 3
+
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
@@ -68,59 +77,60 @@ def db(tmp_path, monkeypatch):
     scope_mod.invalidate_library_scope_cache()
 
 
-def _artist(db, aid, name, **cols):
+def _artist(db, aid, name, musicbrainz_id=None, **external):
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES (?, ?, 'soulsync')",
-                     (aid, name))
-        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, 'soulsync')",
-                     (f'{aid}-al', aid, f'album {aid}'))
-        for col, val in cols.items():
-            conn.execute(f"UPDATE artists SET {col} = ? WHERE id = ?", (val, aid))
+        conn.execute("INSERT INTO lib2_artists (id, name, name_key, server_source, musicbrainz_id,"
+                     " external_ids) VALUES (?, ?, ?, 'soulsync', ?, ?)",
+                     (aid, name, normalize_name(name), musicbrainz_id, json.dumps(external)))
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, server_source)"
+                     " VALUES (?, ?, ?, 'soulsync')", (aid * 100, aid, f'album {aid}'))
         conn.commit()
 
 
 def _artists(db):
     with db._get_connection() as conn:
-        return {r['id']: r['name'] for r in conn.execute("SELECT id, name FROM artists")}
+        return {r['id']: r['name'] for r in conn.execute("SELECT id, name FROM lib2_artists")}
 
 
 def _album_owner(db, album_id):
     with db._get_connection() as conn:
-        return conn.execute("SELECT artist_id FROM albums WHERE id = ?", (album_id,)).fetchone()[0]
+        return conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id = ?",
+                            (album_id,)).fetchone()[0]
 
 
 def test_the_merge_joins_dash_variants_and_keeps_the_keepers_name(db):
-    _artist(db, 'mb', UNICODE, musicbrainz_id='fc7bbf00')
-    _artist(db, 'dz', ASCII, deezer_id='1606315')
-    _artist(db, 'other', 'Alt-Country')
+    _artist(db, MB, UNICODE, musicbrainz_id='fc7bbf00')
+    _artist(db, DZ, ASCII, deezer='1606315')
+    _artist(db, OTHER, 'Alt-Country')
 
     result = db.merge_duplicate_artists()
 
     assert result['artists_merged'] == 1
     survivors = _artists(db)
-    assert set(survivors) == {'mb', 'other'} or set(survivors) == {'dz', 'other'}
-    keeper = next(k for k in survivors if k != 'other')
-    assert survivors[keeper] == {'mb': UNICODE, 'dz': ASCII}[keeper]
-    assert _album_owner(db, 'mb-al') == keeper and _album_owner(db, 'dz-al') == keeper
+    assert set(survivors) == {MB, OTHER} or set(survivors) == {DZ, OTHER}
+    keeper = next(k for k in survivors if k != OTHER)
+    assert survivors[keeper] == {MB: UNICODE, DZ: ASCII}[keeper]
+    assert _album_owner(db, MB * 100) == keeper and _album_owner(db, DZ * 100) == keeper
     with db._get_connection() as conn:
-        row = conn.execute("SELECT musicbrainz_id, deezer_id FROM artists WHERE id = ?",
+        row = conn.execute("SELECT musicbrainz_id, external_ids FROM lib2_artists WHERE id = ?",
                            (keeper,)).fetchone()
-    assert (row['musicbrainz_id'], row['deezer_id']) == ('fc7bbf00', '1606315')
+    assert row['musicbrainz_id'] == 'fc7bbf00'
+    assert json.loads(row['external_ids'])['deezer'] == '1606315'
 
 
 def test_a_variant_with_a_conflicting_provider_id_stays_separate(db):
-    _artist(db, 'one', UNICODE, musicbrainz_id='mbid-one')
-    _artist(db, 'two', ASCII, musicbrainz_id='mbid-two')
+    _artist(db, MB, UNICODE, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII, musicbrainz_id='mbid-two')
 
     assert db.merge_duplicate_artists()['artists_merged'] == 0
-    assert _artists(db) == {'one': UNICODE, 'two': ASCII}
+    assert _artists(db) == {MB: UNICODE, DZ: ASCII}
 
 
 def test_exact_name_duplicates_merge_as_before(db):
     """the provider guard is for variant spellings only; exact-name
     duplicates keep the merge they always had."""
-    _artist(db, 'one', ASCII, musicbrainz_id='mbid-one')
-    _artist(db, 'two', ASCII, musicbrainz_id='mbid-two')
+    _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII, musicbrainz_id='mbid-two')
 
     assert db.merge_duplicate_artists()['artists_merged'] == 1
     assert len(_artists(db)) == 1

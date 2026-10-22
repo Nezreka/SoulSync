@@ -21511,21 +21511,53 @@ class MusicDatabase:
                     seen['status'] = row['finding_type']
         except Exception as exc:  # the table is optional on older databases
             logger.debug("API: could not read repair findings: %s", exc)
-        artist_ids = {}
+        artist_ids, album_years, files = {}, {}, {}
+        if entity_type == 'artist' and 'enrichment' not in data[0]:
+            # the artist list reads a page projection; the v1 fields live on the row
+            extra = {row['id']: row for row in conn.execute(
+                f"SELECT id, aliases, soul_id_path, art_locked, enrichment "
+                f"FROM lib2_artists WHERE id IN ({marks})", ids)}
+            for item in data:
+                for key, value in dict(extra.get(item['id']) or {}).items():
+                    item.setdefault(key, value)
         if entity_type == 'track':
             album_ids = {row.get('album_id') for row in data if row.get('album_id') is not None}
             if album_ids:
                 album_marks = ','.join('?' * len(album_ids))
-                artist_ids = {row['id']: row['primary_artist_id'] for row in conn.execute(
-                    f"SELECT id, primary_artist_id FROM lib2_albums WHERE id IN ({album_marks})",
-                    list(album_ids))}
+                for row in conn.execute(
+                        f"SELECT id, primary_artist_id, year FROM lib2_albums WHERE id IN ({album_marks})",
+                        list(album_ids)):
+                    artist_ids[row['id']] = row['primary_artist_id']
+                    album_years[row['id']] = row['year']
+            # the primary file's size, and the path the active server reported
+            # for it before mount mapping (#872a9bc1d)
+            from core.settings import config_manager
+            for row in conn.execute(
+                    f"SELECT t.id, f.size, m.server_path FROM lib2_tracks t "
+                    f"LEFT JOIN lib2_track_files f ON f.track_id = t.id AND f.is_primary = 1 "
+                    f"     AND COALESCE(f.file_state, 'active') <> 'deleted' "
+                    f"LEFT JOIN lib2_media_server_mappings m ON m.entity_type = 'track' "
+                    f"     AND m.entity_id = t.id AND m.server_source = ? "
+                    f"WHERE t.id IN ({marks})",
+                    [config_manager.get_active_media_server(), *ids]):
+                files[row['id']] = row
+        # a hand-set field is lib2's lock: the v1 lock flags read the overrides
+        locked: Dict[int, set] = {}
+        try:
+            for row in conn.execute(
+                    f"SELECT entity_id, field_name FROM lib2_metadata_overrides "
+                    f"WHERE entity_type=? AND entity_id IN ({marks})",
+                    [{'album': 'release_group'}.get(entity_type, entity_type), *ids]):
+                locked.setdefault(int(row['entity_id']), set()).add(row['field_name'])
+        except Exception as exc:  # the table is optional on older databases
+            logger.debug("API: could not read metadata overrides: %s", exc)
         id_fields = {
             'artist': {'spotify': 'spotify_artist_id', 'musicbrainz': 'musicbrainz_id',
                        'itunes': 'itunes_artist_id'},
             'album': {'spotify': 'spotify_album_id', 'musicbrainz': 'musicbrainz_release_id',
-                      'itunes': 'itunes_album_id'},
+                      'itunes': 'itunes_album_id', 'bandcamp': 'bandcamp_url'},
             'track': {'spotify': 'spotify_track_id', 'musicbrainz': 'musicbrainz_recording_id',
-                      'itunes': 'itunes_track_id'},
+                      'itunes': 'itunes_track_id', 'bandcamp': 'bandcamp_url'},
         }[entity_type]
         for item in data:
             try:
@@ -21545,11 +21577,22 @@ class MusicDatabase:
             repair = repairs.get(int(item['id'])) or {}
             item['repair_status'] = repair.get('status')
             item['repair_last_checked'] = repair.get('checked')
+            hand_set = locked.get(int(item['id']), set())
+            if entity_type != 'artist':
+                item['metadata_locked'] = bool(hand_set)
+            if entity_type != 'track':
+                item['genres_locked'] = 'genres' in hand_set
             if entity_type == 'album':
                 item.update(artist_id=item.get('primary_artist_id'),
-                            record_type=item.get('album_type'))
-            elif entity_type == 'track' and not item.get('artist_id'):
-                item['artist_id'] = artist_ids.get(item.get('album_id'))
+                            record_type=item.get('album_type'),
+                            api_track_count=item.get('expected_track_count'))
+            elif entity_type == 'track':
+                if not item.get('artist_id'):
+                    item['artist_id'] = artist_ids.get(item.get('album_id'))
+                item.setdefault('year', album_years.get(item.get('album_id')))
+                file = files.get(item['id']) or {}
+                item.setdefault('file_size', file['size'] if file else None)
+                item.setdefault('server_path', file['server_path'] if file else None)
             for service, value in source_ids.items():
                 field = id_fields.get(service, service if service in ('lastfm', 'genius_url')
                                       else f'{service}_id')
@@ -21561,7 +21604,7 @@ class MusicDatabase:
             for service, state in attempts.get(int(item['id']), {}).items():
                 item[f'{service}_match_status'] = state['status']
                 item[f'{service}_last_attempted'] = state['last_attempted_at']
-            for service in ('lastfm', 'genius'):
+            for service in ('lastfm', 'genius', 'discogs', 'bandcamp'):
                 payload = enrichment.get(service, {}) if isinstance(enrichment, dict) else {}
                 if isinstance(payload, dict):
                     for key, value in payload.items():
@@ -21743,15 +21786,22 @@ class MusicDatabase:
             promoted["musicbrainz"] = "musicbrainz_id"
         catalogue_table = {"artists": "lib2_artists", "albums": "lib2_albums",
                            "tracks": "lib2_tracks"}[table]
+        params = (external_id,)
         if provider in promoted:
             where = f"{promoted[provider]} = ?"
+        elif provider == "bandcamp":
+            # the bandcamp id sits in its enrichment bucket, the url is the
+            # stored provider id; either finds the row
+            where = ("(json_extract(enrichment, '$.bandcamp.id') = ? "
+                     "OR json_extract(external_ids, '$.bandcamp') = ?)")
+            params = (external_id, external_id)
         else:
             where = f"json_extract(external_ids, '$.{provider}') = ?"
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                f"SELECT * FROM {catalogue_table} WHERE {where}", (external_id,))
+                f"SELECT * FROM {catalogue_table} WHERE {where}", params)
             rows = self._api_project_lib2(conn, table.rstrip('s'), cursor.fetchall())
             return rows[0] if rows else None
         except Exception as e:
