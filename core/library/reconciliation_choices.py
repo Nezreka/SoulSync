@@ -15,6 +15,7 @@ CREATE_TABLE = '''CREATE TABLE IF NOT EXISTS reconcile_review_choices (
     category TEXT NOT NULL,
     choice TEXT NOT NULL CHECK(choice IN ('fix', 'dismiss')),
     fix_action TEXT NOT NULL DEFAULT '',
+    numbering_choice TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )'''
 
@@ -23,6 +24,8 @@ def ensure_schema(conn):
     conn.execute(CREATE_TABLE)
     if 'fix_action' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
         conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN fix_action TEXT NOT NULL DEFAULT ''")
+    if 'numbering_choice' not in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}:
+        conn.execute("ALTER TABLE reconcile_review_choices ADD COLUMN numbering_choice TEXT NOT NULL DEFAULT ''")
     conn.execute("""CREATE TABLE IF NOT EXISTS reconcile_saved_plans (
         case_id TEXT PRIMARY KEY, signature TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
@@ -31,8 +34,10 @@ def ensure_schema(conn):
 def load_choices(conn, finding_id=None, *, case_id=None):
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
         return {}
-    action_column = 'fix_action' if 'fix_action' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')} else "''"
-    sql = f'SELECT finding_id, case_id, evidence_json, category, choice, {action_column} FROM reconcile_review_choices'
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}
+    action_column = 'fix_action' if 'fix_action' in columns else "''"
+    numbering_column = 'numbering_choice' if 'numbering_choice' in columns else "''"
+    sql = f'SELECT finding_id, case_id, evidence_json, category, choice, {action_column}, {numbering_column} FROM reconcile_review_choices'
     if finding_id is not None:
         sql, params = sql + ' WHERE finding_id=?', (finding_id,)
     elif case_id is not None:
@@ -56,9 +61,11 @@ def project(details, saved, *, case_id=None, raw_json=None):
     result = deepcopy(details)
     category, choice = saved[2:4]
     result['planned_choice'] = {'category': category, 'action': choice, 'fix_action': saved[4] if len(saved) > 4 else ''}
-    if choice == 'fix':
-        result['plan_approved'] = True
-    elif category == 'numbering':
+    numbering = choice if category == 'numbering' else saved[5] if len(saved) > 5 else ''
+    if numbering:
+        result['numbering_choice'] = numbering
+    if numbering == 'dismiss':
+        result.get('db_data', {}).pop('track_count', None)
         for key in ('track_number', 'disc_number'):
             for section in ('db_data', 'db_track_updates'):
                 result.get(section, {}).pop(key, None)
@@ -68,7 +75,9 @@ def project(details, saved, *, case_id=None, raw_json=None):
         result.pop('target_path', None)
         result.get('changes', {}).pop('filename', None)
         result['plan_keep'] = not bool(result.get('changes'))
-    else:
+    if category != 'numbering' and choice == 'fix':
+        result['plan_approved'] = True
+    elif category != 'numbering' and choice == 'dismiss':
         result['plan_keep'] = True
         result['changes'] = {}
     return result
@@ -89,10 +98,13 @@ def applied_numbering_choices(db):
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reconcile_review_choices'").fetchone():
             return {}
         result, seen = {}, set()
+        ensure_schema(conn)
         for path, status, action, choice, raw in conn.execute('''
-            SELECT f.file_path, f.status, f.user_action, c.choice, c.evidence_json
+            SELECT f.file_path, f.status, f.user_action,
+                CASE WHEN c.category='numbering' THEN c.choice ELSE c.numbering_choice END,
+                c.evidence_json
             FROM reconcile_review_choices c JOIN repair_findings f ON f.id=c.finding_id
-            WHERE c.category='numbering' ORDER BY f.id DESC'''):
+            WHERE c.category='numbering' OR c.numbering_choice != '' ORDER BY f.id DESC'''):
             if path in seen:
                 continue
             seen.add(path)
@@ -129,7 +141,7 @@ def same_relocated_evidence(previous, current):
 
 def same_annotated_evidence(previous, current):
     """Adding explanations alone preserves an otherwise exact saved choice."""
-    annotations = {'assignment_evidence', 'recording_identity',
+    annotations = {'assignment_evidence', 'recording_identity', 'numbering_mode',
                    'recommended_keeper', 'keeper_reason', 'tool_checks', 'match_reasons'}
     empty_defaults = {'metadata_review_reason', 'album_consistency', 'companion_count', 'recording_id_conflict'}
     def substantive(details):

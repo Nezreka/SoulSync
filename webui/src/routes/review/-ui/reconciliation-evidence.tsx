@@ -1350,9 +1350,15 @@ export function ReconciliationEvidence({
             <EvidenceIcon name="check" /> Proposed changes
           </h4>
           <MetadataComparison
-            rows={comparisonRows(visibleChanges.length ? visibleChanges : identifierAdditions)}
+            rows={comparisonRows(
+              identifierAdditions.length <= 1
+                ? [...visibleChanges, ...identifierAdditions]
+                : visibleChanges.length
+                  ? visibleChanges
+                  : identifierAdditions,
+            )}
           />
-          {visibleChanges.length > 0 && identifierAdditions.length > 0 && (
+          {visibleChanges.length > 0 && identifierAdditions.length > 1 && (
             <details className={styles.identifierChanges}>
               <summary>
                 Add {identifierAdditions.length} missing identifier
@@ -1367,8 +1373,8 @@ export function ReconciliationEvidence({
       {controls}
       {audioControl}
       {objects(details.tool_checks).length > 0 && (
-        <details className={styles.identifierChanges}>
-          <summary>Other maintenance checks ({objects(details.tool_checks).length})</summary>
+        <section className={styles.technicalCard}>
+          <h5>Other maintenance checks</h5>
           <ul>
             {objects(details.tool_checks).map((check) => (
               <li key={label(check.id)}>
@@ -1377,7 +1383,7 @@ export function ReconciliationEvidence({
               </li>
             ))}
           </ul>
-        </details>
+        </section>
       )}
       {prominent && (
         <div className={styles.prominentEvidence}>

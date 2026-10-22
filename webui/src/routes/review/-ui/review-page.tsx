@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ActionMenu } from '@/components/action-menu/action-menu';
 import { useConfirmDialog } from '@/components/dialog/use-confirm-dialog';
 import { Button, Select, TextInput } from '@/components/form/form';
 import { PageHeader } from '@/components/page-header';
@@ -1635,21 +1634,13 @@ export function ReviewPage() {
                   >
                     Reanalyze album
                   </Button>
-                  <ActionMenu
-                    trigger={(props) => (
-                      <Button {...props} variant="ghost" aria-label="Album actions">
-                        •••
-                      </Button>
-                    )}
-                    items={[
-                      {
-                        key: 'catalogue',
-                        label: 'Refresh catalog evidence',
-                        disabled: mutationBusy,
-                        onSelect: () => void reanalyzeAlbum(true),
-                      },
-                    ]}
-                  />
+                  <Button
+                    variant="ghost"
+                    disabled={mutationBusy}
+                    onClick={() => void reanalyzeAlbum(true)}
+                  >
+                    Refresh catalog evidence
+                  </Button>
                   <Button
                     type="button"
                     disabled={caseIndex <= 0}
@@ -1928,15 +1919,13 @@ export function ReviewPage() {
                                       >
                                         {busyDecision === decision.category
                                           ? `Saving ${decision.action_count} choices…`
-                                          : decision.additional_metadata_summary
-                                            ? `Plan ${decision.category === 'numbering' ? 'numbering' : 'title changes'} and album metadata for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                          : decision.additional_metadata_summary &&
+                                              decision.category !== 'numbering'
+                                            ? `Plan title changes and album metadata for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
                                             : decision.category === 'numbering'
                                               ? !releaseHasMultipleDiscs
                                                 ? `Plan release track numbers for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                                : reviewCase.album_plan?.numbering_mode ===
-                                                    'digital'
-                                                  ? `Plan continuous numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
-                                                  : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
+                                                : `Plan release numbering for ${decision.action_count} track${decision.action_count === 1 ? '' : 's'}`
                                               : decision.category === 'title_conventions'
                                                 ? 'Use proposed title conventions'
                                                 : decision.label === 'Confirm album artist'
@@ -2124,15 +2113,8 @@ export function ReviewPage() {
 
                   {albumView === 'plan' &&
                     reviewCase.items.some((item) => item.details?.planned_choice) && (
-                      <details className={styles.editPlan}>
-                        <summary>Edit saved choices</summary>
-                        <div>
-                          <strong>Choices saved in this album plan</strong>
-                          <p>
-                            No file changes have been applied. You can change these choices before
-                            applying.
-                          </p>
-                        </div>
+                      <section className={styles.editPlan} aria-label="Edit saved choices">
+                        <small>Saved choices</small>
                         <div className={styles.inlineActions}>
                           {[
                             ...new Set(
@@ -2140,11 +2122,15 @@ export function ReviewPage() {
                                 const choice = item.details?.planned_choice as
                                   | { category?: string }
                                   | undefined;
-                                return choice?.category ? [choice.category] : [];
+                                return [
+                                  ...(choice?.category ? [choice.category] : []),
+                                  ...(item.details?.numbering_choice ? ['numbering'] : []),
+                                ];
                               }),
                             ),
                           ].map((category) => (
                             <Button
+                              variant="ghost"
                               key={category}
                               type="button"
                               disabled={mutationBusy}
@@ -2154,7 +2140,7 @@ export function ReviewPage() {
                             </Button>
                           ))}
                         </div>
-                      </details>
+                      </section>
                     )}
 
                   {albumView === 'tracks' && assignments.length > 0 && (
@@ -2224,16 +2210,12 @@ export function ReviewPage() {
                           </div>
                         </div>
                         <div className={styles.releaseContext}>
-                          <details className={styles.releaseReference}>
-                            <summary>Selected release details</summary>
-                            <ProviderReleaseId
-                              source={reviewCase.album_plan?.source}
-                              releaseId={reviewCase.album_plan?.release_id}
-                            />
+                          <div className={styles.releaseReference}>
+                            <span>{primaryCandidate?.release_title || 'Selected release'}</span>
                             <Button variant="ghost" onClick={() => setAlbumView('release')}>
                               Compare editions →
                             </Button>
-                          </details>
+                          </div>
                           {reviewCase.album_plan?.intent_scope && (
                             <span>Intent: {reviewCase.album_plan.intent_scope} album</span>
                           )}
@@ -2659,13 +2641,12 @@ export function ReviewPage() {
                                   disambiguation={primaryCandidate.disambiguation}
                                 />
                               )}
-                              <details className={styles.releaseReference}>
-                                <summary>Source and release ID</summary>
+                              <div className={styles.releaseReference}>
                                 <ProviderReleaseId
                                   source={reviewCase.album_plan.source}
                                   releaseId={reviewCase.album_plan.release_id}
                                 />
-                              </details>
+                              </div>
                             </dd>
                           </div>
                           <div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 import sqlite3
 import threading
 
@@ -869,8 +870,7 @@ def test_album_consistency_question_explains_the_conflict_and_preserves_group_sc
     numbering = classify_case([conflict])['decisions'][0]
     assert numbering['category'] == 'numbering'
     assert numbering['additional_metadata_summary'] == (
-        'Also resolve conflicting album metadata. Files disagree on album title and MusicBrainz release ID. '
-        'Proposed corrections affect 1 track.')
+        'Numbering approval does not approve the other metadata changes shown for these tracks.')
     del conflict['details']['changes']['track_number']
 
     # Saved decisions and unrelated edits must not revive a resolved album question.
@@ -1037,6 +1037,63 @@ def test_numbering_draft_keeps_independent_metadata_and_invalidates_on_change():
     conn.commit()
     conn.close()
     assert get_case(db, key)['items'][0]['review_tier'] == 'manual'
+    assert _ready_selection(db)[0] == []
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
+
+
+@pytest.mark.parametrize('numbering', ['fix', 'dismiss'])
+def test_numbering_choice_does_not_approve_other_metadata_and_survives_followup(numbering):
+    db = _Database()
+    db.add(1, '/music/Album/11.flac', {
+        'album_id': 10, 'album_title': 'Album', 'confidence': 'clear',
+        'changes': {'track_number': {'old': 11, 'new': 1},
+                    'disc_number': {'old': 1, 'new': 2},
+                    'artist': {'old': 'Various Artists', 'new': 'Matchbox Twenty'},
+                    'musicbrainz_recording_id': {'old': '', 'new': 'recording'}},
+        'db_data': {'track_number': 1, 'disc_number': 2, 'artist_name': 'Matchbox Twenty'},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._review_apply_lock = db, threading.Lock()
+    assert worker.apply_review_decision_group(key, 'numbering', action=numbering)['success']
+    case = get_case(db, key)
+    item = case['items'][0]
+    assert item['category'] == 'metadata'
+    assert item['review_tier'] == 'manual'
+    assert not item['details'].get('plan_approved')
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
+    assert _ready_selection(db)[0] == []
+    assert worker.apply_review_decision_group(key, 'metadata', action='fix')['success']
+    item = get_case(db, key)['items'][0]
+    assert item['review_tier'] == 'ready'
+    assert ('track_number' in item['details']['db_data']) == (numbering == 'fix')
+    assert ('disc_number' in item['details']['changes']) == (numbering == 'fix')
+    assert _ready_selection(db)[0] == [1]
+    assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 1
+    # Reopening metadata preserves the independently chosen numbering.
+    assert worker.apply_review_decision_group(key, 'metadata', action='reset')['success']
+    assert get_case(db, key)['items'][0]['details']['numbering_choice'] == numbering
+    assert _ready_selection(db)[0] == []
+    assert worker.apply_review_decision_group(key, 'numbering', action='reset')['success']
+    assert get_case(db, key)['items'][0]['category'] == 'numbering'
+
+
+def test_saved_legacy_flattening_requires_reanalysis_before_apply():
+    db = _Database()
+    db.add(1, '/music/Album/01.flac', {
+        'album_id': 10, 'confidence': 'clear', 'numbering_mode': 'digital',
+        'release_disc_count': 2,
+        'changes': {'track_number': {'old': 1, 'new': 11},
+                    'disc_number': {'old': 2, 'new': 1}},
+    }, job_id='library_reconciliation', kind='reconciliation_metadata')
+    key = list_cases(db, job_id='library_reconciliation')['items'][0]['case_id']
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db, worker._review_apply_lock = db, threading.Lock()
+    assert worker.apply_review_decision_group(key, 'numbering', action='fix')['success']
+    assert worker.apply_review_decision_group(key, 'metadata', action='fix')['success']
+    item = get_case(db, key)['items'][0]
+    assert item['review_tier'] == 'manual'
+    assert 'Reanalyze' in item['review_reason']
     assert _ready_selection(db)[0] == []
     assert list_cases(db, job_id='library_reconciliation', risk='ready')['total'] == 0
 
@@ -1471,6 +1528,8 @@ def test_redundant_disc_markers_on_complete_continuous_sequence_are_ready():
     assert not classify_case([item])['can_apply_ready']
     details['local_file_count'] = 19
     details['numbering_mode'] = 'release'
+    assert classify_case([item])['can_apply_ready']
+    details['release_disc_count'] = 2
     assert not classify_case([item])['can_apply_ready']
 
 

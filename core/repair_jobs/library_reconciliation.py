@@ -85,7 +85,6 @@ _SOURCES = {
     'deezer_id': 'deezer',
 }
 _DISC_FOLDER = re.compile(r'^(?:cd|disc|disk|volume|vol)\s*[-_. ]*\d+\b', re.I)
-_NUMBERED_FILENAME = re.compile(r'^(\d{1,4})(\s*[-_.]\s*|\s+)(.+)$')
 _WATCHLIST_REMOVAL_PREFIX = '.watchlist-removal-'
 _ALBUM_EDITION_WORD = re.compile(
     r'\b(?:anniversary|bit|cd|deluxe|edition|expanded|khz|limited|lp|master|mono|'
@@ -113,33 +112,37 @@ def _clean_album_display_title(title: str) -> str:
     return f'{match.group(1)} ({", ".join(kept)})' if kept else match.group(1)
 
 
-def _suggest_filename(path: str, slot: dict) -> str:
+def _suggest_filename(path: str, slot: dict, *, absolute_number: int | None = None) -> str:
     """Keep the file's numbering convention while correcting a clear slot."""
     if not str(slot.get('title') or '').strip():
         return ''
     stem, extension = os.path.splitext(os.path.basename(path))
-    match = _NUMBERED_FILENAME.match(stem)
-    if match:
-        digits, separator, old_title = match.groups()
-        try:
-            track = int(slot['track_number'])
-            disc = int(slot.get('disc_number') or 1)
-        except (TypeError, ValueError, KeyError):
-            track, disc = 0, 0
-        if (len(digits) == 4 and 0 < int(digits[:2]) <= 9 and
-                0 < int(digits[2:]) < 100 and 0 < track < 100 and 0 < disc <= 9):
-            number = f'{disc:02d}{track:02d}'
-        elif len(digits) <= 2 and track > 0:
-            number = str(track).zfill(len(digits))
-        else:
-            number = digits
-        title = (old_title if display_title_compatible(old_title, slot)
+    from core.text.track_prefix import parse_track_prefix
+    parsed = parse_track_prefix(stem)
+    if parsed.number is not None:
+        prefix = stem[:-len(parsed.remainder)]
+        track, disc = int(slot.get('track_number') or 0), int(slot.get('disc_number') or 1)
+        # A single-folder album may use absolute filenames with per-disc tags.
+        # Count against the complete release, including absent slots.
+        compatible = (parsed.number == track and parsed.disc in (None, disc) or
+                      parsed.disc is None and parsed.number == absolute_number)
+        if not compatible and not parsed.side and track > 0:
+            numbers = list(re.finditer(r'\d+', prefix))
+            values = ([disc, track] if parsed.disc is not None and len(numbers) == 2
+                      else [disc * 100 + track] if parsed.disc is not None else [track])
+            for match, value in reversed(list(zip(numbers, values))):
+                prefix = prefix[:match.start()] + str(value).zfill(len(match[0])) + prefix[match.end():]
+        title = (parsed.remainder if display_title_compatible(parsed.remainder, slot)
                  else _safe_filename(slot['title']))
-        proposed = f'{number}{separator}{title}{extension}'
+        proposed = f'{prefix}{title}{extension}'
     else:
-        title = (stem if display_title_compatible(stem, slot)
+        # Preserve an unrecognized numeric prefix (for example a year). It is
+        # not evidence of a track position and must not be rewritten as one.
+        unknown = re.match(r'^(\d{4,}\s*[-_.]\s*)(.+)$', stem)
+        current = unknown[2] if unknown else stem
+        title = (current if display_title_compatible(current, slot)
                  else _safe_filename(slot['title']))
-        proposed = f'{title}{extension}'
+        proposed = f'{unknown[1] if unknown else ""}{title}{extension}'
     return os.path.join(os.path.dirname(path), proposed) if proposed != os.path.basename(path) else ''
 
 
@@ -648,22 +651,8 @@ def _score_release_candidates(files: list[dict], candidates: list[tuple[str, str
     return scored
 
 
-def _numbering_fit(files: list[dict], scored: tuple) -> int:
-    """How closely a candidate preserves the library's existing positions."""
-    _clear, _matched, _extras, _source, _release_id, slots, plan = scored
-    fit = 0
-    for pair in plan['pairs']:
-        tags = files[pair['file_index']].get('tags') or {}
-        slot = slots[pair['slot_index']]
-        if tags.get('track_number') == slot.get('track_number'):
-            fit += 2
-        if (tags.get('disc_number') or 1) == (slot.get('disc_number') or 1):
-            fit += 1
-    return fit
-
-
 def _continuous_numbering(scored: tuple) -> int:
-    """Prefer a diskless 1..N tracklist when the user selected digital mode."""
+    """Describe an actual one-disc 1..N source tracklist for the review UI."""
     slots = scored[5]
     positions = [slot.get('track_number') for slot in slots]
     discs = {slot.get('disc_number') or 1 for slot in slots}
@@ -741,29 +730,12 @@ def _single_position_outlier(files: list[dict], scored: tuple) -> bool:
     return False
 
 
-def _candidate_rank(files: list[dict], scored: tuple, numbering_mode: str,
-                    preferred_source: str = '') -> tuple:
+def _candidate_rank(files: list[dict], scored: tuple, preferred_source: str = '') -> tuple:
     rank = (*scored[:3], _complete_collection_fit(files, scored))
     # A configured provider is a tie breaker after actual file coverage. It
     # must never outrank a release that identifies more audio or fewer extras.
     source_fit = int(bool(preferred_source) and scored[3] == preferred_source)
-    return ((*rank, source_fit, _continuous_numbering(scored), _numbering_fit(files, scored))
-            if numbering_mode == 'digital' else (*rank, source_fit))
-
-
-def _numbered_slot(slot: dict, slot_index: int, numbering_mode: str,
-                   slots: list[dict] | None = None) -> dict:
-    """Return the metadata position selected for a release slot.
-
-    SoulSync stores disc and track numbers on each track. In digital mode the
-    release identity remains exact while its ordered slots are flattened to a
-    single 1..N sequence. This gives physical-only releases the same useful
-    convention as a digital edition without inventing a different tracklist.
-    """
-    discs = {row.get('disc_number') or 1 for row in (slots or [])}
-    if numbering_mode != 'digital' or (len(discs) <= 1 and not slot.get('excluded_video_tracks')):
-        return slot
-    return {**slot, 'disc_number': 1, 'track_number': slot_index + 1}
+    return (*rank, source_fit)
 
 
 def _promote_album_context_candidate(
@@ -802,31 +774,29 @@ def _release_metadata(scored: tuple, cache: dict, exact_releases: set[str]) -> d
     return cache[key]
 
 
-def _edition_preference(meta: dict, numbering_mode: str) -> tuple[int, int]:
+def _edition_preference(meta: dict) -> tuple[int, int]:
     media = meta.get('media') or []
     formats = ' '.join(str(row.get('format') or '') for row in media
                        if isinstance(row, dict))
     formats += ' ' + str(meta.get('format') or '')
     country = str(meta.get('country') or '').casefold()
-    digital = int(numbering_mode == 'digital' and
-                  any(word in formats.casefold() for word in ('digital', 'download', 'stream')))
+    digital = int(any(word in formats.casefold() for word in ('digital', 'download', 'stream')))
     international = int(country in ('xw', 'worldwide', 'international', 'world'))
     return digital, international
 
 
 def _full_coverage_digital_alternative(selected: tuple, ranked: list[tuple],
-                                       numbering_mode: str, file_count: int,
-                                       metadata) -> bool:
+                                       file_count: int, metadata) -> bool:
     """A near-equal digital edition should remain an explicit album choice."""
     clear, matched, _, _, _, _, plan = selected
-    if (numbering_mode != 'digital' or matched != file_count or
+    if (matched != file_count or
             plan['extra_files'] or plan['missing_slots'] or
-            _edition_preference(metadata(selected), numbering_mode)[0]):
+            _edition_preference(metadata(selected))[0]):
         return False
     return any(
         row[3] == 'musicbrainz' and row[1] == matched and row[0] >= clear - 1 and
         not row[6]['extra_files'] and not row[6]['missing_slots'] and
-        _edition_preference(metadata(row), numbering_mode)[0]
+        _edition_preference(metadata(row))[0]
         for row in ranked[1:6]
     )
 
@@ -1167,15 +1137,13 @@ def _audio_conflicts_with_slot(file: dict, slot: dict) -> bool:
 
 
 @timed('assignment_preparation')
-def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
-                            numbering_mode: str = '') -> tuple[list[dict], list[str]]:
+def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict) -> tuple[list[dict], list[str]]:
     """Compact complete track matrix for the review read model."""
     assignments: list[dict] = []
     categories: set[str] = set()
     for pair in _review_pairs(files, plan):
         file = files[pair['file_index']]
         slot = slots[pair['slot_index']]
-        display_slot = _numbered_slot(slot, pair['slot_index'], numbering_mode, slots)
         tags = file.get('tags') or {}
         row = file.get('db') or {}
         recordings = (file.get('acoustid') or {}).get('recordings') or []
@@ -1215,7 +1183,7 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
             'source_track_id': slot.get('source_track_id'),
             'slot_track_number': slot.get('track_number'),
             'slot_disc_number': slot.get('disc_number') or 1,
-            'display_track_number': display_slot.get('track_number'),
+            'display_track_number': slot.get('track_number'),
             'title_difference': title_kind, 'changes': changes,
             'current_tags': tags, 'acoustid': file.get('acoustid') or {},
             'confidence': pair['confidence'], 'reasons': pair.get('reasons') or [],
@@ -1229,14 +1197,13 @@ def _album_plan_assignments(files: list[dict], slots: list[dict], plan: dict,
         })
     for index in plan['missing_slots']:
         slot = slots[index]
-        display_slot = _numbered_slot(slot, index, numbering_mode, slots)
         categories.add('missing_tracks')
         assignments.append({
             'status': 'missing', 'file_path': '', 'file': '',
             'slot_title': slot['title'], 'slot_artist': slot.get('artist') or '',
             'slot_track_number': slot.get('track_number'),
             'slot_disc_number': slot.get('disc_number') or 1,
-            'display_track_number': display_slot.get('track_number'),
+            'display_track_number': slot.get('track_number'),
             'source_track_id': slot.get('source_track_id'),
             'slot_duration_ms': slot.get('duration_ms') or 0,
         })
@@ -1284,8 +1251,7 @@ def release_catalog_details(meta: dict) -> dict:
     }
 
 
-def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
-                      numbering_mode: str = '') -> dict:
+def candidate_preview(files: list[dict], row: tuple, release_meta: dict) -> dict:
     candidate = ScoredCandidate(*row)
     release_slots, candidate_plan = candidate.slots, candidate.plan
     media = release_meta.get('media') or []
@@ -1316,9 +1282,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
             'slot_source_track_id': release_slots[pair['slot_index']].get('source_track_id') or '',
             'disc_number': release_slots[pair['slot_index']].get('disc_number') or 1,
             'track_number': release_slots[pair['slot_index']].get('track_number'),
-            'display_track_number': _numbered_slot(
-                release_slots[pair['slot_index']], pair['slot_index'],
-                numbering_mode, release_slots).get('track_number'),
+            'display_track_number': release_slots[pair['slot_index']].get('track_number'),
             'confidence': pair.get('confidence') or '',
             'assignment_evidence': assignment_evidence(files[pair['file_index']], pair),
         } for pair in candidate_plan['pairs']],
@@ -1326,8 +1290,7 @@ def candidate_preview(files: list[dict], row: tuple, release_meta: dict,
             'slot_title': release_slots[index].get('title') or '',
             'disc_number': release_slots[index].get('disc_number') or 1,
             'track_number': release_slots[index].get('track_number'),
-            'display_track_number': _numbered_slot(release_slots[index], index,
-                numbering_mode, release_slots).get('track_number'),
+            'display_track_number': release_slots[index].get('track_number'),
             'missing': True,
         } for index in candidate_plan['missing_slots']],
         'missing_tracks': [release_slots[index].get('title') or ''
@@ -1349,8 +1312,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
                            wanted_slots: set[str] | None = None,
                            wishlisted_slots: set[tuple[str, str, str]] | None = None) -> str:
     clear, matched, _extras, source, release_id, slots, plan = scored
-    assignments, categories = _album_plan_assignments(files, slots, plan,
-                                                       numbering_mode)
+    assignments, categories = _album_plan_assignments(files, slots, plan)
     for assignment in assignments:
         if (assignment.get('status') == 'missing' and
                 (source, str(assignment.get('source_track_id') or ''),
@@ -1411,8 +1373,7 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
             'matched': matched, 'clear': clear, 'assignments': assignments,
             'categories': sorted(set(categories)),
             'candidates': [candidate_preview(files, row,
-                            (candidate_metadata or {}).get((row[3], row[4])) or {},
-                            numbering_mode) for row in candidate_rows[:6]],
+                            (candidate_metadata or {}).get((row[3], row[4])) or {}) for row in candidate_rows[:6]],
         }
         from core.library.reconciliation_fulfillment import settle_assignments
         with stage('plan_persistence'):
@@ -1653,16 +1614,11 @@ class LibraryReconciliationJob(RepairJob):
         'min_acoustid_score': 0.80,
         'catalogue_cache_enabled': True,
         'matching_cache_mode': 'reuse',
-        # Prefer a one-medium/digital edition when it fits the same audio and
-        # preserves continuous library numbering. Set to "release" to prefer
-        # the linked physical edition and its per-disc positions.
-        'numbering_mode': 'digital',
         'source_preference': 'active_preferred',
         'album_title_policy': 'preserve',
     }
     setting_options = {
         'matching_cache_mode': ['off', 'shadow', 'reuse'],
-        'numbering_mode': ['digital', 'release'],
         'source_preference': ['active_preferred', 'best_fit'],
         'album_title_policy': ['preserve', 'exact_release'],
     }
@@ -1675,8 +1631,9 @@ class LibraryReconciliationJob(RepairJob):
                 f'repair.jobs.{self.job_id}.settings', {}) or {}
             if isinstance(configured, dict):
                 merged.update(configured)
-        if merged.get('numbering_mode') not in ('digital', 'release'):
-            merged['numbering_mode'] = 'digital'
+        # Legacy installations may still store digital mode. Source positions
+        # are now authoritative; never flatten a selected multidisc release.
+        merged.pop('numbering_mode', None)
         if merged.get('source_preference') not in ('active_preferred', 'best_fit'):
             merged['source_preference'] = 'active_preferred'
         if merged.get('album_title_policy') not in ('preserve', 'exact_release'):
@@ -1947,12 +1904,12 @@ class LibraryReconciliationJob(RepairJob):
             result.stopped_early = reason or 'AcoustID unavailable'
             return result
         settings = self._get_settings(context)
-        numbering_mode = settings['numbering_mode']
+        numbering_mode = 'release'
         preferred_source = ''
         if settings['source_preference'] == 'active_preferred' and context.config_manager:
             preferred_source = str(context.config_manager.get('metadata.fallback_source', '') or '')
         rank_candidate = lambda row: _candidate_rank(
-            files, row, numbering_mode, preferred_source)
+            files, row, preferred_source)
         roots = all_library_roots(context)
         if not roots or any(not os.path.isdir(root) for root in roots):
             result.stopped_early = 'A configured library root is unavailable'
@@ -2189,13 +2146,12 @@ class LibraryReconciliationJob(RepairJob):
                             files, additional, release_cache, exact_musicbrainz_releases))
                         candidates.extend(additional)
                     best_expanded = (max(scored, key=rank_candidate) if scored else None)
-                    # Digital numbering is a stated preference, so discover an MB
-                    # release-group seed before settling for a physical/per-disc
-                    # provider result.  Search stays bounded and cached; track and
-                    # audio fit still outrank format in _candidate_rank.
+                    # Discover digital siblings of a physical release. Format is
+                    # only a tie breaker after audio/tracklist fit, and has no
+                    # effect on the positions written to file or library metadata.
                     needs_digital = bool(
-                        numbering_mode == 'digital' and best_expanded and
-                        not _continuous_numbering(best_expanded)
+                        best_expanded and not _edition_preference(_release_metadata(
+                            best_expanded, release_meta_cache, exact_musicbrainz_releases))[0]
                     )
                     if needs_digital and not any(row.source == 'musicbrainz' for row in scored):
                         searched = [candidate for candidate in _search_release_candidates(
@@ -2217,16 +2173,10 @@ class LibraryReconciliationJob(RepairJob):
                              best_expanded[6]['missing_slots'] or
                              _systematic_numbering_drift(files, best_expanded) or
                              _single_position_outlier(files, best_expanded) or
-                             (numbering_mode == 'digital' and
-                              (not _continuous_numbering(best_expanded) or
-                               # A perfectly matching physical release does not
-                               # establish the intended edition. Include its
-                               # digital siblings before asking the user to pin.
-                               not _edition_preference(
+                             not _edition_preference(
                                    _release_metadata(best_expanded,
                                                      release_meta_cache,
-                                                     exact_musicbrainz_releases),
-                                   numbering_mode)[0])))):
+                                                     exact_musicbrainz_releases))[0])):
                         editions = [candidate for candidate in _release_group_candidates(
                             group_seed[4], files, context, release_group_cache)
                             if candidate not in candidates]
@@ -2275,7 +2225,7 @@ class LibraryReconciliationJob(RepairJob):
                             scored[:leading_count],
                             key=lambda row: _edition_preference(
                                 _release_metadata(row, release_meta_cache,
-                                                  exact_musicbrainz_releases), numbering_mode),
+                                                  exact_musicbrainz_releases)),
                             reverse=True)
                     # A single fingerprint proves the recording, but that same
                     # recording can occur on an original album and many later
@@ -2332,7 +2282,7 @@ class LibraryReconciliationJob(RepairJob):
                             continue
                     ranked_candidates = list(scored)
                     pinned_row = None
-                    best_unpinned_rank = _candidate_rank(files, scored[0], numbering_mode)
+                    best_unpinned_rank = rank_candidate(scored[0])
                     if album and album.get('canonical_locked'):
                         pinned_row = next((row for row in scored
                                            if (row.source, row.release_id) ==
@@ -2345,11 +2295,10 @@ class LibraryReconciliationJob(RepairJob):
                     locked_conflict = bool(album and album.get('canonical_locked') and
                                            (not pinned_row or
                                             (pinned_row.matched == 0 and
-                                             _candidate_rank(files, pinned_row, numbering_mode) !=
+                                             rank_candidate(pinned_row) !=
                                              best_unpinned_rank)))
                     tied_rows = [row for row in scored
-                                 if _candidate_rank(files, row, numbering_mode) ==
-                                 _candidate_rank(files, scored[0], numbering_mode)]
+                                 if rank_candidate(row) == rank_candidate(scored[0])]
                     equivalent_tie = (len(tied_rows) > 1 and
                                       all(_candidate_shapes_equivalent(row, tied_rows[0])
                                           for row in tied_rows[1:]))
@@ -2377,7 +2326,7 @@ class LibraryReconciliationJob(RepairJob):
                     digital_edition_choice = bool(
                         album_id is not None and album and not album.get('canonical_locked') and
                         _full_coverage_digital_alternative(
-                            scored[0], ranked_candidates, numbering_mode, len(files),
+                            scored[0], ranked_candidates, len(files),
                             lambda row: _release_metadata(
                                 row, release_meta_cache, exact_musicbrainz_releases))
                     )
@@ -2544,11 +2493,10 @@ class LibraryReconciliationJob(RepairJob):
                         'key': _wanted_slot_key(slot), 'title': slot['title'],
                         'disc_number': slot.get('disc_number') or 1,
                         'track_number': slot.get('track_number'),
-                        'display_track_number': _numbered_slot(
-                            slot, index, numbering_mode, slots).get('track_number'),
+                        'display_track_number': slot.get('track_number'),
                         'duration_ms': slot.get('duration_ms') or 0,
                         'preview_url': slot.get('preview_url') or '',
-                    } for index, slot in enumerate(slots)]
+                    } for slot in slots]
                     raw_duplicate_groups = []
                     for extra_index, rivals in plan.get('competing_files', {}).items():
                         indexes = set([extra_index, *rivals])
@@ -2573,13 +2521,24 @@ class LibraryReconciliationJob(RepairJob):
                         duplicate_groups[leaders[0]] = sorted(indexes)
                         duplicate_indexes.update(indexes)
                     album_title_proposed = False
+                    # Absolute filenames are compatible only when the complete
+                    # source sequence is known; never compress excluded media
+                    # or an incomplete source tracklist into new positions.
+                    disc_tracks: dict[int, list[int]] = defaultdict(list)
+                    for source_slot in slots:
+                        disc_tracks[source_slot.get('disc_number') or 1].append(source_slot.get('track_number'))
+                    disc_totals = {disc: len(numbers) if all(number is not None for number in numbers)
+                                   and sorted(numbers) == list(range(1, len(numbers) + 1)) else 0
+                                   for disc, numbers in disc_tracks.items()}
+                    absolute_filenames = (len(disc_tracks) > 1 and
+                        sorted(disc_tracks) == list(range(1, max(disc_tracks) + 1)) and
+                        not any(slot.get('excluded_video_tracks') for slot in slots) and
+                        all(disc_totals.values()))
                     tool_evidence.compare(files, slots, plan, source)
                     plan_action_changes: dict[str, dict] = {}
                     for pair in _review_pairs(files, plan):
                         file = files[pair['file_index']]
                         slot = slots[pair['slot_index']]
-                        metadata_slot = _numbered_slot(
-                            slot, pair['slot_index'], numbering_mode, slots)
                         tags = file['tags']
                         if (pair['confidence'] not in ('clear', 'manual') or
                                 _audio_conflicts_with_slot(file, slot)):
@@ -2637,8 +2596,8 @@ class LibraryReconciliationJob(RepairJob):
                                 result.findings_created += 1
                             continue
                         target = {'name': slot['title'],
-                                  'track_number': metadata_slot['track_number'],
-                                  'disc_number': metadata_slot['disc_number'],
+                                  'track_number': slot['track_number'],
+                                  'disc_number': slot['disc_number'],
                                   'artists': [{'name': name}
                                               for name in slot.get('artist_names') or
                                               ([slot['artist']] if slot['artist'] else [])]}
@@ -2664,7 +2623,10 @@ class LibraryReconciliationJob(RepairJob):
                             else common['artist_name'])
                         meta = {'name': metadata_album_title, 'artists':
                                 [{'name': metadata_artist}] if metadata_artist else [],
-                                'total_tracks': len(slots)}
+                                # Track totals describe this disc, not the sum
+                                # of every medium in a multidisc release.
+                                'total_tracks': disc_totals[slot['disc_number']]
+                                if not slot.get('excluded_video_tracks') else 0}
                         tag_plan = plan_track(tags, target, meta)
                         # Minor title spelling/version annotations are often valid;
                         # only act on a substantive title difference or hard slot
@@ -2716,12 +2678,12 @@ class LibraryReconciliationJob(RepairJob):
                             changed['library_title'] = {
                                 'old': row.get('title') or '', 'new': slot['title']}
                         for field in ('track_number', 'disc_number'):
-                            if (row and metadata_slot.get(field) is not None and
-                                    row.get(field) != metadata_slot[field]):
-                                db_updates[field] = metadata_slot[field]
+                            if (row and slot.get(field) is not None and
+                                    row.get(field) != slot[field]):
+                                db_updates[field] = slot[field]
                                 changed[f'library_{field}'] = {
                                     'old': str(row.get(field) or ''),
-                                    'new': str(metadata_slot[field])}
+                                    'new': str(slot[field])}
                         target_track_artist = tag_plan['db_data'].get('track_artist')
                         if (row and target_track_artist and
                                 row.get('track_artist') != target_track_artist):
@@ -2755,7 +2717,11 @@ class LibraryReconciliationJob(RepairJob):
                                     'old': current_disambiguation,
                                     'new': confirmed_disambiguation,
                                 }
-                        target_path = (_suggest_filename(file['path'], metadata_slot)
+                        absolute_number = (sum(total for disc, total in disc_totals.items()
+                                               if disc < slot['disc_number']) + slot['track_number']
+                                           if absolute_filenames else None)
+                        target_path = (_suggest_filename(file['path'], slot,
+                            absolute_number=absolute_number)
                                        if file.get('db') else '')
                         if target_path:
                             changed['filename'] = {'old': os.path.basename(file['path']),
@@ -2831,7 +2797,7 @@ class LibraryReconciliationJob(RepairJob):
                             details['file_only'] = True
                         if review_choices.retains_numbering(kept_numbering.get(file['path']), details):
                             projected = review_choices.project(details, ('', json.dumps(details), 'numbering', 'dismiss', ''))
-                            for key in ('planned_choice', 'plan_keep'):
+                            for key in ('planned_choice', 'plan_keep', 'numbering_choice'):
                                 projected.pop(key, None)
                             details = projected
                             changed = details['changes']

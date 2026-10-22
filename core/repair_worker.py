@@ -635,6 +635,9 @@ class RepairWorker:
                 if 'settings' in cfg and isinstance(cfg['settings'], dict):
                     defaults['settings'].update(cfg['settings'])
 
+        if job_id == 'library_reconciliation':
+            defaults['settings'].pop('numbering_mode', None)
+
         return defaults
 
     def stop_current_job(self, job_id: str) -> dict:
@@ -2051,7 +2054,7 @@ class RepairWorker:
                     if not scored:
                         return {'success': False, 'error': 'Could not analyze this release track list'}
                     return {'success': True, 'candidate': candidate_preview(
-                        files, scored[0], release, plan.get('numbering_mode') or '')}
+                        files, scored[0], release)}
                 candidate = candidate or {'source': source, 'release_id': release_id,
                                           'clear': 0, 'matched': 1}
             if not candidate:
@@ -2118,8 +2121,16 @@ class RepairWorker:
             conn = self.db._get_connection()
             try:
                 review_choices.ensure_schema(conn)
-                conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND category=?',
-                             (case_id, category))
+                if category == 'numbering':
+                    # Reopening numbering also revokes a later whole-proposal
+                    # approval, which may depend on the kept numbering.
+                    conn.execute("DELETE FROM reconcile_review_choices WHERE case_id=? AND (category=? OR numbering_choice != '')",
+                                 (case_id, category))
+                else:
+                    conn.execute("UPDATE reconcile_review_choices SET category='numbering', choice=numbering_choice, numbering_choice='' WHERE case_id=? AND category=? AND numbering_choice != ''",
+                                 (case_id, category))
+                    conn.execute('DELETE FROM reconcile_review_choices WHERE case_id=? AND category=?',
+                                 (case_id, category))
                 conn.commit()
             finally:
                 conn.close()
@@ -2143,13 +2154,20 @@ class RepairWorker:
                     conn.rollback()
                     return {'success': False, 'stale': True, 'error': 'The album plan changed'}
                 # Re-read the immutable scan proposal, not a projected prior choice.
+                previous = review_choices.load_choices(conn, item['id']).get(item['id'])
+                numbering = ''
+                if previous and previous[0] == case_id and previous[1] == row[10]:
+                    numbering = previous[3] if previous[2] == 'numbering' else previous[5]
+                if category == 'numbering':
+                    numbering = action
                 conn.execute("""INSERT INTO reconcile_review_choices
-                    (finding_id, case_id, evidence_json, category, choice, fix_action)
-                    VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
+                    (finding_id, case_id, evidence_json, category, choice, fix_action, numbering_choice)
+                    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(finding_id) DO UPDATE SET
                     case_id=excluded.case_id, evidence_json=excluded.evidence_json,
                     category=excluded.category, choice=excluded.choice, fix_action=excluded.fix_action,
+                    numbering_choice=excluded.numbering_choice,
                     updated_at=CURRENT_TIMESTAMP""",
-                    (item['id'], case_id, row[10], category, action, fix_action))
+                    (item['id'], case_id, row[10], category, action, fix_action, numbering))
                 # A newly reviewed choice may retry a failed apply. The file and
                 # release guards still run when the saved plan is applied.
                 conn.execute('UPDATE repair_findings SET last_error=NULL WHERE id=?', (item['id'],))

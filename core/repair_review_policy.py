@@ -41,6 +41,8 @@ def _change_value(change: Any, key: str) -> str:
 
 
 def needs_numbering_review(details: dict) -> bool:
+    if details.get('numbering_choice') in ('fix', 'dismiss'):
+        return False
     changes = details.get('changes') or {}
     positions = _POSITION_CHANGE_KEYS.intersection(changes)
     if not positions:
@@ -48,7 +50,6 @@ def needs_numbering_review(details: dict) -> bool:
     # A fully assigned continuous sequence already has its final track numbers.
     # Clearing redundant disc markers is metadata normalization, not renumbering.
     normalized_disc = (positions <= {'disc_number', 'library_disc_number'}
-        and details.get('numbering_mode') == 'digital'
         and details.get('confidence') == 'clear'
         and details.get('release_disc_count') == 1
         and (details.get('local_file_count') or 0) - (details.get('companion_count') or 0) == details.get('release_track_count')
@@ -146,6 +147,10 @@ def _finding_tier(item: dict[str, Any], *, global_blocked: bool = False) -> tupl
         }.get(finding_type, 'This finding requires a decision')
     if global_blocked:
         return 'blocked', 'The selected release must be resolved first'
+    if (details.get('numbering_mode') == 'digital' and
+            (details.get('release_disc_count') or 0) > 1 and
+            _POSITION_CHANGE_KEYS.intersection(changes)):
+        return 'manual', 'Reanalyze this album to replace the old flattened numbering proposal'
     if details.get('plan_approved') or details.get('plan_keep'):
         return 'ready', 'Saved in the album plan; no file changes applied yet'
     if details.get('metadata_review_reason'):
@@ -214,7 +219,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
     # Lists and counters need policy inputs, not thousands of complete release
     # candidates and evidence snapshots. Execution still reads full evidence.
     detail_sql, join = 'f.details_json', ''
-    choice_sql = 'NULL, NULL, NULL'
+    choice_sql = 'NULL, NULL, NULL, NULL'
     if compact:
         fields = ('changes', 'fulfillment_state', 'audio_conflict', 'version_conflict',
                   'title_difference_kind', 'confidence', 'numbering_mode',
@@ -228,8 +233,8 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         detail_sql = 'json_object(' + ', '.join(pairs) + ')'
         join = ('LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id '
                 'AND c.case_id=f.review_case_key AND c.evidence_json=f.details_json')
-        choice_sql = 'c.category, c.choice, c.fix_action'
-    for fid, key, kind, error, raw, category, choice, action in conn.execute(
+        choice_sql = 'c.category, c.choice, c.fix_action, c.numbering_choice'
+    for fid, key, kind, error, raw, category, choice, action, numbering in conn.execute(
             f"SELECT f.id, f.review_case_key, f.finding_type, f.last_error, {detail_sql}, {choice_sql} "
             f"FROM repair_findings f {join} WHERE f.status = ? AND (? = '' OR f.job_id = ?) "
             "AND (? = '' OR f.review_case_key = ?)", (status, job_id, job_id, case_id, case_id)):
@@ -240,7 +245,7 @@ def effective_case_modes(conn, *, status: str = 'pending', job_id: str = '', cas
         if compact:
             details = {k: v for k, v in details.items() if v is not None}
             raw = json.dumps(details)
-        saved_choice = (key, raw, category, choice, action) if compact and choice else saved.get(fid)
+        saved_choice = (key, raw, category, choice, action, numbering) if compact and choice else saved.get(fid)
         details = choices.project(details if isinstance(details, dict) else {}, saved_choice, case_id=key, raw_json=raw)
         grouped.setdefault(key, []).append({'id': fid, 'finding_type': kind, 'details': details, 'last_error': error})
     result = {}

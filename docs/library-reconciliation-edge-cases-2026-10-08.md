@@ -30,9 +30,9 @@ This catalogue records the real-library cases used while designing and tuning th
 | --- | --- | --- |
 | Queens of the Stone Age — *Songs for the Deaf* | Files from materially different editions were combined. “The Real Song for the Deaf” and the specific “Song for the Deaf” recording distinguish candidate releases. | Require an edition choice when tracklists or recordings differ, then recompute dependent track actions. |
 | Queens of the Stone Age — *Rated R* | The folder was named “R,” and a deluxe tracklist had replaced the standard split-track edition. | Use album context and exact tracklist evidence to select or ask for the intended edition; do not treat an album-title correction as sufficient. |
-| The Ocean — *Pelagial* | Instrumental and vocal discs begin with the same instrumental recording; a physical two-disc edition conflicts with a continuous digital tracklist. | Do not infer the disc from vocals alone. Prefer a fitting digital release in digital-numbering mode while retaining a manual numbering choice where the local convention differs. |
+| The Ocean — *Pelagial* | Instrumental and vocal discs begin with the same instrumental recording; a physical two-disc edition conflicts with a continuous digital tracklist. | Do not infer the disc from vocals alone. Digital format breaks otherwise equivalent release ties; the selected release always supplies its actual disc/track positions. |
 | Lamb of God — *Sacrament* | Several providers returned differently shaped releases, though one MusicBrainz release completely fit all 11 files. | Do not create a release decision when only one candidate fully fits. |
-| Joep Beving — *Trilogy* | A multidisc physical release numbers each disc separately, while the desired digital convention numbers all 46 tracks continuously. | Proactively search for a fitting digital edition and present one album-wide numbering choice. |
+| Joep Beving — *Trilogy* | Earlier queue behavior flattened a multidisc release into 46 continuous positions. | Discover fitting editions without favoring already-flattened tags; preserve real selected-release positions and offer reviewed corrections for previously applied flattening. |
 | Katy Kirby — *Katy Kirby on Audiotree Live* | Apple reports “Katy Kirby on Audiotree Live (Audiotree Live) - EP”; Deezer repeats the same parenthetical. Removing only “- EP” proposed awkward redundant metadata. | Treat a trailing qualifier that merely repeats words already in the album title as source flavor and preserve the cleaner local title. Keep the exact provider release ID. |
 | Duran Duran — *Rio* | Apple release `693584837` fits all nine tracks. The library/cache retained “Rio (Columbia House),” the current provider title is “Rio (Remastered),” and every file tag and the folder use “Rio.” | Keep the exact release identity for track matching while preserving the unanimous clean display title. Clean obsolete retailer, record-club, and pressing-plant qualifiers from the library album without pushing them into file tags. |
 | The Spiritual Sound | Multiple MusicBrainz releases assign the same ten files equally. | Show the edition ambiguity and disambiguation fields; avoid pretending audio can distinguish catalogue-equivalent editions. |
@@ -40,12 +40,18 @@ This catalogue records the real-library cases used while designing and tuning th
 ## Numbering conventions and discs
 
 - SoulSync stores disc and track numbers on files and library rows. It does not model a disc as a separate library entity.
-- `digital` mode prefers one continuous sequence and disc 1 when a fitting digital release exists.
-- `release` mode preserves the selected release’s per-disc positions.
+- Preserve the selected release’s actual disc/track positions. The old `digital`
+  flattening setting is retired; format preference cannot manufacture positions.
+- Compatible absolute filenames may coexist with per-disc metadata. Use the full
+  source tracklist, including locally missing slots; never compress excluded videos.
+- Previously applied flattening reopens through new corrective evidence. Old
+  approval cannot authorize an inverse correction; actual single-disc digital
+  releases retain their own continuous numbering.
 - Numbering changes are one album-wide choice, never dozens of independent metadata decisions.
-- A numbering action cannot hide a material title/version change on the same track.
+- A numbering action approves only numbering. Other metadata remains subject to
+  its own evidence/review, and later approval must preserve kept numbering.
 - Conventional `Disc N`, `CD N`, and similar child folders may form one logical album when their release identities do not conflict.
-- A track number such as `2.12` must not be silently rewritten to `12`, `1.12`, or `1` without the chosen convention being explicit.
+- A track position such as `2.12` must not silently lose its disc identity.
 
 ## Titles, versions, and metadata flavor
 
@@ -116,5 +122,5 @@ Examples encountered: Snow Patrol’s *Up to Now* should remain partial; the sin
 
 ## Mixed audio/video releases and downloaded fragments
 
-- Gojira — *The Flesh Alive*: the selected release has 30 explicitly video-marked Blu-ray recordings and 13 CD audio tracks. Audio coverage is 13/13; videos are noted separately, never requested as missing audio. Audio on Blu-ray and recordings with unknown video flags remain eligible. Original medium positions remain evidence; digital numbering uses the filtered audio sequence.
+- Gojira — *The Flesh Alive*: the selected release has 30 explicitly video-marked Blu-ray recordings and 13 CD audio tracks. Audio coverage is 13/13; videos are noted separately, never requested as missing audio. Audio on Blu-ray and recordings with unknown video flags remain eligible. Audio retains its source disc and track positions; excluding videos does not renumber the remaining media.
 - Split Chain — *motionblur (DELUXE)*: a regular album folder and deluxe addendum can already form one logical album while ten newly downloaded, unindexed files remain in a third sibling folder. Include a unanimous exact album/artist fragment only with one authoritative sibling owner, then match the full collection jointly. Never strip edition qualifiers when deciding fragment ownership.

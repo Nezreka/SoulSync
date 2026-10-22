@@ -483,9 +483,10 @@ describe('library reconciliation review queue', () => {
       screen.getByRole('button', { name: 'Plan release track numbers for 1 track' }),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Evidence' })).toBeNull();
+    expect(screen.getByText('digital-release')).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: /Tracks/ }));
     expect(screen.getByRole('heading', { name: 'Track assignments' })).toBeTruthy();
-    expect(screen.getByText('digital-release')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Compare editions/ })).toBeTruthy();
     expect(screen.getAllByText('One disc · match release positions').length).toBeGreaterThan(0);
     expect(screen.getByText('1 outside collection')).toBeTruthy();
     expect(screen.getByText(/3 settled release slots/)).toBeTruthy();
@@ -998,10 +999,9 @@ describe('library reconciliation review queue', () => {
       ).toBe(true),
     );
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Album actions' })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Refresh catalog evidence' })).not.toBeDisabled(),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Album actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Refresh catalog evidence' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh catalog evidence' }));
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(

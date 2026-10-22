@@ -16,8 +16,9 @@ finished with zero errors and 488 warnings; production build and the local
 conflict-resolution whitespace check passed. This is integration coverage of
 Review and the affected shared code, not a full test of every incoming feature.
 
-The user's next direction is customizable library defaults. Proposed approach,
-pending implementation agreement:
+The initial configurable-defaults proposal below is superseded by the queue-only
+correction scope agreed on 2026-10-22. It is retained only as historical context;
+no shared policy resolver, override framework, or new settings are authorized.
 
 - Separate release/audio identity from preferred metadata representation,
   filename rendering, folder layout and acquisition intent. A formatting
@@ -48,6 +49,50 @@ pending implementation agreement:
   integrate existing date, credit and preservation controls. Validate mixed edits,
   partial/multidisc albums, conflicting versions, stale plans, codec round trips,
   naming collisions and apply-then-rescan stability before broadening defaults.
+
+## Queue numbering correction and recovery — 2026-10-22 (in progress)
+
+The user authorized implementation, tests, deployment, a full reconciliation run,
+and repeated correction/deployment/run review as needed. Host reboot for a
+vulnerability fix may temporarily interrupt live access; retry after it returns.
+
+- [x] Keep digital format as an evidence-subordinate release tie breaker;
+  separate it from numbering. Respect selected releases and recording versions.
+- [x] Preserve the selected release's real disc/track positions, including audio
+  media after excluded videos. Retire the queue's flattening behavior/settings.
+- [x] Reassess completed albums and recover previously flattened metadata using
+  selected-release evidence. Preserve valid decisions; changed inverse proposals
+  require fresh review. Do not infer that an actual single-disc edition is wrong.
+- [x] Numbering approval covers numbering only; unrelated metadata remains
+  classified on its evidence and explicitly reviewable where required.
+- [x] Preserve compatible filename conventions and title/remaster behavior;
+  verify partial albums, repeated titles, collisions and apply/rescan stability.
+- [x] Remove low-value queue disclosures and excessive component nesting,
+  especially release candidates; inspect desktop/mobile before and after.
+- [ ] Run affected backend/UI/browser suites, check/build; deploy via maintained
+  script, run reconciliation, inspect actual proposals/readiness/recovery, fix
+  findings and repeat. Report measured results and remaining limitations.
+
+Scope excludes new preferences, downloads/Soulseek, shared organizer behavior,
+date policy, completeness defaults, and duplicate handling changes. Live review
+does not authorize applying unrelated music-file changes as test data.
+
+Implementation checks: 773 backend tests passed before the final edge-case
+additions; the final affected scan/authority/queue suites passed 233 tests.
+Recovery tests write real FLAC fixtures, verify disc/track and per-disc totals,
+retain compatible absolute filenames, and rescan to an empty queue. Additional
+coverage includes unordered or incomplete source positions, explicit release
+pins, digital format ties, and separate numbering/metadata choice lifecycles.
+Frontend review tests passed 78 tests; check reported zero errors and 488 existing
+warnings, and production builds passed. Desktop/tablet/phone screenshots were
+compared; the redundant release/manual-lookup frames, single-action album menu,
+small saved-choice/source disclosures and one-identifier disclosure were removed.
+Multiple identifier additions retain a disclosure to protect phone readability.
+All 69 pinned browser checks passed against the reviewed snapshots. An initial
+update pass overlapped a production build and lost its manifest in three tests;
+the complete run against the finished build passed without snapshot updates.
+Live baseline: 895 albums, 131 eligible albums / 526 ready changes; captured 137
+release/numbering cases before rollout. Live verification is still pending.
 
 ## Reverification against the original assessment — 2026-10-20
 

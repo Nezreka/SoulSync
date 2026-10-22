@@ -159,13 +159,15 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                     return blocked('This file has a manually chosen release-track assignment.')
             if not _table(conn, 'reconcile_review_choices'):
                 continue
-            rows = conn.execute("""SELECT f.file_path, f.entity_id, f.status, f.user_action,
-                    f.details_json, c.evidence_json, c.choice, c.category, c.case_id
+            has_numbering = 'numbering_choice' in {row[1] for row in conn.execute('PRAGMA table_info(reconcile_review_choices)')}
+            numbering_column = 'c.numbering_choice' if has_numbering else "''"
+            rows = conn.execute(f"""SELECT f.file_path, f.entity_id, f.status, f.user_action,
+                    f.details_json, c.evidence_json, c.choice, c.category, c.case_id, {numbering_column}
                 FROM repair_findings f LEFT JOIN reconcile_review_choices c ON c.finding_id=f.id
                 WHERE f.review_case_key=? AND f.job_id='library_reconciliation'
                 AND f.status IN ('pending','resolved','dismissed') ORDER BY f.id DESC""", (case_id,))
             seen = set()
-            for path, tid, status, action, raw, saved, choice, category, choice_case in rows:
+            for path, tid, status, action, raw, saved, choice, category, choice_case, numbering in rows:
                 if action == 'obsolete':
                     continue
                 same_file = not (paths or track_ids) or path in paths or str(tid) in track_ids
@@ -176,6 +178,7 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                             continue
                 d = json.loads(raw or '{}')
                 approved = bool(saved and saved == raw and choice_case == case_id)
+                numbering = choice if category == 'numbering' else numbering
                 if status == 'pending' and not approved:
                     continue
                 if same_file and 'files' in touched and approved and (choice == 'dismiss' or status == 'pending'):
@@ -186,8 +189,12 @@ def conflict(db, kind, *, entity_type='', entity_id=None, file_path=None, detail
                         continue
                     if field not in touched or not isinstance(change, dict) or (path, field) in seen:
                         continue
+                    position = field in ('track_number', 'disc_number', 'filename')
+                    if status == 'pending' and category == 'numbering' and not position:
+                        continue
                     seen.add((path, field))
-                    kept = choice == 'dismiss' and (category != 'numbering' or field in ('track_number', 'disc_number', 'filename'))
+                    kept = (numbering == 'dismiss' and position or
+                            choice == 'dismiss' and category != 'numbering')
                     expected = change.get('old' if kept or status == 'dismissed' else 'new')
                     if field not in proposed or str(proposed[field] or '') != str(expected or ''):
                         return blocked(f'This action conflicts with the accepted {field.replace("_", " ")} decision.')

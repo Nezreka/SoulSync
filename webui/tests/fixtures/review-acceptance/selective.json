@@ -35,7 +35,7 @@
           ],
           "source": "musicbrainz",
           "release_id": "11111111-1111-4111-8111-111111111111",
-          "numbering_mode": "digital",
+          "numbering_mode": "release",
           "exact_release_id": "11111111-1111-4111-8111-111111111111",
           "release_track_count": 3,
           "local_file_count": 1,
@@ -93,7 +93,7 @@
           ],
           "source": "musicbrainz",
           "release_id": "11111111-1111-4111-8111-111111111111",
-          "numbering_mode": "digital",
+          "numbering_mode": "release",
           "exact_release_id": "11111111-1111-4111-8111-111111111111",
           "release_track_count": 3,
           "local_file_count": 1,
@@ -280,7 +280,7 @@
       "release_id": "11111111-1111-4111-8111-111111111111",
       "state": "review",
       "intent_scope": "partial",
-      "numbering_mode": "digital",
+      "numbering_mode": "release",
       "inventory": {
         "version": 1,
         "library_roots": [

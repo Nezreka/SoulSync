@@ -51,6 +51,17 @@ def test_resolved_identity_remains_authoritative_and_obsolete_history_does_not(t
     assert conflict(db, 'mbid_mismatch', **args) is None
 
 
+def test_numbering_choice_only_governs_numbering_until_metadata_is_approved(tmp_path):
+    db = Database(tmp_path / 'db')
+    args = dict(entity_type='track', entity_id='track')
+    assert conflict(db, 'mbid_mismatch', **args) is None
+    with db._get_connection() as c:
+        c.execute("UPDATE reconcile_review_choices SET category='metadata', choice='fix', numbering_choice='dismiss'")
+    assert conflict(db, 'mbid_mismatch', **args)['review_conflict']
+    assert conflict(db, 'track_number_mismatch', details={'correct_track_num': 2}, **args)['review_conflict']
+    assert conflict(db, 'track_number_mismatch', details={'correct_track_num': 7}, **args) is None
+
+
 def test_changed_unapproved_proposal_does_not_reuse_old_choice(tmp_path):
     db = Database(tmp_path / 'db')
     with db._get_connection() as c:

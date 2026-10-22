@@ -5,5 +5,7 @@ export function formatTrackPosition(
   displayTrack?: number | string | null,
 ): string {
   const number = displayTrack === '' || displayTrack == null ? track || '—' : displayTrack;
-  return numberingMode === 'digital' ? String(number) : `${disc || 1}.${number}`;
+  return numberingMode === 'digital' || Number(disc || 1) === 1
+    ? String(number)
+    : `${disc}.${number}`;
 }

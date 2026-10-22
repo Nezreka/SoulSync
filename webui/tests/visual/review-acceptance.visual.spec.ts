@@ -164,14 +164,12 @@ for (const width of [1800, 390]) {
       const board = page.getByLabel('Album decisions', { exact: true });
       const explanation = board.getByText(
         numbering
-          ? 'Also resolve conflicting album metadata. Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track.'
+          ? 'Numbering approval does not approve the other metadata changes shown for these tracks.'
           : 'Files disagree on album title and MusicBrainz release ID. Proposed corrections affect 1 track; this group also includes metadata changes on 1 other track.',
         { exact: true },
       );
       const approval = board.getByRole('button', {
-        name: numbering
-          ? 'Plan numbering and album metadata for 1 track'
-          : 'Use 2 proposed changes',
+        name: numbering ? 'Plan release track numbers for 1 track' : 'Use 2 proposed changes',
         exact: true,
       });
       await expect(explanation).toBeVisible();

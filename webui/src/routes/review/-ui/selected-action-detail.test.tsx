@@ -58,7 +58,7 @@ it('shows identity replacement alongside readable edits before approval', () => 
   expect(screen.getByText('old-id').closest('details')).toBeNull();
 });
 
-it('keeps removals visible beside a filename edit and labels additions in the disclosure', () => {
+it('shows short identifier additions and removals beside a filename edit', () => {
   render(
     <ReconciliationEvidence
       finding={{
@@ -77,11 +77,8 @@ it('keeps removals visible beside a filename edit and labels additions in the di
   expect(screen.getByText('Remove Recording ID · file and library')).toBeVisible();
   expect(screen.getAllByText('remove-id')).toHaveLength(1);
   expect(screen.getByText('remove-id').closest('details')).toBeNull();
-  const disclosure = screen.getByText('Add 1 missing identifier').closest('details')!;
-  expect(disclosure.open).toBe(false);
-  fireEvent.click(screen.getByText('Add 1 missing identifier'));
-  expect(disclosure.open).toBe(true);
   expect(screen.getByText('added-id')).toBeVisible();
+  expect(screen.getByText('added-id').closest('details')).toBeNull();
 });
 
 it('shows identifier-only proposals immediately', () => {

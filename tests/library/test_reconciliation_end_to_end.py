@@ -21,7 +21,7 @@ from core.repair_jobs.library_reconciliation import (
     _display_album_title, _distinctive_position_conflict,
     _full_coverage_digital_alternative,
     _group_disc_folders, _group_logical_albums,
-    _has_unexplained_identified_extras, _normalize_slot, _numbered_slot,
+    _has_unexplained_identified_extras, _normalize_slot, _edition_preference,
     _promote_album_context_candidate,
     _release_group_candidates, _same_recording_copies, _search_release_candidates,
     _single_file_album_context_conflict, _suggest_filename,
@@ -107,11 +107,11 @@ def test_preferred_source_breaks_equal_coverage_but_not_a_better_match():
             'missing_slots': [], 'extra_files': []}
     itunes = (2, 2, 0, 'itunes', 'i', slots, plan)
     musicbrainz = (2, 2, 0, 'musicbrainz', 'm', slots, plan)
-    assert _candidate_rank(files, musicbrainz, 'release', 'musicbrainz') > \
-        _candidate_rank(files, itunes, 'release', 'musicbrainz')
+    assert _candidate_rank(files, musicbrainz, 'musicbrainz') > \
+        _candidate_rank(files, itunes, 'musicbrainz')
     weaker = (1, 2, 0, 'musicbrainz', 'm', slots, plan)
-    assert _candidate_rank(files, itunes, 'release', 'musicbrainz') > \
-        _candidate_rank(files, weaker, 'release', 'musicbrainz')
+    assert _candidate_rank(files, itunes, 'musicbrainz') > \
+        _candidate_rank(files, weaker, 'musicbrainz')
     # A current provider title can carry real edition detail while the stored
     # library title still carries an obsolete catalog label. Unanimous file
     # tags remain the clean display title; the exact provider ID preserves the
@@ -542,6 +542,86 @@ def test_non_musicbrainz_release_repairs_audio_supported_recording_ids(tmp_path,
     assert db.get_album_canonical(10)['source'] == source
 
 
+def test_source_without_all_track_numbers_does_not_invent_disc_totals(tmp_path, monkeypatch):
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    read_tracks = module.get_album_tracks_for_source
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *args, **kwargs: [
+        {**track, 'track_number': None if index else 1}
+        for index, track in enumerate(read_tracks(*args, **kwargs))])
+    result = LibraryReconciliationJob().scan(context)
+    assert not result.errors
+    with db._get_connection() as conn:
+        items = [json.loads(row[0]) for row in conn.execute(
+            "SELECT details_json FROM repair_findings WHERE finding_type='reconciliation_metadata'")]
+    assert items
+    assert all(not item['db_data'].get('track_count') for item in items)
+
+
+@pytest.mark.parametrize(('multidisc', 'reversed_source'), [(True, False), (True, True), (False, False)])
+def test_completed_flattening_is_recovered_and_apply_rescan_is_stable(tmp_path, monkeypatch, multidisc, reversed_source):
+    import core.repair_jobs.library_reconciliation as module
+    from core.library import reconciliation_choices as choices
+    db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch)
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda *_args, **_kwargs: [
+        {'id': str(index + 1), 'name': title, 'artists': [{'name': 'Lamb of God'}],
+         'track_number': 1 if multidisc else index + 1,
+         'disc_number': index + 1 if multidisc else 1, 'duration_ms': 200000}
+        for index, title in enumerate(['Laid to Rest', 'Hourglass'])][::(-1 if reversed_source else 1)])
+    assert db.set_album_canonical(10, 'itunes', 'ashes-release', .99, locked=True)
+    # Model the actual legacy decision: source disc 2 track 1 was flattened,
+    # approved and applied. The inverse repair must reopen even though the
+    # completed album is no longer an outstanding queue item.
+    legacy = {'album_id': 10, 'album_folder': str(paths[0].parent),
+              'source': 'itunes', 'release_id': 'ashes-release', 'numbering_mode': 'digital',
+              'changes': {'track_number': {'old': 1, 'new': 2},
+                          'disc_number': {'old': 2, 'new': 1}}}
+    worker._create_finding('library_reconciliation', 'reconciliation_metadata', 'warning',
+                           'track', '2', str(paths[1]), 'Flatten numbering', '', legacy)
+    with db._get_connection() as conn:
+        choices.ensure_schema(conn)
+        fid, key, raw = conn.execute('SELECT id,review_case_key,details_json FROM repair_findings').fetchone()
+        conn.execute("INSERT INTO reconcile_review_choices(finding_id,case_id,evidence_json,category,choice) VALUES (?,?,?,'numbering','fix')", (fid, key, raw))
+        conn.execute("UPDATE repair_findings SET status='resolved', user_action='fixed'")
+    assert not worker.get_review_cases()['items']
+    # Stored digital mode is intentionally ignored, without changing settings
+    # in the imports, downloader or folder organizer.
+    class Config:
+        def get(self, key, default=None):
+            return {'numbering_mode': 'digital'} if key.endswith('.settings') else default
+    context.config_manager = Config()
+    result = LibraryReconciliationJob().scan(context)
+    assert not result.errors
+    case = worker.get_review_case(key)
+    second = next(item for item in case['items'] if item['entity_id'] == '2')
+    assert not second['details'].get('plan_approved')
+    assert case['album_plan']['numbering_mode'] == 'release'
+    assert 'filename' not in second['details']['changes']
+    if multidisc:
+        assert second['category'] == 'numbering'
+        assert str(second['details']['changes']['disc_number']['new']) == '2'
+        assert str(second['details']['changes']['track_number']['new']) == '1'
+        assert worker.apply_review_decision_group(key, 'numbering', action='fix')['success']
+    else:
+        assert 'disc_number' not in second['details']['changes']
+        assert 'track_number' not in second['details']['changes']
+    for item in worker.get_review_case(key)['items']:
+        assert item['review_tier'] == 'ready', item
+        assert worker.fix_finding(item['id'], review_approved=True)['success']
+    assert paths[1].exists()  # compatible absolute filename remains unchanged
+    audio = FLAC(str(paths[1]))
+    assert audio['discnumber'] == ['2' if multidisc else '1']
+    assert audio['tracknumber'][0].split('/')[0] == ('1' if multidisc else '2')
+    if multidisc:
+        assert audio['tracktotal'] == ['1']
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT disc_number,track_number FROM tracks WHERE id=2').fetchone()
+    assert tuple(row) == ((2, 1) if multidisc else (1, 2))
+    result = LibraryReconciliationJob().scan(context)
+    assert not result.errors
+    assert not worker.get_review_cases()['items']
+
+
 def test_mixed_album_metadata_requires_review_and_can_clear_only_release_ids(tmp_path, monkeypatch):
     from core.repair_review_policy import _finding_tier
     db, worker, context, paths, _ = _metadata_recommendation_album(tmp_path, monkeypatch, mixed=True)
@@ -832,6 +912,9 @@ def test_explanatory_annotations_keep_saved_choice_but_new_conflict_reopens_it(t
     result = worker.apply_review_decision(case_id, item['id'], evidence_token=item['evidence_token'], action='fix')
     assert result['success'], result
     details = {**item['details'], 'assignment_evidence': 'audio', 'tool_checks': [{'title': 'Additional context'}]}
+    # Removing the obsolete display mode alone does not revoke an unrelated
+    # metadata decision; actual changes/source/identity still must match.
+    details['numbering_mode'] = 'digital'
     details['match_reasons'] = ['AcoustID recording title matches release slot']
     if previous_annotation_scan:
         with db._get_connection() as conn:
@@ -1094,7 +1177,11 @@ def test_scan_review_intent_and_exact_missing_request(tmp_path, monkeypatch, mat
                item['details']['release_id'] == 'alternate-edition' for item in pending)
 
 
-def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monkeypatch):
+@pytest.mark.parametrize(('digital', 'locked', 'expected_source'), [
+    (False, False, 'spotify'), (True, False, 'musicbrainz'), (True, True, 'spotify'),
+])
+def test_stored_release_and_digital_tie_break_respect_explicit_pin(
+        tmp_path, monkeypatch, digital, locked, expected_source):
     import core.repair_jobs.library_reconciliation as module
 
     root = tmp_path / 'music'
@@ -1106,6 +1193,7 @@ def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monke
     _album(db, path)
     with db._get_connection() as conn:
         conn.execute("UPDATE albums SET musicbrainz_release_id = 'other-release' WHERE id = 10")
+        conn.execute('UPDATE albums SET canonical_locked=? WHERE id=10', (int(locked),))
         conn.commit()
     worker = RepairWorker(database=db)
     client = _Acoustid({path.name: {
@@ -1123,15 +1211,24 @@ def test_stored_release_breaks_an_equal_fit_without_human_review(tmp_path, monke
          'artists': [{'name': 'Lamb of God'}],
          'track_number': 1, 'disc_number': 1, 'duration_ms': 200000},
     ])
-    monkeypatch.setattr(module, 'get_album_for_source', lambda *_args, **_kwargs: {
-        'name': 'Ashes of the Wake', 'artists': [{'name': 'Lamb of God'}]})
+    monkeypatch.setattr(module, 'get_album_for_source', lambda source, *_args, **_kwargs: {
+        'name': 'Ashes of the Wake', 'artists': [{'name': 'Lamb of God'}],
+        'format': 'Digital Media' if digital and source == 'musicbrainz' else 'Cassette'})
     context = JobContext(db=db, transfer_folder=str(root), config_manager=None,
                          acoustid_client=client, create_finding=worker._create_finding)
 
     result = LibraryReconciliationJob().scan(context)
 
-    assert result.findings_created == 0
-    assert worker.get_review_cases(job_id='library_reconciliation')['total'] == 0
+    cases = worker.get_review_cases(job_id='library_reconciliation')
+    if expected_source == 'musicbrainz':
+        # The digital tie winner also supplies the missing recording ID.
+        assert result.findings_created == 1
+        assert cases['items'][0]['plan']['can_apply_ready']
+    else:
+        assert result.findings_created == 0
+        assert cases['total'] == 0
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT source FROM reconcile_album_plans').fetchone()[0] == expected_source
 
 
 def test_lone_playlist_track_requires_explicit_album_intent(tmp_path, monkeypatch):
@@ -1763,7 +1860,7 @@ def test_logical_album_joins_parent_and_disc_child_with_different_album_rows():
     assert trusted == {anchor: 10}
 
 
-def test_digital_numbering_rank_prefers_continuous_track_numbers():
+def test_candidate_rank_does_not_reward_previously_flattened_numbering():
     files = [
         {'tags': {'track_number': number, 'disc_number': 1}}
         for number in range(1, 5)
@@ -1783,10 +1880,19 @@ def test_digital_numbering_rank_prefers_continuous_track_numbers():
     continuous = (4, 4, 0, 'musicbrainz', 'digital', continuous_slots, plan)
     compact_disc = (4, 4, 0, 'musicbrainz', 'cd', cd_slots, plan)
 
-    assert _candidate_rank(files, continuous, 'digital') > \
-        _candidate_rank(files, compact_disc, 'digital')
-    assert _candidate_rank(files, continuous, 'release') == \
-        _candidate_rank(files, compact_disc, 'release')
+    assert _candidate_rank(files, continuous) == _candidate_rank(files, compact_disc)
+    assert _edition_preference({'format': 'Digital Media'}) > _edition_preference({'format': 'Cassette'})
+
+
+def test_retired_numbering_setting_is_hidden_and_ignored():
+    from types import SimpleNamespace
+    worker = RepairWorker.__new__(RepairWorker)
+    worker._jobs = {'library_reconciliation': LibraryReconciliationJob()}
+    worker._config_manager = SimpleNamespace(get=lambda _key, default=None: {
+        'settings': {'numbering_mode': 'digital', 'min_acoustid_score': .9}})
+    config = worker.get_job_config('library_reconciliation')
+    assert 'numbering_mode' not in config['settings']
+    assert config['settings']['min_acoustid_score'] == .9
 
 
 def test_complete_tracklist_breaks_tie_with_deluxe_release():
@@ -1803,20 +1909,17 @@ def test_complete_tracklist_breaks_tie_with_deluxe_release():
               [{'track_number': number, 'disc_number': 1}
                for number in range(1, 15)], deluxe_plan)
 
-    assert _candidate_rank(files, complete, 'digital') > \
-        _candidate_rank(files, deluxe, 'digital')
+    assert _candidate_rank(files, complete) > _candidate_rank(files, deluxe)
 
 
-def test_digital_numbering_flattens_physical_release_without_changing_identity():
-    slot = {'title': 'Ab Ovo', 'disc_number': 2, 'track_number': 12,
-            'recording_mbid': 'recording-id'}
-
-    slots = [{'disc_number': 1}, slot]
-    numbered = _numbered_slot(slot, 12, 'digital', slots)
-
-    assert numbered == {**slot, 'disc_number': 1, 'track_number': 13}
-    assert _numbered_slot(slot, 12, 'release', slots) is slot
-    assert _numbered_slot(slot, 12, 'digital', [slot]) is slot
+@pytest.mark.parametrize('filename', ['11 - Ab Ovo.flac', '01 - Ab Ovo.flac',
+                                     '2-01 - Ab Ovo.flac', '0201 - Ab Ovo.flac'])
+def test_filename_numbering_can_differ_from_per_disc_metadata(filename):
+    slot = {'title': 'Ab Ovo', 'disc_number': 2, 'track_number': 1}
+    assert _suggest_filename('/album/' + filename, slot, absolute_number=11) == ''
+    proposed = _suggest_filename('/album/' + filename, {**slot, 'title': 'Ab Ovo (live)'},
+                                 absolute_number=11)
+    assert proposed == '/album/' + filename.replace('Ab Ovo', 'Ab Ovo (live)')
 
 
 def test_title_searched_compilation_beats_equally_fitting_original_album():
@@ -2025,12 +2128,10 @@ def test_complete_digital_edition_stays_reviewable_when_one_track_is_ambiguous()
     metadata = lambda row: {'format': 'Digital Media' if row[4] == 'digital' else 'CD'}
 
     assert _full_coverage_digital_alternative(
-        physical, [physical, digital], 'digital', 14, metadata)
-    assert not _full_coverage_digital_alternative(
-        physical, [physical, digital], 'release', 14, metadata)
+        physical, [physical, digital], 14, metadata)
     assert not _full_coverage_digital_alternative(
         physical, [physical, (*digital[:6], {**complete, 'missing_slots': [14]})],
-        'digital', 14, metadata)
+        14, metadata)
 
 
 def test_wrong_audio_defers_completion_intent_until_assignment_is_settled(tmp_path, monkeypatch):
@@ -2716,8 +2817,7 @@ def test_video_slots_are_excluded_without_discarding_bluray_audio(monkeypatch):
     assert [slot['source_track_id'] for slot in row.slots] == ['audio', 'unknown']
     assert row.plan['missing_slots'] == [0, 1]
     assert candidate_preview([], row, {})['excluded_video_tracks'] == 1
-    assert _numbered_slot(row.slots[0], 0, 'digital', row.slots)['disc_number'] == 1
-    assert _numbered_slot(row.slots[0], 0, 'release', row.slots)['disc_number'] == 2
+    assert row.slots[0]['disc_number'] == 2
 
 
 def test_unassigned_download_grouping_requires_one_exact_album_owner():

@@ -17,7 +17,7 @@ from core.library import reconciliation_choices as choices
 from core.text.fold import fold_title
 from core.repair_review_policy import (
     _DETAILS, _GLOBAL_BLOCKER_TYPES, _TRACK_ARTIST_CHANGE_KEYS,
-    _RECORDING_ID_CHANGE_KEYS, _change_value, _finding_tier,
+    _RECORDING_ID_CHANGE_KEYS, _POSITION_CHANGE_KEYS, _change_value, _finding_tier,
     finding_category, queue_filter, count_ready_findings, effective_case_modes, case_mode,
 )
 
@@ -329,6 +329,11 @@ def build_decisions(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'finding_ids': [row.get('id') for row in rows],
             'action_count': len(rows),
             **({'additional_metadata_summary':
+                'Numbering approval does not approve the other metadata changes shown for these tracks.'}
+               if category == 'numbering' and any(
+                   set((row.get('details') or {}).get('changes') or {}) - _POSITION_CHANGE_KEYS - {'filename'}
+                   for row in rows) else
+               {'additional_metadata_summary':
                 f'Also resolve conflicting album metadata. {consistency[1]}'}
                if consistency and category != 'metadata' else {}),
         })
