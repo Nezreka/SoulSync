@@ -1948,7 +1948,6 @@ let _pfLastSelect = null;
 async function selectProfile(profileId) {
     _pfLastSelect = null;
     try {
-        const oldProfileId = currentProfile ? currentProfile.id : null;
         const res = await fetch('/api/profiles/select', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1958,9 +1957,15 @@ async function selectProfile(profileId) {
         _pfLastSelect = data;
         if (data.success) {
             setCurrentProfile(data.profile);
-            // Join profile-scoped WebSocket room for watchlist/wishlist count updates
+            // Reconnect the socket so its new handshake carries the switched
+            // profile's session cookie: Flask-SocketIO freezes the session at
+            // connect time, so emitting profile:join on the existing socket
+            // would leave the server acting on (and revocation-checking) the
+            // OLD profile's session (#1837). The connect handler re-joins the
+            // profile room for the now-current profile and re-subscribes.
             if (socket && socket.connected) {
-                socket.emit('profile:join', { profile_id: profileId, old_profile_id: oldProfileId });
+                socket.disconnect();
+                socket.connect();
             }
             // Invalidate ListenBrainz cache on profile switch (each profile has their own playlists)
             _invalidateListenBrainzCache();

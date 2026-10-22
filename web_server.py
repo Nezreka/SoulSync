@@ -23070,6 +23070,21 @@ def _ws_snapshot_revoked(snapshot):
         pid = (snapshot or {}).get('profile_id')
         if pid is None:
             return False
+        # A profile that no longer exists (or was disabled, for a non-admin)
+        # is revoked too: HTTP pops such a session and 401s it. A failed read
+        # is NOT a missing profile — that path stays fail-open below.
+        profile = None
+        profile_read = False
+        try:
+            profile = get_database().get_profile(pid)
+            profile_read = True
+        except Exception:  # noqa: BLE001 - unreadable ≠ deleted
+            profile_read = False
+        if profile_read:
+            if profile is None:
+                return True
+            if profile.get('disabled') and not profile.get('is_admin'):
+                return True
         from core.security import devices as _devices
         from core.security.session_epoch import session_is_current
         from core.security.ws_gate import is_session_revoked
@@ -23103,13 +23118,52 @@ def _ws_current_session_revoked():
 
 def _ws_store_snapshot():
     """Remember the session the current socket is acting under, so the
-    revocation sweep can re-check exactly that session later."""
-    with _ws_session_by_sid_lock:
-        _ws_session_by_sid[request.sid] = {
-            'profile_id': session.get('profile_id'),
-            'profile_epoch': session.get('profile_epoch', 0),
-            'device_id': session.get('device_id'),
-        }
+    revocation sweep can re-check exactly that session later. Never raises:
+    a failed store just leaves the sweep nothing to check for this sid."""
+    try:
+        with _ws_session_by_sid_lock:
+            _ws_session_by_sid[request.sid] = {
+                'profile_id': session.get('profile_id'),
+                'profile_epoch': session.get('profile_epoch', 0),
+                'device_id': session.get('device_id'),
+            }
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"[WS gate] session snapshot store failed: {e}")
+
+
+def _ws_refresh_snapshot_for_join(target_pid):
+    """Rebuild the snapshot when profile:join moves this socket to a profile
+    other than the one it connected under.
+
+    Flask-SocketIO freezes the session at the handshake (manage_session), so
+    the frozen session can NOT observe an HTTP-side profile switch — reading
+    it here would just copy the stale values. The real client reconnects on
+    switch (init.js), which re-snapshots at connect; this covers clients
+    that join a different profile's room on the existing socket instead.
+    The joined profile's epoch comes from the db; its device id is
+    unknowable here (the switch minted it inside the HTTP session), so a
+    foreign profile's snapshot is epoch-checked only — the same treatment
+    pre-device sessions get. Same-profile joins keep the connect snapshot,
+    which carries the real device id."""
+    try:
+        sid = request.sid
+        with _ws_session_by_sid_lock:
+            current = _ws_session_by_sid.get(sid)
+        if current and current.get('profile_id') == target_pid:
+            return
+        epoch = 0
+        try:
+            epoch = (get_database().get_profile(target_pid) or {}).get('session_epoch', 0)
+        except Exception:  # noqa: BLE001 - epoch 0 is every profile's floor
+            epoch = 0
+        with _ws_session_by_sid_lock:
+            _ws_session_by_sid[sid] = {
+                'profile_id': target_pid,
+                'profile_epoch': epoch,
+                'device_id': None,
+            }
+    except Exception as e:  # noqa: BLE001 - a failed refresh keeps the old snapshot
+        logger.debug(f"[WS gate] join snapshot refresh failed: {e}")
 
 
 def _forget_sid(sid):
@@ -23126,30 +23180,54 @@ def _forget_sid(sid):
         _log_live_sids.discard(sid)
 
 
+def _drop_sid(sid, snapshot=None):
+    """Forget + disconnect one socket, with the reason in the log.
+    Forget BEFORE disconnecting, deliberately: disconnect can trigger the
+    disconnect handler synchronously (it forgets again — harmless), and on
+    a half-dead transport the handler may never run at all, in which case
+    an orphaned sid must not linger in any registry (a stale _activity_sids
+    entry would keep the activity poll loop fed forever)."""
+    logger.info("Disconnecting WebSocket client %s (profile %s) — session revoked (#1837)",
+                sid, (snapshot or {}).get('profile_id'))
+    _forget_sid(sid)
+    try:
+        socketio.server.disconnect(sid, namespace='/')
+    except Exception as e:  # noqa: BLE001 - already gone is fine
+        logger.debug(f"[WS gate] disconnect of revoked socket failed: {e}")
+
+
 def _disconnect_revoked_sockets():
     """Drop already-connected sockets whose session has been revoked since
     they connected, so delivery stops instead of streaming on to a
-    signed-out browser until it happens to reconnect."""
+    signed-out browser until it happens to reconnect.
+    (_ws_snapshot_revoked never raises — its contract is fail-open.)"""
     with _ws_session_by_sid_lock:
         items = list(_ws_session_by_sid.items())
     for sid, snapshot in items:
-        try:
-            if not _ws_snapshot_revoked(snapshot):
-                continue
-        except Exception as e:  # noqa: BLE001 - a failed recheck drops nobody
-            logger.debug(f"[WS gate] revocation recheck failed for a socket: {e}")
+        if not _ws_snapshot_revoked(snapshot):
             continue
-        logger.info("Disconnecting WebSocket client — session revoked (#1837)")
-        # Forget BEFORE disconnecting, deliberately: disconnect can trigger
-        # the disconnect handler synchronously (it forgets again — harmless),
-        # and on a half-dead transport the handler may never run at all, in
-        # which case an orphaned sid must not linger in any registry (a stale
-        # _activity_sids entry would keep the activity poll loop fed forever).
-        _forget_sid(sid)
-        try:
-            socketio.server.disconnect(sid, namespace='/')
-        except Exception as e:  # noqa: BLE001 - already gone is fine
-            logger.debug(f"[WS gate] disconnect of revoked socket failed: {e}")
+        # Drop only on the evidence we checked: a snapshot refreshed since
+        # the copy (a reconnect / profile:join) is re-checked next sweep.
+        with _ws_session_by_sid_lock:
+            if _ws_session_by_sid.get(sid) is not snapshot:
+                continue
+        _drop_sid(sid, snapshot)
+
+
+def _ws_drop_sid_if_revoked():
+    """Inbound-event re-gate for the current socket: True when its session
+    has been revoked — it is dropped now, not left to act (join rooms,
+    subscribe to admin streams) until the sweep notices."""
+    try:
+        sid = request.sid
+    except Exception:  # noqa: BLE001 - no socket context ⇒ nothing to drop
+        return False
+    with _ws_session_by_sid_lock:
+        snapshot = _ws_session_by_sid.get(sid)
+    if snapshot is None or not _ws_snapshot_revoked(snapshot):
+        return False
+    _drop_sid(sid, snapshot)
+    return True
 
 
 def _ws_revocation_loop():
@@ -23223,6 +23301,8 @@ def handle_disconnect():
 @socketio.on('activity:subscribe')
 def handle_activity_subscribe():
     """A drawer opened → join the live room so the push loop starts feeding it."""
+    if _ws_drop_sid_if_revoked():
+        return
     join_room('activity:live')
     with _activity_sids_lock:
         _activity_sids.add(request.sid)
@@ -23238,6 +23318,8 @@ def handle_activity_unsubscribe():
 @socketio.on('downloads:subscribe')
 def handle_download_subscribe(data):
     """Client subscribes to download batch updates by joining rooms."""
+    if _ws_drop_sid_if_revoked():
+        return
     batch_ids = data.get('batch_ids', [])
     for bid in batch_ids:
         join_room(f'batch:{bid}')
@@ -23265,11 +23347,11 @@ def handle_profile_join(data):
     pid, is_admin = _ws_session_profile()
     if pid is None:
         return
-    # #1837: profile:join is where a client declares its (possibly switched)
-    # profile — refresh the revocation snapshot so the sweep re-checks the
-    # session this socket acts under NOW, not just the one it connected with.
-    _ws_store_snapshot()
     target = requested if (is_admin and requested) else pid
+    # #1837: profile:join is where a client declares its (possibly switched)
+    # profile — rebuild the revocation snapshot for the joined profile so
+    # the sweep re-checks THAT profile, not just the one from connect time.
+    _ws_refresh_snapshot_for_join(target)
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
                        "joining the session's room", requested, pid)
@@ -23285,6 +23367,12 @@ def _ws_session_profile():
     truth for room joins. Fail-closed to the session profile; profile 1 or an
     is_admin-flagged profile counts as admin. no profile in the session is
     (None, False) except on a single-profile install, same rule as http."""
+    # #1837: a revoked session may not keep acting through inbound events
+    # while it waits for the sweep — drop it here, at the choke point the
+    # profile-scoped handlers (profile:join, logs/sync/discovery subscribe)
+    # all resolve their identity through.
+    if _ws_drop_sid_if_revoked():
+        return None, False
     from core.security.session_profile import resolve_session_profile
     _session_pid = session.get('profile_id')
     _count = 2

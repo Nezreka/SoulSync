@@ -312,3 +312,91 @@ def test_socket_rejected_replaying_cookie_after_real_logout(monkeypatch):
     replay.set_cookie('soulsync_session', cookie.value)
     sio2 = web_server.socketio.test_client(web_server.app, flask_test_client=replay)
     assert sio2.is_connected() is False
+
+
+def test_profile_join_rebuilds_snapshot_for_switched_profile():
+    # the frozen-session trap: a socket that joins a DIFFERENT profile's
+    # room (admin watching, or a switch that didn't reconnect) must be
+    # revocation-checked against the JOINED profile, not the connect one
+    db = web_server.get_database()
+    pid_a = db.create_profile('WsRev-adminA-1837', is_admin=True)
+    pid_b, epoch_b = _profile_with_device('dev-B-1837')
+    assert pid_a
+    db.add_profile_device('dev-A-1837', pid_a, 'Browser', '127.0.0.1')
+    epoch_a = (db.get_profile(pid_a) or {}).get('session_epoch', 0)
+
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid_a, epoch_a, 'dev-A-1837'))
+    assert sio.is_connected() is True
+    sio.emit('profile:join', {'profile_id': pid_b})
+    snaps = [s for s in web_server._ws_session_by_sid.values() if s.get('profile_id') == pid_b]
+    assert snaps, "joining profile B must re-snapshot the socket under B"
+
+    # revoking the ORIGINAL profile's device must not drop a socket that
+    # now acts as B
+    assert db.revoke_profile_device(pid_a, 'dev-A-1837')
+    from core.security.devices import forget as _dev_forget
+    _dev_forget('dev-A-1837')
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is True
+
+    # but signing B out everywhere must drop it
+    assert db.bump_profile_session_epoch(pid_b) is not None
+    from core.security.session_epoch import forget as _epoch_forget
+    _epoch_forget(pid_b)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_socket_rejected_in_pin_mode_when_revoked(monkeypatch):
+    _pin_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-pin-1837')
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-pin-1837')
+    from core.security.devices import forget
+    forget('dev-pin-1837')
+    flask_client = web_server.app.test_client()
+    with flask_client.session_transaction() as s:
+        s['launch_pin_verified'] = True
+        s['profile_id'] = pid
+        s['profile_epoch'] = epoch
+        s['device_id'] = 'dev-pin-1837'
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is False
+
+
+def test_connected_socket_dropped_when_profile_deleted():
+    pid, epoch = _profile_with_device('dev-gone-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-gone-1837'))
+    assert sio.is_connected() is True
+    db = web_server.get_database()
+    assert db.delete_profile(pid)
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is False
+
+
+def test_revoked_socket_cannot_act_via_inbound_events(monkeypatch):
+    # no waiting for the sweep: the next inbound event re-gates and drops it
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-act-1837')
+    sio = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-act-1837'))
+    assert sio.is_connected() is True
+    db = web_server.get_database()
+    assert db.revoke_profile_device(pid, 'dev-act-1837')
+    from core.security.devices import forget
+    forget('dev-act-1837')
+    sio.emit('activity:subscribe')
+    assert sio.is_connected() is False
+
+
+def test_snapshot_revoked_wrapper_swallows_helper_errors(monkeypatch):
+    # exercise _ws_snapshot_revoked's own except branch: a helper that
+    # raises somewhere the helpers' internal fail-open can't reach
+    import core.security.session_epoch as _epoch_mod
+    def _boom(*a, **k):
+        raise RuntimeError("epoch store exploded")
+    monkeypatch.setattr(_epoch_mod, 'session_is_current', _boom)
+    assert web_server._ws_snapshot_revoked(
+        {'profile_id': 1, 'profile_epoch': 0, 'device_id': 'dev-x-1837'}) is False
