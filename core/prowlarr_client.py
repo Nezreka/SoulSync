@@ -161,6 +161,11 @@ class ProwlarrSearchResult:
     _release_evidence: Optional['ProwlarrSearchResult'] = field(default=None, repr=False)
 
 
+# Prefix of the error a bundle plugin reports when the Prowlarr search itself did
+# not complete. Shared so the wishlist can tell it apart from a failed release.
+SEARCH_FAILED_PREFIX = 'Prowlarr search failed'
+
+
 class ProwlarrSearchError(RuntimeError):
     """A Prowlarr search did not complete.
 

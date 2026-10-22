@@ -1164,12 +1164,16 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             tracks. Without a stamp the retry backoff never starts and the
             same dead release is fetched again every cycle."""
             try:
-                from core.wishlist.processing import record_failed_attempts_for_tracks
+                from core.wishlist.processing import (
+                    bundle_failure_counts_as_attempt, record_failed_attempts_for_tracks)
                 from core.wishlist_service import get_wishlist_service
                 with tasks_lock:
                     _row = download_batches.get(batch_id) or {}
                     _reason = _row.get('album_bundle_error') or _row.get('error') or 'Album bundle failed'
                     _profile = _row.get('profile_id', batch_profile_id) or 1
+                if not bundle_failure_counts_as_attempt(_reason):
+                    logger.info("[Album Bundle] search did not complete (%s); not counting an attempt", _reason)
+                    return
                 record_failed_attempts_for_tracks(
                     get_wishlist_service(), tracks_json, _reason, _profile)
             except Exception:

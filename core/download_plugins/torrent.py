@@ -91,6 +91,7 @@ from core.prowlarr_client import (
     ProwlarrClient,
     ProwlarrSearchError,
     ProwlarrSearchResult,
+    SEARCH_FAILED_PREFIX,
     canonical_protocol,
 )
 from core.torrent_clients import get_active_adapter as get_active_torrent_adapter
@@ -758,7 +759,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 self._prowlarr, query, 'torrent',
             ))
         except Exception as e:
-            result['error'] = f'Prowlarr search failed: {e}'
+            result['error'] = f'{SEARCH_FAILED_PREFIX}: {e}'
             return result
 
         candidates = [r for r in search_results

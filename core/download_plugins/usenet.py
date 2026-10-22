@@ -55,6 +55,7 @@ from core.prowlarr_client import (
     DEFAULT_MUSIC_CATEGORIES,
     ProwlarrClient,
     ProwlarrSearchResult,
+    SEARCH_FAILED_PREFIX,
 )
 from core.quality.release_format import (
     audio_quality_from_release,
@@ -597,7 +598,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 self._prowlarr, query, 'usenet',
             ))
         except Exception as e:
-            result['error'] = f'Prowlarr search failed: {e}'
+            result['error'] = f'{SEARCH_FAILED_PREFIX}: {e}'
             return result
 
         candidates = [r for r in search_results
