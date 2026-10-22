@@ -294,8 +294,7 @@
     cursor: pointer; text-decoration: none;
     transition: color var(--dur-fast) ease;
 }
-.automation-card .auto-runs-link:hover { text-decoration: underline; }
-.automation-card .auto-runs-link:hover { color: rgb(var(--accent-light-rgb)); }
+.automation-card .auto-runs-link:hover { text-decoration: underline; color: rgb(var(--accent-light-rgb)); }
 /* Plain inline text — truncation is done in JS at a fixed length, so no
    layout-dependent trimming can misfire. Full facts in the hover tooltip. */
 .automation-card .auto-last-result { color: var(--white-a30); cursor: default; }

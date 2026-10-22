@@ -3486,6 +3486,8 @@ html.download-modal-open body {
     .download-missing-modal-content .download-tracks-table thead tr {
         display: flex;
         align-items: center;
+        background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
+        border-bottom: 1px solid var(--white-a08);
     }
     .download-missing-modal-content .download-tracks-table thead th {
         display: none;
@@ -3497,10 +3499,6 @@ html.download-modal-open body {
         background: none;
         border: none;
         text-align: left;
-    }
-    .download-missing-modal-content .download-tracks-table thead tr {
-        background: linear-gradient(180deg, rgba(28,28,28,0.95), rgba(22,22,22,0.95));
-        border-bottom: 1px solid var(--white-a08);
     }
 
     .download-missing-modal-content .download-tracks-table tbody tr {
