@@ -94,6 +94,25 @@ the complete run against the finished build passed without snapshot updates.
 Live baseline: 895 albums, 131 eligible albums / 526 ready changes; captured 137
 release/numbering cases before rollout. Live verification is still pending.
 
+First live run (`aa75e21a2`, run 900): all 13,835 files examined, 306 findings
+created, no file actions applied. It correctly reopened 20 Bad Blood X tracks,
+40 ABBA Gold tracks and 15 Fame Monster tracks for fresh numbering review.
+The run ended as stopped/incomplete because a merged MusicBrainz release ID
+returned a same-server 301. The conservative incomplete-run path retained old
+proposals, so its queue totals are not a final result. Fixed the existing client
+redirect handling to allow bounded, same-server/same-API-root/same-entity release
+and release-group merges as well as recording merges; 114 provider/catalogue
+tests passed, including local HTTP tests and rejected unsafe/looping redirects.
+
+Comparing all newly reopened cases exposed an ineffective digital tie breaker:
+format ordered candidates but physical numbering variants still forced release
+review. Corrected it to resolve identical audio/tracklist ties across formats,
+while preserving explicit pins, material version/tracklist differences and
+competing digital layouts. No source positions are synthesized. Follow-up tests
+cover physical-vs-digital layouts, pins and two genuinely different digital
+layouts. A packed DDTT filename overflow guard also preserves prefixes that
+cannot represent the source position. The complete rerun remains required.
+
 ## Reverification against the original assessment — 2026-10-20
 
 Baseline: `e80e4a1da`; deployed application `336c7cf68c1e`. Recovered the full

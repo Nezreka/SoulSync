@@ -1393,14 +1393,15 @@ def _persist_selected_plan(db, common: dict, files: list[dict], scored: tuple,
         return ''
 
 
-def _candidate_shape(scored: tuple) -> tuple:
+def _candidate_shape(scored: tuple, *, ignore_positions: bool = False) -> tuple:
     """The release facts reconciliation can distinguish, excluding edition ID."""
     _clear, _matched, _extras, _source, _release_id, slots, plan = scored
 
     def slot_shape(slot: dict) -> tuple:
         track_number = slot.get('track_number')
-        return (slot.get('disc_number') or 1, track_number is None,
-                track_number or 0, semantic_title_key(slot),
+        return (0 if ignore_positions else slot.get('disc_number') or 1,
+                False if ignore_positions else track_number is None,
+                0 if ignore_positions else track_number or 0, semantic_title_key(slot),
                 normalize(slot.get('recording_disambiguation') or ''))
 
     pairs = tuple(sorted(
@@ -1412,13 +1413,14 @@ def _candidate_shape(scored: tuple) -> tuple:
     return len(slots), pairs, missing, tuple(sorted(plan['extra_files']))
 
 
-def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
+def _candidate_shapes_equivalent(left: tuple, right: tuple, *, ignore_positions: bool = False) -> bool:
     """Compare release mappings without treating absent detail as conflict.
 
     MusicBrainz often supplies a recording comment or version marker that
     iTunes/Deezer omit. Missing provider detail is unknown, not evidence of a
     different edition. Two explicit, different markers or comments still keep
-    the releases distinct.
+    the releases distinct. Ignoring positions is reserved for comparing the
+    same audio across formats; competing layouts within one format stay distinct.
     """
     if left[3] == right[3] == 'musicbrainz':
         def recording_shape(candidate):
@@ -1427,7 +1429,8 @@ def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
                 return None
             def identity(index):
                 slot = slots[index]
-                return (slot.get('disc_number') or 1, slot.get('track_number') or 0,
+                return (0 if ignore_positions else slot.get('disc_number') or 1,
+                        0 if ignore_positions else slot.get('track_number') or 0,
                         slot['recording_mbid'])
             return (len(slots), tuple(sorted((pair['file_index'], *identity(pair['slot_index']))
                     for pair in plan['pairs'])),
@@ -1438,7 +1441,8 @@ def _candidate_shapes_equivalent(left: tuple, right: tuple) -> bool:
             # Release-specific translations/arrangement labels may differ even
             # when every positioned recording and file assignment is identical.
             return True
-    left_shape, right_shape = _candidate_shape(left), _candidate_shape(right)
+    left_shape = _candidate_shape(left, ignore_positions=ignore_positions)
+    right_shape = _candidate_shape(right, ignore_positions=ignore_positions)
     if left_shape[0] != right_shape[0] or left_shape[3] != right_shape[3]:
         return False
 
@@ -2303,6 +2307,16 @@ class LibraryReconciliationJob(RepairJob):
                                              best_unpinned_rank)))
                     tied_rows = [row for row in scored
                                  if rank_candidate(row) == rank_candidate(scored[0])]
+                    # Digital format resolves otherwise identical audio ties,
+                    # including a physical edition's different medium split.
+                    # Keep material track/version differences as release choices.
+                    if _edition_preference(_release_metadata(
+                            scored[0], release_meta_cache, exact_musicbrainz_releases))[0]:
+                        tied_rows = [row for row in tied_rows
+                            if _edition_preference(_release_metadata(
+                                row, release_meta_cache, exact_musicbrainz_releases))[0]
+                            or not _candidate_shapes_equivalent(
+                                scored[0], row, ignore_positions=True)]
                     equivalent_tie = (len(tied_rows) > 1 and
                                       all(_candidate_shapes_equivalent(row, tied_rows[0])
                                           for row in tied_rows[1:]))

@@ -238,6 +238,7 @@ def test_release_shapes_keep_two_explicit_recording_versions_distinct():
     }], plan)
 
     assert not _candidate_shapes_equivalent(live_1977, live_1978)
+    assert not _candidate_shapes_equivalent(live_1977, live_1978, ignore_positions=True)
 
 
 def test_release_shapes_ignore_minor_provider_spelling_differences():
@@ -556,6 +557,30 @@ def test_source_without_all_track_numbers_does_not_invent_disc_totals(tmp_path, 
             "SELECT details_json FROM repair_findings WHERE finding_type='reconciliation_metadata'")]
     assert items
     assert all(not item['db_data'].get('track_count') for item in items)
+
+
+@pytest.mark.parametrize(('locked', 'both_digital'), [(False, False), (True, False), (False, True)])
+def test_digital_tie_break_resolves_medium_split_without_overriding_pin(tmp_path, monkeypatch, locked, both_digital):
+    import core.repair_jobs.library_reconciliation as module
+    db, worker, context, paths, mbids = _metadata_recommendation_album(tmp_path, monkeypatch)
+    db.set_album_canonical(10, 'musicbrainz', 'physical', .99, locked=locked)
+    monkeypatch.setattr(LibraryReconciliationJob, '_release_candidates',
+                        lambda *_args, **_kwargs: [('musicbrainz', 'physical'), ('musicbrainz', 'digital')])
+    monkeypatch.setattr(module, '_release_group_candidates', lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(module, 'get_album_for_source', lambda _source, release_id, **_kwargs: {
+        'name': 'Ashes of the Wake (Deluxe)', 'artists': [{'name': 'Lamb of God'}],
+        'format': 'Digital Media' if release_id == 'digital' or both_digital else 'CD'})
+    monkeypatch.setattr(module, 'get_album_tracks_for_source', lambda _source, release_id, **_kwargs: [
+        {'id': mbids[index], 'name': title, 'artists': [{'name': 'Lamb of God'}],
+         'track_number': index + 1 if release_id == 'digital' else 1,
+         'disc_number': 1 if release_id == 'digital' else index + 1, 'duration_ms': 200000}
+        for index, title in enumerate(['Laid to Rest', 'Hourglass'])])
+    assert not LibraryReconciliationJob().scan(context).errors
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT release_id FROM reconcile_album_plans').fetchone()[0] == (
+            'physical' if locked or both_digital else 'digital')
+        conflict = conn.execute("SELECT 1 FROM repair_findings WHERE finding_type='reconciliation_release'").fetchone()
+        assert bool(conflict) == (both_digital and not locked)
 
 
 @pytest.mark.parametrize(('multidisc', 'reversed_source'), [(True, False), (True, True), (False, False)])
