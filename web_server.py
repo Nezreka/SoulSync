@@ -23046,13 +23046,137 @@ def _emit_server_activity_loop():
 
 # --- Socket.IO event handlers ---
 
+# --- #1837: session revocation for sockets ---------------------------------
+# The HTTP gate drops a session server-side when it is revoked: logout (or an
+# admin) revokes the session's device row, and "sign out everywhere" / a
+# password change bumps the profile's session epoch. A replayed cookie keeps
+# its login/PIN flags, so on HTTP it now gets a 401 — but the WS gate only
+# ever read those flags, so the same replayed cookie still opened a socket,
+# and a socket opened before the revocation kept receiving everything.
+# Snapshot what each socket connected under and apply the same two checks.
+_ws_session_by_sid = {}
+_ws_session_by_sid_lock = threading.Lock()
+
+
+def _ws_snapshot_revoked(snapshot):
+    """True when the session in `snapshot` has been revoked — the same two
+    checks the HTTP profile gate applies (session epoch, device row), read
+    through the same fail-open helpers: a db hiccup signs nobody out. A
+    snapshot with no profile has nothing to revoke. NEVER raises: this is an
+    auxiliary check beside the gate, so any unexpected failure (no request
+    context, a broken db handle) reads as "not revoked" and the gate's own
+    fail-closed path decides, exactly as it did before revocation was added."""
+    try:
+        pid = (snapshot or {}).get('profile_id')
+        if pid is None:
+            return False
+        from core.security import devices as _devices
+        from core.security.session_epoch import session_is_current
+        from core.security.ws_gate import is_session_revoked
+        epoch_current = session_is_current(
+            pid, snapshot.get('profile_epoch', 0),
+            lambda p: (get_database().get_profile(p) or {}).get('session_epoch', 0))
+        device_live = _devices.device_is_live(
+            snapshot.get('device_id'),
+            lambda d: get_database().get_profile_device(d))
+        return is_session_revoked(has_profile_session=True,
+                                  epoch_current=epoch_current,
+                                  device_live=device_live)
+    except Exception as e:  # noqa: BLE001 - fail open, see docstring
+        logger.debug(f"[WS gate] revocation check failed, treating as live: {e}")
+        return False
+
+
+def _ws_current_session_revoked():
+    """_ws_snapshot_revoked for the session of the request being handled.
+    Also never raises: with no usable session there is nothing to revoke."""
+    try:
+        snapshot = {
+            'profile_id': session.get('profile_id'),
+            'profile_epoch': session.get('profile_epoch', 0),
+            'device_id': session.get('device_id'),
+        }
+    except Exception:  # noqa: BLE001 - no session context ⇒ no profile session
+        return False
+    return _ws_snapshot_revoked(snapshot)
+
+
+def _ws_store_snapshot():
+    """Remember the session the current socket is acting under, so the
+    revocation sweep can re-check exactly that session later."""
+    with _ws_session_by_sid_lock:
+        _ws_session_by_sid[request.sid] = {
+            'profile_id': session.get('profile_id'),
+            'profile_epoch': session.get('profile_epoch', 0),
+            'device_id': session.get('device_id'),
+        }
+
+
+def _forget_sid(sid):
+    """Drop every per-sid trace (connected set, revocation snapshot, the
+    activity and log-live subscription sets). Shared by the disconnect
+    handler and the revocation sweep; all operations are idempotent."""
+    with _connected_sids_lock:
+        _connected_sids.discard(sid)
+    with _ws_session_by_sid_lock:
+        _ws_session_by_sid.pop(sid, None)
+    with _activity_sids_lock:
+        _activity_sids.discard(sid)
+    with _log_live_sids_lock:
+        _log_live_sids.discard(sid)
+
+
+def _disconnect_revoked_sockets():
+    """Drop already-connected sockets whose session has been revoked since
+    they connected, so delivery stops instead of streaming on to a
+    signed-out browser until it happens to reconnect."""
+    with _ws_session_by_sid_lock:
+        items = list(_ws_session_by_sid.items())
+    for sid, snapshot in items:
+        try:
+            if not _ws_snapshot_revoked(snapshot):
+                continue
+        except Exception as e:  # noqa: BLE001 - a failed recheck drops nobody
+            logger.debug(f"[WS gate] revocation recheck failed for a socket: {e}")
+            continue
+        logger.info("Disconnecting WebSocket client — session revoked (#1837)")
+        # Forget BEFORE disconnecting, deliberately: disconnect can trigger
+        # the disconnect handler synchronously (it forgets again — harmless),
+        # and on a half-dead transport the handler may never run at all, in
+        # which case an orphaned sid must not linger in any registry (a stale
+        # _activity_sids entry would keep the activity poll loop fed forever).
+        _forget_sid(sid)
+        try:
+            socketio.server.disconnect(sid, namespace='/')
+        except Exception as e:  # noqa: BLE001 - already gone is fine
+            logger.debug(f"[WS gate] disconnect of revoked socket failed: {e}")
+
+
+def _ws_revocation_loop():
+    """Re-check connected sockets against revocation state. The epoch/device
+    helpers cache their reads for a few seconds, so a 2s sweep is cheap and
+    a revoked socket is dropped within seconds of the revocation becoming
+    visible — the same visibility window HTTP has."""
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        if not _has_connected_clients():
+            continue
+        try:
+            _disconnect_revoked_sockets()
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Error in WebSocket revocation loop: {e}")
+
+
 def _ws_connection_blocked():
     """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
     (before_request doesn't run for it). Fails CLOSED on unexpected errors (#GHSA-j7g5-8j44-jqhm)."""
     try:
+        # #1837: revocation reads server-side state, not the cookie, and it
+        # applies even when neither gate is on — the same as HTTP.
+        revoked = _ws_current_session_revoked()
         require_login = _require_login_enabled()
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
-        if not require_login and not require_pin:
+        if not require_login and not require_pin and not revoked:
             return False
         proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
         from core.security.auth_proxy import trusted_proxy_user
@@ -23064,6 +23188,7 @@ def _ws_connection_blocked():
             require_pin=require_pin,
             pin_verified=bool(session.get('launch_pin_verified', False)),
             proxy_authed=proxy_authed,
+            session_revoked=revoked,
         )
     except Exception as e:
         logger.error(f"[WS gate] check failed, blocking unverified connection (fail-closed): {e}")
@@ -23080,21 +23205,19 @@ def handle_connect():
         return False
     with _connected_sids_lock:
         _connected_sids.add(request.sid)
+    # #1837: remember the session this socket connected under so the
+    # revocation sweep can drop it if that session is later revoked.
+    _ws_store_snapshot()
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    # Drop this client from the server-activity live set so the push loop goes
-    # idle again once the last drawer closes / navigates away.
+    # Drop this client from every per-sid set (activity live set included) so
+    # the push loops go idle again once the last drawer closes / navigates away.
     try:
-        with _activity_sids_lock:
-            _activity_sids.discard(request.sid)
-        with _log_live_sids_lock:
-            _log_live_sids.discard(request.sid)
+        _forget_sid(request.sid)
     except Exception:   # noqa: BLE001, S110 - cleanup only; a missing sid is fine
         pass
-    with _connected_sids_lock:
-        _connected_sids.discard(request.sid)
     logger.info("WebSocket client disconnected")
 
 @socketio.on('activity:subscribe')
@@ -23142,6 +23265,10 @@ def handle_profile_join(data):
     pid, is_admin = _ws_session_profile()
     if pid is None:
         return
+    # #1837: profile:join is where a client declares its (possibly switched)
+    # profile — refresh the revocation snapshot so the sweep re-checks the
+    # session this socket acts under NOW, not just the one it connected with.
+    _ws_store_snapshot()
     target = requested if (is_admin and requested) else pid
     if target != requested and requested:
         logger.warning("profile:join — client asked for profile %s but session is %s; "
@@ -24860,6 +24987,8 @@ def start_runtime_services():
         socketio.start_background_task(_chat_auto_prove_loop)
         # Server Activity — subscriber-gated live push (idle when no drawer open)
         socketio.start_background_task(_emit_server_activity_loop)
+        # #1837: drop sockets whose session gets revoked while connected
+        socketio.start_background_task(_ws_revocation_loop)
         # Phase 2: Dashboard pollers
         socketio.start_background_task(_emit_system_stats_loop)
         socketio.start_background_task(_emit_activity_feed_loop)

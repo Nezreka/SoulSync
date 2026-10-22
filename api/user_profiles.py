@@ -79,6 +79,10 @@ def _end_device():
     if device_id and owner:
         try:
             get_database().revoke_profile_device(owner, device_id)
+            # clear the in-process live cache as the admin revoke endpoint
+            # does, so the sign-out is visible at once (#1837)
+            from core.security.devices import forget
+            forget(device_id)
         except Exception:  # noqa: BLE001
             logger.debug("device revoke on logout failed", exc_info=True)
 
