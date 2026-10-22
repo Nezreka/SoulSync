@@ -400,3 +400,36 @@ def test_snapshot_revoked_wrapper_swallows_helper_errors(monkeypatch):
     monkeypatch.setattr(_epoch_mod, 'session_is_current', _boom)
     assert web_server._ws_snapshot_revoked(
         {'profile_id': 1, 'profile_epoch': 0, 'device_id': 'dev-x-1837'}) is False
+
+
+def test_actor_reconnect_with_new_epoch_survives_sweep(monkeypatch):
+    # "sign out everywhere" keeps the ACTING browser: its cookie moves to
+    # the new epoch, and the client re-handshakes (pfReconnectSocket). The
+    # re-handshaked socket must survive the sweep; the stale one must not.
+    _login_on(monkeypatch)
+    pid, epoch = _profile_with_device('dev-actor-1837')
+    stale = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, epoch, 'dev-actor-1837'))
+    assert stale.is_connected() is True
+    db = web_server.get_database()
+    new_epoch = db.bump_profile_session_epoch(pid)
+    assert new_epoch is not None
+    from core.security.session_epoch import forget
+    forget(pid)
+    fresh = web_server.socketio.test_client(
+        web_server.app, flask_test_client=_session_client(pid, new_epoch, 'dev-actor-1837'))
+    assert fresh.is_connected() is True
+    web_server._disconnect_revoked_sockets()
+    assert stale.is_connected() is False
+    assert fresh.is_connected() is True
+    fresh.disconnect()
+
+
+def test_anonymous_socket_survives_sweep():
+    # no profile in the session: nothing to revoke, the sweep leaves it be
+    flask_client = web_server.app.test_client()
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is True
+    web_server._disconnect_revoked_sockets()
+    assert sio.is_connected() is True
+    sio.disconnect()

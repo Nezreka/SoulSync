@@ -23067,8 +23067,13 @@ def _ws_snapshot_revoked(snapshot):
     context, a broken db handle) reads as "not revoked" and the gate's own
     fail-closed path decides, exactly as it did before revocation was added."""
     try:
-        pid = (snapshot or {}).get('profile_id')
-        if pid is None:
+        # Match HTTP's resolve: a missing/invalid profile id is no profile
+        # session at all, not a revocation.
+        try:
+            pid = int((snapshot or {}).get('profile_id'))
+        except (TypeError, ValueError):
+            return False
+        if pid <= 0:
             return False
         # A profile that no longer exists (or was disabled, for a non-admin)
         # is revoked too: HTTP pops such a session and 401s it. A failed read
