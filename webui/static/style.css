@@ -56869,7 +56869,7 @@ body.max-performance #page-particles-canvas {
     font-size: 0.8rem;
     font-weight: 500;
     text-decoration: none;
-    transition: background 0.2s ease;
+    transition: background var(--dur-base) ease;
 }
 
 .adl-empty-links a:hover {
@@ -56902,7 +56902,7 @@ body.max-performance #page-particles-canvas {
 }
 
 .adl-status-dot.queued { background: var(--white-a30); }
-.adl-status-dot.completed { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.3); }
+.adl-status-dot.completed { background: var(--success-strong); box-shadow: 0 0 6px rgba(var(--success-strong-rgb), 0.3); }
 .adl-status-dot.failed { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.3); }
 .adl-status-dot.cancelled { background: var(--white-a20); }
 
@@ -56948,7 +56948,7 @@ body.max-performance #page-particles-canvas {
     margin-bottom: 12px;
     background: rgba(var(--accent-rgb), 0.06);
     border: 1px solid rgba(var(--accent-rgb), 0.15);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     font-size: 0.78rem;
     color: var(--white-a75);
 }
@@ -56969,7 +56969,7 @@ body.max-performance #page-particles-canvas {
     color: var(--white-a70);
     font-size: 0.72rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--dur-base) ease;
     white-space: nowrap;
 }
 
@@ -57006,7 +57006,7 @@ body.max-performance #page-particles-canvas {
     font-weight: 600;
     color: var(--white-a60);
     border-radius: var(--radius-md);
-    transition: color 0.15s ease;
+    transition: color var(--dur-fast) ease;
 }
 
 .adl-batch-history-header:hover {
@@ -57015,7 +57015,7 @@ body.max-performance #page-particles-canvas {
 
 .adl-batch-history-chevron {
     color: var(--white-a40);
-    transition: transform 0.2s ease;
+    transition: transform var(--dur-base) ease;
 }
 
 .adl-batch-history-header-actions {
@@ -57096,18 +57096,18 @@ body.max-performance #page-particles-canvas {
     border-radius: var(--radius-xl);
     padding: 22px 24px;
     box-shadow:
-        0 6px 24px rgba(0, 0, 0, 0.35),
-        0 2px 8px rgba(0, 0, 0, 0.2),
+        0 6px 24px var(--black-a35),
+        0 2px 8px var(--black-a20),
         inset 0 1px 0 var(--white-a08);
     position: relative;
     overflow: hidden;
-    transition: border-color 0.3s, box-shadow 0.3s;
+    transition: border-color var(--dur-slow), box-shadow var(--dur-slow);
 }
 
 .library-status-card:hover {
     border-color: rgba(var(--accent-rgb), 0.15);
     box-shadow:
-        0 8px 28px rgba(0, 0, 0, 0.4),
+        0 8px 28px var(--black-a40),
         0 0 16px rgba(var(--accent-rgb), 0.04),
         inset 0 1px 0 var(--white-a10);
 }
@@ -57127,7 +57127,7 @@ body.max-performance #page-particles-canvas {
         rgba(var(--accent-rgb), 0.3) 80%,
         transparent 100%);
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity var(--dur-slow);
 }
 
 /* Animated background glow */
@@ -57141,7 +57141,7 @@ body.max-performance #page-particles-canvas {
     background: radial-gradient(circle, rgba(var(--accent-rgb), 0.06) 0%, transparent 70%);
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.5s;
+    transition: opacity var(--dur-slowest);
 }
 
 .library-status-card.has-data .library-status-glow {
@@ -57268,7 +57268,7 @@ body.max-performance #page-particles-canvas {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     white-space: nowrap;
 }
 
@@ -57317,14 +57317,14 @@ body.max-performance #page-particles-canvas {
 /* Review with files waiting. amber, same language as the badge on the
    downloads page, so the two read as the same thing in two places. */
 .library-status-btn-attention {
-    background: rgba(245, 158, 11, 0.12);
-    border-color: rgba(245, 158, 11, 0.35);
+    background: rgba(var(--warning-strong-rgb), 0.12);
+    border-color: rgba(var(--warning-strong-rgb), 0.35);
     color: #fbbf24;
 }
 
 .library-status-btn-attention:hover {
-    background: rgba(245, 158, 11, 0.2);
-    border-color: rgba(245, 158, 11, 0.5);
+    background: rgba(var(--warning-strong-rgb), 0.2);
+    border-color: rgba(var(--warning-strong-rgb), 0.5);
     color: #fcd34d;
 }
 
@@ -57336,7 +57336,7 @@ body.max-performance #page-particles-canvas {
     height: 17px;
     padding: 0 5px;
     border-radius: 9px;
-    background: rgba(245, 158, 11, 0.28);
+    background: rgba(var(--warning-strong-rgb), 0.28);
     color: #fcd34d;
     font-size: 10px;
     font-weight: 700;
@@ -57359,8 +57359,8 @@ body.max-performance #page-particles-canvas {
     padding: 12px 14px;
     background: rgba(255, 255, 255, 0.025);
     border: 1px solid var(--white-a05);
-    border-radius: 10px;
-    transition: all 0.2s;
+    border-radius: var(--radius-control);
+    transition: all var(--dur-base);
 }
 
 .library-status-stat:hover {
@@ -57431,7 +57431,7 @@ body.max-performance #page-particles-canvas {
     height: 100%;
     background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
     border-radius: 3px;
-    transition: width 0.5s ease;
+    transition: width var(--dur-slowest) ease;
     box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.4);
     position: relative;
 }
@@ -57582,7 +57582,7 @@ body.max-performance #page-particles-canvas {
     padding: 20px 24px;
     margin-bottom: 28px;
     box-shadow:
-        0 4px 16px rgba(0, 0, 0, 0.3),
+        0 4px 16px var(--black-a30),
         inset 0 1px 0 var(--white-a06);
     position: relative;
 }
@@ -57619,9 +57619,9 @@ body.max-performance #page-particles-canvas {
 .tools-maintenance-logo {
     width: 40px;
     height: 40px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     object-fit: cover;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 8px var(--black-a30);
 }
 
 .tools-maintenance-title {
@@ -57675,7 +57675,7 @@ body.max-performance #page-particles-canvas {
     font-weight: 600;
     letter-spacing: 0.2px;
     cursor: pointer;
-    transition: color 0.15s ease, border-color 0.15s ease;
+    transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 
 .tools-tab:hover {
@@ -57718,7 +57718,7 @@ body.max-performance #page-particles-canvas {
     font-weight: 600;
     letter-spacing: 0.2px;
     cursor: pointer;
-    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
 }
 
 .repair-section-link:hover {
@@ -57750,7 +57750,7 @@ body.max-performance #page-particles-canvas {
     padding: 16px 18px;
     margin-bottom: 14px;
     border: 1px solid var(--white-a07);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background:
         radial-gradient(120% 160% at 0% 0%, rgba(var(--accent-rgb), 0.09), transparent 60%),
         var(--white-a02);
@@ -57786,8 +57786,8 @@ body.max-performance #page-particles-canvas {
     text-transform: uppercase;
 }
 
-.repair-health-band.healthy { color: #22c55e; }
-.repair-health-band.attention { color: #f59e0b; }
+.repair-health-band.healthy { color: var(--success-strong); }
+.repair-health-band.attention { color: var(--warning-strong); }
 .repair-health-band.unhealthy { color: #f44336; }
 
 .repair-health-body {
@@ -57818,12 +57818,12 @@ body.max-performance #page-particles-canvas {
     border: none;
     padding: 0;
     cursor: pointer;
-    transition: filter 0.15s, transform 0.15s;
+    transition: filter var(--dur-fast), transform var(--dur-fast);
 }
 
 .repair-health-seg:hover { filter: brightness(1.35); }
 .repair-health-seg.error { background: #f44336; }
-.repair-health-seg.warning { background: #f59e0b; }
+.repair-health-seg.warning { background: var(--warning-strong); }
 .repair-health-seg.info { background: rgba(var(--accent-rgb), 0.45); }
 
 .repair-health-bar-empty {
@@ -57849,7 +57849,7 @@ body.max-performance #page-particles-canvas {
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
-    transition: background 0.15s, opacity 0.15s;
+    transition: background var(--dur-fast), opacity var(--dur-fast);
 }
 
 .repair-health-fix-safe:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.24); }
@@ -57895,7 +57895,7 @@ body.max-performance #page-particles-canvas {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background var(--dur-fast), color var(--dur-fast);
 }
 
 .repair-status-seg:hover { color: #fff; }
@@ -57951,11 +57951,11 @@ body.max-performance #page-particles-canvas {
     background: var(--white-a02);
     overflow: hidden;
     scroll-margin-top: 60px;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 
 .repair-inbox-group.critical { border-left-color: #f44336; }
-.repair-inbox-group.warning { border-left-color: #f59e0b; }
+.repair-inbox-group.warning { border-left-color: var(--warning-strong); }
 .repair-inbox-group.info { border-left-color: rgba(var(--accent-rgb), 0.5); }
 .repair-inbox-group.open { background: rgba(255, 255, 255, 0.035); }
 
@@ -58040,7 +58040,7 @@ body.max-performance #page-particles-canvas {
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: background 0.15s, opacity 0.15s;
+    transition: background var(--dur-fast), opacity var(--dur-fast);
 }
 
 .repair-inbox-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.22); }
@@ -58076,7 +58076,7 @@ body.max-performance #page-particles-canvas {
     color: var(--white-a35);
     font-size: 10px;
     cursor: pointer;
-    transition: transform 0.18s, color 0.15s;
+    transition: transform var(--dur-quick), color var(--dur-fast);
 }
 
 .repair-inbox-expand:hover { color: #fff; }
@@ -58109,7 +58109,7 @@ body.max-performance #page-particles-canvas {
     cursor: pointer;
 }
 
-.repair-list-controls select option { background: #1a1a1a; }
+.repair-list-controls select option { background: var(--bg-raised); }
 
 /* A run in flight sits at surface level, above the inbox — it belongs to the
    library, not to whichever group happens to be open. */
@@ -58140,7 +58140,7 @@ body.max-performance #page-particles-canvas {
     position: relative;
     padding: 13px 14px 15px 14px;
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background:
         radial-gradient(90% 120% at 0% 0%, rgba(var(--tile-glow), 0.06), transparent 55%),
         rgba(255, 255, 255, 0.012);
@@ -58205,7 +58205,7 @@ body.max-performance #page-particles-canvas {
 .repair-family {
     --tile-glow: 148, 163, 184;
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     background:
         radial-gradient(90% 120% at 0% 0%, rgba(var(--tile-glow), 0.07), transparent 55%),
         rgba(255, 255, 255, 0.015);
@@ -58274,7 +58274,7 @@ body.max-performance #page-particles-canvas {
 .repair-family-chevron {
     font-size: 9px;
     color: var(--white-a30);
-    transition: transform 0.18s;
+    transition: transform var(--dur-quick);
     flex-shrink: 0;
 }
 
@@ -58306,12 +58306,12 @@ body.max-performance #page-particles-canvas {
     border-radius: 11px;
     background: rgba(255, 255, 255, 0.025);
     overflow: hidden;
-    transition: border-color 0.15s, background 0.15s, opacity 0.15s;
+    transition: border-color var(--dur-fast), background var(--dur-fast), opacity var(--dur-fast);
 }
 
 .repair-tile:hover { border-color: rgba(var(--tile-glow), 0.35); }
 .repair-tile.off { opacity: 0.55; }
-.repair-tile.sched-overdue { border-color: rgba(245, 158, 11, 0.3); }
+.repair-tile.sched-overdue { border-color: rgba(var(--warning-strong-rgb), 0.3); }
 
 /* The glow edge IS the progress bar: a family-coloured hairline at rest,
    filling left-to-right while the job scans. */
@@ -58325,7 +58325,7 @@ body.max-performance #page-particles-canvas {
         rgba(var(--tile-glow), 0.25),
         rgba(var(--tile-glow), 0.55));
     opacity: 0.55;
-    transition: width 0.4s ease, opacity 0.3s;
+    transition: width var(--dur-slower) ease, opacity var(--dur-slow);
 }
 
 .repair-tile-edge.running {
@@ -58423,13 +58423,13 @@ body.max-performance #page-particles-canvas {
     padding: 3px 6px;
     border: 1px solid var(--white-a12);
     border-radius: var(--radius-sm);
-    background: rgba(0, 0, 0, 0.3);
+    background: var(--black-a30);
     color: #fff;
     font-size: 11px;
 }
 
 .repair-tile-cadence-edit input { width: 52px; }
-.repair-tile-cadence-edit select option { background: #1a1a1a; }
+.repair-tile-cadence-edit select option { background: var(--bg-raised); }
 
 .repair-tile-cadence-save,
 .repair-tile-cadence-cancel {
@@ -58459,9 +58459,9 @@ body.max-performance #page-particles-canvas {
     color: var(--white-a35);
 }
 
-.repair-tile-next.overdue { color: #f59e0b; font-weight: 600; }
+.repair-tile-next.overdue { color: var(--warning-strong); font-weight: 600; }
 .repair-tile-next.due { color: rgba(var(--accent-rgb), 0.9); font-weight: 600; }
-.repair-tile-next.running { color: #22c55e; font-weight: 600; }
+.repair-tile-next.running { color: var(--success-strong); font-weight: 600; }
 .repair-tile-next.disabled { color: rgba(255, 255, 255, 0.22); }
 
 .repair-tile-foot {
@@ -58543,7 +58543,7 @@ body.max-performance #page-particles-canvas {
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    transition: color 0.15s, background 0.15s, border-color 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
 }
 
 .repair-runs-chip:hover,
@@ -58638,7 +58638,7 @@ body.max-performance #page-particles-canvas {
     gap: 11px;
     padding: 8px 13px;
     cursor: pointer;
-    transition: background 0.12s;
+    transition: background var(--dur-xfast);
 }
 
 .repair-run-head:hover { background: var(--white-a03); }
@@ -58651,10 +58651,10 @@ body.max-performance #page-particles-canvas {
     flex-shrink: 0;
 }
 
-.repair-run-glyph.success { color: #22c55e; }
+.repair-run-glyph.success { color: var(--success-strong); }
 .repair-run-glyph.quiet { color: var(--white-a25); }
 .repair-run-glyph.failed { color: #f44336; }
-.repair-run-glyph.stopped { color: #f59e0b; }
+.repair-run-glyph.stopped { color: var(--warning-strong); }
 .repair-run-glyph.running { color: rgba(var(--accent-rgb), 0.9); }
 
 .repair-run-clock {
@@ -58695,7 +58695,7 @@ body.max-performance #page-particles-canvas {
     font-size: 9px;
     color: var(--white-a25);
     flex-shrink: 0;
-    transition: transform 0.18s;
+    transition: transform var(--dur-quick);
 }
 
 .repair-run-chevron.open { transform: rotate(180deg); color: #fff; }
@@ -58932,10 +58932,10 @@ body.max-performance #page-particles-canvas {
     background: linear-gradient(135deg,
         rgba(20, 20, 20, 0.95) 0%,
         rgba(12, 12, 12, 0.98) 100%);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     margin-bottom: 20px;
     border: 1px solid var(--white-a08);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3),
+    box-shadow: 0 4px 16px var(--black-a30),
                 inset 0 1px 0 var(--white-a06);
     position: relative;
     overflow: hidden;
@@ -58950,7 +58950,7 @@ body.max-performance #page-particles-canvas {
     height: 2px;
     background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.5), transparent);
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity var(--dur-slow);
 }
 
 @keyframes scanPulse {
@@ -58968,7 +58968,7 @@ body.max-performance #page-particles-canvas {
         rgba(255, 193, 7, 0.06) 0%,
         rgba(255, 152, 0, 0.03) 100%);
     border: 1px solid rgba(255, 193, 7, 0.1);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     margin-bottom: 16px;
     font-size: 13px;
     color: var(--white-a55);
@@ -59001,9 +59001,9 @@ body.max-performance #page-particles-canvas {
     color: var(--white-a65);
     font-size: 13px;
     font-weight: 500;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     appearance: none;
     -webkit-appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.4)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
@@ -59024,7 +59024,7 @@ body.max-performance #page-particles-canvas {
 }
 
 .watchlist-sort-select option {
-    background: #1a1a1a;
+    background: var(--bg-raised);
     color: #fff;
 }
 
@@ -59044,7 +59044,7 @@ body.max-performance #page-particles-canvas {
     color: #ffffff;
     font-size: 14px;
     font-weight: 500;
-    transition: all 0.3s ease;
+    transition: all var(--dur-slow) ease;
     box-sizing: border-box;
 }
 
@@ -59074,11 +59074,11 @@ body.max-performance #page-particles-canvas {
         rgba(18, 18, 18, 0.98) 100%);
     border: 1px solid var(--white-a07);
     border-top: 1px solid var(--white-a10);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.3),
+        0 4px 12px var(--black-a30),
         inset 0 1px 0 var(--white-a05);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
     position: relative;
     overflow: hidden;
     contain: none;
@@ -59093,14 +59093,14 @@ body.max-performance #page-particles-canvas {
     height: 2px;
     background: linear-gradient(90deg, transparent, rgba(255, 193, 7, 0.4), transparent);
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity var(--dur-slow);
 }
 
 .watchlist-page-container .watchlist-artist-card:hover {
     transform: translateY(-3px);
     border-color: rgba(255, 193, 7, 0.15);
     box-shadow:
-        0 8px 24px rgba(0, 0, 0, 0.4),
+        0 8px 24px var(--black-a40),
         0 0 20px rgba(255, 193, 7, 0.06),
         inset 0 1px 0 var(--white-a08);
 }
@@ -59113,7 +59113,7 @@ body.max-performance #page-particles-canvas {
 .watchlist-page-container .watchlist-batch-bar {
     background: var(--white-a03);
     border: 1px solid var(--white-a06);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 8px 16px;
     margin-bottom: 10px;
 }
@@ -59124,7 +59124,7 @@ body.max-performance #page-particles-canvas {
         rgba(255, 193, 7, 0.08) 0%,
         rgba(255, 152, 0, 0.05) 100%);
     border: 1px solid rgba(255, 193, 7, 0.15);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 10px 16px;
     margin-bottom: 16px;
     font-size: 13px;
@@ -59178,7 +59178,7 @@ body.max-performance #page-particles-canvas {
     gap: 4px;
     min-height: 58px;
     padding: 11px 14px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(255, 255, 255, 0.035);
     border: 1px solid var(--white-a07);
 }
@@ -59265,7 +59265,7 @@ body.max-performance #page-particles-canvas {
     width: 100%;
     min-width: 0;
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--white-a10);
     background: rgba(255, 255, 255, 0.045);
     color: #fff;
@@ -59323,7 +59323,7 @@ body.max-performance #page-particles-canvas {
     border-radius: var(--radius-lg);
     border: 1px solid var(--white-a07);
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.025));
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 
 .watchlist-add-result:hover {
@@ -59336,7 +59336,7 @@ body.max-performance #page-particles-canvas {
 .watchlist-add-avatar {
     width: 52px;
     height: 52px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     object-fit: cover;
     background: rgba(var(--accent-rgb), 0.12);
     display: flex;
@@ -59460,7 +59460,7 @@ body.max-performance #page-particles-canvas {
     gap: 10px;
     align-items: center;
     padding: 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(255, 255, 255, 0.035);
     min-width: 0;
 }
@@ -59651,7 +59651,7 @@ body.max-performance #page-particles-canvas {
     height: 28px;
     border-radius: var(--radius-md);
     border: 1px solid var(--white-a08);
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--black-a35);
     color: var(--white-a55);
     font-size: 14px;
     font-weight: 900;
@@ -59661,7 +59661,7 @@ body.max-performance #page-particles-canvas {
     align-items: center;
     justify-content: center;
     opacity: 0.72;
-    transition: all 0.15s ease;
+    transition: all var(--dur-fast) ease;
 }
 
 .watchlist-row-menu-trigger:hover,
@@ -59677,10 +59677,10 @@ body.max-performance #page-particles-canvas {
     z-index: 10000;
     min-width: 210px;
     padding: 6px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     border: 1px solid var(--white-a10);
     background: rgba(18, 18, 20, 0.98);
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 18px 40px var(--black-a45);
 }
 
 .watchlist-row-menu button {
@@ -59779,7 +59779,7 @@ body.max-performance #page-particles-canvas {
 
 .watchlist-inspector-warning {
     padding: 10px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: rgba(255, 193, 7, 0.08);
     border: 1px solid rgba(255, 193, 7, 0.18);
     color: rgba(255, 213, 79, 0.9);
@@ -60056,14 +60056,14 @@ body.max-performance #page-particles-canvas {
 .wl-list-sorts { display: flex; gap: 8px; }
 .wl-list-sep { cursor: pointer; }
 .wl-list-sep:hover { background: var(--white-a04); }
-.wl-list-chevron { font-size: 11px; color: var(--white-a35); transition: transform 0.18s ease; }
+.wl-list-chevron { font-size: 11px; color: var(--white-a35); transition: transform var(--dur-quick) ease; }
 .wl-list-chevron.open { transform: rotate(90deg); }
 .wl-list-section { display: flex; flex-direction: column; }
 .wl-list-sep { display: flex; align-items: center; gap: 10px; padding: 14px 10px 8px;
     border-bottom: 1px solid var(--white-a06); margin-bottom: 4px;
     position: sticky; top: 0; background: rgba(11,11,15,0.92); backdrop-filter: blur(6px); z-index: 2; }
 .wl-list-avatar { width: 26px; height: 26px; border-radius: var(--radius-circle); object-fit: cover;
-    box-shadow: 0 3px 8px rgba(0,0,0,0.4); }
+    box-shadow: 0 3px 8px var(--black-a40); }
 .wl-list-avatar--ph { display: flex; align-items: center; justify-content: center;
     background: var(--white-a06); color: var(--white-a35); font-size: 16px; }
 .wl-list-artist-name { background: none; border: none; padding: 0; cursor: pointer;
@@ -60074,16 +60074,16 @@ body.max-performance #page-particles-canvas {
     background: rgba(251,191,36,0.14); border: 1px solid rgba(251,191,36,0.35); color: #fbbf24; }
 .wl-list-album-x { background: none; border: none; color: var(--white-a25);
     font-size: 10px; cursor: pointer; padding: 2px 4px; margin-left: 4px; border-radius: var(--radius-xs);
-    opacity: 0; transition: opacity 0.15s ease, color 0.15s ease; }
+    opacity: 0; transition: opacity var(--dur-fast) ease, color var(--dur-fast) ease; }
 .wl-list-track:hover .wl-list-album-x { opacity: 1; }
 .wl-list-album-x:hover { color: #f87171; }
 .wl-list-cover { width: 38px; height: 38px; border-radius: 5px; object-fit: cover;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.35); }
+    box-shadow: 0 2px 6px var(--black-a35); }
 .wl-list-cover--ph { display: flex; align-items: center; justify-content: center;
     background: var(--white-a05); color: var(--white-a30); font-size: 13px; }
 .wl-list-track { display: grid; grid-template-columns: 38px minmax(0, 1fr) 92px minmax(120px, 230px) auto;
     gap: 14px; align-items: center; padding: 6px 10px; border-radius: var(--radius-md); font-size: 13px;
-    transition: background 0.15s ease; }
+    transition: background var(--dur-fast) ease; }
 .wl-list-track-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wl-list-track:hover { background: var(--white-a05); }
 .wl-list-track--failing { box-shadow: inset 2px 0 0 #fbbf24; border-radius: 4px 8px 8px 4px; }
@@ -60107,12 +60107,12 @@ body.max-performance #page-particles-canvas {
 .wl-list-last { font-size: 11.5px; color: var(--white-a35); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
 .wl-list-track-actions { display: flex; gap: 6px; justify-content: flex-end; opacity: 0;
-    transition: opacity 0.15s ease; }
+    transition: opacity var(--dur-fast) ease; }
 .wl-list-track:hover .wl-list-track-actions, .wl-list-album-head .wl-list-btn { opacity: 1; }
 @media (hover: none) { .wl-list-track-actions { opacity: 0.7; } }
 .wl-list-btn { background: var(--white-a05); border: 1px solid var(--white-a10);
     border-radius: var(--radius-sm); padding: 3px 9px; font-size: 11px; color: var(--white-a65);
-    cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
+    cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease; }
 .wl-list-btn:hover { background: var(--white-a10); color: #fff; }
 .wl-list-btn--x:hover { color: #f87171; border-color: rgba(248,113,113,0.4); }
 @media (max-width: 700px) {
@@ -60125,12 +60125,12 @@ body.max-performance #page-particles-canvas {
 .wl-nebula-empty { width: 100%; text-align: center; padding: 60px 20px; color: var(--white-a20); font-size: 14px; }
 
 /* ── Orb group ── */
-.wl-orb-group { display: flex; flex-direction: column; align-items: center; gap: 6px; transition: all 0.4s cubic-bezier(0.4,0,0.2,1); position: relative; }
+.wl-orb-group { display: flex; flex-direction: column; align-items: center; gap: 6px; transition: all var(--dur-slower) var(--ease-standard); position: relative; }
 
 /* the video wishlist still expands shows inline; the music page opens a panel instead */
-.wl-orb-group.expanded { background: var(--white-a02); border-radius: var(--radius-xl); padding: 16px; box-shadow: 0 0 30px rgba(0,0,0,0.3); z-index: 5; flex-basis: 100%; max-width: 800px; }
+.wl-orb-group.expanded { background: var(--white-a02); border-radius: var(--radius-xl); padding: 16px; box-shadow: 0 0 30px var(--black-a30); z-index: 5; flex-basis: 100%; max-width: 800px; }
 /* ── Orb ── */
-.wl-orb { position: relative; border-radius: var(--radius-circle); cursor: pointer; overflow: hidden; transition: all 0.35s cubic-bezier(0.4,0,0.2,1); }
+.wl-orb { position: relative; border-radius: var(--radius-circle); cursor: pointer; overflow: hidden; transition: all 0.35s var(--ease-standard); }
 .wl-orb.orb-sm { width: 70px; height: 70px; }
 .wl-orb.orb-md { width: 90px; height: 90px; }
 .wl-orb.orb-lg { width: 110px; height: 110px; }
@@ -60163,9 +60163,9 @@ body.max-performance #page-particles-canvas {
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 0.2s, transform 0.2s;
+    transition: opacity var(--dur-base), transform var(--dur-base);
     z-index: 20;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 16px var(--black-a40);
 }
 .wl-orb-tooltip span { font-size: 10px; font-weight: 400; color: var(--white-a45); }
 .wl-orb-group:not(.expanded):hover .wl-orb-tooltip { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -60178,7 +60178,7 @@ body.max-performance #page-particles-canvas {
 
 /* Enhancement 5: album art ring */
 .wl-orb-art-ring { position: absolute; inset: -16px; border-radius: var(--radius-circle); z-index: 0; pointer-events: none; animation: artRingSpin 30s linear infinite; }
-.wl-art-ring-item { position: absolute; width: 20px; height: 20px; border-radius: var(--radius-circle); object-fit: cover; top: 50%; left: 50%; transform: rotate(var(--ring-angle)) translateY(-50%) translateX(calc(var(--ring-radius, 48px))); opacity: 0.5; border: 1px solid var(--white-a10); transition: opacity 0.3s; }
+.wl-art-ring-item { position: absolute; width: 20px; height: 20px; border-radius: var(--radius-circle); object-fit: cover; top: 50%; left: 50%; transform: rotate(var(--ring-angle)) translateY(-50%) translateX(calc(var(--ring-radius, 48px))); opacity: 0.5; border: 1px solid var(--white-a10); transition: opacity var(--dur-slow); }
 .wl-orb.orb-sm .wl-orb-art-ring { --ring-radius: 44px; }
 .wl-orb.orb-md .wl-orb-art-ring { --ring-radius: 54px; }
 .wl-orb.orb-lg .wl-orb-art-ring { --ring-radius: 66px; }
@@ -60209,7 +60209,7 @@ body.max-performance #page-particles-canvas {
 .wl-orb-group.wl-orb-entered { animation: none; }
 @keyframes orbEntrance { from { opacity: 0; transform: translateY(20px) scale(0.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-.wl-orb-label { font-size: 11px; font-weight: 600; color: var(--white-a70); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: color 0.15s; }
+.wl-orb-label { font-size: 11px; font-weight: 600; color: var(--white-a70); text-align: center; max-width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; transition: color var(--dur-fast); }
 .wl-orb-label:hover { color: rgb(var(--accent-light-rgb)); text-decoration: underline; }
 .wl-orb-meta { font-size: 9px; color: var(--white-a30); text-align: center; }
 
@@ -60242,16 +60242,16 @@ body.max-performance #page-particles-canvas {
     border: 1px solid var(--white-a08);
     border-top: 1px solid var(--white-a12);
     box-shadow:
-        0 6px 20px rgba(0, 0, 0, 0.35),
+        0 6px 20px var(--black-a35),
         inset 0 1px 0 var(--white-a06);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 
 .wishlist-page-container .wishlist-category-card:hover {
     transform: translateY(-4px) scale(1.01);
     border-color: rgba(var(--accent-rgb), 0.2);
     box-shadow:
-        0 12px 30px rgba(0, 0, 0, 0.4),
+        0 12px 30px var(--black-a40),
         0 0 24px rgba(var(--accent-rgb), 0.08),
         inset 0 1px 0 var(--white-a10);
 }
@@ -60264,7 +60264,7 @@ body.max-performance #page-particles-canvas {
 .wishlist-page-container .wishlist-batch-bar {
     background: rgba(var(--accent-rgb), 0.06);
     border: 1px solid rgba(var(--accent-rgb), 0.12);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 8px 16px;
     margin-bottom: 12px;
 }
@@ -60274,7 +60274,7 @@ body.max-performance #page-particles-canvas {
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-lg);
     background: var(--white-a02);
-    transition: border-color 0.2s;
+    transition: border-color var(--dur-base);
 }
 
 .wishlist-page-container .wishlist-album-card:hover {
@@ -60429,23 +60429,23 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: rgba(18, 18, 18, 1);
     backdrop-filter: none;
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     padding: 0;
     display: block;
     height: auto;
     aspect-ratio: 1;
     overflow: hidden;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px var(--black-a30);
+    transition: transform var(--dur-slow) var(--ease-standard),
+                box-shadow var(--dur-slow) var(--ease-standard),
+                border-color var(--dur-slow) var(--ease-standard);
 }
 
 .artist-detail-page .release-card.album-card:hover {
     background: rgba(18, 18, 18, 1);
     transform: translateY(-5px) scale(1.02);
     border-color: rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+    box-shadow: 0 12px 40px var(--black-a50),
                 0 0 24px rgba(var(--accent-rgb), 0.12);
 }
 
@@ -60465,12 +60465,12 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     top: 8px;
     left: 8px;
     z-index: 3;
-    background: rgba(0, 0, 0, 0.65);
+    background: var(--black-a65);
     border-radius: var(--radius-sm);
     padding: 4px 6px;
     cursor: pointer;
     opacity: 0.85;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--dur-base) ease;
 }
 
 .artist-detail-page .release-card.album-card .mb-card-icon:hover {
@@ -60503,7 +60503,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     cursor: pointer;
     opacity: 0;
     transform: translateY(8px) scale(0.94);
-    transition: opacity 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+    transition: opacity var(--dur-base) ease, transform var(--dur-base) ease, filter var(--dur-base) ease;
 }
 
 .artist-detail-page .release-card.album-card:hover .release-card-play-btn,
@@ -60547,7 +60547,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border-radius: var(--radius-md);
     font-size: 0.82em;
     user-select: none;
-    transition: all 0.2s;
+    transition: all var(--dur-base);
     cursor: grab;
 }
 .hifi-instance-item:hover {
@@ -60583,7 +60583,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     flex-shrink: 0;
     cursor: pointer;
     font-size: 0.95em;
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast);
     /* Bigger tap target — the bare glyph was hard to hit/register (#Sokhi). */
     display: inline-flex;
     align-items: center;
@@ -60613,7 +60613,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: #f44336;
     cursor: pointer;
     font-size: 0.95em;
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast);
     /* Bigger tap target — the bare ✖ was hard to hit/register (#Sokhi). */
     display: inline-flex;
     align-items: center;
@@ -60774,7 +60774,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
         linear-gradient(165deg, rgba(14, 14, 18, 0.96), rgba(7, 7, 10, 0.99));
     color: #fff;
     cursor: pointer;
-    transition: border-color 0.2s ease, transform 0.18s ease, box-shadow 0.2s ease;
+    transition: border-color var(--dur-base) ease, transform var(--dur-quick) ease, box-shadow var(--dur-base) ease;
 }
 .listen-hero:hover {
     border-color: rgba(var(--accent-rgb), 0.55);
@@ -60814,7 +60814,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: #fff;
     background: rgba(var(--accent-rgb), 0.55);
     box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
-    transition: background 0.18s ease, transform 0.18s ease;
+    transition: background var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
 .listen-tile {
     position: relative;
@@ -60829,7 +60829,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: linear-gradient(165deg, rgba(16, 16, 20, 0.94), rgba(8, 8, 12, 0.98));
     color: #fff;
     cursor: pointer;
-    transition: border-color 0.2s ease, background 0.2s ease;
+    transition: border-color var(--dur-base) ease, background var(--dur-base) ease;
 }
 .listen-tile:hover {
     border-color: var(--white-a16);
@@ -60850,7 +60850,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     transform: translateY(-50%);
     font-size: 16px;
     color: var(--white-a35);
-    transition: transform 0.18s ease, color 0.18s ease;
+    transition: transform var(--dur-quick) ease, color var(--dur-quick) ease;
 }
 @media (max-width: 960px) {
     .listen-band {
@@ -60887,11 +60887,11 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     align-items: center;
     gap: 10px;
     padding: 9px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     background: var(--white-a02);
     border: 1px solid var(--white-a06);
     cursor: pointer; /* row click opens the shared run-history modal */
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .dash-autom-row--live {
     border-color: rgba(var(--accent-rgb), 0.30);
@@ -61000,7 +61000,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     color: var(--white-a65);
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: opacity var(--dur-fast) ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .dash-autom-row:hover .dash-autom-run {
     opacity: 1;
@@ -61045,7 +61045,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: 1px solid var(--white-a10);
     color: var(--white-a60);
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .dash-qs-knob {
     width: 22px;
@@ -61053,7 +61053,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border-radius: var(--radius-pill);
     background: var(--white-a12);
     position: relative;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 .dash-qs-knob::after {
     content: '';
@@ -61064,7 +61064,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     height: 9px;
     border-radius: var(--radius-circle);
     background: var(--white-a60);
-    transition: transform 0.18s ease, background 0.18s ease;
+    transition: transform var(--dur-quick) ease, background var(--dur-quick) ease;
 }
 .dash-qs-toggle--on {
     border-color: rgba(var(--accent-rgb), 0.4);
@@ -61094,7 +61094,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: 1px solid var(--white-a18);
     padding: 0;
     cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .dash-qs-swatch:hover {
     transform: scale(1.2);
@@ -61108,7 +61108,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
 .dash-qs-swatch--custom {
     appearance: none;
     -webkit-appearance: none;
-    background: conic-gradient(#f43f5e, #f59e0b, #1db954, #14b8a6, #1d8ab9, #8b5cf6, #f43f5e);
+    background: conic-gradient(#f43f5e, var(--warning-strong), #1db954, #14b8a6, #1d8ab9, #8b5cf6, #f43f5e);
     overflow: hidden;
 }
 .dash-qs-swatch--custom::-webkit-color-swatch-wrapper {
@@ -61151,7 +61151,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: 1px solid var(--white-a10);
     color: rgba(255, 255, 255, 0.72);
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .autosync-manage-btn:hover {
     background: var(--white-a07);
@@ -61187,8 +61187,8 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: var(--white-a02);
     border: 1px solid var(--white-a06);
     cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease,
-        opacity 0.2s ease, transform 0.2s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease,
+        opacity var(--dur-base) ease, transform var(--dur-base) ease;
 }
 .syncband-row:hover {
     background: rgba(255, 255, 255, 0.045);
@@ -61206,15 +61206,15 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     position: relative;
     width: 46px;
     height: 46px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     flex-shrink: 0;
     background: var(--white-a04);
     border: 1px solid var(--white-a07);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
-    transition: transform 0.18s ease;
+    box-shadow: 0 3px 10px var(--black-a35);
+    transition: transform var(--dur-quick) ease;
 }
 .syncband-row:hover .syncband-art {
     transform: scale(1.05);
@@ -61241,7 +61241,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     background: #101014;
     border: 1px solid var(--white-a14);
     object-fit: contain;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 2px 6px var(--black-a50);
 }
 /* White-on-dark brand marks need inverting; the filter only touches the
    image pixels — background/border stay put because the badge's box paints
@@ -61329,7 +61329,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     height: 100%;
     border-radius: 2px;
     background: linear-gradient(90deg, rgba(52, 211, 153, 0.55), rgba(52, 211, 153, 0.95));
-    transition: width 0.4s ease;
+    transition: width var(--dur-slower) ease;
 }
 .syncband-owned-fill--live {
     background: rgb(var(--accent-light-rgb));
@@ -61377,7 +61377,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     gap: 6px;
     justify-content: flex-end;
     opacity: 0;
-    transition: opacity 0.15s ease;
+    transition: opacity var(--dur-fast) ease;
 }
 .syncband-row:hover .syncband-actions {
     opacity: 1;
@@ -61394,7 +61394,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: 1px solid var(--white-a10);
     color: var(--white-a65);
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .syncband-btn:hover:not(:disabled) {
     background: var(--white-a09);
@@ -61438,7 +61438,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: 1px solid rgba(var(--accent-rgb), 0.30);
     color: rgb(var(--accent-light-rgb));
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background var(--dur-fast) ease;
 }
 .autosync-empty-cta:hover {
     background: rgba(var(--accent-rgb), 0.20);
@@ -61503,7 +61503,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     font-weight: 700;
     color: rgba(255, 255, 255, 0.38);
     border-bottom: 2px solid transparent;
-    transition: color 0.2s;
+    transition: color var(--dur-base);
 }
 .dash-band-tab:hover {
     color: var(--white-a70);
@@ -61597,7 +61597,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     gap: 10px;
     transform: translateY(-50%);
     opacity: 0;
-    transition: opacity 0.18s ease;
+    transition: opacity var(--dur-quick) ease;
     pointer-events: none;
 }
 .ya-card:hover .dash-card-actions,
@@ -61619,15 +61619,15 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     place-items: center;
     border: 1px solid var(--white-a12);
     border-radius: 50%;
-    background: rgba(0, 0, 0, 0.55);
+    background: var(--black-a55);
     color: #fff;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     cursor: pointer;
-    transition: transform 0.15s ease, background-color 0.15s ease;
+    transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease;
 }
 .dash-card-action:hover:not(:disabled) {
-    background: rgba(0, 0, 0, 0.75);
+    background: var(--black-a75);
     transform: scale(1.08);
 }
 .dash-card-action--play {
@@ -61636,7 +61636,7 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
     border: none;
     background: rgb(var(--accent-rgb));
     color: #000;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 6px 18px var(--black-a45);
 }
 .dash-card-action--play:hover:not(:disabled) {
     background: rgb(var(--accent-light-rgb));
@@ -61679,14 +61679,14 @@ body[data-artist-source="source"] .artist-detail-page #library-artist-enhance-bt
        service glows), not the containers. */
     border: 1px solid var(--white-a07);
     border-top: 1px solid var(--white-a10);
-    border-radius: 18px;
+    border-radius: var(--radius-sheet);
     box-shadow:
         0 6px 24px rgba(0, 0, 0, 0.42),
         0 2px 8px rgba(0, 0, 0, 0.26),
         inset 0 1px 0 var(--white-a06);
     transition:
         border-color 0.24s ease,
-        transform 0.18s ease,
+        transform var(--dur-quick) ease,
         box-shadow 0.24s ease;
     overflow: hidden;
     isolation: isolate;
@@ -61882,14 +61882,14 @@ body.max-performance .dash-card::after {
         rgba(20, 20, 20, 0.95) 0%,
         rgba(13, 13, 13, 0.98) 100%);
     box-shadow:
-        0 6px 24px rgba(0, 0, 0, 0.35),
+        0 6px 24px var(--black-a35),
         inset 0 1px 0 var(--white-a06);
     color: #fff;
     cursor: pointer;
     text-align: left;
     font: inherit;
     display: grid;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    transition: border-color var(--dur-slow) ease, box-shadow var(--dur-slow) ease, transform var(--dur-slow) ease;
 }
 
 .qa-tile::before {
@@ -61918,7 +61918,7 @@ body.max-performance .dash-card::after {
        below carries the hover state. */
     border-color: rgba(var(--accent-rgb), 0.32);
     box-shadow:
-        0 16px 40px rgba(0, 0, 0, 0.5),
+        0 16px 40px var(--black-a50),
         0 0 0 1px rgba(var(--accent-rgb), 0.18),
         0 0 26px rgba(var(--accent-rgb), 0.1),
         inset 0 1px 0 var(--white-a12);
@@ -62105,7 +62105,7 @@ body.max-performance .dash-card::after {
     background: rgba(var(--accent-rgb), 0.14);
     border: 1px solid rgba(var(--accent-rgb), 0.28);
     color: rgb(var(--accent-light-rgb));
-    transition: transform 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+    transition: transform var(--dur-slow) ease, background var(--dur-slow) ease, border-color var(--dur-slow) ease;
     flex-shrink: 0;
 }
 
@@ -62143,7 +62143,7 @@ body.max-performance .dash-card::after {
     padding: 14px 14px;
     min-height: 0;
     box-shadow: none;
-    transition: background 0.18s ease, border-color 0.18s ease;
+    transition: background var(--dur-quick) ease, border-color var(--dur-quick) ease;
 }
 .dash-card[data-card="services"] .service-card:hover {
     background: rgba(255, 255, 255, 0.045);
@@ -62337,7 +62337,7 @@ body.max-performance .dash-card::after {
 .dash-card[data-card="stats"] .stat-card-dashboard {
     background: rgba(255, 255, 255, 0.025);
     border: 1px solid var(--white-a05);
-    border-radius: 10px;
+    border-radius: var(--radius-control);
     padding: 12px 14px;
     box-shadow: none;
     min-height: 0;
@@ -62529,7 +62529,7 @@ body.max-performance .dash-card::after {
     }
     .dash-card {
         padding: 16px 16px;
-        border-radius: 14px;
+        border-radius: var(--radius-card);
     }
     .dash-card__title {
         font-size: 15px;
@@ -62641,7 +62641,7 @@ body.max-performance .dash-card::after {
     color: inherit;
     font-size: 13px;
     outline: none;
-    transition: border-color 0.15s;
+    transition: border-color var(--dur-fast);
 }
 .mlm-search:focus {
     border-color: var(--white-a25);
@@ -62766,7 +62766,7 @@ body.max-performance .dash-card::after {
     font-size: 14px;
     padding: 3px 7px;
     border-radius: var(--radius-sm);
-    transition: color 0.15s, background 0.15s;
+    transition: color var(--dur-fast), background var(--dur-fast);
     line-height: 1;
 }
 .mlm-remove-btn:hover {
@@ -62799,7 +62799,7 @@ body.max-performance .dash-card::after {
             color-mix(in srgb, rgb(var(--accent-rgb)) 4%, transparent) 0%,
             rgba(0, 0, 0, 0.22) 70%);
     border: 1px solid var(--white-a04);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     align-items: center;
 }
 
@@ -62823,10 +62823,10 @@ body.max-performance .dash-card::after {
     transition:
         width 0.32s cubic-bezier(0.34, 1.2, 0.5, 1),
         padding 0.32s cubic-bezier(0.34, 1.2, 0.5, 1),
-        background 0.25s ease,
-        border-color 0.25s ease,
-        box-shadow 0.25s ease,
-        transform 0.18s ease;
+        background var(--dur-moderate) ease,
+        border-color var(--dur-moderate) ease,
+        box-shadow var(--dur-moderate) ease,
+        transform var(--dur-quick) ease;
 }
 
 .sync-tab-button:hover:not(.active) {
@@ -62837,7 +62837,7 @@ body.max-performance .dash-card::after {
     border-color: color-mix(in srgb, var(--sync-tab-accent, rgb(var(--accent-rgb))) 35%, var(--white-a10));
     color: #fff;
     transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 14px var(--black-a25);
 }
 
 /* Active state — stay the same 40px circle as the inactive chips (no
@@ -62945,7 +62945,7 @@ body.max-performance .dash-card::after {
         center / 70% no-repeat
         url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'><path d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/><path d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/></svg>");
     border: 1.5px solid #1a1d28;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 3px var(--black-a50);
     z-index: 2;
 }
 
@@ -62953,7 +62953,7 @@ body.max-performance .dash-card::after {
  * darker outline of the now-bright pill — bump the border to keep
  * contrast against the brand-color fill. */
 .sync-tab-button[data-link="true"].active::after {
-    border-color: rgba(0, 0, 0, 0.45);
+    border-color: var(--black-a45);
 }
 
 /* Responsive — collapse chip size on smaller widths to fit the row. */
@@ -63009,7 +63009,7 @@ body.max-performance .dash-card::after {
     justify-content: center;
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    transition: opacity var(--dur-fast) ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 
 .sync-tab-button:hover + .sync-tab-close,
@@ -63072,7 +63072,7 @@ body.max-performance .dash-card::after {
     border: 1px solid rgba(var(--accent-rgb), 0.22);
     border-radius: 22px;
     box-shadow:
-        0 32px 96px rgba(0, 0, 0, 0.6),
+        0 32px 96px var(--black-a60),
         0 0 0 1px var(--white-a03),
         inset 0 1px 0 var(--white-a06);
 }
@@ -63127,7 +63127,7 @@ body.max-performance .dash-card::after {
     height: 36px;
     background: var(--white-a04);
     border: 1px solid var(--white-a08);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-close:hover {
@@ -63152,12 +63152,12 @@ body.max-performance .dash-card::after {
         linear-gradient(160deg,
             var(--white-a04) 0%,
             var(--white-a02) 50%,
-            rgba(0, 0, 0, 0.2) 100%);
+            var(--black-a20) 100%);
     border: 1px solid var(--white-a06);
-    border-radius: 14px;
+    border-radius: var(--radius-card);
     position: relative;
     overflow: hidden;
-    transition: border-color 0.25s, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: border-color var(--dur-moderate), transform var(--dur-moderate) var(--ease-standard);
 }
 
 .auto-sync-summary div::before {
@@ -63167,7 +63167,7 @@ body.max-performance .dash-card::after {
     height: 1px;
     background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
     opacity: 0;
-    transition: opacity 0.25s;
+    transition: opacity var(--dur-moderate);
 }
 
 .auto-sync-summary div:hover {
@@ -63277,7 +63277,7 @@ body.max-performance .dash-card::after {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-monitor-head button:hover,
@@ -63314,7 +63314,7 @@ body.max-performance .dash-card::after {
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    transition: color 0.2s, border-color 0.2s;
+    transition: color var(--dur-base), border-color var(--dur-base);
     position: relative;
 }
 
@@ -63368,8 +63368,8 @@ body.max-performance .dash-card::after {
 .auto-sync-sidebar-search {
     background: var(--white-a04);
     border: 1px solid var(--white-a08);
-    border-radius: 10px;
-    transition: border-color 0.2s, background 0.2s;
+    border-radius: var(--radius-control);
+    transition: border-color var(--dur-base), background var(--dur-base);
 }
 
 .auto-sync-sidebar-search:focus {
@@ -63419,12 +63419,12 @@ body.max-performance .dash-card::after {
     background:
         radial-gradient(circle at 30% 25%,
             var(--white-a08),
-            rgba(0, 0, 0, 0.35) 70%);
+            var(--black-a35) 70%);
     border: 1px solid var(--white-a10);
     object-fit: contain;
     padding: 2px;
     flex: 0 0 auto;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+    filter: drop-shadow(0 1px 1px var(--black-a50));
 }
 
 /* Last.fm's source icon is a square avatar PNG — clip it to a
@@ -63442,7 +63442,7 @@ body.max-performance .dash-card::after {
 .auto-sync-source-icon[data-svc="tidal"],
 .auto-sync-source-icon[data-svc="qobuz"],
 .auto-sync-source-icon[data-svc="itunes_link"] {
-    filter: brightness(0) invert(1) drop-shadow(0 1px 1px rgba(0, 0, 0, 0.5));
+    filter: brightness(0) invert(1) drop-shadow(0 1px 1px var(--black-a50));
 }
 
 
@@ -63455,7 +63455,7 @@ body.max-performance .dash-card::after {
             rgba(255, 255, 255, 0.015) 100%);
     border: 1px solid var(--white-a06);
     border-radius: 11px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-playlist::before {
@@ -63472,7 +63472,7 @@ body.max-performance .dash-card::after {
             rgba(var(--accent-rgb), 0.08) 0%,
             var(--white-a02) 100%);
     transform: translateY(-1px);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    box-shadow: 0 4px 16px var(--black-a25);
 }
 
 .auto-sync-playlist.scheduled {
@@ -63500,10 +63500,10 @@ body.max-performance .dash-card::after {
         linear-gradient(180deg,
             rgba(255, 255, 255, 0.035) 0%,
             rgba(255, 255, 255, 0.015) 8%,
-            rgba(0, 0, 0, 0.15) 100%);
+            var(--black-a15) 100%);
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-xl);
-    transition: border-color 0.25s, box-shadow 0.25s;
+    transition: border-color var(--dur-moderate), box-shadow var(--dur-moderate);
     overflow: hidden;
     position: relative;
 }
@@ -63568,7 +63568,7 @@ body.max-performance .dash-card::after {
     margin: 12px;
     text-align: center;
     color: var(--white-a40);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-slow) var(--ease-standard);
 }
 
 .auto-sync-drop-hint strong {
@@ -63610,14 +63610,14 @@ body.max-performance .dash-card::after {
         linear-gradient(160deg,
             rgba(255, 255, 255, 0.045) 0%,
             var(--white-a02) 50%,
-            rgba(0, 0, 0, 0.15) 100%);
+            var(--black-a15) 100%);
     border: 1px solid var(--white-a07);
     border-radius: 13px;
     margin: 10px 12px;
     padding: 12px 14px;
     position: relative;
     overflow: hidden;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-moderate) var(--ease-standard);
 }
 
 .auto-sync-scheduled-card::before {
@@ -63637,7 +63637,7 @@ body.max-performance .dash-card::after {
 .auto-sync-scheduled-card:hover {
     border-color: rgba(var(--accent-rgb), 0.3);
     transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 6px 20px var(--black-a30);
 }
 
 .auto-sync-scheduled-card.disabled {
@@ -63689,7 +63689,7 @@ body.max-performance .dash-card::after {
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
     box-shadow:
         0 2px 8px rgba(var(--accent-rgb), 0.25),
         inset 0 1px 0 var(--white-a20);
@@ -63725,7 +63725,7 @@ body.max-performance .dash-card::after {
     font-size: 16px;
     line-height: 1;
     padding: 0;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-scheduled-card button:not(.run):hover {
@@ -63773,7 +63773,7 @@ body.max-performance .dash-card::after {
             rgba(255, 255, 255, 0.015) 100%);
     border: 1px solid var(--white-a06);
     border-radius: var(--radius-lg);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-history-row:hover {
@@ -63825,7 +63825,7 @@ body.max-performance .dash-card::after {
     border: 1px solid rgba(var(--accent-rgb), 0.3);
     border-radius: var(--radius-xl);
     box-shadow:
-        0 20px 50px rgba(0, 0, 0, 0.5),
+        0 20px 50px var(--black-a50),
         inset 0 1px 0 var(--white-a05);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
@@ -63842,8 +63842,8 @@ body.max-performance .dash-card::after {
 .auto-sync-bulk-menu button {
     border: 1px solid var(--white-a08);
     background: var(--white-a03);
-    border-radius: 10px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: var(--radius-control);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-bulk-menu button:hover {
@@ -63884,7 +63884,7 @@ body.max-performance .dash-card::after {
     border: 1px solid rgba(var(--accent-rgb), 0.35);
     border-radius: 22px;
     box-shadow:
-        0 32px 80px rgba(0, 0, 0, 0.6),
+        0 32px 80px var(--black-a60),
         inset 0 1px 0 var(--white-a05);
 }
 
@@ -63901,7 +63901,7 @@ body.max-performance .dash-card::after {
     border: 1px solid var(--white-a08);
     background: var(--white-a03);
     border-radius: 99px;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all var(--dur-base) var(--ease-standard);
 }
 
 .auto-sync-weekly-day-toggle:hover {
@@ -63951,7 +63951,7 @@ body.max-performance .dash-card::after {
     background:
         linear-gradient(160deg,
             var(--white-a02) 0%,
-            rgba(0, 0, 0, 0.15) 100%);
+            var(--black-a15) 100%);
     border: 1px dashed var(--white-a08);
     border-radius: var(--radius-lg);
     color: var(--white-a40);
@@ -64101,7 +64101,7 @@ body.max-performance .dash-card::after {
     align-items: center;
     margin-bottom: 4px;
     padding: 8px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-control);
 }
 
 .auto-sync-modal .auto-sync-playlist::before {
