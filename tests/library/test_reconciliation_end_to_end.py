@@ -1922,6 +1922,12 @@ def test_filename_numbering_can_differ_from_per_disc_metadata(filename):
     assert proposed == '/album/' + filename.replace('Ab Ovo', 'Ab Ovo (live)')
 
 
+@pytest.mark.parametrize(('disc', 'track'), [(1, 121), (10, 1)])
+def test_packed_filename_does_not_encode_another_position_on_overflow(disc, track):
+    assert _suggest_filename('/album/0101 - Ab Ovo.flac', {
+        'title': 'Ab Ovo', 'disc_number': disc, 'track_number': track}) == ''
+
+
 def test_title_searched_compilation_beats_equally_fitting_original_album():
     plan = {'pairs': [{'file_index': 0, 'slot_index': 0, 'confidence': 'clear'}],
             'extra_files': [], 'missing_slots': []}

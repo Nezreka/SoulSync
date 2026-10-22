@@ -130,6 +130,10 @@ def _suggest_filename(path: str, slot: dict, *, absolute_number: int | None = No
             numbers = list(re.finditer(r'\d+', prefix))
             values = ([disc, track] if parsed.disc is not None and len(numbers) == 2
                       else [disc * 100 + track] if parsed.disc is not None else [track])
+            if parsed.disc is not None and len(numbers) == 1 and not (disc <= 9 and track < 100):
+                # Packed DDTT cannot encode these positions. Preserve the
+                # prefix rather than making it look like another disc/track.
+                values = []
             for match, value in reversed(list(zip(numbers, values))):
                 prefix = prefix[:match.start()] + str(value).zfill(len(match[0])) + prefix[match.end():]
         title = (parsed.remainder if display_title_compatible(parsed.remainder, slot)
